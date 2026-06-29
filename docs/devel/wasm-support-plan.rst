@@ -248,11 +248,26 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   ``QEMU_WASM_LINUX_BOOT_OK`` marker, so the next blocker is post-early-kernel
   progress rather than firmware entry or serial capture.
 * The same boot path still emits one ``__syscall_pipe2`` warning.  Avoiding
-  ``g_unix_open_pipe()`` in the signalfd compatibility path reduced the boot
-  warnings, but Emscripten ``pipe()`` itself can still route through an
-  unsupported pipe syscall.  The remaining fix is an Emscripten-specific
-  notifier/signalfd strategy that does not depend on host file-descriptor
-  pipes.
+  ``g_unix_open_pipe()`` in the signalfd compatibility and event-notifier
+  paths removed two known QEMU-owned warning sources, but the optimized
+  artifact still warns during generic system-mode startup.  The warning appears
+  with ``-M none -nodefaults -nographic -S`` before any guest firmware or
+  kernel payload is loaded, so the remaining source is QEMU host runtime or
+  GLib/main-loop initialization, not Bus Engine OS, Linux boot, firmware, or
+  serial routing.
+* Emscripten hosts now skip POSIX signal-fd setup in ``qemu_signal_init()``.
+  Browser and Node WebAssembly runtimes do not deliver Unix signals through
+  host ``signalfd``/pipe file descriptors, so this is a platform boundary
+  rather than a missing emulation feature for the browser MVP.  Normal POSIX
+  hosts keep the existing signalfd or compatibility-pipe path.
+  The rebuilt artifact after this change had ``qemu-system-x86_64.js`` =
+  ``1eb87363b7a7d347638bef7a1943e2f9323269ec1a7e880dcf3554585fe26eb2`` and
+  ``qemu-system-x86_64.wasm`` =
+  ``e7a7a07f73eaad655ecda99848b417208b2b3573fc6d5d8d39423524362e7e7a``.
+  The ``--version`` smoke test passed.  A short Linux boot check still emitted
+  the generic ``__syscall_pipe2`` warning and did not reach the Linux banner
+  within 45 seconds, so this change is not sufficient to close the startup
+  pipe-warning task.
 * The same proof showed that the Emscripten pthread runtime can keep async
   state alive after QEMU exits.  The smoke helper therefore waits for an
   expected output marker and then exits explicitly.  Long-running boot tests
@@ -859,10 +874,33 @@ Touches:
 Proof:
   The Node.js ``--version`` smoke test starts without unsupported ``pipe2``
   warnings, the boot path no longer emits unsupported pipe warnings, and
-  normal POSIX builds still use the existing GLib pipe helper.
+  normal POSIX builds still use the existing GLib pipe helper.  Emscripten
+  signal handling is documented as a no-op host boundary, not as a pipe-backed
+  signalfd emulation.
 
 Non-goals:
   No browser networking implementation.
+
+WASM-016g: Remove generic startup pipe2 warning
+-----------------------------------------------
+
+Scope:
+  Find and replace the remaining ``pipe2`` call path that appears during
+  generic Emscripten system-mode startup.  The reproducer is smaller than a
+  Linux boot and should be used before guest debugging:
+  ``-M none -nodefaults -nographic -S``.
+
+Touches:
+  Host runtime, main-loop, chardev, GLib integration, or Emscripten-specific
+  platform glue as identified by the diagnostic.
+
+Proof:
+  The ``-M none`` startup smoke test and the 64-bit Linux boot smoke both start
+  without ``__syscall_pipe2`` warnings, while normal POSIX builds keep their
+  existing close-on-exec pipe behavior.
+
+Non-goals:
+  No guest boot-progress fix, networking, graphics, or browser storage work.
 
 WASM-016e: Define canonical TCI smoke-boot command line
 -------------------------------------------------------

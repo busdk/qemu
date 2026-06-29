@@ -40,7 +40,14 @@
 #include <sys/wait.h>
 #endif
 
-#ifndef _WIN32
+#if defined(__EMSCRIPTEN__)
+
+static int qemu_signal_init(Error **errp)
+{
+    return 0;
+}
+
+#elif !defined(_WIN32)
 
 /* If we have signalfd, we mask out the signals we want to handle and then
  * use signalfd to listen for them.  We rely on whatever the current signal
