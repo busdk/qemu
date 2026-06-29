@@ -16,6 +16,7 @@ function parseArgs(argv) {
     marker: "QEMU emulator version",
     mountFiles: [],
     dumpFiles: [],
+    maxOutputBytes: null,
     timeoutMs: 10000,
     qemuArgs: ["--version"],
   };
@@ -35,6 +36,8 @@ function parseArgs(argv) {
       options.mountFiles.push(parseMountFile(argv[++i]));
     } else if (arg === "--dump-file") {
       options.dumpFiles.push(parseDumpFile(argv[++i]));
+    } else if (arg === "--max-output-bytes") {
+      options.maxOutputBytes = Number(argv[++i]);
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number(argv[++i]);
     } else if (arg === "--help") {
@@ -47,6 +50,13 @@ function parseArgs(argv) {
 
   if (!Number.isInteger(options.timeoutMs) || options.timeoutMs <= 0) {
     console.error("--timeout-ms must be a positive integer");
+    usage(2);
+  }
+  if (
+    options.maxOutputBytes !== null &&
+    (!Number.isInteger(options.maxOutputBytes) || options.maxOutputBytes <= 0)
+  ) {
+    console.error("--max-output-bytes must be a positive integer");
     usage(2);
   }
 
@@ -101,6 +111,8 @@ Options:
   --mount-file H:W    Copy host file H to absolute Emscripten path W
   --dump-file PATH[:N]
                      Print Emscripten file PATH on timeout, capped at N bytes
+  --max-output-bytes N
+                     Suppress stdout/stderr after N total output bytes
   --timeout-ms MS     Timeout in milliseconds
   --help              Show this help
 `);
@@ -113,6 +125,8 @@ const programUrl = pathToFileURL(resolve(options.artifactDir, options.program));
 let markerSeen = false;
 let exitScheduled = false;
 let activeModule = null;
+let outputBytes = 0;
+let outputSuppressed = false;
 
 function scheduleExit(status) {
   if (exitScheduled) {
@@ -123,7 +137,30 @@ function scheduleExit(status) {
 }
 
 function emit(line, stream) {
-  stream.write(`${line}\n`);
+  const text = `${line}\n`;
+  if (options.maxOutputBytes === null) {
+    stream.write(text);
+  } else if (outputBytes < options.maxOutputBytes) {
+    const encoded = new TextEncoder().encode(text);
+    const remaining = options.maxOutputBytes - outputBytes;
+    if (encoded.length <= remaining) {
+      stream.write(text);
+      outputBytes += encoded.length;
+    } else {
+      stream.write(new TextDecoder().decode(encoded.slice(0, remaining)));
+      outputBytes += remaining;
+    }
+  }
+  if (
+    options.maxOutputBytes !== null &&
+    outputBytes >= options.maxOutputBytes &&
+    !outputSuppressed
+  ) {
+    outputSuppressed = true;
+    process.stderr.write(
+      `\nwasm-node-smoke: output suppressed after ${options.maxOutputBytes} bytes\n`,
+    );
+  }
   if (line.includes(options.marker)) {
     markerSeen = true;
     scheduleExit(0);

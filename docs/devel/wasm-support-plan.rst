@@ -281,6 +281,44 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   generated JavaScript did not contain syscall-debug support.  Future syscall
   diagnostics need a verified build-hook or cross-file change that proves the
   Emscripten flag reached the final link.
+* The reason ``--extra-ldflags`` did not work is configure/Meson ordering:
+  configure emits ``config-meson.cross`` with ``--extra-ldflags`` first and
+  then adds ``configs/meson/emscripten.txt`` second.  The later Emscripten
+  cross file provides its own ``c_link_args`` and overrides the generated cross
+  file's linker arguments.  Passing Meson ``-Dc_link_args=...`` does override
+  both cross files, but it replaces the complete Emscripten linker argument
+  list.  Diagnostic builds must therefore pass the full default Emscripten
+  linker argument list plus the diagnostic flag.
+* A verified syscall-debug diagnostic artifact was built with full Emscripten
+  linker arguments plus ``-sSYSCALL_DEBUG=1`` using ``-Dc_link_args``.  The
+  configure summary reported that exact ``LDFLAGS`` value.  The generated
+  ``qemu-system-x86_64.js`` hash changed to
+  ``0c6c125206e82d5531e63416cb3ef1b70cbdf2fce4aeba2166a884aaa20df36d`` while
+  ``qemu-system-x86_64.wasm`` remained
+  ``e7a7a07f73eaad655ecda99848b417208b2b3573fc6d5d8d39423524362e7e7a``,
+  which is consistent with changing Emscripten JavaScript syscall glue rather
+  than QEMU object code.
+* Running the verified syscall-debug artifact with the minimal
+  ``-M none -nodefaults -display none -monitor none -serial none -parallel none
+  -S`` reproducer showed the remaining ``__syscall_pipe2`` warning coming from
+  a pthread worker's ``printErr`` path.  Main-thread QEMU pipe creation was
+  visible as successful ``__syscall_pipe`` plus ``__syscall_fcntl64`` calls.
+  This narrows the remaining warning away from the already-cleaned direct QEMU
+  ``pipe()`` call paths and toward pthread-worker, GLib wakeup, or another
+  library/runtime pipe2 call made from a worker.
+* A standalone GLib main-context diagnostic compiled for Emscripten with
+  ``-pthread -sPROXY_TO_PTHREAD=1 -sMEMORY64=1 -sWASM_BIGINT
+  -sFORCE_FILESYSTEM`` reproduced the same ``__syscall_pipe2`` warning before
+  QEMU, any machine model, or any guest image was involved.  The program only
+  created a ``GMainContext``, attached an idle source, and then released it.
+  This maps the remaining warning to the Emscripten/GLib wakeup path used by
+  QEMU's main-loop dependencies rather than to Bus Engine OS, firmware,
+  direct QEMU event-notifier calls, or Linux boot state.
+* ``scripts/ci/wasm-node-smoke.mjs`` now accepts ``--max-output-bytes`` so
+  syscall-debug builds and failed boot probes can keep scanning for their
+  success marker while suppressing unbounded stdout/stderr after a chosen
+  byte limit.  This keeps future evidence runs repeatable without turning
+  diagnostic logging into an accidental transcript dump.
 * The same proof showed that the Emscripten pthread runtime can keep async
   state alive after QEMU exits.  The smoke helper therefore waits for an
   expected output marker and then exits explicitly.  Long-running boot tests
@@ -935,6 +973,31 @@ Proof:
 
 Non-goals:
   No permanent debug flags in release artifacts.
+
+WASM-016i: Diagnose pthread-worker pipe2 warning
+------------------------------------------------
+
+Scope:
+  Decide how QEMU should handle the Emscripten/GLib main-context wakeup path
+  that emits ``__syscall_pipe2`` during minimal system-mode startup.  The
+  current evidence shows clean main-thread QEMU ``pipe()`` calls and a
+  standalone GLib main-context diagnostic reproducing the remaining worker
+  warning.
+
+Touches:
+  Emscripten diagnostic build flags, GLib integration, pthread startup,
+  QEMU thread creation, or library wakeup paths as identified by the next
+  diagnostic.
+
+Proof:
+  The branch either includes a targeted Emscripten host fix that avoids the
+  warning without breaking normal POSIX hosts, or documents why the fix belongs
+  in the Emscripten/GLib runtime and records the smallest acceptable upstream
+  patch, workaround, or release-note boundary.  The minimal startup reproducer
+  and standalone GLib diagnostic are both used to verify the chosen path.
+
+Non-goals:
+  No guest boot-progress fix, networking, graphics, or browser storage work.
 
 WASM-016e: Define canonical TCI smoke-boot command line
 -------------------------------------------------------
