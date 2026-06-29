@@ -187,12 +187,29 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   calls and skipped the POSIX coroutine stack guard page under Emscripten.
   A rebuilt artifact still passed the Node.js ``v24.18.0`` ``--version``
   smoke test.  Startup warnings were reduced to ``__syscall_pipe2``.
+* The remaining ``__syscall_pipe2`` warning came from the POSIX event notifier
+  fallback.  Emscripten does not provide ``eventfd()``, so QEMU falls back to a
+  pipe-backed notifier.  GLib's ``g_unix_open_pipe()`` attempts ``pipe2()``
+  first, which emits an unsupported-syscall warning before falling back.  The
+  Emscripten-specific QEMU path now calls ``pipe()`` directly, keeps the
+  existing nonblocking setup, and avoids changing normal POSIX hosts.
+  Rebuilding the wasm64 TCI artifact after this change produced a clean
+  Node.js ``v24.18.0`` ``--version`` smoke test with no unsupported syscall
+  warnings.  The remaining runtime message is Emscripten's post-exit
+  ``keepRuntimeAlive()`` notice, which the smoke helper handles by exiting
+  after the marker.
 * The cleaned artifact hashes were:
   ``qemu-system-x86_64.js`` =
   ``6fc7fb8d9fb3354203222bedb149a5f5d84a56a86298e3a4eeabcb57b8b3e987`` and
   ``qemu-system-x86_64.wasm`` =
   ``bb1c732c79d8006f4297575d2d883591722be44342a8428b7575a7d1fee36873``.
   The wasm module size was ``74820239`` bytes.
+* After the event-notifier cleanup, the artifact hashes were:
+  ``qemu-system-x86_64.js`` =
+  ``6fc7fb8d9fb3354203222bedb149a5f5d84a56a86298e3a4eeabcb57b8b3e987`` and
+  ``qemu-system-x86_64.wasm`` =
+  ``ee17a1764e7d64ff9250031fced621caa020a8c56134e8a54d744f498b8996de``.
+  The wasm module size was ``74820177`` bytes.
 * The cleaned ``-M microvm`` boot attempt no longer crashed, but still timed
   out after 120 seconds before the Linux marker.  ``-d cpu_reset,guest_errors``
   showed two CPU resets and no guest errors.  Forcing
@@ -216,6 +233,10 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   memories and rejected 8 GiB.  This is useful runtime evidence, but it is not
   a browser compatibility guarantee and does not satisfy the later
   browser-memory matrix task.
+* No Chromium, Chrome, Firefox, or Playwright browser runtime was available on
+  the local host during this pass.  Browser memory-limit evidence remains a
+  separate required matrix item; the current evidence is limited to Node.js/V8
+  constructor behavior and primary browser/runtime documentation.
 
 The local artifact proof used this source-copy build shape from the QEMU
 source root::
@@ -260,6 +281,12 @@ Browser runtime notes from primary documentation:
   context.
 * MDN documents JavaScript creation of 64-bit-address WebAssembly memory with
   ``address: "i64"`` and ``BigInt`` sizes.
+* MDN documents ``WebAssembly.Memory.grow()`` in 64 KiB pages.  Runtime memory
+  reporting and limit tests should record pages as well as byte sizes.
+* Emscripten's default maximum memory is not a browser guarantee.  The
+  generated artifact's ``INITIAL_MEMORY``/``TOTAL_MEMORY``,
+  ``MAXIMUM_MEMORY``, ``ALLOW_MEMORY_GROWTH``, ``MEMORY64``, pthread, and
+  shared-memory settings must be recorded with every browser-memory result.
 * V8's 4 GiB WebAssembly memory note is still useful as a conservative
   ``wasm32`` contrast: ``wasm32`` can address at most 4 GiB, while QEMU's
   Bus Engine MVP deliberately targets ``wasm64`` so the practical limit shifts
@@ -770,8 +797,7 @@ Touches:
 
 Proof:
   The Node.js ``--version`` smoke test starts without unsupported ``pipe2``
-  warnings, or the warning is documented as harmless with evidence that the
-  fallback creates working non-blocking notification file descriptors.
+  warnings, and normal POSIX builds still use the existing GLib pipe helper.
 
 Non-goals:
   No browser networking implementation.

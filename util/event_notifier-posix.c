@@ -51,9 +51,22 @@ int event_notifier_init(EventNotifier *e, int active)
         if (errno != ENOSYS) {
             return -errno;
         }
+#ifdef __EMSCRIPTEN__
+        /*
+         * Emscripten does not implement pipe2().  g_unix_open_pipe() tries
+         * pipe2() first, which emits a runtime warning before falling back.
+         * Plain pipe() is enough here because close-on-exec has no browser
+         * runtime meaning and qemu_set_blocking() below still configures the
+         * descriptors we use.
+         */
+        if (pipe(fds) < 0) {
+            return -errno;
+        }
+#else
         if (!g_unix_open_pipe(fds, FD_CLOEXEC, NULL)) {
             return -errno;
         }
+#endif
         if (!qemu_set_blocking(fds[0], false, &local_err)) {
             ret = -errno;
             goto fail;
