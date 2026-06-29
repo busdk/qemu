@@ -123,6 +123,7 @@
       - ci-runner-env
       - build/qemu-system-*.js
       - build/qemu-system-*.wasm
+      - build/qemu-system-wasm.SHA256SUMS
     reports:
       junit: build/meson-logs/*.junit.xml
   script:
@@ -141,4 +142,5 @@
     - section_end configure
     - section_start build "Building QEMU"
     - emmake make -j"$JOBS"
+    - sha256sum qemu-system-*.js qemu-system-*.wasm > qemu-system-wasm.SHA256SUMS
     - section_end build

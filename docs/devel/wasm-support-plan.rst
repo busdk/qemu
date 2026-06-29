@@ -120,10 +120,10 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   the JavaScript launcher and
   ``0ef7ba1d7e9de45816a0918708c653c25e87bb8c2a197d4e6e1460d8f9c958f9`` for
   the WebAssembly module.
-* The wasm CI template now preserves ``build/qemu-system-*.js`` and
-  ``build/qemu-system-*.wasm`` as job artifacts.  This makes the build output
-  available to later browser harness and boot-test jobs without re-running the
-  compiler.
+* The wasm CI template now preserves ``build/qemu-system-*.js``,
+  ``build/qemu-system-*.wasm``, and ``build/qemu-system-wasm.SHA256SUMS`` as
+  job artifacts.  This makes the build output available to later browser
+  harness and boot-test jobs without re-running the compiler.
 
 The local artifact proof used this source-copy build shape from the QEMU
 source root::
@@ -440,7 +440,9 @@ Proof:
   The observed 64-bit TCI build currently produces
   ``qemu-system-x86_64.js`` and ``qemu-system-x86_64.wasm``.  If a future
   Emscripten configuration starts emitting a separate worker file, the artifact
-  rules and harness documentation must be updated at the same time.
+  rules and harness documentation must be updated at the same time.  CI also
+  emits ``qemu-system-wasm.SHA256SUMS`` for deterministic handoff to later
+  harness, packaging, and browser boot-test steps.
 
 Non-goals:
   No WebAssembly TCG backend.
