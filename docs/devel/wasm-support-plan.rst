@@ -124,6 +124,12 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   ``build/qemu-system-*.wasm``, and ``build/qemu-system-wasm.SHA256SUMS`` as
   job artifacts.  This makes the build output available to later browser
   harness and boot-test jobs without re-running the compiler.
+* The wasm CI template now also emits
+  ``build/qemu-system-wasm-artifacts.json``.  The manifest format starts at
+  version ``1`` and records each generated QEMU WebAssembly artifact path,
+  artifact kind, byte size, and SHA-256 hash.  The manifest deliberately does
+  not include guest kernel, rootfs, or product metadata; those belong to the
+  later harness or downstream integration layer.
 * The generated JavaScript is ``MODULARIZE`` ES module output.  Directly
   running ``node qemu-system-x86_64.js --version`` only loads the module
   factory and is not a QEMU startup test.  A real Node startup test must import
@@ -484,14 +490,18 @@ WASM-012: Define artifact manifest format
 -----------------------------------------
 
 Scope:
-  Define a small manifest for QEMU/WASM artifacts and guest inputs.
+  Define a small manifest for generated QEMU/WASM build artifacts.
 
 Touches:
-  Documentation first; example harness later.
+  ``scripts/ci/wasm-artifact-manifest.py``, CI artifact configuration, and
+  documentation.
 
 Proof:
-  The manifest includes QEMU build ID, kernel path, rootfs path, optional
-  initrd path, firmware paths, checksums, memory size, and boot arguments.
+  The CI job writes ``qemu-system-wasm-artifacts.json`` with format version,
+  artifact paths, artifact kinds, byte sizes, and SHA-256 hashes.  Later
+  harness manifests may reference guest kernel, rootfs, optional initrd,
+  firmware paths, memory size, and boot arguments, but those inputs are not
+  part of this QEMU build-artifact manifest.
 
 Non-goals:
   No package manager or product release format.
