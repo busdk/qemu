@@ -114,6 +114,17 @@
   extends: .base_meson_job_template
   stage: build
   image: $CI_REGISTRY_IMAGE/qemu/$IMAGE:$QEMU_CI_CONTAINER_TAG
+  artifacts:
+    name: "$CI_JOB_NAME-$CI_COMMIT_REF_SLUG"
+    when: always
+    expire_in: 7 days
+    paths:
+      - build/meson-logs
+      - ci-runner-env
+      - build/qemu-system-*.js
+      - build/qemu-system-*.wasm
+    reports:
+      junit: build/meson-logs/*.junit.xml
   script:
     - du -sh .git
     - mkdir build

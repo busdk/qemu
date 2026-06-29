@@ -107,6 +107,49 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   making constant casts explicit at format-call sites and avoiding
   Emscripten-unreachable POSIX helpers.  A follow-up Docker build completed
   and linked ``qemu-system-x86_64.js`` with those cleanups applied.
+* A repeatable artifact-capture build copied the generated browser artifacts
+  out of the container.  The current TCI configuration emits
+  ``qemu-system-x86_64.js`` and ``qemu-system-x86_64.wasm``.  It did not emit a
+  separate ``.worker.js`` file; the generated JavaScript contains the pthread
+  worker startup code and loads ``qemu-system-x86_64.wasm`` relative to the
+  module URL.
+* The captured artifact sizes were approximately ``607 KiB`` for
+  ``qemu-system-x86_64.js`` and ``72 MiB`` for
+  ``qemu-system-x86_64.wasm``.  The captured SHA-256 values were
+  ``7f1760c7944f251709ac501c2014a8684299ddb66b4be2fa00ca7137037b3834`` for
+  the JavaScript launcher and
+  ``0ef7ba1d7e9de45816a0918708c653c25e87bb8c2a197d4e6e1460d8f9c958f9`` for
+  the WebAssembly module.
+* The wasm CI template now preserves ``build/qemu-system-*.js`` and
+  ``build/qemu-system-*.wasm`` as job artifacts.  This makes the build output
+  available to later browser harness and boot-test jobs without re-running the
+  compiler.
+
+The local artifact proof used this source-copy build shape from the QEMU
+source root::
+
+  mkdir -p /tmp/qemu-wasm64-tci-artifacts
+  docker run --rm \
+    -v "$PWD:/host-src:ro" \
+    -v /tmp/qemu-wasm64-tci-artifacts:/host-out \
+    -w /tmp qemu/emsdk-wasm64-cross \
+    bash -lc 'set -euo pipefail
+      rm -rf /tmp/src /tmp/build
+      mkdir -p /tmp/src /tmp/build /host-out
+      rm -f /host-out/*
+      tar -C /host-src --exclude=.git --exclude=build \
+        --exclude=build-wasm64-tci -cf - . | tar -C /tmp/src -xf -
+      cd /tmp/build
+      emconfigure /tmp/src/configure --disable-docs \
+        --target-list=x86_64-softmmu --static --cpu=wasm64 \
+        --disable-tools --enable-debug --enable-tcg-interpreter
+      make -j$(nproc)
+      find . -maxdepth 1 -type f \
+        \( -name "qemu-system-x86_64*" -o -name "*.wasm" \) \
+        -print -exec cp -v "{}" /host-out/ \;
+      cd /host-out
+      sha256sum * > SHA256SUMS
+      ls -lh'
 
 The current upstream Emscripten link configuration is intentionally browser
 oriented.  It enables pthreads, Asyncify, ``PROXY_TO_PTHREAD``, filesystem
@@ -386,14 +429,18 @@ WASM-011: Produce browser-loadable TCI artifacts
 ------------------------------------------------
 
 Scope:
-  Ensure a TCI build creates the expected ``.js``, ``.wasm``, worker, and
-  metadata artifacts.
+  Ensure a TCI build creates and preserves the generated browser-loadable
+  Emscripten artifacts.
 
 Touches:
   Build scripts, CI artifact configuration, and docs.
 
 Proof:
   CI or a documented local build produces named artifacts from upstream QEMU.
+  The observed 64-bit TCI build currently produces
+  ``qemu-system-x86_64.js`` and ``qemu-system-x86_64.wasm``.  If a future
+  Emscripten configuration starts emitting a separate worker file, the artifact
+  rules and harness documentation must be updated at the same time.
 
 Non-goals:
   No WebAssembly TCG backend.
