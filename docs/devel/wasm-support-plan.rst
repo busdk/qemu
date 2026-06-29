@@ -124,6 +124,17 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   ``build/qemu-system-*.wasm``, and ``build/qemu-system-wasm.SHA256SUMS`` as
   job artifacts.  This makes the build output available to later browser
   harness and boot-test jobs without re-running the compiler.
+* The generated JavaScript is ``MODULARIZE`` ES module output.  Directly
+  running ``node qemu-system-x86_64.js --version`` only loads the module
+  factory and is not a QEMU startup test.  A real Node startup test must import
+  the default module factory and pass arguments explicitly, for example
+  ``await Module({ arguments: ["--version"] })``.
+* A Node startup attempt with the captured artifacts failed before QEMU started
+  because the generated Emscripten output requires Node.js ``v23.0.0`` or
+  newer.  The supervisor host had Node.js ``v22.19.0`` and the
+  ``qemu/emsdk-wasm64-cross:latest`` image had Node.js ``v22.16.0``.  This is
+  a toolchain/runtime mismatch for Node-based smoke tests, not evidence that
+  the QEMU emulator itself failed.
 
 The local artifact proof used this source-copy build shape from the QEMU
 source root::
@@ -446,6 +457,28 @@ Proof:
 
 Non-goals:
   No WebAssembly TCG backend.
+
+WASM-011a: Align JavaScript runtime for smoke tests
+---------------------------------------------------
+
+Scope:
+  Make the build or test environment provide a JavaScript runtime that can
+  execute the generated wasm64 Emscripten module.
+
+Touches:
+  ``tests/docker/dockerfiles/emsdk-wasm64-cross.docker``, CI configuration,
+  and documentation.
+
+Proof:
+  A documented command imports ``qemu-system-x86_64.js`` as an ES module and
+  runs ``await Module({ arguments: ["--version"] })`` successfully.  The test
+  environment must report Node.js ``v23.0.0`` or newer, or use a browser
+  runtime that supports the required wasm64, pthread, BigInt, worker, and
+  shared-memory features.
+
+Non-goals:
+  No Linux guest boot requirement in this task.  It only proves that the
+  JavaScript runtime can start the generated QEMU module.
 
 WASM-012: Define artifact manifest format
 -----------------------------------------
