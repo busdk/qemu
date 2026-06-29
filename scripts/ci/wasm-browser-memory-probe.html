@@ -1,0 +1,114 @@
+<!doctype html>
+<!--
+  Probe WebAssembly.Memory constructor limits in a browser.
+
+  SPDX-License-Identifier: GPL-2.0-or-later
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>QEMU WASM browser memory probe</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body {
+        color: #202124;
+        font: 16px/1.5 system-ui, sans-serif;
+        margin: 2rem;
+        max-width: 72rem;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      label {
+        display: block;
+        margin: 1rem 0;
+      }
+
+      input {
+        box-sizing: border-box;
+        display: block;
+        margin-top: 0.25rem;
+        max-width: 32rem;
+        width: 100%;
+      }
+
+      pre {
+        background: #f6f8fa;
+        overflow: auto;
+        padding: 1rem;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>QEMU WASM browser memory probe</h1>
+    <p>
+      This page records browser-visible WebAssembly.Memory constructor behavior
+      for QEMU WebAssembly host planning. Serve it with the companion Node
+      server so pthread and shared-memory probes receive cross-origin isolation
+      headers.
+    </p>
+
+    <label>
+      Page counts, comma-separated
+      <input id="pages" value="16384,32768,65536,131072">
+    </label>
+
+    <label>
+      <input id="memory64" type="checkbox" checked>
+      Include address: "i64" probes
+    </label>
+
+    <button id="run" type="button">Run probe</button>
+    <button id="copy" type="button">Copy JSON</button>
+
+    <pre id="output" aria-live="polite">Waiting to run.</pre>
+
+    <script type="module">
+      import { runProbe } from "./wasm-memory-probe.mjs";
+
+      const pagesInput = document.querySelector("#pages");
+      const memory64Input = document.querySelector("#memory64");
+      const output = document.querySelector("#output");
+      let latestJson = "";
+
+      function parsePages(value) {
+        const pages = value.split(",").map((item) => Number(item.trim()));
+        if (pages.length === 0 ||
+            pages.some((page) => !Number.isInteger(page) || page <= 0)) {
+          throw new Error("Page counts must be positive integers.");
+        }
+        return pages;
+      }
+
+      function run() {
+        try {
+          const result = runProbe({
+            pages: parsePages(pagesInput.value),
+            memory64: memory64Input.checked,
+          });
+          latestJson = JSON.stringify(result, null, 2);
+          output.textContent = latestJson;
+        } catch (error) {
+          latestJson = "";
+          output.textContent = error && error.message ? error.message : String(error);
+        }
+      }
+
+      document.querySelector("#run").addEventListener("click", run);
+      document.querySelector("#copy").addEventListener("click", async () => {
+        if (latestJson === "") {
+          run();
+        }
+        if (latestJson !== "") {
+          await navigator.clipboard.writeText(latestJson);
+        }
+      });
+
+      run();
+    </script>
+  </body>
+</html>

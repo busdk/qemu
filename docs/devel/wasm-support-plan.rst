@@ -340,6 +340,17 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   and 4 GiB, rejects default-address 8 GiB, and rejects the ``address: "i64"``
   constructor form with ``TypeError: Cannot convert a BigInt value to a
   number``.
+* ``scripts/ci/wasm-browser-memory-probe.html`` and
+  ``scripts/ci/wasm-memory-probe-server.mjs`` now provide the matching browser
+  probe path.  The server only exposes the probe page and its module, and sets
+  ``Cross-Origin-Opener-Policy: same-origin``,
+  ``Cross-Origin-Embedder-Policy: require-corp``, and
+  ``Cross-Origin-Resource-Policy: same-origin`` so shared WebAssembly memory
+  probes run in the same security shape required by Emscripten pthread builds.
+  Start it with ``node scripts/ci/wasm-memory-probe-server.mjs`` and open the
+  printed local URL in each browser under test.  The resulting JSON must be
+  recorded with the browser name, version, host OS, available memory, and
+  whether the page reported ``crossOriginIsolated``.
 * No Chromium, Chrome, Firefox, or Playwright browser runtime was available on
   the local host during this pass.  Browser memory-limit evidence remains a
   separate required matrix item; the current evidence is limited to Node.js/V8
@@ -402,7 +413,11 @@ Browser runtime notes from primary documentation:
 
 These notes are not a compatibility guarantee.  The next proof must run the
 generated artifacts in a browser or browser-equivalent runtime and record the
-tested browser, headers, memory settings, and observed failure modes.
+tested browser, headers, memory settings, and observed failure modes.  The
+browser memory probe is intentionally separate from QEMU startup: it answers
+whether the runtime can construct the shared linear memories QEMU/Emscripten
+will need.  A passing memory probe is required evidence for a browser target,
+but it does not prove that QEMU can boot a guest in that browser.
 
 Runtime references used for this evidence:
 
