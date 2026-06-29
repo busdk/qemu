@@ -178,6 +178,32 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   ``QEMU_WASM_LINUX_BOOT_OK`` marker before the 240 second timeout.  This is
   not yet a Linux boot proof; it narrows the next work to diagnosing the
   pre-serial boot path under wasm64 TCI.
+* The Node smoke helper now supports ``--dump-file PATH[:N]``.  This prints a
+  MEMFS file on timeout and can cap the output to ``N`` bytes, which allows
+  QEMU ``-D`` logs and instruction traces to be collected without flooding CI
+  logs.
+* The second syscall-warning cleanup made ``qemu_madvise()`` and
+  ``qemu_mprotect_*()`` explicit no-ops on Emscripten hosts for valid advisory
+  calls and skipped the POSIX coroutine stack guard page under Emscripten.
+  A rebuilt artifact still passed the Node.js ``v24.18.0`` ``--version``
+  smoke test.  Startup warnings were reduced to ``__syscall_pipe2``.
+* The cleaned artifact hashes were:
+  ``qemu-system-x86_64.js`` =
+  ``6fc7fb8d9fb3354203222bedb149a5f5d84a56a86298e3a4eeabcb57b8b3e987`` and
+  ``qemu-system-x86_64.wasm`` =
+  ``bb1c732c79d8006f4297575d2d883591722be44342a8428b7575a7d1fee36873``.
+  The wasm module size was ``74820239`` bytes.
+* The cleaned ``-M microvm`` boot attempt no longer crashed, but still timed
+  out after 120 seconds before the Linux marker.  ``-d cpu_reset,guest_errors``
+  showed two CPU resets and no guest errors.  Forcing
+  ``-accel tcg,thread=single`` did not change the reset-only timeout result.
+* A short capped run with ``-d in_asm,exec,cpu_reset`` proved the CPU does
+  execute BIOS instructions under wasm64 TCI after reset.  The trace moved
+  from ``0xfffffff0`` into firmware addresses such as ``0x000fe05b`` and
+  ``0x000fd45d`` and then spent the captured window in firmware translation
+  blocks.  The remaining boot issue is therefore not "CPU never starts"; it is
+  a firmware/TCI progress, performance, or event-loop issue before Linux
+  serial output.
 * The same proof showed that the Emscripten pthread runtime can keep async
   state alive after QEMU exits.  The smoke helper therefore waits for an
   expected output marker and then exits explicitly.  Long-running boot tests
@@ -683,13 +709,72 @@ Touches:
   specific QEMU subsystems implicated by the diagnosis.
 
 Proof:
-  The next run either reaches ``QEMU_WASM_LINUX_BOOT_OK`` or produces a
-  concrete failure earlier than the timeout, such as a firmware handoff issue,
-  missing emulated device, unsupported host syscall with caller, TCI execution
-  problem, or serial chardev wiring problem.
+  The diagnostic run produces a concrete failure earlier than the timeout or
+  narrows the timeout to a specific execution phase.  Current evidence shows
+  wasm64 TCI executes BIOS instructions after reset, so the remaining issue is
+  firmware/TCI progress before Linux serial output rather than a missing
+  firmware file or a CPU-start failure.
 
 Non-goals:
   No browser UI, networking, graphics, or Bus Engine-specific artifact.
+
+WASM-016b: Measure wasm64 TCI firmware progress
+-----------------------------------------------
+
+Scope:
+  Determine whether the firmware loop observed under Node.js is simply too
+  slow for the current timeout, stuck on an emulated hardware/event path, or
+  blocked by the remaining ``pipe2``/event-notifier warning.
+
+Touches:
+  QEMU trace options, optional capped log extraction in the smoke helper,
+  firmware selection, and documented boot-test timeouts.
+
+Proof:
+  A run shows one of: Linux serial output after a longer bounded timeout; a
+  repeated firmware loop with stable addresses; a specific missing event,
+  timer, or interrupt path; or a minimal firmware/boot path that reaches the
+  Linux entry point.
+
+Non-goals:
+  No wasm TCG/JIT backend implementation.
+
+WASM-016c: Build a profiling-symbol wasm diagnostic variant
+-----------------------------------------------------------
+
+Scope:
+  Add or document a debug-only build variant that keeps enough wasm function
+  names or source information to map Node.js ``wasm-function[...]`` frames to
+  QEMU source during assertion failures.
+
+Touches:
+  Build documentation, optional CI helper flags, and artifact-handling notes.
+
+Proof:
+  A known assertion or forced abort can be mapped to a QEMU function/source
+  location from the generated wasm artifacts.
+
+Non-goals:
+  No requirement that release artifacts carry full debug names.
+
+WASM-016d: Audit Emscripten event notifier path
+-----------------------------------------------
+
+Scope:
+  Explain and, if needed, replace the POSIX ``g_unix_open_pipe`` notifier path
+  that currently emits ``__syscall_pipe2`` warnings under Node.js.
+
+Touches:
+  ``util/event_notifier-posix.c`` or an Emscripten-specific notifier backend,
+  plus main-loop proof.
+
+Proof:
+  The Node.js ``--version`` smoke test starts without unsupported ``pipe2``
+  warnings, or the warning is documented as harmless with evidence that the
+  fallback creates working non-blocking notification file descriptors.
+
+Non-goals:
+  No browser networking implementation.
 
 WASM-017: Choose upstream smoke guest
 -------------------------------------

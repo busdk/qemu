@@ -52,6 +52,14 @@ int qemu_madvise(void *addr, size_t len, int advice)
         errno = EINVAL;
         return -1;
     }
+#ifdef EMSCRIPTEN
+    /*
+     * Browser and Emscripten hosts do not expose process-level VM advice.
+     * QEMU uses these calls as advisory performance hints, so keep the call
+     * sites portable by treating valid advice as successfully ignored.
+     */
+    return 0;
+#endif
 #if defined(CONFIG_MADVISE)
     return madvise(addr, len, advice);
 #elif defined(CONFIG_POSIX_MADVISE)
@@ -71,6 +79,15 @@ static int qemu_mprotect__osdep(void *addr, size_t size, int prot)
 {
     g_assert(!((uintptr_t)addr & ~qemu_real_host_page_mask()));
     g_assert(!(size & ~qemu_real_host_page_mask()));
+
+#ifdef EMSCRIPTEN
+    /*
+     * WebAssembly linear memory cannot be protected with POSIX mprotect().
+     * The wasm TCI path does not execute translated host pages, so ignore
+     * protection changes after validating alignment above.
+     */
+    return 0;
+#endif
 
 #ifdef _WIN32
     DWORD old_protect;

@@ -15,6 +15,7 @@ function parseArgs(argv) {
     program: "qemu-system-x86_64.js",
     marker: "QEMU emulator version",
     mountFiles: [],
+    dumpFiles: [],
     timeoutMs: 10000,
     qemuArgs: ["--version"],
   };
@@ -32,6 +33,8 @@ function parseArgs(argv) {
       options.marker = argv[++i];
     } else if (arg === "--mount-file") {
       options.mountFiles.push(parseMountFile(argv[++i]));
+    } else if (arg === "--dump-file") {
+      options.dumpFiles.push(parseDumpFile(argv[++i]));
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number(argv[++i]);
     } else if (arg === "--help") {
@@ -65,6 +68,28 @@ function parseMountFile(value) {
   return { hostPath, wasmPath };
 }
 
+function parseDumpFile(value) {
+  let path = value;
+  let maxBytes = null;
+  const separator = value.lastIndexOf(":");
+  if (separator > 0) {
+    const suffix = value.slice(separator + 1);
+    if (/^[0-9]+$/.test(suffix)) {
+      path = value.slice(0, separator);
+      maxBytes = Number(suffix);
+    }
+  }
+  if (!path.startsWith("/")) {
+    console.error("--dump-file path must be absolute");
+    usage(2);
+  }
+  if (maxBytes !== null && (!Number.isInteger(maxBytes) || maxBytes <= 0)) {
+    console.error("--dump-file byte limit must be a positive integer");
+    usage(2);
+  }
+  return { path, maxBytes };
+}
+
 function usage(status) {
   const stream = status === 0 ? process.stdout : process.stderr;
   stream.write(`usage: wasm-node-smoke.mjs [OPTIONS] [-- QEMU_ARGS...]
@@ -74,6 +99,8 @@ Options:
   --program FILE      JavaScript launcher inside artifact dir
   --marker TEXT       Output text required for success
   --mount-file H:W    Copy host file H to absolute Emscripten path W
+  --dump-file PATH[:N]
+                     Print Emscripten file PATH on timeout, capped at N bytes
   --timeout-ms MS     Timeout in milliseconds
   --help              Show this help
 `);
@@ -85,6 +112,7 @@ const programUrl = pathToFileURL(resolve(options.artifactDir, options.program));
 
 let markerSeen = false;
 let exitScheduled = false;
+let activeModule = null;
 
 function scheduleExit(status) {
   if (exitScheduled) {
@@ -110,8 +138,34 @@ function mountFiles(module) {
   }
 }
 
+function dumpFiles() {
+  if (activeModule === null) {
+    return;
+  }
+  for (const dump of options.dumpFiles) {
+    process.stderr.write(`----- begin ${dump.path} -----\n`);
+    try {
+      let data = activeModule.FS.readFile(dump.path);
+      if (dump.maxBytes !== null && data.length > dump.maxBytes) {
+        data = data.slice(0, dump.maxBytes);
+      }
+      process.stderr.write(new TextDecoder().decode(data));
+      if (data.length > 0 && data[data.length - 1] !== 10) {
+        process.stderr.write("\n");
+      }
+      if (dump.maxBytes !== null) {
+        process.stderr.write(`----- truncated at ${dump.maxBytes} bytes -----\n`);
+      }
+    } catch (error) {
+      process.stderr.write(`${error && error.message ? error.message : String(error)}\n`);
+    }
+    process.stderr.write(`----- end ${dump.path} -----\n`);
+  }
+}
+
 const timeout = setTimeout(() => {
   console.error(`timeout waiting for marker: ${options.marker}`);
+  dumpFiles();
   process.exit(124);
 }, options.timeoutMs);
 
@@ -125,6 +179,12 @@ try {
   if (options.mountFiles.length > 0) {
     moduleOptions.preRun = [(module) => mountFiles(module)];
   }
+  moduleOptions.preRun = [
+    (module) => {
+      activeModule = module;
+    },
+    ...(moduleOptions.preRun || []),
+  ];
   await moduleFactory({
     ...moduleOptions,
   });
