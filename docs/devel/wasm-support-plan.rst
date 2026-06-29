@@ -16,6 +16,20 @@ production networking, or durable browser storage.  The experimental
 ``ktock/qemu-wasm`` code is research material only; the upstreamable work must
 be designed as native QEMU support rather than importing the fork wholesale.
 
+Settled MVP decisions
+=====================
+
+The Bus Engine browser target needs 64-bit guest environments only.  The MVP
+therefore uses the upstream ``wasm64`` Emscripten host baseline and the
+``x86_64-softmmu`` system emulator.  ``wasm32`` compatibility is not an MVP
+goal.  Existing ``wasm32`` material in experimental forks remains useful only
+as historical design input for browser packaging, JavaScript integration, and
+TCG-to-WebAssembly ideas.
+
+The first executable milestone is the TCI boot path.  A native WebAssembly TCG
+backend remains a later performance and maintainability milestone after the
+TCI path can boot a 64-bit Linux guest in a browser-controlled runtime.
+
 Strict definition of done
 =========================
 
@@ -62,6 +76,80 @@ Upstream QEMU already contains an Emscripten/WebAssembly host baseline:
 This means the plan must improve an existing upstream host target.  It must
 not assume QEMU has no WebAssembly support.
 
+Build and runtime evidence
+==========================
+
+Evidence collected on 2026-06-29 from the local QEMU branch:
+
+* Local ``emcc`` was not installed, so development used QEMU's Docker-based
+  Emscripten image.
+* The QEMU source-tree target
+  ``make -f Makefile docker-image-emsdk-wasm64-cross V=1`` successfully built
+  ``qemu/emsdk-wasm64-cross:latest`` as image ID ``a597fc7fd202``.  The image
+  uses Emscripten SDK ``4.0.10`` and produces a ``wasm64`` cross environment
+  with ``-sMEMORY64=1``.
+* A source tree copied into the container configured successfully for
+  ``--target-list=x86_64-softmmu --static --cpu=wasm64 --disable-tools
+  --enable-debug --enable-tcg-interpreter``.
+* The configure summary reported ``Host CPU: wasm64``, ``void * size: 8``,
+  Emscripten ``4.0.10``, TCI as the TCG backend, the ``wasm`` coroutine
+  backend, and ``x86_64-softmmu`` as the only target.
+* The TCI build linked ``qemu-system-x86_64.js`` successfully inside the
+  container.
+* A read-only mounted QEMU source tree is not sufficient for this configure
+  path because the Python editable install writes ``qemu.egg-info`` into the
+  source directory.  The repeatable local workaround is to copy the source
+  tree into a container-local directory and build from there.
+* The build produced warning evidence worth turning into early cleanup tasks:
+  wasm64 ``printf`` format mismatches for 64-bit constants and ``ram_addr_t``,
+  plus unused Emscripten-specific code paths in a few host files.
+* The first implementation cleanup removed the observed wasm64 warnings by
+  making constant casts explicit at format-call sites and avoiding
+  Emscripten-unreachable POSIX helpers.  A follow-up Docker build completed
+  and linked ``qemu-system-x86_64.js`` with those cleanups applied.
+
+The current upstream Emscripten link configuration is intentionally browser
+oriented.  It enables pthreads, Asyncify, ``PROXY_TO_PTHREAD``, filesystem
+support, table growth, a 2 GiB initial memory, WebAssembly BigInt, ES module
+output, and Emscripten runtime methods including ``TTY`` and ``FS``.
+
+Browser runtime notes from primary documentation:
+
+* Emscripten pthreads require ``-pthread`` at compile and link time, and
+  deployed browser pthread builds require SharedArrayBuffer availability behind
+  COOP/COEP cross-origin isolation headers.
+* Emscripten recommends ``PROXY_TO_PTHREAD`` to move ``main()`` off the browser
+  main thread and avoid blocking the UI thread.
+* MDN documents that shared ``WebAssembly.Memory`` uses ``SharedArrayBuffer``
+  and that SharedArrayBuffer sharing requires a secure, cross-origin-isolated
+  context.
+* MDN documents JavaScript creation of 64-bit-address WebAssembly memory with
+  ``address: "i64"`` and ``BigInt`` sizes.
+* V8's 4 GiB WebAssembly memory note is still useful as a conservative
+  ``wasm32`` contrast: ``wasm32`` can address at most 4 GiB, while QEMU's
+  Bus Engine MVP deliberately targets ``wasm64`` so the practical limit shifts
+  to browser support, device memory, Emscripten, and configured initial or
+  maximum memory.
+
+These notes are not a compatibility guarantee.  The next proof must run the
+generated artifacts in a browser or browser-equivalent runtime and record the
+tested browser, headers, memory settings, and observed failure modes.
+
+Runtime references used for this evidence:
+
+* Emscripten pthreads:
+  ``https://emscripten.org/docs/porting/pthreads.html``
+* Emscripten ``MEMORY64`` setting:
+  ``https://emscripten.org/docs/tools_reference/settings_reference.html``
+* MDN ``SharedArrayBuffer``:
+  ``https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer``
+* MDN ``Cross-Origin-Embedder-Policy``:
+  ``https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Cross-Origin-Embedder-Policy``
+* MDN ``WebAssembly.Memory``:
+  ``https://developer.mozilla.org/en-US/docs/WebAssembly/Reference/JavaScript_interface/Memory``
+* V8 WebAssembly 4 GiB memory note:
+  ``https://v8.dev/blog/4gb-wasm-memory``
+
 Reference implementation material
 =================================
 
@@ -69,7 +157,7 @@ Use the following experimental sources as reference material:
 
 * ``ktock/qemu-wasm`` master for browser packaging, Emscripten module startup,
   xterm terminal integration, networking experiments, virtfs experiments, and
-  the ``tcg/wasm32`` backend.
+  the historical ``tcg/wasm32`` backend.
 * ``ktock/qemu-wasm`` ``wasm64-tcg-b`` branch for the ``tcg/wasm64`` backend,
   wasm64 memory handling, and CI structure.
 * ``ktock/qemu-wasm-sample`` for the minimal direct-kernel boot flow:
@@ -236,9 +324,8 @@ Touches:
   Documentation only.
 
 Proof:
-  The matrix covers WebAssembly, wasm64 or wasm32 compatibility, Web Workers,
-  pthreads, SharedArrayBuffer, COOP, COEP, CORP, memory limits, and fallback
-  to TCI.
+  The matrix covers WebAssembly, wasm64, Web Workers, pthreads,
+  SharedArrayBuffer, COOP, COEP, CORP, memory limits, and fallback to TCI.
 
 Non-goals:
   No browser compatibility guarantee beyond tested runtimes.
@@ -706,8 +793,9 @@ Files to inspect:
   ``meson.build``, ``configs/meson/emscripten.txt``,
   ``tests/docker/dockerfiles/emsdk-wasm64-cross.docker``,
   ``.gitlab-ci.d/buildtest.yml``, ``system/os-wasm.*``,
-  ``util/coroutine-*``, ``tcg/tci.*``, ``tcg/wasm32*``,
-  ``tcg/wasm64*``, browser sample startup files, and browser packaging
+  ``util/coroutine-*``, ``tcg/tci.*``, ``tcg/wasm64*``,
+  historical ``tcg/wasm32*`` reference files, browser sample startup files,
+  and browser packaging
   scripts.
 
 Acceptance:
@@ -727,8 +815,8 @@ Expected QEMU areas:
 
 Work items:
   * Pin the Emscripten SDK version used by the QEMU build image.
-  * Decide whether QEMU supports wasm64 only, or both wasm32 compatibility and
-    wasm64.
+  * Keep the Bus Engine MVP on wasm64 only.  Treat wasm32 compatibility as a
+    separate upstream discussion outside this MVP.
   * Define build variants for TCI baseline and native WebAssembly TCG.
   * Keep browser-specific link flags centralized in the Emscripten cross file.
   * Document required browser headers for pthreads and SharedArrayBuffer.
@@ -799,8 +887,7 @@ Expected QEMU areas:
   flushing, invalidation, and multi-threaded TCG integration.
 
 Work items:
-  * Choose wasm64 as the primary upstream backend target unless the audit
-    proves wasm32 compatibility must remain first.
+  * Use wasm64 as the Bus Engine MVP backend target.
   * Re-derive the backend design from QEMU TCG requirements and the fork's
     implementation, preserving QEMU style and review boundaries.
   * Support hot translation blocks through WebAssembly modules where browser
@@ -982,8 +1069,6 @@ Open decisions
 
 * Whether upstream QEMU should keep wasm64+TCI as the only official baseline
   until a native WebAssembly TCG backend is accepted.
-* Whether wasm32 compatibility remains useful enough to support, given modern
-  browser memory requirements and 64-bit Linux guest goals.
 * Whether QEMU should provide a minimal browser harness in-tree or only
   document how an external harness loads the generated artifacts.
 * Which headless browser test runner is acceptable for QEMU CI.

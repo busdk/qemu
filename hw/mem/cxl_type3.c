@@ -663,7 +663,7 @@ static bool cxl_create_dc_regions(CXLType3Dev *ct3d, Error **errp)
     }
     if (region_len % CXL_CAPACITY_MULTIPLIER != 0) {
         error_setg(errp, "DC region size is unaligned to 0x%" PRIx64,
-                   CXL_CAPACITY_MULTIPLIER);
+                   (uint64_t)CXL_CAPACITY_MULTIPLIER);
         return false;
     }
     decode_len = region_len;
@@ -678,7 +678,7 @@ static bool cxl_create_dc_regions(CXLType3Dev *ct3d, Error **errp)
     }
     if (region_base % CXL_CAPACITY_MULTIPLIER != 0) {
         error_setg(errp, "DC region base not aligned to 0x%" PRIx64,
-                   CXL_CAPACITY_MULTIPLIER);
+                   (uint64_t)CXL_CAPACITY_MULTIPLIER);
         return false;
     }
 

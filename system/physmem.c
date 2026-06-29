@@ -2426,7 +2426,7 @@ RAMBlock *qemu_ram_alloc_from_file(ram_addr_t size, MemoryRegion *mr,
 }
 #endif
 
-#ifdef CONFIG_POSIX
+#if defined(CONFIG_POSIX) && !defined(EMSCRIPTEN)
 /*
  * Create MAP_SHARED RAMBlocks by mmap'ing a file descriptor, so it can be
  * shared with another process if CPR is being used.  Use memfd if available

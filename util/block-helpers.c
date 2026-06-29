@@ -37,7 +37,7 @@ bool check_block_size(const char *name, int64_t value, Error **errp)
         error_setg(errp,
                    "parameter %s must be a power of 2 between %" PRId64
                    " and %" PRId64,
-                   name, MIN_BLOCK_SIZE, MAX_BLOCK_SIZE);
+                   name, (int64_t)MIN_BLOCK_SIZE, (int64_t)MAX_BLOCK_SIZE);
         return false;
     }
     return true;

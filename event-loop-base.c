@@ -64,7 +64,7 @@ static void event_loop_base_set_param(Object *obj, Visitor *v,
 
     if (value < 0) {
         error_setg(errp, "%s value must be in range [0, %" PRId64 "]",
-                   info->name, INT64_MAX);
+                   info->name, (int64_t)INT64_MAX);
         return;
     }
 

@@ -69,8 +69,9 @@ static void pc_init_isa(MachineState *machine)
     }
 
     if (machine->ram_size > 3.5 * GiB) {
-        error_report("Too much memory for this machine: %" PRId64 " MiB, "
-                     "maximum 3584 MiB", machine->ram_size / MiB);
+        error_report("Too much memory for this machine: %" PRIu64 " MiB, "
+                     "maximum 3584 MiB",
+                     (uint64_t)(machine->ram_size / MiB));
         exit(1);
     }
 
