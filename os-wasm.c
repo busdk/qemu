@@ -73,23 +73,10 @@ void os_setup_signal_handling(void)
 }
 void os_setup_limits(void)
 {
-    struct rlimit nofile;
-
-    if (getrlimit(RLIMIT_NOFILE, &nofile) < 0) {
-        warn_report("unable to query NOFILE limit: %s", strerror(errno));
-        return;
-    }
-
-    if (nofile.rlim_cur == nofile.rlim_max) {
-        return;
-    }
-
-    nofile.rlim_cur = nofile.rlim_max;
-
-    if (setrlimit(RLIMIT_NOFILE, &nofile) < 0) {
-        warn_report("unable to set NOFILE limit: %s", strerror(errno));
-        return;
-    }
+    /*
+     * Browser and Emscripten hosts do not provide a meaningful process-wide
+     * file descriptor limit for QEMU to raise.
+     */
 }
 int os_mlock(bool on_fault)
 {

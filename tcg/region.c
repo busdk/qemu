@@ -833,8 +833,10 @@ void tcg_region_init(size_t tb_size, int splitwx, unsigned max_threads)
             }
         }
         if (have_prot != 0) {
+#ifndef EMSCRIPTEN
             /* Guard pages are nice for bug detection but are not essential. */
             (void)qemu_mprotect_none(end, page_size);
+#endif
         }
     }
 

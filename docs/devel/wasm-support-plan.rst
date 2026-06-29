@@ -151,6 +151,12 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   ``__syscall_pipe2`` before printing the QEMU version.  These warnings do not
   block the version smoke test, but they need explicit audit before the Linux
   boot path can be considered healthy.
+* The first syscall-warning cleanup made ``os_setup_limits()`` a no-op on
+  Emscripten hosts and skipped optional TCG guard-page protection under
+  Emscripten.  A rebuilt artifact still passed the Node.js ``v24.18.0``
+  ``--version`` smoke test, and the ``__syscall_prlimit64`` warning
+  disappeared.  The remaining startup warnings were ``__syscall_mprotect`` and
+  ``__syscall_pipe2``.
 * The same proof showed that the Emscripten pthread runtime can keep async
   state alive after QEMU exits.  The smoke helper therefore waits for an
   expected output marker and then exits explicitly.  Long-running boot tests
@@ -555,10 +561,11 @@ WASM-012a: Audit unsupported startup syscalls
 ---------------------------------------------
 
 Scope:
-  Determine whether the Emscripten warnings for ``__syscall_prlimit64``,
-  ``__syscall_mprotect``, and ``__syscall_pipe2`` are harmless for the
+  Determine whether the remaining Emscripten warnings for
+  ``__syscall_mprotect`` and ``__syscall_pipe2`` are harmless for the
   console-first Linux boot path or need QEMU-side configuration, stubs, or
-  clearer diagnostics.
+  clearer diagnostics.  ``__syscall_prlimit64`` was traced to wasm host
+  ``os_setup_limits()`` and removed by making that setup a no-op.
 
 Touches:
   Audit documentation first; code only if the warning maps to a boot-path
