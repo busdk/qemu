@@ -268,6 +268,19 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   the generic ``__syscall_pipe2`` warning and did not reach the Linux banner
   within 45 seconds, so this change is not sufficient to close the startup
   pipe-warning task.
+* A standalone Emscripten ``pipe()`` diagnostic compiled with
+  ``-sMEMORY64=1 -sWASM_BIGINT`` and run under Node.js ``v24`` created a pipe
+  without warnings.  The same diagnostic compiled with
+  ``-pthread -sPROXY_TO_PTHREAD=1 -sMEMORY64=1 -sWASM_BIGINT`` also created a
+  pipe without warnings, although the runtime stayed alive after process exit.
+  Therefore the remaining QEMU warning is not explained by plain Emscripten
+  ``pipe()`` or pthread proxying alone.
+* A temporary attempt to rebuild QEMU with
+  ``--extra-ldflags=-sSYSCALL_DEBUG=1`` did not change the generated artifact;
+  the SHA-256 values matched the previous signal-noop artifact and the
+  generated JavaScript did not contain syscall-debug support.  Future syscall
+  diagnostics need a verified build-hook or cross-file change that proves the
+  Emscripten flag reached the final link.
 * The same proof showed that the Emscripten pthread runtime can keep async
   state alive after QEMU exits.  The smoke helper therefore waits for an
   expected output marker and then exits explicitly.  Long-running boot tests
@@ -901,6 +914,27 @@ Proof:
 
 Non-goals:
   No guest boot-progress fix, networking, graphics, or browser storage work.
+
+WASM-016h: Add verified Emscripten diagnostic link flags
+--------------------------------------------------------
+
+Scope:
+  Provide a repeatable way to build temporary QEMU/WASM diagnostic artifacts
+  with explicit Emscripten link flags such as ``-sSYSCALL_DEBUG=1`` and prove
+  that those flags reach the final generated JavaScript/WebAssembly output.
+
+Touches:
+  Build documentation, optional CI helper scripts, or an Emscripten diagnostic
+  cross-file variant.
+
+Proof:
+  A diagnostic build produces artifacts whose JavaScript visibly contains the
+  requested diagnostic support, whose SHA-256 differs from the non-diagnostic
+  artifact for a known reason, and whose minimal ``-M none`` startup output
+  provides more detail than the plain unsupported-syscall warning.
+
+Non-goals:
+  No permanent debug flags in release artifacts.
 
 WASM-016e: Define canonical TCI smoke-boot command line
 -------------------------------------------------------
