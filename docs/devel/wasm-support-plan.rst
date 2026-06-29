@@ -233,6 +233,15 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   memories and rejected 8 GiB.  This is useful runtime evidence, but it is not
   a browser compatibility guarantee and does not satisfy the later
   browser-memory matrix task.
+* ``scripts/ci/wasm-memory-probe.mjs`` now makes that memory-constructor probe
+  repeatable.  It emits JSON with the JavaScript runtime, page size, tested
+  page counts, byte sizes, shared/unshared mode, optional ``address: "i64"``
+  mode, buffer type, and any constructor failure.  The local command
+  ``node scripts/ci/wasm-memory-probe.mjs --memory64`` confirmed that Node.js
+  ``v22.19.0`` accepts default-address shared and unshared memories at 1, 2,
+  and 4 GiB, rejects default-address 8 GiB, and rejects the ``address: "i64"``
+  constructor form with ``TypeError: Cannot convert a BigInt value to a
+  number``.
 * No Chromium, Chrome, Firefox, or Playwright browser runtime was available on
   the local host during this pass.  Browser memory-limit evidence remains a
   separate required matrix item; the current evidence is limited to Node.js/V8
@@ -494,6 +503,26 @@ Proof:
 
 Non-goals:
   No browser compatibility guarantee beyond tested runtimes.
+
+WASM-007a: Add runtime memory probe helper
+------------------------------------------
+
+Scope:
+  Provide a small JavaScript helper that records
+  ``WebAssembly.Memory`` constructor behavior for the current JavaScript
+  runtime.
+
+Touches:
+  ``scripts/ci/wasm-memory-probe.mjs`` and documentation.
+
+Proof:
+  ``node scripts/ci/wasm-memory-probe.mjs --memory64`` emits JSON with the
+  runtime version, page size, tested memory sizes, shared/unshared mode,
+  optional ``address: "i64"`` mode, and exact constructor failures.  The
+  helper can also be imported by a later browser harness.
+
+Non-goals:
+  No claim that Node.js memory behavior represents browser compatibility.
 
 WASM-008: Audit host POSIX assumptions
 --------------------------------------
