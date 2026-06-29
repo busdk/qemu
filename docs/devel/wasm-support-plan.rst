@@ -157,6 +157,27 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   ``--version`` smoke test, and the ``__syscall_prlimit64`` warning
   disappeared.  The remaining startup warnings were ``__syscall_mprotect`` and
   ``__syscall_pipe2``.
+* A native QEMU control boot used local ``/boot/vmlinuz-7.1.0`` and a tiny
+  BusyBox initramfs that prints ``QEMU_WASM_LINUX_BOOT_OK`` from ``/init``.
+  Native ``qemu-system-x86_64`` reached the marker with both the default PC
+  machine and ``-M microvm``.  This proves the kernel/initramfs/command-line
+  inputs are valid before involving WebAssembly.
+* ``scripts/ci/wasm-node-smoke.mjs`` now supports ``--mount-file HOST:WASM``.
+  The helper copies host files into Emscripten MEMFS during ``preRun`` using
+  the generated module's exported ``FS_createPath`` and ``FS.writeFile``
+  methods.  This provides a Node proof path for kernel, initrd, and firmware
+  inputs without requiring ``NODEFS`` support in the generated artifact.
+* The first wasm Linux boot attempt with the default PC machine progressed to
+  firmware loading and failed because ``bios-256k.bin`` was absent from MEMFS.
+  Supplying ``-L /firmware`` and mounting ``bios-256k.bin`` moved the failure
+  forward to missing ``kvmvapic.bin`` and ``linuxboot_dma.bin`` messages, then
+  timed out without reaching the Linux marker.
+* A wasm ``-M microvm`` boot attempt with ``bios-microvm.bin`` and
+  ``linuxboot_dma.bin`` mounted under ``/firmware`` produced no missing
+  firmware errors, but did not produce guest serial output or the
+  ``QEMU_WASM_LINUX_BOOT_OK`` marker before the 240 second timeout.  This is
+  not yet a Linux boot proof; it narrows the next work to diagnosing the
+  pre-serial boot path under wasm64 TCI.
 * The same proof showed that the Emscripten pthread runtime can keep async
   state alive after QEMU exits.  The smoke helper therefore waits for an
   expected output marker and then exits explicitly.  Long-running boot tests
@@ -532,6 +553,8 @@ Proof:
   ``node scripts/ci/wasm-node-smoke.mjs --artifact-dir /artifacts`` reports
   ``QEMU emulator version`` and exits with status ``0`` when run with
   Node.js ``v24.18.0`` against the captured ``x86_64-softmmu`` artifacts.
+  The helper can also copy files into MEMFS with ``--mount-file HOST:WASM``,
+  which is required for Node-based kernel/initrd/firmware boot attempts.
 
 Non-goals:
   No browser proof, guest kernel boot, QMP transport, or product-specific
@@ -590,6 +613,9 @@ Touches:
 
 Proof:
   QEMU opens the kernel and raw rootfs using documented in-browser paths.
+  The Node smoke helper has proven the first part of this for MEMFS-hosted
+  kernel, initrd, and firmware files.  Browser packaging still needs a
+  dedicated harness or file-packaging path.
 
 Non-goals:
   No persistent storage.
@@ -643,6 +669,27 @@ Proof:
 
 Non-goals:
   No full distribution test suite.
+
+WASM-016a: Diagnose wasm64 TCI pre-serial boot timeout
+------------------------------------------------------
+
+Scope:
+  Explain why the Node.js wasm64 TCI ``-M microvm`` boot attempt with mounted
+  kernel, initramfs, ``bios-microvm.bin``, and ``linuxboot_dma.bin`` does not
+  produce guest serial output before timeout.
+
+Touches:
+  QEMU tracing, boot harness options, firmware packaging notes, and only the
+  specific QEMU subsystems implicated by the diagnosis.
+
+Proof:
+  The next run either reaches ``QEMU_WASM_LINUX_BOOT_OK`` or produces a
+  concrete failure earlier than the timeout, such as a firmware handoff issue,
+  missing emulated device, unsupported host syscall with caller, TCI execution
+  problem, or serial chardev wiring problem.
+
+Non-goals:
+  No browser UI, networking, graphics, or Bus Engine-specific artifact.
 
 WASM-017: Choose upstream smoke guest
 -------------------------------------

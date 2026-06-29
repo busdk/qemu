@@ -6,13 +6,15 @@
  */
 
 import { pathToFileURL } from "node:url";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { readFileSync } from "node:fs";
 
 function parseArgs(argv) {
   const options = {
     artifactDir: ".",
     program: "qemu-system-x86_64.js",
     marker: "QEMU emulator version",
+    mountFiles: [],
     timeoutMs: 10000,
     qemuArgs: ["--version"],
   };
@@ -28,6 +30,8 @@ function parseArgs(argv) {
       options.program = argv[++i];
     } else if (arg === "--marker") {
       options.marker = argv[++i];
+    } else if (arg === "--mount-file") {
+      options.mountFiles.push(parseMountFile(argv[++i]));
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number(argv[++i]);
     } else if (arg === "--help") {
@@ -46,6 +50,21 @@ function parseArgs(argv) {
   return options;
 }
 
+function parseMountFile(value) {
+  const separator = value.indexOf(":");
+  if (separator < 1) {
+    console.error("--mount-file must use HOST:WASM_PATH");
+    usage(2);
+  }
+  const hostPath = value.slice(0, separator);
+  const wasmPath = value.slice(separator + 1);
+  if (!wasmPath.startsWith("/")) {
+    console.error("--mount-file WASM_PATH must be absolute");
+    usage(2);
+  }
+  return { hostPath, wasmPath };
+}
+
 function usage(status) {
   const stream = status === 0 ? process.stdout : process.stderr;
   stream.write(`usage: wasm-node-smoke.mjs [OPTIONS] [-- QEMU_ARGS...]
@@ -54,6 +73,7 @@ Options:
   --artifact-dir DIR   Directory containing qemu-system-*.js/.wasm artifacts
   --program FILE      JavaScript launcher inside artifact dir
   --marker TEXT       Output text required for success
+  --mount-file H:W    Copy host file H to absolute Emscripten path W
   --timeout-ms MS     Timeout in milliseconds
   --help              Show this help
 `);
@@ -82,6 +102,14 @@ function emit(line, stream) {
   }
 }
 
+function mountFiles(module) {
+  for (const mount of options.mountFiles) {
+    const data = readFileSync(mount.hostPath);
+    module.FS_createPath("/", dirname(mount.wasmPath), true, true);
+    module.FS.writeFile(mount.wasmPath, data);
+  }
+}
+
 const timeout = setTimeout(() => {
   console.error(`timeout waiting for marker: ${options.marker}`);
   process.exit(124);
@@ -89,10 +117,16 @@ const timeout = setTimeout(() => {
 
 try {
   const moduleFactory = (await import(programUrl.href)).default;
-  await moduleFactory({
+  const moduleOptions = {
     arguments: options.qemuArgs,
     print: (line) => emit(line, process.stdout),
     printErr: (line) => emit(line, process.stderr),
+  };
+  if (options.mountFiles.length > 0) {
+    moduleOptions.preRun = [(module) => mountFiles(module)];
+  }
+  await moduleFactory({
+    ...moduleOptions,
   });
 } catch (error) {
   clearTimeout(timeout);
