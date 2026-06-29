@@ -141,6 +141,20 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   ``qemu/emsdk-wasm64-cross:latest`` image had Node.js ``v22.16.0``.  This is
   a toolchain/runtime mismatch for Node-based smoke tests, not evidence that
   the QEMU emulator itself failed.
+* A Node.js ``v24.18.0`` container successfully ran the generated
+  ``qemu-system-x86_64.js`` module with ``--version`` using
+  ``scripts/ci/wasm-node-smoke.mjs``.  The proof saw
+  ``QEMU emulator version 11.0.50`` and exited successfully after matching the
+  marker.
+* The Node.js ``v24.18.0`` startup proof emitted Emscripten warnings for
+  unsupported ``__syscall_prlimit64``, ``__syscall_mprotect``, and
+  ``__syscall_pipe2`` before printing the QEMU version.  These warnings do not
+  block the version smoke test, but they need explicit audit before the Linux
+  boot path can be considered healthy.
+* The same proof showed that the Emscripten pthread runtime can keep async
+  state alive after QEMU exits.  The smoke helper therefore waits for an
+  expected output marker and then exits explicitly.  Long-running boot tests
+  need their own shutdown path instead of assuming Node will exit naturally.
 * A local Node.js ``v22.19.0`` memory-constructor probe accepted shared and
   unshared ``WebAssembly.Memory`` at ``32768`` pages and ``65536`` pages, then
   rejected ``131072`` pages with ``RangeError: WebAssembly.Memory(): Property
@@ -497,6 +511,26 @@ Non-goals:
   No Linux guest boot requirement in this task.  It only proves that the
   JavaScript runtime can start the generated QEMU module.
 
+WASM-011b: Add Node smoke helper for generated artifacts
+--------------------------------------------------------
+
+Scope:
+  Provide a small Node.js helper that imports the generated Emscripten ES
+  module, passes QEMU arguments, captures stdout and stderr, waits for a
+  required output marker, and exits deterministically.
+
+Touches:
+  ``scripts/ci/wasm-node-smoke.mjs`` and documentation.
+
+Proof:
+  ``node scripts/ci/wasm-node-smoke.mjs --artifact-dir /artifacts`` reports
+  ``QEMU emulator version`` and exits with status ``0`` when run with
+  Node.js ``v24.18.0`` against the captured ``x86_64-softmmu`` artifacts.
+
+Non-goals:
+  No browser proof, guest kernel boot, QMP transport, or product-specific
+  integration.
+
 WASM-012: Define artifact manifest format
 -----------------------------------------
 
@@ -516,6 +550,27 @@ Proof:
 
 Non-goals:
   No package manager or product release format.
+
+WASM-012a: Audit unsupported startup syscalls
+---------------------------------------------
+
+Scope:
+  Determine whether the Emscripten warnings for ``__syscall_prlimit64``,
+  ``__syscall_mprotect``, and ``__syscall_pipe2`` are harmless for the
+  console-first Linux boot path or need QEMU-side configuration, stubs, or
+  clearer diagnostics.
+
+Touches:
+  Audit documentation first; code only if the warning maps to a boot-path
+  failure or misleading behavior.
+
+Proof:
+  The audit identifies the QEMU or dependency caller for each syscall warning,
+  explains whether it affects ``--version`` only, the TCI boot path, or later
+  features, and defines the exact follow-up patch if one is needed.
+
+Non-goals:
+  No broad POSIX emulation layer.
 
 WASM-013: Package kernel and rootfs through Emscripten FS
 --------------------------------------------------------
