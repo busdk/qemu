@@ -141,6 +141,14 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   ``qemu/emsdk-wasm64-cross:latest`` image had Node.js ``v22.16.0``.  This is
   a toolchain/runtime mismatch for Node-based smoke tests, not evidence that
   the QEMU emulator itself failed.
+* A local Node.js ``v22.19.0`` memory-constructor probe accepted shared and
+  unshared ``WebAssembly.Memory`` at ``32768`` pages and ``65536`` pages, then
+  rejected ``131072`` pages with ``RangeError: WebAssembly.Memory(): Property
+  'initial': value 131072 is above the upper bound 65536``.  With 64 KiB
+  WebAssembly pages, this means the local V8 runtime accepted 2 GiB and 4 GiB
+  memories and rejected 8 GiB.  This is useful runtime evidence, but it is not
+  a browser compatibility guarantee and does not satisfy the later
+  browser-memory matrix task.
 
 The local artifact proof used this source-copy build shape from the QEMU
 source root::
@@ -386,6 +394,9 @@ Touches:
 Proof:
   The matrix covers WebAssembly, wasm64, Web Workers, pthreads,
   SharedArrayBuffer, COOP, COEP, CORP, memory limits, and fallback to TCI.
+  Each tested runtime row should include the browser or Node version, the
+  headers or flags used, shared-memory support, maximum accepted
+  ``WebAssembly.Memory`` pages, and whether the QEMU module starts.
 
 Non-goals:
   No browser compatibility guarantee beyond tested runtimes.
