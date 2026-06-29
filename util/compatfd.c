@@ -60,10 +60,23 @@ static int qemu_signalfd_compat(const sigset_t *mask)
 
     info = g_malloc(sizeof(*info));
 
+#ifdef __EMSCRIPTEN__
+    /*
+     * Emscripten does not implement pipe2().  g_unix_open_pipe() attempts
+     * pipe2() before falling back, which emits an unsupported-syscall warning
+     * at runtime.  close-on-exec has no browser runtime meaning, so use
+     * pipe() directly for the signalfd compatibility pipe.
+     */
+    if (pipe(fds) < 0) {
+        g_free(info);
+        return -1;
+    }
+#else
     if (!g_unix_open_pipe(fds, FD_CLOEXEC, NULL)) {
         g_free(info);
         return -1;
     }
+#endif
 
     memcpy(&info->mask, mask, sizeof(*mask));
     info->fd = fds[1];

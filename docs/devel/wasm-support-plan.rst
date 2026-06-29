@@ -221,6 +221,38 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   blocks.  The remaining boot issue is therefore not "CPU never starts"; it is
   a firmware/TCI progress, performance, or event-loop issue before Linux
   serial output.
+* The apparent pre-serial timeout was partly a command-line capture problem:
+  ``-nographic -monitor none`` did not expose the guest serial stream to the
+  Node smoke helper.  Using ``-nographic -serial mon:stdio`` with mounted
+  ``bios-microvm.bin`` and ``linuxboot_dma.bin`` prints SeaBIOS output and
+  Linux early console output under wasm64 TCI.
+* A non-debug wasm64 TCI build without ``--enable-debug`` configured with
+  ``-O2``, no TCG debug, and no mutex debug.  The artifact still passed the
+  Node.js ``v24.18.0`` ``--version`` smoke test.  Its
+  ``qemu-system-x86_64.wasm`` size was ``45337376`` bytes, compared with
+  roughly ``74.8 MiB`` for the previous debug artifact.
+* The optimized artifact hashes were:
+  ``qemu-system-x86_64.js`` =
+  ``fa08cfb87919282e9dc3e77cb0a747826a721e4e620be2915b63d14d5620719f`` and
+  ``qemu-system-x86_64.wasm`` =
+  ``11dd31075965ea6aba206e4cd2400dadbed8a77c09b4df14799753e6212f290e``.
+* The optimized ``-M microvm`` wasm64 TCI run with explicit serial routing
+  reached Linux early boot, but timed out before the
+  ``QEMU_WASM_LINUX_BOOT_OK`` init marker after 120 seconds.  The default
+  kernel command line reported failed fast TSC calibration and no PIT/HPET/PM
+  timer reference before stalling around delay-loop calibration.
+* Adding ``tsc=unstable lpj=1000000 clocksource=jiffies`` to the guest command
+  line moved the optimized wasm64 TCI run beyond delay-loop calibration and
+  through later kernel initialization, including ``VFS: Finished mounting
+  rootfs on nullfs``.  A quiet 240 second run still did not reach the
+  ``QEMU_WASM_LINUX_BOOT_OK`` marker, so the next blocker is post-early-kernel
+  progress rather than firmware entry or serial capture.
+* The same boot path still emits one ``__syscall_pipe2`` warning.  Avoiding
+  ``g_unix_open_pipe()`` in the signalfd compatibility path reduced the boot
+  warnings, but Emscripten ``pipe()`` itself can still route through an
+  unsupported pipe syscall.  The remaining fix is an Emscripten-specific
+  notifier/signalfd strategy that does not depend on host file-descriptor
+  pipes.
 * The same proof showed that the Emscripten pthread runtime can keep async
   state alive after QEMU exits.  The smoke helper therefore waits for an
   expected output marker and then exits explicitly.  Long-running boot tests
@@ -752,8 +784,8 @@ Proof:
 Non-goals:
   No full distribution test suite.
 
-WASM-016a: Diagnose wasm64 TCI pre-serial boot timeout
-------------------------------------------------------
+WASM-016a: Diagnose wasm64 TCI serial and early boot progress
+-------------------------------------------------------------
 
 Scope:
   Explain why the Node.js wasm64 TCI ``-M microvm`` boot attempt with mounted
@@ -767,9 +799,10 @@ Touches:
 Proof:
   The diagnostic run produces a concrete failure earlier than the timeout or
   narrows the timeout to a specific execution phase.  Current evidence shows
-  wasm64 TCI executes BIOS instructions after reset, so the remaining issue is
-  firmware/TCI progress before Linux serial output rather than a missing
-  firmware file or a CPU-start failure.
+  wasm64 TCI executes BIOS instructions after reset and reaches Linux early
+  console when the command line uses explicit ``-serial mon:stdio`` routing.
+  The remaining issue is post-early-kernel progress, not missing firmware,
+  missing serial output, or CPU-start failure.
 
 Non-goals:
   No browser UI, networking, graphics, or Bus Engine-specific artifact.
@@ -787,10 +820,9 @@ Touches:
   firmware selection, and documented boot-test timeouts.
 
 Proof:
-  A run shows one of: Linux serial output after a longer bounded timeout; a
-  repeated firmware loop with stable addresses; a specific missing event,
-  timer, or interrupt path; or a minimal firmware/boot path that reaches the
-  Linux entry point.
+  A run shows Linux serial output after explicit serial routing and optimized
+  TCI build settings.  Follow-up runs should now measure post-kernel-entry
+  progress, timer behavior, and initramfs handoff.
 
 Non-goals:
   No wasm TCG/JIT backend implementation.
@@ -826,10 +858,48 @@ Touches:
 
 Proof:
   The Node.js ``--version`` smoke test starts without unsupported ``pipe2``
-  warnings, and normal POSIX builds still use the existing GLib pipe helper.
+  warnings, the boot path no longer emits unsupported pipe warnings, and
+  normal POSIX builds still use the existing GLib pipe helper.
 
 Non-goals:
   No browser networking implementation.
+
+WASM-016e: Define canonical TCI smoke-boot command line
+-------------------------------------------------------
+
+Scope:
+  Update the smoke-boot recipe so it uses the command-line details proven by
+  the wasm64 TCI diagnostics.
+
+Touches:
+  Test harness documentation, boot-test command construction, and CI notes.
+
+Proof:
+  The documented command line uses ``-serial mon:stdio`` for marker capture,
+  an optimized TCI build for runtime tests, and explicit timer/calibration
+  arguments when the smoke guest needs them.
+
+Non-goals:
+  No product-specific Bus Engine OS arguments in upstream QEMU.
+
+WASM-016f: Diagnose post-early-kernel TCI progress
+--------------------------------------------------
+
+Scope:
+  Explain why the optimized wasm64 TCI run reaches Linux early boot but does
+  not reach the initramfs marker within the current bounded timeout.
+
+Touches:
+  Kernel command-line experiments, QEMU timer/interrupt traces, serial log
+  capture, and optional smoke guest changes.
+
+Proof:
+  A run either reaches ``QEMU_WASM_LINUX_BOOT_OK`` or narrows the remaining
+  stall to a specific timer, interrupt, device, initramfs, or kernel
+  configuration phase.
+
+Non-goals:
+  No native WebAssembly TCG backend implementation.
 
 WASM-017: Choose upstream smoke guest
 -------------------------------------
