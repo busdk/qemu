@@ -1969,10 +1969,19 @@ Current status:
   in ``130611`` ms, recorded ``crossOriginIsolated: true``, no request
   failures, no page errors, ``258`` serial lines, and wrote a ``1280x720``
   screenshot at ``/tmp/bus-engine-os-wasm-proof/chromium-bus-engine-os.png``.
-  This is an accepted browser init-handoff proof for the downstream artifact.
-  It is not yet a full browser multi-user proof or an ``/etc/os-release``
-  proof; that should come from a downstream browser-lab readiness marker that
-  does not depend on networking.
+  A Node.js probe for ``Reached target Login Prompts`` without networking did
+  not reach that target before the ``300000`` ms timeout, but it did emit
+  userspace identity evidence: ``systemd 261.1``,
+  ``Welcome to Bus Engine OS 0.1.0``, and hostname ``bus-engine-os``.  A
+  Chromium ``141.0.7390.37`` run then used ``Bus Engine OS 0.1.0`` as the
+  readiness marker and required both ``bus@bus-engine-os`` and
+  ``systemd 261.1`` as expected serial text.  It reached the marker in
+  ``145651`` ms, recorded ``crossOriginIsolated: true``, no request failures,
+  no page errors, ``268`` serial lines, and wrote a ``1280x720`` screenshot at
+  ``/tmp/bus-engine-os-wasm-proof/chromium-bus-engine-os-userspace.png``.
+  This is an accepted browser userspace-identity proof for the downstream
+  artifact.  It is not yet a full browser multi-user proof because the
+  no-network run did not reach the login prompt target before timeout.
 
 Non-goals:
   No Bus-specific source code in upstream QEMU.  No requirement for WebGPU,

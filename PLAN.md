@@ -60,9 +60,9 @@ browser MVP. Keep Bus Engine product work downstream.
   harness in Chromium.
 - [x] Capture serial evidence proving accepted Bus Engine OS kernel identity
   and rootfs init handoff through Chromium/WASM.
-- [ ] Add deeper userspace identity evidence, such as `/etc/os-release` or a
-  deterministic `BUS_ENGINE_OS_BROWSER_LAB_OK` marker, after the downstream
-  image provides a browser-lab readiness path that does not depend on network.
+- [x] Add deeper userspace identity evidence that does not depend on network:
+  Chromium/WASM reached the Bus Engine OS userspace welcome marker and observed
+  `systemd 261.1`.
 - [x] Capture a screenshot-like browser preview suitable for the
   `busdk.com/engine/` product page.
 - [x] Keep the website preview code and product presentation outside upstream
