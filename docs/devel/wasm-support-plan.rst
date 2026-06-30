@@ -520,6 +520,16 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   difference more specific than "slow": Chromium pauses near the FPU line and
   resumes, while Firefox can spend much longer before timer/calibration
   progress and then stalls after entropy initialization in the sampled run.
+* A Firefox ``142.0.1`` timer-parameter probe with
+  ``--append-extra "nohz=off highres=off clockevents.no_timer_check=1"`` also
+  timed out after ``420000`` ms.  The guest command line contained the
+  appended arguments, but the kernel reported ``nohz=off`` and ``highres=off``
+  as unknown parameters to pass to userspace, so that run does not prove those
+  two timer settings changed kernel behavior.  The sampled timeline still
+  reached ``random: crng init done`` at roughly ``372`` seconds and emitted no
+  more serial lines through timeout.  Future kernel-command-line diagnostics
+  must check the guest log for accepted versus ignored parameters before using
+  the result to rule out a subsystem.
 * ``scripts/ci/wasm-prepare-tuxboot-smoke-guest.py`` now provides that
   CI-shaped guest-preparation path.  It downloads or reuses the existing
   x86_64 TuxBoot kernel and rootfs assets, verifies them against the SHA-256
@@ -1558,7 +1568,11 @@ Proof:
   baseline run also timed out, which rules out the original ``420000`` ms
   timeout as the primary explanation.  The sampled Firefox baseline reached
   ``random: crng init done`` at roughly ``342`` seconds and then emitted no
-  more serial lines before timeout.
+  more serial lines before timeout.  A timer-parameter probe with
+  ``nohz=off highres=off clockevents.no_timer_check=1`` did not change that
+  timeout shape, but the guest reported ``nohz=off`` and ``highres=off`` as
+  unknown parameters, so future timer probes must first verify accepted kernel
+  parameters.
 
 Non-goals:
   No requirement to support Firefox in the first accepted MVP if Chromium is
