@@ -530,6 +530,15 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   more serial lines through timeout.  Future kernel-command-line diagnostics
   must check the guest log for accepted versus ignored parameters before using
   the result to rule out a subsystem.
+* A Firefox ``142.0.1`` uniprocessor-path probe with
+  ``--append-extra "nosmp maxcpus=1"`` also timed out after ``420000`` ms.  The
+  guest command line contained the appended parameters, the guest reported one
+  processor, and the log did not report those parameters as unknown.  The run
+  changed the kernel path enough to print ``Not enabling interrupt remapping
+  due to skipped IO-APIC setup``, but still reached ``random: crng init done``
+  at roughly ``352`` seconds and emitted no more serial lines through timeout.
+  This makes the Firefox gap unlikely to be fixed merely by forcing the smoke
+  guest away from the SMP/IO-APIC setup used by the canonical run.
 * ``scripts/ci/wasm-prepare-tuxboot-smoke-guest.py`` now provides that
   CI-shaped guest-preparation path.  It downloads or reuses the existing
   x86_64 TuxBoot kernel and rootfs assets, verifies them against the SHA-256
@@ -1572,7 +1581,8 @@ Proof:
   ``nohz=off highres=off clockevents.no_timer_check=1`` did not change that
   timeout shape, but the guest reported ``nohz=off`` and ``highres=off`` as
   unknown parameters, so future timer probes must first verify accepted kernel
-  parameters.
+  parameters.  A ``nosmp maxcpus=1`` probe changed the guest CPU/interrupt
+  setup path but still timed out after ``random: crng init done``.
 
 Non-goals:
   No requirement to support Firefox in the first accepted MVP if Chromium is
