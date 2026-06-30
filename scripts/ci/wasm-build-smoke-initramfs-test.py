@@ -140,8 +140,47 @@ def test_display_input_smoke_initramfs():
                     "dev/input/event31 minor should be 95")
 
 
+def test_service_bridge_smoke_initramfs():
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        busybox = root / "busybox"
+        output = root / "service-initramfs.cpio.gz"
+        busybox.write_bytes(b"busybox")
+        busybox.chmod(0o755)
+
+        subprocess.run([
+            sys.executable,
+            str(SCRIPT),
+            "--busybox",
+            str(busybox),
+            "--output",
+            str(output),
+            "--service-bridge-smoke",
+        ], check=True)
+
+        entries = parse_newc(output)
+        init = entries["init"]["data"]
+        assert_true(b"/dev/virtio-ports/org.qemu.wasm.service.request" in init,
+                    "service bridge init should use the default request port")
+        assert_true(b"/dev/virtio-ports/org.qemu.wasm.service.response" in init,
+                    "service bridge init should use the default response port")
+        assert_true(b"QEMU_WASM_SERVICE_READY" in init,
+                    "service bridge init should print readiness marker")
+        assert_true(b"QEMU_WASM_SERVICE_PORTS_MISSING" in init,
+                    "service bridge init should diagnose missing virtio ports")
+        assert_true(b'"operation"[[:space:]]*:[[:space:]]*"' in init,
+                    "service bridge init should parse operation from JSON")
+        assert_true(b'"id"[[:space:]]*:[[:space:]]*"' in init,
+                    "service bridge init should parse request id from JSON")
+        assert_true(b'{"id":"%s","status":"ok","operation":"health"}' in init,
+                    "service bridge init should return a health response")
+        assert_true(b"QEMU_WASM_LINUX_BOOT_OK" in init,
+                    "service bridge init should print the success marker")
+
+
 def main():
     test_display_input_smoke_initramfs()
+    test_service_bridge_smoke_initramfs()
     print("wasm-build-smoke-initramfs-test: ok")
 
 

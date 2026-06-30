@@ -41,6 +41,12 @@ appear on the Bus Engine product website as a screenshot-like or live-preview
 item. Upstream QEMU should only provide the generic WebAssembly emulator
 capability needed by that proof.
 
+## Work Ordering
+
+Finish unchecked `PLAN.md` items before taking new work. If the active plan is
+empty or blocked on a concrete external dependency, move the next
+highest-value item from `FUTURE_WORK.md` into `PLAN.md` before implementing it.
+
 ## Evidence
 
 Record browser/runtime evidence in `docs/devel/wasm-support-plan.rst` with:

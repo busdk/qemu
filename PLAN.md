@@ -2,9 +2,10 @@
 
 This branch tracks upstreamable QEMU WebAssembly host support for the 64-bit
 browser MVP. Keep Bus Engine product work downstream.
-Finish the unchecked `PLAN.md` items first. Only when the active plan is empty
-or blocked on a concrete external dependency should the next highest-value
-item be moved from `FUTURE_WORK.md` into this file and then implemented.
+The active working rule is to finish the unchecked `PLAN.md` items first. Only
+when the active plan is empty or blocked on a concrete external dependency
+should the next highest-value item be moved from `FUTURE_WORK.md` into this
+file and then implemented.
 
 ## Current Direction
 

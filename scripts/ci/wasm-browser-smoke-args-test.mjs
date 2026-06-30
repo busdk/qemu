@@ -443,7 +443,7 @@ assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
   };
   const smokeState = {};
   const bridge = createServiceBridge(
-    baseConfig({ serviceBridge: serviceBridgeConfig() }),
+    baseConfig({ serviceBridge: serviceBridgeConfig({ interactiveOnly: true }) }),
     smokeState,
     scope,
   );
@@ -500,6 +500,50 @@ assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
   assert.equal(posted[0].message.type, "qemu-wasm-service-response");
   assert.equal(posted[0].message.id, "outer-1");
   assert.equal(posted[0].message.response.status, "ok");
+}
+
+{
+  const scope = {
+    location: { origin: "https://example.invalid" },
+    addEventListener() {},
+  };
+  const smokeState = {};
+  const bridge = createServiceBridge(
+    baseConfig({ serviceBridge: serviceBridgeConfig() }),
+    smokeState,
+    scope,
+  );
+  const written = [];
+  bridge.attachModule({
+    _qemu_wasm_chardev_write_pending() {
+      written.push({
+        channel: this.qemuWasmChardevPendingChannel,
+        text: this.qemuWasmChardevPendingText,
+      });
+      return this.qemuWasmChardevPendingText.length;
+    },
+  });
+
+  bridge.markReady("serial");
+
+  assert.equal(smokeState.serviceBridge.healthRequested, true);
+  assert.equal(smokeState.serviceBridge.sent, 1);
+  assert.equal(written.length, 1);
+  assert.equal(written[0].channel, "org.qemu.wasm.service.request");
+  const frame = JSON.parse(written[0].text);
+  assert.equal(frame.operation, "health");
+
+  bridge.receive(
+    "org.qemu.wasm.service.response",
+    new TextEncoder().encode(`${JSON.stringify({ id: frame.id, status: "ok" })}\n`),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(smokeState.serviceBridge.healthRequestId, frame.id);
+  assert.equal(smokeState.serviceBridge.healthStatus, "ok");
+  assert.equal(smokeState.serviceBridge.healthError, null);
+  assert.equal(smokeState.serviceBridge.received, 1);
+  assert.equal(smokeState.serviceBridge.resolved, 1);
 }
 
 {

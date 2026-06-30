@@ -14,6 +14,9 @@ import sys
 DEFAULT_MARKER = "QEMU_WASM_LINUX_BOOT_OK"
 DEFAULT_INPUT_READY_MARKER = "QEMU_WASM_LINUX_INPUT_READY"
 DEFAULT_INPUT_TEXT = "ab"
+DEFAULT_SERVICE_READY_MARKER = "QEMU_WASM_SERVICE_READY"
+DEFAULT_SERVICE_REQUEST_PATH = "/dev/virtio-ports/org.qemu.wasm.service.request"
+DEFAULT_SERVICE_RESPONSE_PATH = "/dev/virtio-ports/org.qemu.wasm.service.response"
 
 
 def parse_args():
@@ -67,6 +70,26 @@ def parse_args():
     parser.add_argument(
         "--input-helper",
         help="static guest helper binary that reads Linux input events for --display-input-smoke",
+    )
+    parser.add_argument(
+        "--service-bridge-smoke",
+        action="store_true",
+        help="generate an init that serves one JSONL health request over virtio ports",
+    )
+    parser.add_argument(
+        "--service-ready-marker",
+        default=DEFAULT_SERVICE_READY_MARKER,
+        help="serial marker printed when the service bridge is ready",
+    )
+    parser.add_argument(
+        "--service-request-path",
+        default=DEFAULT_SERVICE_REQUEST_PATH,
+        help="guest path for service bridge request input",
+    )
+    parser.add_argument(
+        "--service-response-path",
+        default=DEFAULT_SERVICE_RESPONSE_PATH,
+        help="guest path for service bridge response output",
     )
     return parser.parse_args()
 
@@ -227,6 +250,54 @@ poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || sleep 5
 """.encode("utf-8")
 
 
+def build_service_bridge_init(marker, ready_marker, request_path, response_path):
+    return f"""#!/bin/sh
+PATH=/bin
+mount -t proc proc /proc 2>/dev/null || true
+mount -t sysfs sysfs /sys 2>/dev/null || true
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+
+serial=/dev/ttyS0
+[ -c "$serial" ] || serial=/dev/console
+say() {{
+    printf '%s\\n' "$1" > "$serial" 2>/dev/null || printf '%s\\n' "$1"
+}}
+
+request={shell_quote(request_path)}
+response={shell_quote(response_path)}
+
+i=0
+while [ ! -e "$request" ] || [ ! -e "$response" ]; do
+    i=$((i + 1))
+    if [ "$i" -gt 30 ]; then
+        say 'QEMU_WASM_SERVICE_PORTS_MISSING'
+        poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || sleep 5
+        exit 1
+    fi
+    sleep 1
+done
+
+say {shell_quote(ready_marker)}
+
+if IFS= read -r line < "$request"; then
+    id=$(printf '%s\\n' "$line" | /bin/busybox sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')
+    operation=$(printf '%s\\n' "$line" | /bin/busybox sed -n 's/.*"operation"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')
+    [ -n "$id" ] || id='unknown'
+    if [ "$operation" = health ]; then
+        printf '{{"id":"%s","status":"ok","operation":"health"}}\\n' "$id" > "$response"
+        say {shell_quote(marker)}
+    else
+        printf '{{"id":"%s","status":"error","error":"unsupported operation"}}\\n' "$id" > "$response"
+        say 'QEMU_WASM_SERVICE_UNSUPPORTED_OPERATION'
+    fi
+else
+    say 'QEMU_WASM_SERVICE_READ_FAILED'
+fi
+
+poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || sleep 5
+""".encode("utf-8")
+
+
 def shell_quote(value):
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
@@ -280,7 +351,14 @@ def main():
                     13,
                     event_minor,
                 )
-            if args.display_input_smoke:
+            if args.service_bridge_smoke:
+                init = build_service_bridge_init(
+                    args.marker,
+                    args.service_ready_marker,
+                    args.service_request_path,
+                    args.service_response_path,
+                )
+            elif args.display_input_smoke:
                 init = build_display_input_init(
                     args.marker,
                     args.input_ready_marker,

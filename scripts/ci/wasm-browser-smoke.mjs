@@ -190,17 +190,43 @@ export function createServiceBridge(config, smokeState, scope = globalThis) {
     lastResponseId: null,
     lastResponseStatus: null,
     lastError: null,
+    healthRequested: false,
+    healthRequestId: null,
+    healthStatus: null,
+    healthError: null,
   };
   smokeState.serviceBridge = state;
+
+  const maybeStartHealthRequest = () => {
+    if (
+      bridgeConfig.interactiveOnly ||
+      state.healthRequested ||
+      !state.ready ||
+      !state.moduleAttached
+    ) {
+      return;
+    }
+    state.healthRequested = true;
+    request(bridgeConfig.healthRequest)
+      .then((response) => {
+        state.healthRequestId = typeof response.id === "string" ? response.id : null;
+        state.healthStatus = serviceBridgeResponseStatus(response);
+      })
+      .catch((error) => {
+        state.healthError = serviceBridgeError(state, error);
+      });
+  };
 
   const markReady = (source) => {
     state.ready = true;
     state.readySource = source;
+    maybeStartHealthRequest();
   };
 
   const attachModule = (nextModule) => {
     module = nextModule;
     state.moduleAttached = Boolean(module);
+    maybeStartHealthRequest();
   };
 
   const sendFrame = (frame) => {
