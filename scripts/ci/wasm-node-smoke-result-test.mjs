@@ -16,7 +16,7 @@ import {
 } from "./wasm-node-smoke-result.mjs";
 
 const expectedTextSeen = [
-  { text: "Bus Engine OS", seen: true },
+  { text: "Example Linux", seen: true },
   { text: "QEMU_WASM_LINUX_BOOT_OK", seen: false },
 ];
 

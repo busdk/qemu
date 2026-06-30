@@ -27,7 +27,7 @@ for (const status of [
   `marker reached: ${marker}`,
   "program exited before marker: status 1",
   "timeout waiting for marker: QEMU_WASM_LINUX_BOOT_OK",
-  "timeout waiting for marker or expected text: Bus Engine OS",
+  "timeout waiting for marker or expected text: Example Linux",
   "failed",
 ]) {
   assert.equal(isTerminalPageStatus(status, marker), true, `${status} should be terminal`);
@@ -50,7 +50,7 @@ for (const status of [
 {
   const result = {};
   promoteSmokeState(result, {
-    expectedTextSeen: [{ text: "Bus Engine OS", seen: true }],
+    expectedTextSeen: [{ text: "Example Linux", seen: true }],
     failurePhase: "fetch-guest-inputs",
     lastLine: "last serial line",
     lines: 42,
@@ -79,7 +79,7 @@ for (const status of [
   assert.equal(result.outputBytes, 1234);
   assert.equal(result.outputSuppressed, true);
   assert.equal(result.lastLine, "last serial line");
-  assert.deepEqual(result.expectedTextSeen, [{ text: "Bus Engine OS", seen: true }]);
+  assert.deepEqual(result.expectedTextSeen, [{ text: "Example Linux", seen: true }]);
   assert.deepEqual(result.qemuCommand, ["-M", "microvm,acpi=off", "-nic", "none"]);
   assert.deepEqual(result.browserRuntime, {
     crossOriginIsolated: true,
@@ -100,7 +100,7 @@ for (const status of [
   const url = browserSmokeUrl({
     appendExtra: "ignore_loglevel",
     cpu: "Nehalem",
-    expectText: ["Bus Engine OS", "systemd 261.1"],
+    expectText: ["Example Linux", "systemd 261.1"],
     host: "127.0.0.1",
     initrd: null,
     idleAfterText: "",
@@ -128,7 +128,7 @@ for (const status of [
     "network=none&" +
     "rootfsDevice=virtio-pci&" +
     "kernelAppend=console%3DttyS0+root%3D%2Fdev%2Fvda+rw&" +
-    "expectText=Bus+Engine+OS&" +
+    "expectText=Example+Linux&" +
     "expectText=systemd+261.1&" +
     "initrd=&" +
     "rootfs=%2Fguest%2Frootfs.raw&" +
@@ -168,7 +168,7 @@ for (const status of [
     appendExtra: "ignore_loglevel",
     browser: "chromium",
     cpu: "Nehalem",
-    expectText: ["Bus Engine OS"],
+    expectText: ["Example Linux"],
     idleAfterText: "",
     kernelAppend: "console=ttyS0 root=/dev/vda rw",
     idleTimeoutMs: 0,
@@ -194,7 +194,7 @@ for (const status of [
   assert.equal(result.idleTimeoutMs, 0);
   assert.equal(result.rootfsDevice, "virtio-pci");
   assert.equal(result.maxDiagnosticEntries, 50);
-  assert.deepEqual(result.expectText, ["Bus Engine OS"]);
+  assert.deepEqual(result.expectText, ["Example Linux"]);
   assert.deepEqual(result.qemuArgs, ["-name", "wasm-smoke"]);
   assert.deepEqual(result.consoleMessages, []);
   assert.deepEqual(result.pageErrors, []);
