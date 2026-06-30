@@ -10,12 +10,10 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Prove a tiny 64-bit Linux console guest reaches a serial readiness
   marker under Node.js.
 - [x] Prove the same generic smoke guest reaches the marker in Chromium.
-- [ ] Diagnose Firefox boot progress enough to either make it pass or document
-  the concrete Firefox-specific blocker.
-- [ ] Keep WebKit out of the first MVP unless wasm64 instantiation becomes
-  reliable in the tested runtime.
+- [ ] Keep the browser MVP focused on Chromium unless another browser becomes
+  necessary for the accepted Bus Engine OS proof.
 
-## Generic QEMU Work
+## MVP Generic QEMU Work
 
 - [x] Add artifact capture for `qemu-system-x86_64.js` and
   `qemu-system-x86_64.wasm`.
@@ -37,6 +35,8 @@ browser MVP. Keep Bus Engine product work downstream.
   product-specific QEMU code.
 - [x] Resolve manifest relative paths from the manifest file and verify
   optional SHA-256 checksums for guest kernel, initrd, and rootfs inputs.
+- [x] Add generic expected serial-text assertions so downstream proofs can
+  require OS identity text in addition to a readiness marker.
 - [ ] Keep the accepted smoke profile stable while diagnostic arguments vary.
 - [ ] Continue recording browser/runtime versions, commands, results, and
   failure modes in `docs/devel/wasm-support-plan.rst`.
@@ -65,6 +65,14 @@ browser MVP. Keep Bus Engine product work downstream.
   `busdk.com/engine/` product page.
 - [ ] Keep the website preview code and product presentation outside upstream
   QEMU.
+
+## Compatibility Tracking
+
+- [ ] Diagnose Firefox boot progress enough to either make it pass or document
+  the concrete Firefox-specific blocker. This is not required for the first
+  MVP if Chromium remains the accepted browser proof.
+- [ ] Keep WebKit out of the first MVP unless wasm64 instantiation becomes
+  reliable in the tested runtime.
 
 ## Later Work
 

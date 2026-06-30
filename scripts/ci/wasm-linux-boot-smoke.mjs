@@ -17,6 +17,7 @@ function parseArgs(argv) {
     appendExtra: "",
     artifactDir: ".",
     cpu: null,
+    expectText: [],
     firmwareDir: "pc-bios",
     guestManifest: null,
     initrd: null,
@@ -42,6 +43,9 @@ function parseArgs(argv) {
     } else if (arg === "--cpu") {
       options.cpu = argv[++i];
       explicit.add("cpu");
+    } else if (arg === "--expect-text") {
+      options.expectText.push(argv[++i]);
+      explicit.add("expectText");
     } else if (arg === "--firmware-dir") {
       options.firmwareDir = argv[++i];
       explicit.add("firmwareDir");
@@ -98,7 +102,7 @@ function parseArgs(argv) {
       "program",
       "rootfs",
     ],
-    stringListFields: ["qemuArgs"],
+    stringListFields: ["expectText", "qemuArgs"],
   });
 
   if (options.kernel === null) {
@@ -129,6 +133,7 @@ Options:
   --append-extra TEXT   Extra Linux kernel arguments appended to the default
   --artifact-dir DIR     Directory containing qemu-system-*.js/.wasm artifacts
   --cpu MODEL            Optional guest CPU model passed to QEMU
+  --expect-text TEXT     Additional output text required for success
   --firmware-dir DIR     Directory containing qboot.rom and linuxboot_dma.bin
   --guest-manifest FILE  JSON file with guest input defaults
   --initrd FILE          Initramfs image that prints the expected marker
@@ -191,6 +196,9 @@ function runSmoke(options) {
     "--mount-file",
     `${linuxboot}:/firmware/linuxboot_dma.bin`,
   ];
+  for (const text of options.expectText) {
+    args.push("--expect-text", text);
+  }
 
   const kernelAppend = [
     options.initrd !== null

@@ -109,6 +109,7 @@ function buildConfig() {
   return {
     appendExtra: option("appendExtra", ""),
     cpu: option("cpu", "Nehalem"),
+    expectText: listOption("expectText"),
     initrd: pathOption("initrd", "/guest/initramfs.cpio.gz"),
     kernel: option("kernel", "/guest/kernel"),
     linuxboot: option("linuxboot", "/firmware/linuxboot_dma.bin"),
@@ -135,6 +136,7 @@ async function run() {
     outputBytes: 0,
     outputSuppressed: false,
     markerSeen: false,
+    expectedTextSeen: config.expectText.map((text) => ({ text, seen: false })),
     lastLine: "",
   };
   globalThis.qemuWasmSmokeState = smokeState;
@@ -158,10 +160,25 @@ async function run() {
   }
 
   const timeout = setTimeout(() => {
-    if (!smokeState.markerSeen) {
-      status.textContent = `timeout waiting for marker: ${config.marker}`;
+    if (!smokeState.markerSeen || !allExpectedTextSeen()) {
+      const missing = smokeState.expectedTextSeen
+        .filter((expected) => !expected.seen)
+        .map((expected) => expected.text);
+      status.textContent = missing.length === 0
+        ? `timeout waiting for marker: ${config.marker}`
+        : `timeout waiting for marker or expected text: ${missing.join(", ")}`;
     }
   }, config.timeoutMs);
+
+  const allExpectedTextSeen = () =>
+    smokeState.expectedTextSeen.every((expected) => expected.seen);
+
+  const maybeComplete = () => {
+    if (smokeState.markerSeen && allExpectedTextSeen()) {
+      clearTimeout(timeout);
+      status.textContent = `marker reached: ${config.marker}`;
+    }
+  };
 
   const emit = (line) => {
     smokeState.lines += 1;
@@ -183,9 +200,13 @@ async function run() {
     }
     if (line.includes(config.marker)) {
       smokeState.markerSeen = true;
-      clearTimeout(timeout);
-      status.textContent = `marker reached: ${config.marker}`;
     }
+    for (const expected of smokeState.expectedTextSeen) {
+      if (!expected.seen && line.includes(expected.text)) {
+        expected.seen = true;
+      }
+    }
+    maybeComplete();
   };
 
   status.textContent = "loading smoke guest inputs";
@@ -213,7 +234,7 @@ async function run() {
     print: emit,
     printErr: emit,
   });
-  if (!smokeState.markerSeen) {
+  if (!smokeState.markerSeen || !allExpectedTextSeen()) {
     status.textContent = "QEMU started; waiting for marker";
   }
 }

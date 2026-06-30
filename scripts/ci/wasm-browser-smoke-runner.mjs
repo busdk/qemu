@@ -27,6 +27,7 @@ Options:
   --artifact-dir DIR  Directory containing qemu-system-*.js/.wasm artifacts
   --browser NAME      Browser engine to launch (default: chromium)
   --cpu MODEL         Guest CPU model passed to QEMU
+  --expect-text TEXT  Additional output text required for success
   --firmware-dir DIR  Directory containing qboot.rom and linuxboot_dma.bin
   --guest-manifest FILE
                      JSON file with guest and runner defaults
@@ -63,6 +64,7 @@ function parseArgs(argv) {
     artifactDir: null,
     browser: "chromium",
     cpu: "Nehalem",
+    expectText: [],
     firmwareDir: "pc-bios",
     guestManifest: null,
     host: "127.0.0.1",
@@ -99,6 +101,9 @@ function parseArgs(argv) {
     } else if (arg === "--cpu") {
       options.cpu = argv[++i];
       explicit.add("cpu");
+    } else if (arg === "--expect-text") {
+      options.expectText.push(argv[++i]);
+      explicit.add("expectText");
     } else if (arg === "--firmware-dir") {
       options.firmwareDir = argv[++i];
       explicit.add("firmwareDir");
@@ -199,7 +204,7 @@ function parseArgs(argv) {
       "rootfs",
       "screenshot",
     ],
-    stringListFields: ["qemuArgs"],
+    stringListFields: ["expectText", "qemuArgs"],
   });
 
   if (options.artifactDir === null) {
@@ -399,6 +404,7 @@ async function run() {
     browser: options.browser,
     browserVersion: browser.version(),
     cpu: options.cpu,
+    expectText: options.expectText,
     maxDiagnosticEntries: MAX_DIAGNOSTIC_ENTRIES,
     marker: options.marker,
     memory: options.memory,
@@ -447,6 +453,9 @@ async function run() {
     url.searchParams.set("marker", options.marker);
     url.searchParams.set("maxOutputBytes", String(options.maxOutputBytes));
     url.searchParams.set("memory", options.memory);
+    for (const text of options.expectText) {
+      url.searchParams.append("expectText", text);
+    }
     if (options.initrd === null) {
       url.searchParams.set("initrd", "");
     }

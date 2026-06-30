@@ -33,6 +33,9 @@ TCG-to-WebAssembly ideas.
 The first executable milestone is the TCI boot path.  A native WebAssembly TCG
 backend remains a later performance and maintainability milestone after the
 TCI path can boot a 64-bit Linux guest in a browser-controlled runtime.
+Chromium or Chrome is the preferred browser target for the MVP acceptance
+path.  Firefox remains compatibility tracking, not a first-MVP requirement,
+unless Chromium stops being a viable proof browser.
 
 Strict definition of done
 =========================
@@ -1364,24 +1367,34 @@ Proof:
   ``scripts/ci/wasm-browser-smoke-runner.mjs`` now also accept
   ``--guest-manifest FILE``.  The manifest is a generic JSON object with flat
   fields such as ``kernel``, ``initrd`` or ``rootfs``, ``firmwareDir``,
-  ``cpu``, ``memory``, ``marker``, ``appendExtra``, ``qemuArgs``, and timeout
-  or capture settings.  Explicit command-line options override manifest
-  values, and repeated command-line ``--qemu-arg`` values are appended after
-  manifest ``qemuArgs``.  Manifest path fields are resolved relative to the
-  manifest file when they are not absolute, so a downstream bundle can carry
-  local artifact paths without requiring the caller's current directory to
-  match.  A manifest may also include a ``sha256`` object keyed by input field
-  name; QEMU smoke helpers verify ``kernel``, ``initrd``, and ``rootfs``
-  checksums before starting the emulator.  A Node.js ``v24`` rootfs proof and a
-  Chromium ``141.0.7390.37`` browser proof both reached
+  ``cpu``, ``memory``, ``marker``, ``expectText``, ``appendExtra``,
+  ``qemuArgs``, and timeout or capture settings.  Explicit command-line options
+  override manifest values, and repeated command-line ``--qemu-arg`` values are
+  appended after manifest ``qemuArgs``.  Manifest path fields are resolved
+  relative to the manifest file when they are not absolute, so a downstream
+  bundle can carry local artifact paths without requiring the caller's current
+  directory to match.  A manifest may also include a ``sha256`` object keyed by
+  input field name; QEMU smoke helpers verify ``kernel``, ``initrd``, and
+  ``rootfs`` checksums before starting the emulator.  A Node.js ``v24`` rootfs
+  proof and a Chromium ``141.0.7390.37`` browser proof both reached
   ``QEMU_WASM_LINUX_BOOT_OK`` using a relative-path manifest with SHA-256
   checksums for the kernel and rootfs; the Chromium run again recorded
   ``crossOriginIsolated: true``, no request failures, ``174`` serial lines, and
   a ``1280x720`` screenshot.  A negative Node.js proof with a deliberately
   wrong rootfs SHA-256 exited with status ``2`` and reported a checksum
-  mismatch before QEMU startup.  This manifest is the generic handoff shape
-  that downstream Bus Engine OS can populate without adding Bus-specific code
-  to upstream QEMU.
+  mismatch before QEMU startup.  The smoke helpers also accept repeated
+  ``--expect-text TEXT`` arguments, or a manifest ``expectText`` array, so a
+  downstream guest proof can require serial identity text in addition to the
+  readiness marker.  A Node.js ``v24`` positive proof required
+  ``virtio_blk virtio0: [vda]`` and reached
+  ``QEMU_WASM_LINUX_BOOT_OK``.  A negative Node.js proof with missing expected
+  text exited with status ``124`` and reported the missing string after the
+  timeout.  A Chromium ``141.0.7390.37`` browser proof with the same expected
+  text recorded ``expectedTextSeen: true``, ``crossOriginIsolated: true``, no
+  request failures, no page errors, ``174`` serial lines, and a ``1280x720``
+  screenshot at ``/tmp/qemu-wasm-rootfs-proof/chromium-expect.png``.  This
+  manifest is the generic handoff shape that downstream Bus Engine OS can
+  populate without adding Bus-specific code to upstream QEMU.
 
   Example generic manifest shape for a root-disk proof::
 
@@ -1394,6 +1407,7 @@ Proof:
       "cpu": "Nehalem",
       "memory": "512M",
       "marker": "QEMU_WASM_LINUX_BOOT_OK",
+      "expectText": ["virtio_blk virtio0: [vda]"],
       "maxOutputBytes": 90000,
       "pageTextTailBytes": 120000,
       "timeoutMs": 180000,
@@ -1887,9 +1901,10 @@ Touches:
 Proof:
   The QEMU side remains product-neutral.  Downstream Bus Engine produces a
   64-bit Bus Engine OS kernel/rootfs or disk image, runs it through the generic
-  browser QEMU harness, reaches a deterministic serial readiness marker, and
-  captures a browser preview suitable for a ``busdk.com/engine/`` screenshot-
-  like or live-preview item.
+  browser QEMU harness in Chromium or Chrome, reaches a deterministic serial
+  readiness marker, proves expected serial identity text, and captures a
+  browser preview suitable for a ``busdk.com/engine/`` screenshot-like or
+  live-preview item.
 
 Current status:
   Bus Engine OS currently documents ``bus engine os build image`` as the normal
@@ -1902,8 +1917,8 @@ Current status:
   The QEMU-side generic handoff format is now ``--guest-manifest FILE`` for
   the Node and browser smoke runners.  Bus Engine OS should generate or export
   such a manifest with product-owned artifacts and a Bus Engine OS readiness
-  marker; QEMU should keep validating the manifest only as generic guest input
-  metadata.
+  marker plus expected serial identity text; QEMU should keep validating the
+  manifest only as generic guest input metadata.
 
 Non-goals:
   No Bus-specific source code in upstream QEMU.  No requirement for WebGPU,
@@ -2217,6 +2232,9 @@ Work items:
   * Pin the Emscripten SDK version used by the QEMU build image.
   * Keep the Bus Engine MVP on wasm64 only.  Treat wasm32 compatibility as a
     separate upstream discussion outside this MVP.
+  * Use Chromium or Chrome as the first browser acceptance target.  Keep
+    Firefox and WebKit as compatibility tracking until the Chromium proof path
+    is accepted.
   * Define build variants for TCI baseline and native WebAssembly TCG.
   * Keep browser-specific link flags centralized in the Emscripten cross file.
   * Document required browser headers for pthreads and SharedArrayBuffer.

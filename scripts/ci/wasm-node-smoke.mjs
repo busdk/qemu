@@ -14,6 +14,7 @@ function parseArgs(argv) {
     artifactDir: ".",
     program: "qemu-system-x86_64.js",
     marker: "QEMU emulator version",
+    expectTexts: [],
     mountFiles: [],
     dumpFiles: [],
     maxOutputBytes: null,
@@ -32,6 +33,8 @@ function parseArgs(argv) {
       options.program = argv[++i];
     } else if (arg === "--marker") {
       options.marker = argv[++i];
+    } else if (arg === "--expect-text") {
+      options.expectTexts.push(argv[++i]);
     } else if (arg === "--mount-file") {
       options.mountFiles.push(parseMountFile(argv[++i]));
     } else if (arg === "--dump-file") {
@@ -108,6 +111,7 @@ Options:
   --artifact-dir DIR   Directory containing qemu-system-*.js/.wasm artifacts
   --program FILE      JavaScript launcher inside artifact dir
   --marker TEXT       Output text required for success
+  --expect-text TEXT  Additional output text required for success
   --mount-file H:W    Copy host file H to absolute Emscripten path W
   --dump-file PATH[:N]
                      Print Emscripten file PATH on timeout, capped at N bytes
@@ -123,6 +127,7 @@ const options = parseArgs(process.argv.slice(2));
 const programUrl = pathToFileURL(resolve(options.artifactDir, options.program));
 
 let markerSeen = false;
+const expectedTextSeen = options.expectTexts.map((text) => ({ text, seen: false }));
 let exitScheduled = false;
 let activeModule = null;
 let outputBytes = 0;
@@ -134,6 +139,22 @@ function scheduleExit(status) {
   }
   exitScheduled = true;
   setTimeout(() => process.exit(status), 50);
+}
+
+function allExpectedTextSeen() {
+  return expectedTextSeen.every((expected) => expected.seen);
+}
+
+function maybeComplete() {
+  if (markerSeen && allExpectedTextSeen()) {
+    scheduleExit(0);
+  }
+}
+
+function describeMissingText() {
+  return expectedTextSeen
+    .filter((expected) => !expected.seen)
+    .map((expected) => expected.text);
 }
 
 function emit(line, stream) {
@@ -163,8 +184,13 @@ function emit(line, stream) {
   }
   if (line.includes(options.marker)) {
     markerSeen = true;
-    scheduleExit(0);
   }
+  for (const expected of expectedTextSeen) {
+    if (!expected.seen && line.includes(expected.text)) {
+      expected.seen = true;
+    }
+  }
+  maybeComplete();
 }
 
 function mountFiles(module) {
@@ -201,7 +227,16 @@ function dumpFiles() {
 }
 
 const timeout = setTimeout(() => {
-  console.error(`timeout waiting for marker: ${options.marker}`);
+  if (!markerSeen) {
+    console.error(`timeout waiting for marker: ${options.marker}`);
+  }
+  const missingText = describeMissingText();
+  if (missingText.length > 0) {
+    console.error("timeout waiting for expected text:");
+    for (const text of missingText) {
+      console.error(`  ${text}`);
+    }
+  }
   dumpFiles();
   process.exit(124);
 }, options.timeoutMs);
@@ -231,7 +266,7 @@ try {
   process.exit(1);
 }
 
-if (markerSeen) {
+if (markerSeen && allExpectedTextSeen()) {
   clearTimeout(timeout);
 } else {
   /*
