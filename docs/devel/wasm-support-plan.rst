@@ -2573,10 +2573,12 @@ Current status:
   oracle.
 
   A Chrome/Chromium run against the existing Bus Engine browser-lab artifacts
-  was captured in ``build/wasm-browser-proof/stdvga-result.json`` with
-  ``--display sdl --display-device stdvga --require-display-output``.  That
-  run reached QEMU startup and created the SDL canvas, but it did not reach the
-  serial marker.  The failure was an Emscripten WebGL context error:
+  was captured in ``build/wasm-browser-proof/stdvga-webgl-sampler-result.json``
+  with ``--display sdl --display-device stdvga --require-display-output``.
+  That run reached QEMU startup and created the SDL canvas, but it did not
+  reach the serial marker.  The display sampler observed a
+  ``WebGLRenderingContext`` and zero non-black pixels.  The failure was an
+  Emscripten WebGL context error:
   ``Cannot read properties of undefined (reading 'createShader')``.  This is
   consistent with a pthreaded SDL/WebGL build that lacks OffscreenCanvas
   transfer support.  The Emscripten cross file now enables
