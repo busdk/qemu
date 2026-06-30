@@ -1218,10 +1218,13 @@ The MVP is accepted when an upstream-style QEMU build can:
 * boot a 64-bit Linux kernel with a raw root filesystem through virtio block;
 * expose a serial console through a browser terminal bridge;
 * run with no network by default;
+* expose a browser-visible 2D display surface for opt-in interactive runs;
+* accept focused browser keyboard input through the selected QEMU input path;
 * emit enough structured logs to diagnose host startup, guest boot, and
   shutdown failures;
 * provide a repeatable browser or headless-browser boot test that proves the
-  Linux guest reaches a declared readiness marker;
+  Linux guest reaches a declared readiness marker and, for interactive runs,
+  preserves result JSON plus screenshot evidence;
 * package QEMU/WASM artifacts and guest inputs without requiring ad hoc manual
   JavaScript edits.
 
@@ -2779,30 +2782,57 @@ Current status:
   ten delivered browser key events, and QEMU key counters
   ``received=10``, ``dropped=0``, ``drained=10``, and ``sent=10``.  This proves
   the downstream Bus Engine OS browser-visible graphics path and QEMU-side
-  input delivery.  It still does not prove a guest-visible response to the
-  typed sequence, so the Bus Engine OS graphics/keyboard acceptance item
-  remains open.
+  input delivery.  That run did not prove a guest-visible response to the typed
+  sequence, so the follow-up proof below uses a controlled shell handoff to
+  exercise guest-visible keyboard input directly.
 
-  Downstream Bus Engine OS now has a package-level proof hook for the remaining
-  guest-visible input gap.  ``bus-engine-os-gui-config 0.1.0-15.noarch`` ships
-  ``browser-keyboard-proof.service`` gated by
-  ``ConditionKernelCommandLine=bus_engine_os.browser_keyboard_proof=1`` and
-  ``/usr/lib/bus-engine-os/gui/browser-keyboard-proof``.  The service emits
-  serial readiness marker ``bus-engine-os-browser-keyboard-proof: input-ready``,
-  reads Linux ``/dev/input/event*`` key press events inside the guest, and emits
-  ``bus-engine-os-browser-keyboard-proof: input-ok`` after the deterministic
-  ``ab`` sequence.  Package-level validation passed in the downstream
-  ``bus-engine-os`` checkout with
-  ``make package-bus-engine-os-gui-config
-  repro-package-bus-engine-os-gui-config`` and focused virtual-desktop rootfs
-  preflight tests.  The next acceptance run must rebuild a Bus Engine OS
-  ``virtual-desktop`` Browser Lab artifact, boot it in Chromium with
-  ``display=wasm`` and the proof kernel argument, type ``ab`` through the
-  focused browser canvas after the readiness marker, require the ``input-ok``
-  serial marker, and preserve result JSON plus screenshot evidence.
-  ``wasm-browser-smoke-runner.mjs`` also has ``--pre-keyboard-wait-ms`` so that
-  a downstream proof can wait briefly after the serial readiness marker before
-  delivering browser keyboard input, without weakening the serial marker gate.
+  A controlled downstream Bus Engine OS guest-visible keyboard proof now closes
+  that input gap for the QEMU/WASM graphics path.  The run used the same
+  accepted x86_64 Bus Engine OS kernel and rootfs artifacts as the earlier
+  downstream proof: ``bzImage`` SHA-256
+  ``b37cc4f821877ef34d468eeb9504fb6c0738114cff9bb18e030d88a2f4b76943`` and
+  ``rootfs.raw`` SHA-256
+  ``6d2222e0f5c8a1ff2d40808e682ffa5f0995e53c28a0f0af98ed0a96c9d49eae``.
+  Chromium ``149.0.7827.55`` ran with ``display=wasm``, ``-vga std``,
+  ``--rootfs-device virtio-pci``, and ``--kernel-append 'console=ttyS0
+  console=tty0 root=/dev/vda rw init=/bin/sh'``.  The runner waited for serial
+  marker ``Run /bin/sh as init process``, then used ``--pre-keyboard-wait-ms
+  5000`` before typing ``echo ok\n`` into the focused browser canvas and
+  ``--post-keyboard-wait-ms 20000`` before final evidence capture.  The run
+  wrote
+  ``build/wasm-browser-proof-current/bus-engine-os-display-init-shell-keyboard-prewait-result.json``
+  and
+  ``build/wasm-browser-proof-current/bus-engine-os-display-init-shell-keyboard-prewait-page.png``.
+  Result JSON SHA-256 was
+  ``cecb9503cf258b1375bd075aa4cca31ba033129c513b57758cb30fbaea148164`` and
+  screenshot SHA-256 was
+  ``5e0e5af816c8155d9913e8e2c6e584aa2c414f9cbba319e95918d9a1cb685923``.
+  The result recorded a focused ``720x400`` 2D canvas, backend ``wasm``, pixel
+  hash ``fnv1a32:190259fd``, and ``24725`` non-black pixels.  Visual inspection
+  of the screenshot shows the Bus Engine OS shell prompt receiving ``echo ok``,
+  printing ``ok``, and returning to ``sh-5.3#``.
+
+  This is a controlled keyboard acceptance run for the downstream Bus Engine OS
+  artifact.  It intentionally uses ``init=/bin/sh`` so the proof can exercise a
+  guest-visible framebuffer shell without depending on the normal systemd login
+  stack.  The normal Bus Engine OS systemd/userspace boot path remains covered
+  by the earlier serial evidence, visible canvas evidence, and ``systemd 261.1``
+  runs.  ``wasm-browser-smoke-runner.mjs`` now has ``--pre-keyboard-wait-ms``
+  for this kind of readiness gap without weakening the serial marker gate.
+
+  The mandatory default serial-console regression gate was rerun with the same
+  QEMU/WASM artifact and the current browser runner after the pre-keyboard
+  timing support landed.  The regenerated serial initramfs SHA-256 was
+  ``2a12aedec5fe8d3e0fa9eb5d8974f38d8dcf0fbc06d8e9f2c24f34fd45eae3b6``.
+  Chromium ``149.0.7827.55`` ran ``display=none`` and reached
+  ``QEMU_WASM_LINUX_BOOT_OK`` in ``89120`` ms.  It wrote
+  ``build/wasm-browser-proof-current/default-serial-current-runner-result.json``
+  and
+  ``build/wasm-browser-proof-current/default-serial-current-runner-page.png``.
+  Result JSON SHA-256 was
+  ``7156659390fabc8e19114b0b35bf8176f550f08bff19c39f926bed7bd935363a`` and
+  screenshot SHA-256 was
+  ``83f6c571a3bcce3577d4df0bedf10936457e47d58d13283772f857eb2c8ea43c``.
 
 Non-goals:
   No WebGPU, accelerated 3D, or full desktop support.

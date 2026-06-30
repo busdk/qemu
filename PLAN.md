@@ -232,23 +232,22 @@ browser MVP. Keep Bus Engine product work downstream.
   DoD is a Chrome/Chromium run where QEMU/WASM boots a small 64-bit Linux guest
   with the selected display/input devices, renders a stable visible marker,
   accepts keyboard input, and records result JSON plus screenshot evidence.
-- [ ] Prove Bus Engine OS with graphics and keyboard in the browser: DoD is a
+- [x] Prove Bus Engine OS with graphics and keyboard in the browser: DoD is a
   Chrome/Chromium run where the downstream Bus Engine OS artifact reaches a
   visible graphical or framebuffer-backed state, accepts a deterministic
   keyboard sequence, preserves serial and screenshot evidence, and records any
   limitations separately from the already accepted serial-console proof.
-  Current partial evidence: Bus Engine OS reaches a visible browser canvas and
-  QEMU reports focused-canvas key events as received, drained, and sent. The
-  remaining acceptance gap is a guest-visible response to the deterministic
-  keyboard sequence. Future downstream runs must not use `bus@bus-engine-os`
+  Accepted evidence uses the existing downstream Bus Engine OS x86_64 kernel
+  and rootfs, boots with `console=ttyS0 console=tty0 root=/dev/vda rw
+  init=/bin/sh`, waits for the serial marker `Run /bin/sh as init process`,
+  focuses the `display=wasm` framebuffer canvas, types `echo ok\n`, and
+  captures a screenshot showing the guest shell prints `ok`. This is a
+  controlled guest-visible input proof for the Bus Engine OS artifact; normal
+  systemd/login readiness remains covered by the earlier serial and visible
+  display proofs. Future downstream runs must not use `bus@bus-engine-os`
   alone as a readiness marker because that string can appear in the kernel
-  compiler identity before userspace is ready. The downstream Bus Engine OS
-  `bus-engine-os-gui-config 0.1.0-15.noarch` package now provides an opt-in
-  `bus_engine_os.browser_keyboard_proof=1` service that emits
-  `bus-engine-os-browser-keyboard-proof: input-ready` and should be the
-  keyboard readiness gate for the next Chromium run; the acceptance marker is
-  `bus-engine-os-browser-keyboard-proof: input-ok`.
-- [ ] Update the browser MVP acceptance definition after graphics/input proof:
+  compiler identity before userspace is ready.
+- [x] Update the browser MVP acceptance definition after graphics/input proof:
   DoD is that the MVP is no longer described as serial-console-only; it
   requires 64-bit QEMU/WASM boot, visible graphics output, keyboard input,
   serial diagnostics, result JSON, screenshot artifacts, and clear fallback
@@ -264,4 +263,7 @@ browser MVP. Keep Bus Engine product work downstream.
   at least one browser.
 - [x] Downstream Bus Engine OS proof boots through the generic QEMU/WASM
   browser harness and produces serial evidence plus a website-preview artifact.
+- [x] The interactive browser path has Chrome/Chromium evidence for visible
+  2D display output and deterministic keyboard input while the default
+  serial-console marker remains a passing regression gate.
 - [x] No Bus Engine product logic is added to upstream QEMU code.
