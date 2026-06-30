@@ -172,6 +172,7 @@ async function run() {
   }
   const programUrl = new URL(config.program, window.location.href);
   const wasmUrl = new URL(config.wasm, window.location.href);
+  const generatedQemuArgs = qemuArgs(config);
   const startTime = performance.now();
   const smokeState = {
     lines: 0,
@@ -180,6 +181,7 @@ async function run() {
     phase: "init",
     phases: [],
     startedAtMs: startTime,
+    qemuArgs: generatedQemuArgs,
     markerSeen: false,
     expectedTextSeen: config.expectText.map((text) => ({ text, seen: false })),
     lastLine: "",
@@ -294,7 +296,7 @@ async function run() {
   const moduleFactory = (await import(programUrl.href)).default;
   setPhase("start-qemu", "starting QEMU");
   await moduleFactory({
-    arguments: qemuArgs(config),
+    arguments: generatedQemuArgs,
     locateFile(path) {
       if (path === "qemu-system-x86_64.wasm") {
         return wasmUrl.href;

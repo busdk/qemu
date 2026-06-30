@@ -384,6 +384,7 @@ async function capturePageText(page, result, tailBytes) {
       result.phase = result.smokeState.phase || null;
       result.failurePhase = result.smokeState.failurePhase || null;
       result.phases = result.smokeState.phases || [];
+      result.qemuCommand = result.smokeState.qemuArgs || [];
       result.markerSeen = Boolean(result.smokeState.markerSeen);
       result.expectedTextSeen = result.smokeState.expectedTextSeen || [];
       result.programExitStatus = result.smokeState.programExitStatus;

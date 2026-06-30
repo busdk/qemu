@@ -2154,12 +2154,12 @@ Current status:
   promotes the browser state summary into top-level JSON fields including
   ``phase``, ``failurePhase``, ``phases``, ``markerSeen``,
   ``expectedTextSeen``, ``programExitStatus``, ``outputLines``,
-  ``outputBytes``, ``outputSuppressed``, and ``lastLine`` so CI artifacts can
-  be inspected without parsing the full page text.  ``phase`` is the terminal
-  page state, while ``failurePhase`` records the startup phase that was active
-  before a page-level failure.  The remaining proof work is to run the
-  negative cases under Chromium or Chrome and preserve the resulting JSON
-  artifacts.
+  ``outputBytes``, ``outputSuppressed``, ``lastLine``, and ``qemuCommand`` so
+  CI artifacts can be inspected without parsing the full page text.  ``phase``
+  is the terminal page state, while ``failurePhase`` records the startup phase
+  that was active before a page-level failure.  The remaining proof work is to
+  run the negative cases under Chromium or Chrome and preserve the resulting
+  JSON artifacts.
 
 Non-goals:
   No product-specific telemetry.
@@ -2212,9 +2212,11 @@ Current status:
   The browser smoke page and Playwright runner default to ``network=none`` and
   append ``-nic none`` to the generated QEMU command line.  The runner exposes
   ``--network none|default`` for later networking probes and records the
-  selected mode in result JSON.  A follow-up Chromium or Chrome run should
-  preserve a result artifact proving the default no-network command line still
-  reaches the expected serial marker.
+  selected mode in result JSON.  The page also stores the exact generated QEMU
+  argv in ``qemuWasmSmokeState.qemuArgs``, and the runner promotes that array
+  to top-level ``qemuCommand`` in result JSON.  A follow-up Chromium or Chrome
+  run should preserve a result artifact proving the default no-network command
+  line still reaches the expected serial marker.
 
 Non-goals:
   No TAP, slirp, arbitrary TCP, or UDP support.
