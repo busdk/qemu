@@ -627,6 +627,28 @@ function drawHarnessSelfTestFrame(canvas) {
   context.fillRect(0, 16, 64, 4);
 }
 
+export function drawBrowserStatusFrame(canvas, message) {
+  if (!canvas || canvas.hidden) {
+    return false;
+  }
+  if (canvas.width <= 1 || canvas.height <= 1) {
+    canvas.width = 720;
+    canvas.height = 400;
+  }
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return false;
+  }
+  context.fillStyle = "rgb(5, 5, 5)";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "rgb(230, 230, 230)";
+  context.font = "20px system-ui, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(message, canvas.width / 2, canvas.height / 2);
+  return true;
+}
+
 async function run() {
   const status = text("status");
   const output = text("output");
@@ -705,6 +727,7 @@ async function run() {
     if (config.focusDisplay) {
       canvas.focus();
     }
+    drawBrowserStatusFrame(canvas, "Loading Bus Engine OS guest...");
     smokeState.display.focused = document.activeElement === canvas;
     smokeState.display.canvasWidth = canvas.width;
     smokeState.display.canvasHeight = canvas.height;
@@ -842,6 +865,7 @@ async function run() {
   };
 
   setPhase("fetch-guest-inputs", "loading smoke guest inputs");
+  drawBrowserStatusFrame(canvas, "Loading Bus Engine OS guest...");
   for (const mount of mounts) {
     mount.data = mount.optional
       ? await fetchOptionalBytes(mount.url)
@@ -850,8 +874,10 @@ async function run() {
   const availableMounts = mounts.filter((mount) => mount.data !== null);
 
   setPhase("import-qemu-module", "loading QEMU WebAssembly module");
+  drawBrowserStatusFrame(canvas, "Loading QEMU WebAssembly runtime...");
   const moduleFactory = (await import(programUrl.href)).default;
   setPhase("start-qemu", "starting QEMU");
+  drawBrowserStatusFrame(canvas, "Starting QEMU...");
   const installWasmKeySink = (module) => {
     if (config.display === "wasm" && typeof module._qemu_wasm_display_key_event === "function") {
       qemuKeySink = (linuxKey, down) => {

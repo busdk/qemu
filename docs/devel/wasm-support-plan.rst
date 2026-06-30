@@ -3203,3 +3203,12 @@ a non-interactive stdin handler that returns EOF and suppresses browser
 ``alert``, ``confirm``, and ``prompt`` calls while recording counts in the
 smoke state.  Guest keyboard input must enter through the display canvas and
 the QEMU display key event path.
+
+Current browser startup indication invariant
+============================================
+
+The browser harness must draw an explicit startup frame on the display canvas
+before guest graphics or serial output become visible.  The current harness
+shows status frames while guest files load, the QEMU WebAssembly runtime loads,
+and QEMU starts.  This keeps Browser Lab iframe users from seeing a blank black
+display during large WASM/rootfs fetches and early emulator startup.

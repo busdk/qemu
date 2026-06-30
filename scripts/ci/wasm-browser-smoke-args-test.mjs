@@ -13,6 +13,7 @@ import {
   browserRuntimeSnapshot,
   deliverDisplayKeyEvent,
   displayKeyPolicy,
+  drawBrowserStatusFrame,
   emscriptenModuleCanvas,
   installBrowserDialogSuppression,
   installDisplayInputPolicy,
@@ -57,6 +58,7 @@ class FakeCanvas {
     this.id = "";
     this.listeners = new Map();
     this.ownerDocument = ownerDocument || { activeElement: null };
+    this.operations = [];
     this.title = "";
     this.width = 0;
   }
@@ -87,6 +89,24 @@ class FakeCanvas {
 
   setAttribute(name, value) {
     this[name] = value;
+  }
+
+  getContext(kind) {
+    if (kind !== "2d") {
+      return null;
+    }
+    return {
+      fillStyle: "",
+      font: "",
+      textAlign: "",
+      textBaseline: "",
+      fillRect: (...args) => {
+        this.operations.push(["fillRect", ...args]);
+      },
+      fillText: (...args) => {
+        this.operations.push(["fillText", ...args]);
+      },
+    };
   }
 }
 
@@ -212,6 +232,14 @@ assert.equal(browserKeyLinuxCode({ code: "Enter" }), 28);
 assert.equal(browserKeyLinuxCode({ code: "ArrowUp" }), 103);
 assert.equal(browserKeyLinuxCode({ code: "Unknown" }), 0);
 assert.equal(browserNonInteractiveStdin(), null);
+
+{
+  const canvas = new FakeCanvas();
+  assert.equal(drawBrowserStatusFrame(canvas, "Starting QEMU..."), true);
+  assert.equal(canvas.width, 720);
+  assert.equal(canvas.height, 400);
+  assert.deepEqual(canvas.operations.at(-1), ["fillText", "Starting QEMU...", 360, 200]);
+}
 
 {
   const calls = [];
