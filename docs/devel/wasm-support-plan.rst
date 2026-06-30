@@ -494,6 +494,15 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   printed ``random: crng init done``, but still did not reach ``Run /init``.
   This rules out the broad x86 mitigation and page-table-isolation path as a
   sufficient explanation for the Firefox-only browser boot gap.
+* A longer Firefox ``142.0.1`` baseline run with the canonical smoke command
+  timed out after ``900000`` ms.  The result recorded ``pageStatus`` as
+  ``QEMU started; waiting for marker``, ``crossOriginIsolated: true``, no
+  browser console, page, or request errors, and ``smokeState`` with ``94``
+  emitted serial lines, ``4929`` captured bytes, ``markerSeen: false``,
+  ``outputSuppressed: false``, and ``lastLine`` as
+  ``x86/fpu: x87 FPU will use FXSAVE``.  This rules out the previous
+  ``420000`` ms timeout as the primary explanation for Firefox failing to
+  reach ``Run /init``.
 * ``scripts/ci/wasm-prepare-tuxboot-smoke-guest.py`` now provides that
   CI-shaped guest-preparation path.  It downloads or reuses the existing
   x86_64 TuxBoot kernel and rootfs assets, verifies them against the SHA-256
@@ -1527,7 +1536,9 @@ Proof:
   at ``512M`` versus ``256M``, CPU model simplification to ``qemu64``, and
   kernel argument forwarding.  A Firefox run with broad x86 mitigations and
   page-table isolation disabled still timed out before ``Run /init``, so that
-  mitigation path is not sufficient to explain the gap.
+  mitigation path is not sufficient to explain the gap.  A ``900000`` ms
+  baseline run also timed out, which rules out the original ``420000`` ms
+  timeout as the primary explanation.
 
 Non-goals:
   No requirement to support Firefox in the first accepted MVP if Chromium is
