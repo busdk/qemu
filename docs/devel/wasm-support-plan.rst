@@ -1341,6 +1341,14 @@ Proof:
   ``f57bfc6553bcd6e0a54aab86095bf642b33b5571d14e3af1731b18c87ed5aef8`` and
   rootfs SHA-256
   ``4b8b2a99117519c5290e1202cb36eb6c7aaba92b357b5160f5970cf5fb78a751``.
+  A native QEMU ``microvm`` probe with the 1 GiB TuxBoot ext4 rootfs verified
+  the root-disk command-line shape for the future browser-rootfs harness:
+  ``-drive file=...,format=raw,if=none,id=hd0`` plus
+  ``-device virtio-blk-device,drive=hd0`` exposed the image as ``/dev/vda``.
+  The guest mounted the ext4 filesystem and reached the TuxTest login prompt
+  within a 30 second host timeout.  The current browser proof still uses the
+  smaller helper-generated initramfs; browser raw-rootfs support should be
+  added with a suitably small proof image before it is treated as accepted.
 
 Non-goals:
   No persistent storage.

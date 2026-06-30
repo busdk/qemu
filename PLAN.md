@@ -28,6 +28,10 @@ browser MVP. Keep Bus Engine product work downstream.
   current proof.
 - [x] Add a generic browser smoke screenshot artifact so downstream users can
   preserve the terminal-like page state from success or failure runs.
+- [x] Verify the native QEMU `microvm` virtio-block command line that exposes a
+  raw ext4 root filesystem as `/dev/vda`.
+- [ ] Add optional browser harness support for a raw rootfs/disk image after a
+  suitably small proof image is available.
 - [ ] Keep the accepted smoke profile stable while diagnostic arguments vary.
 - [ ] Continue recording browser/runtime versions, commands, results, and
   failure modes in `docs/devel/wasm-support-plan.rst`.
