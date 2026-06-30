@@ -139,6 +139,12 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   artifact copy failed because the host ``/tmp`` filesystem was full.  This is
   build-path evidence for the SDL frontend, not yet browser-visible graphics
   proof.
+* The ``build-wasm64-64bit`` CI job now uses the same SDL-enabled configure
+  shape for produced artifacts: ``--enable-sdl``,
+  ``--extra-cflags=-sUSE_SDL=2``, and ``--extra-ldflags=-sUSE_SDL=2``.  The
+  browser smoke runner still defaults to ``display=none`` so the serial marker
+  gate remains unchanged until an explicit graphics proof opts in to
+  ``display=sdl``.
 * The captured artifact sizes were approximately ``607 KiB`` for
   ``qemu-system-x86_64.js`` and ``72 MiB`` for
   ``qemu-system-x86_64.wasm``.  The captured SHA-256 values were
@@ -2506,15 +2512,21 @@ Proof:
   opt-in ``display=sdl`` removes ``-nographic``, adds
   ``-display sdl,gl=off``, exposes a canvas, and keeps serial output available
   for the boot marker.  The runner also accepts ``--keyboard-text`` only with
-  ``display=sdl``, focuses the canvas, types through Playwright, and records
-  non-secret keyboard-input evidence in the result JSON.
+  ``display=sdl``, can wait for guest serial output using
+  ``--keyboard-after-text``, focuses the canvas, types through Playwright, and
+  records non-secret keyboard-input evidence in the result JSON.  The same
+  display and keyboard fields are accepted through the generic guest manifest
+  schema, so downstream proofs can declare their input gate without
+  product-specific QEMU code.
 
 Current status:
   The harness and runner plumbing is implemented.  Emscripten SDL2 was also
   verified as a viable wasm64 build dependency with ``-sUSE_SDL=2``: QEMU
   configured with ``SDL support: YES 2.32.0`` and compiled through the SDL 2D
-  and input sources to the final link.  Browser-visible rendering still needs
-  a Chrome/Chromium screenshot proof.
+  and input sources to the final link.  The current keyboard path is a
+  deterministic input harness, not yet a guest-visible keyboard acceptance
+  proof.  Browser-visible rendering and guest-observed keyboard input still
+  need Chrome/Chromium screenshot and serial/display evidence.
 
 Non-goals:
   No claim that a guest has rendered a frame until a Chrome/Chromium graphics

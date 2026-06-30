@@ -44,6 +44,9 @@ Options:
                      contains this text
   --initrd FILE       Smoke initramfs image
   --kernel FILE       64-bit Linux bzImage
+  --keyboard-after-text TEXT
+                     Wait until browser-captured serial output contains TEXT
+                     before typing --keyboard-text
   --keyboard-text TEXT
                      Type TEXT into the focused SDL browser display canvas
   --kernel-append TEXT
@@ -92,6 +95,7 @@ function parseArgs(argv) {
     idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
     initrd: null,
     kernel: null,
+    keyboardAfterText: "",
     keyboardText: "",
     kernelAppend: null,
     machine: "microvm,acpi=off",
@@ -157,6 +161,9 @@ function parseArgs(argv) {
     } else if (arg === "--kernel") {
       options.kernel = argv[++i];
       explicit.add("kernel");
+    } else if (arg === "--keyboard-after-text") {
+      options.keyboardAfterText = argv[++i];
+      explicit.add("keyboardAfterText");
     } else if (arg === "--keyboard-text") {
       options.keyboardText = argv[++i];
       explicit.add("keyboardText");
@@ -254,6 +261,7 @@ function parseArgs(argv) {
       "idleAfterText",
       "initrd",
       "kernel",
+      "keyboardAfterText",
       "keyboardText",
       "kernelAppend",
       "machine",
@@ -319,6 +327,10 @@ function parseArgs(argv) {
   }
   if (options.keyboardText !== "" && options.display !== "sdl") {
     console.error("--keyboard-text requires --display sdl");
+    usage(2);
+  }
+  if (options.keyboardAfterText !== "" && options.keyboardText === "") {
+    console.error("--keyboard-after-text requires --keyboard-text");
     usage(2);
   }
   if (!["none", "default"].includes(options.network)) {
@@ -680,6 +692,7 @@ export function initialSmokeResult(options, browserVersion) {
     display: options.display,
     expectText: options.expectText,
     focusDisplay: options.focusDisplay,
+    keyboardAfterText: options.keyboardAfterText,
     keyboardTextLength: options.keyboardText.length,
     kernelAppend: options.kernelAppend,
     machine: options.machine,
@@ -764,6 +777,35 @@ async function sampleSmokeProgress(page, result, startTime, reason, limit) {
   }
 }
 
+async function typeKeyboardText(page, options, result) {
+  if (options.keyboardText === "") {
+    return;
+  }
+  await page.waitForFunction(
+    (afterText) => {
+      const state = globalThis.qemuWasmSmokeState || null;
+      const display = document.querySelector("#display");
+      if (!state || !display || display.hidden) {
+        return false;
+      }
+      if (afterText === "") {
+        return ["start-qemu", "guest-boot", "success"].includes(state.phase);
+      }
+      const output = document.querySelector("#output")?.textContent || "";
+      return output.includes(afterText);
+    },
+    options.keyboardAfterText,
+    { timeout: options.timeoutMs },
+  );
+  await page.locator("#display").focus();
+  await page.keyboard.type(options.keyboardText);
+  result.keyboardInput = {
+    afterText: options.keyboardAfterText,
+    target: "#display",
+    textLength: options.keyboardText.length,
+  };
+}
+
 async function currentSmokeState(page) {
   if (!page) {
     return null;
@@ -844,14 +886,6 @@ async function run() {
     });
     result.userAgent = await page.evaluate(() => navigator.userAgent);
     result.crossOriginIsolated = await page.evaluate(() => Boolean(globalThis.crossOriginIsolated));
-    if (options.keyboardText !== "") {
-      await page.locator("#display").focus();
-      await page.keyboard.type(options.keyboardText);
-      result.keyboardInput = {
-        target: "#display",
-        textLength: options.keyboardText.length,
-      };
-    }
     const sampleAndCheckIdle = async (reason) => {
       await sampleSmokeProgress(
         page,
@@ -881,6 +915,7 @@ async function run() {
       sampleAndCheckIdle("interval");
     }, options.progressSampleIntervalMs);
     await sampleAndCheckIdle("after-load");
+    await typeKeyboardText(page, options, result);
     await Promise.race([
       page.waitForFunction(
         (marker) => {

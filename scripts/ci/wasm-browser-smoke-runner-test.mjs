@@ -108,6 +108,7 @@ for (const status of [
     focusDisplay: true,
     host: "127.0.0.1",
     initrd: null,
+    keyboardAfterText: "login:",
     keyboardText: "uname -a\n",
     idleAfterText: "",
     kernelAppend: "console=ttyS0 root=/dev/vda rw",
@@ -154,6 +155,7 @@ for (const status of [
     focusDisplay: false,
     host: "localhost",
     initrd: "/tmp/initramfs.cpio.gz",
+    keyboardAfterText: "",
     keyboardText: "",
     kernelAppend: null,
     machine: "microvm,acpi=off",
@@ -184,6 +186,7 @@ for (const status of [
     display: "sdl",
     expectText: ["Example Linux"],
     focusDisplay: true,
+    keyboardAfterText: "login:",
     keyboardText: "uname -a\n",
     idleAfterText: "",
     kernelAppend: "console=ttyS0 root=/dev/vda rw",
@@ -207,6 +210,7 @@ for (const status of [
   assert.equal(result.browserVersion, "HeadlessChrome/141.0.7390.37");
   assert.equal(result.display, "sdl");
   assert.equal(result.focusDisplay, true);
+  assert.equal(result.keyboardAfterText, "login:");
   assert.equal(result.keyboardTextLength, "uname -a\n".length);
   assert.equal(result.network, "none");
   assert.equal(result.idleAfterText, "");
@@ -229,6 +233,22 @@ for (const status of [
     "--kernel", "/tmp/kernel",
     "--initrd", "/tmp/initrd",
     "--keyboard-text", "uname -a\n",
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+
+  assert.equal(child.status, 2);
+}
+
+{
+  const child = spawnSync(process.execPath, [
+    runnerPath,
+    "--artifact-dir", "/tmp/artifacts",
+    "--kernel", "/tmp/kernel",
+    "--initrd", "/tmp/initrd",
+    "--display", "sdl",
+    "--keyboard-after-text", "login:",
   ], {
     cwd: process.cwd(),
     encoding: "utf8",

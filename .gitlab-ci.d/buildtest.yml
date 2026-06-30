@@ -787,7 +787,9 @@ build-wasm64-64bit:
     - job: wasm64-emsdk-cross-container
   variables:
     IMAGE: emsdk-wasm64-cross
-    CONFIGURE_ARGS: --static --cpu=wasm64 --disable-tools --enable-debug --enable-tcg-interpreter
+    CONFIGURE_ARGS: --static --cpu=wasm64 --disable-tools --enable-debug
+      --enable-tcg-interpreter --enable-sdl --extra-cflags=-sUSE_SDL=2
+      --extra-ldflags=-sUSE_SDL=2
 
 smoke-wasm64-64bit-linux:
   extends: .base_job_template

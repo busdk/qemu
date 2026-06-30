@@ -148,15 +148,20 @@ browser MVP. Keep Bus Engine product work downstream.
   `display=none` `-nographic` path and the opt-in SDL path.
 - [x] Add runner-side deterministic keyboard injection for the opt-in display
   path: DoD is a `--keyboard-text` browser smoke runner option that focuses the
-  SDL canvas and types through Playwright only when `--display=sdl`, rejects
-  keyboard injection in default `display=none` mode, and records non-secret
-  input evidence in the result JSON.
+  SDL canvas and types through Playwright only when `--display=sdl`, can wait
+  for guest serial output with `--keyboard-after-text`, rejects keyboard
+  injection in default `display=none` mode, and records non-secret input
+  evidence in the result JSON.
 - [x] Verify the wasm64 SDL build path enough to choose the next graphics
   implementation step: DoD is container evidence that Emscripten's SDL2 port
   works with `-sUSE_SDL=2`, QEMU configure reports `SDL support: YES 2.32.0`
   for `--enable-sdl`, and the `qemu-system-x86_64.js` target compiles through
   the QEMU SDL 2D/input sources and reaches the final link step.
-- [ ] Define the generic browser graphics/input MVP boundary: DoD is a
+- [x] Wire the wasm64 CI artifact build for the browser display path: DoD is
+  the 64-bit wasm64 build job configuring QEMU with `--enable-sdl` and the
+  Emscripten SDL2 compile/link flags, while the default browser smoke runner
+  still uses `display=none` unless the display proof opts in.
+- [x] Define the generic browser graphics/input MVP boundary: DoD is a
   developer note that makes browser graphics and keyboard input part of the
   MVP expansion, keeps WebGPU and accelerated 3D out of scope, selects the
   first QEMU display/input device path to expose in a browser, and records why
