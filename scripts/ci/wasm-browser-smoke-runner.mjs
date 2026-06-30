@@ -427,6 +427,36 @@ export function browserSmokeUrl(options) {
   return url;
 }
 
+export function initialSmokeResult(options, browserVersion) {
+  return {
+    format: 1,
+    appendExtra: options.appendExtra,
+    browser: options.browser,
+    browserVersion,
+    cpu: options.cpu,
+    expectText: options.expectText,
+    kernelAppend: options.kernelAppend,
+    machine: options.machine,
+    maxDiagnosticEntries: MAX_DIAGNOSTIC_ENTRIES,
+    marker: options.marker,
+    memory: options.memory,
+    network: options.network,
+    timeoutMs: options.timeoutMs,
+    pageTextTailBytes: options.pageTextTailBytes,
+    progressSampleIntervalMs: options.progressSampleIntervalMs,
+    progressSampleLimit: options.progressSampleLimit,
+    qemuArgs: options.qemuArgs,
+    rootfs: options.rootfs,
+    rootfsDevice: options.rootfsDevice,
+    success: false,
+    consoleMessages: [],
+    pageErrors: [],
+    progressSampleErrors: [],
+    progressSamples: [],
+    requestFailures: [],
+  };
+}
+
 async function capturePageText(page, result, tailBytes) {
   if (!page) {
     return;
@@ -487,33 +517,7 @@ async function run() {
     args: options.browser === "chromium" ? ["--no-sandbox"] : [],
   });
   const startTime = Date.now();
-  const result = {
-    format: 1,
-    appendExtra: options.appendExtra,
-    browser: options.browser,
-    browserVersion: browser.version(),
-    cpu: options.cpu,
-    expectText: options.expectText,
-    kernelAppend: options.kernelAppend,
-    machine: options.machine,
-    maxDiagnosticEntries: MAX_DIAGNOSTIC_ENTRIES,
-    marker: options.marker,
-    memory: options.memory,
-    network: options.network,
-    timeoutMs: options.timeoutMs,
-    pageTextTailBytes: options.pageTextTailBytes,
-    progressSampleIntervalMs: options.progressSampleIntervalMs,
-    progressSampleLimit: options.progressSampleLimit,
-    qemuArgs: options.qemuArgs,
-    rootfs: options.rootfs,
-    rootfsDevice: options.rootfsDevice,
-    success: false,
-    consoleMessages: [],
-    pageErrors: [],
-    progressSampleErrors: [],
-    progressSamples: [],
-    requestFailures: [],
-  };
+  const result = initialSmokeResult(options, browser.version());
   let page = null;
   let progressTimer = null;
   try {

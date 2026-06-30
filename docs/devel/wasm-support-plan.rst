@@ -544,7 +544,9 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   expected-text state, and the last serial line.  It also covers the runner's
   URL/query mapping into the browser page, including repeated expected-text
   and QEMU-argument parameters, rootfs mode, omitted initrd mode, network mode,
-  timeout, and kernel append parameters.
+  timeout, and kernel append parameters.  It verifies the initial result JSON
+  shape as well, including browser identity, timeout, network mode, diagnostic
+  list defaults, expected-text entries, and extra QEMU arguments.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser

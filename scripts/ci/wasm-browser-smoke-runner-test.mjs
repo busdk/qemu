@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 
 import {
   browserSmokeUrl,
+  initialSmokeResult,
   isTerminalPageStatus,
   promoteSmokeState,
 } from "./wasm-browser-smoke-runner.mjs";
@@ -141,4 +142,40 @@ for (const status of [
   assert.equal(url.searchParams.has("rootfs"), false);
   assert.equal(url.searchParams.has("kernelAppend"), false);
   assert.equal(url.searchParams.get("network"), "default");
+}
+
+{
+  const result = initialSmokeResult({
+    appendExtra: "ignore_loglevel",
+    browser: "chromium",
+    cpu: "Nehalem",
+    expectText: ["Bus Engine OS"],
+    kernelAppend: "console=ttyS0 root=/dev/vda rw",
+    machine: "pc",
+    marker,
+    memory: "512M",
+    network: "none",
+    pageTextTailBytes: 60000,
+    progressSampleIntervalMs: 10000,
+    progressSampleLimit: 120,
+    qemuArgs: ["-name", "wasm-smoke"],
+    rootfs: "/tmp/rootfs.raw",
+    rootfsDevice: "virtio-pci",
+    timeoutMs: 180000,
+  }, "HeadlessChrome/141.0.7390.37");
+
+  assert.equal(result.format, 1);
+  assert.equal(result.success, false);
+  assert.equal(result.browser, "chromium");
+  assert.equal(result.browserVersion, "HeadlessChrome/141.0.7390.37");
+  assert.equal(result.network, "none");
+  assert.equal(result.rootfsDevice, "virtio-pci");
+  assert.equal(result.maxDiagnosticEntries, 50);
+  assert.deepEqual(result.expectText, ["Bus Engine OS"]);
+  assert.deepEqual(result.qemuArgs, ["-name", "wasm-smoke"]);
+  assert.deepEqual(result.consoleMessages, []);
+  assert.deepEqual(result.pageErrors, []);
+  assert.deepEqual(result.progressSampleErrors, []);
+  assert.deepEqual(result.progressSamples, []);
+  assert.deepEqual(result.requestFailures, []);
 }
