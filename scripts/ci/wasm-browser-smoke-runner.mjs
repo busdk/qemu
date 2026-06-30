@@ -381,6 +381,23 @@ async function writeResult(options, result) {
   await writeFile(options.out, `${JSON.stringify(result, null, 2)}\n`);
 }
 
+export function promoteSmokeState(result, smokeState) {
+  if (smokeState === null) {
+    return;
+  }
+  result.phase = smokeState.phase || null;
+  result.failurePhase = smokeState.failurePhase || null;
+  result.phases = smokeState.phases || [];
+  result.qemuCommand = smokeState.qemuArgs || [];
+  result.markerSeen = Boolean(smokeState.markerSeen);
+  result.expectedTextSeen = smokeState.expectedTextSeen || [];
+  result.programExitStatus = smokeState.programExitStatus;
+  result.outputSuppressed = Boolean(smokeState.outputSuppressed);
+  result.outputLines = smokeState.lines;
+  result.outputBytes = smokeState.outputBytes;
+  result.lastLine = smokeState.lastLine;
+}
+
 async function capturePageText(page, result, tailBytes) {
   if (!page) {
     return;
@@ -388,19 +405,7 @@ async function capturePageText(page, result, tailBytes) {
   try {
     result.pageStatus = await page.evaluate(() => document.querySelector("#status")?.textContent || "");
     result.smokeState = await page.evaluate(() => globalThis.qemuWasmSmokeState || null);
-    if (result.smokeState !== null) {
-      result.phase = result.smokeState.phase || null;
-      result.failurePhase = result.smokeState.failurePhase || null;
-      result.phases = result.smokeState.phases || [];
-      result.qemuCommand = result.smokeState.qemuArgs || [];
-      result.markerSeen = Boolean(result.smokeState.markerSeen);
-      result.expectedTextSeen = result.smokeState.expectedTextSeen || [];
-      result.programExitStatus = result.smokeState.programExitStatus;
-      result.outputSuppressed = Boolean(result.smokeState.outputSuppressed);
-      result.outputLines = result.smokeState.lines;
-      result.outputBytes = result.smokeState.outputBytes;
-      result.lastLine = result.smokeState.lastLine;
-    }
+    promoteSmokeState(result, result.smokeState);
     const text = await page.evaluate(() => document.body.textContent || "");
     result.pageTextTail = text.slice(-tailBytes);
   } catch (error) {

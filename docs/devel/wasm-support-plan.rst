@@ -538,7 +538,10 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   mismatches.  The runner injects the same helper into the Playwright page
   before navigation, so the browser wait condition and the deterministic Node
   test share one predicate.  The Node Linux smoke job and browser CI job both
-  run this test.
+  run this test.  The same test also verifies the pure result-promotion helper
+  that copies browser smoke state into top-level JSON fields such as
+  ``phase``, ``failurePhase``, ``qemuCommand``, output counters, marker state,
+  expected-text state, and the last serial line.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
@@ -2175,7 +2178,8 @@ Current status:
   run the negative cases under Chromium or Chrome and preserve the resulting
   JSON artifacts.  ``wasm-browser-smoke-runner-test.mjs`` provides
   deterministic coverage for the terminal page-status predicate that decides
-  when those result artifacts should be captured.
+  when those result artifacts should be captured, and for the result-promotion
+  helper that makes the page state visible at top level in the JSON artifact.
 
 Non-goals:
   No product-specific telemetry.
