@@ -151,6 +151,11 @@ function maybeComplete() {
   }
 }
 
+function programExitStatus(line) {
+  const match = /^program exited \(with status: ([0-9]+)\)/.exec(line);
+  return match === null ? null : Number(match[1]);
+}
+
 function describeMissingText() {
   return expectedTextSeen
     .filter((expected) => !expected.seen)
@@ -191,6 +196,10 @@ function emit(line, stream) {
     }
   }
   maybeComplete();
+  const status = programExitStatus(line);
+  if (status !== null && (!markerSeen || !allExpectedTextSeen())) {
+    scheduleExit(status === 0 ? 1 : status);
+  }
 }
 
 function mountFiles(module) {

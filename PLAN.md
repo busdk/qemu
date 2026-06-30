@@ -37,7 +37,7 @@ browser MVP. Keep Bus Engine product work downstream.
   optional SHA-256 checksums for guest kernel, initrd, and rootfs inputs.
 - [x] Add generic expected serial-text assertions so downstream proofs can
   require OS identity text in addition to a readiness marker.
-- [ ] Keep the accepted smoke profile stable while diagnostic arguments vary.
+- [x] Keep the accepted smoke profile stable while diagnostic arguments vary.
 - [ ] Continue recording browser/runtime versions, commands, results, and
   failure modes in `docs/devel/wasm-support-plan.rst`.
 
@@ -51,7 +51,7 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Use the existing Bus Engine OS `virtual-server` profile as the first
   downstream input path because it is already the accepted console-oriented
   QEMU image profile.
-- [ ] Document the expected downstream build command:
+- [x] Document the expected downstream build command:
   `bus engine os build image --profile virtual-server`, with the default host
   architecture selected automatically.
 - [x] Build or consume a minimal x86_64 Bus Engine OS console artifact that can

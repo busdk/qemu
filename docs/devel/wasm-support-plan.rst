@@ -1403,6 +1403,17 @@ Proof:
   ``--rootfs-device virtio-pci`` for ordinary PC-machine images.  The harness
   mounts standard PC firmware files such as ``bios-256k.bin`` when present
   under ``firmwareDir``.
+  The Node and browser smoke harnesses now also treat Emscripten's
+  ``program exited (with status: N)`` line as terminal failure evidence when
+  the marker and expected text have not been satisfied.  This avoids waiting
+  for the full timeout after early QEMU startup failures while preserving the
+  existing success path.  A Node.js ``v24`` negative proof with ``-M pc`` and a
+  missing ``bios-256k.bin`` exited in roughly ``3`` seconds with status ``1``.
+  A Chromium ``141.0.7390.37`` negative proof with qboot/linuxboot present but
+  the PC BIOS absent wrote result JSON with
+  ``pageStatus: program exited before marker: status 1``,
+  ``programExitStatus: 1``, no request failures, no page errors, and
+  ``elapsedMs: 3240``.
 
   Example generic manifest shape for a root-disk proof::
 
@@ -1929,6 +1940,14 @@ Current status:
   such a manifest with product-owned artifacts and a Bus Engine OS readiness
   marker plus expected serial identity text; QEMU should keep validating the
   manifest only as generic guest input metadata.
+  The expected downstream build command is
+  ``bus engine os build image --profile virtual-server``.  Bus Engine OS
+  selects the host architecture by default, so x86_64 browser-lab artifacts do
+  not require an explicit ``--target-arch`` on an x86_64 build host.  The
+  downstream artifact export should provide the kernel, raw root filesystem or
+  disk image, checksums, kernel arguments, machine model, rootfs device mode,
+  marker, and expected serial identity text as a manifest or equivalent
+  machine-readable bundle.
   An accepted x86_64 ``virtual-server`` artifact set was consumed from Docker
   volume ``bus-engine-os-x86_64-minimal-qemu-20260629T051004Z-4062057`` and
   copied to ``/tmp/bus-engine-os-wasm-proof``.  The copied artifacts were

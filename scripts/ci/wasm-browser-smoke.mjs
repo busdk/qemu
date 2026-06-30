@@ -79,6 +79,11 @@ function mountFiles(module, mounts) {
   }
 }
 
+function programExitStatus(line) {
+  const match = /^program exited \(with status: ([0-9]+)\)/.exec(line);
+  return match === null ? null : Number(match[1]);
+}
+
 function qemuArgs(config) {
   const defaultKernelAppend = config.initrd
     ? "console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1"
@@ -167,6 +172,7 @@ async function run() {
     markerSeen: false,
     expectedTextSeen: config.expectText.map((text) => ({ text, seen: false })),
     lastLine: "",
+    programExitStatus: null,
   };
   globalThis.qemuWasmSmokeState = smokeState;
   const mounts = [
@@ -243,6 +249,15 @@ async function run() {
       }
     }
     maybeComplete();
+    const exitStatus = programExitStatus(line);
+    if (
+      exitStatus !== null &&
+      (!smokeState.markerSeen || !allExpectedTextSeen())
+    ) {
+      smokeState.programExitStatus = exitStatus;
+      clearTimeout(timeout);
+      status.textContent = `program exited before marker: status ${exitStatus}`;
+    }
   };
 
   status.textContent = "loading smoke guest inputs";

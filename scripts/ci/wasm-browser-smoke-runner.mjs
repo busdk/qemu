@@ -514,10 +514,18 @@ async function run() {
     }, options.progressSampleIntervalMs);
     await sampleSmokeProgress(page, result, startTime, "after-load", options.progressSampleLimit);
     await page.waitForFunction(
-      (marker) => document.querySelector("#status")?.textContent === `marker reached: ${marker}`,
+      (marker) => {
+        const status = document.querySelector("#status")?.textContent || "";
+        return status === `marker reached: ${marker}` ||
+          status.startsWith("program exited before marker:");
+      },
       options.marker,
       { timeout: options.timeoutMs },
     );
+    const pageStatus = await page.evaluate(() => document.querySelector("#status")?.textContent || "");
+    if (pageStatus !== `marker reached: ${options.marker}`) {
+      throw new Error(pageStatus);
+    }
     if (progressTimer !== null) {
       clearInterval(progressTimer);
       progressTimer = null;
