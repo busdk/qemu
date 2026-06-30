@@ -486,9 +486,11 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``zstd`` tool and the matching ``playwright@1.56.1`` Node package, records
   ``build/wasm-browser-memory-probe.json`` with
   ``scripts/ci/wasm-browser-memory-probe-runner.mjs``, then runs
-  ``scripts/ci/wasm-browser-smoke-runner.mjs``.  The job is optional because
-  the acceptable upstream browser image, browser matrix, and runtime cost
-  policy still need maintainer review.
+  ``scripts/ci/wasm-browser-smoke-runner.mjs``.  The job defaults to
+  ``QEMU_WASM_BROWSER=chromium`` but can be replayed with another Playwright
+  browser name, such as ``firefox``, for matrix investigation.  The job is
+  optional because the acceptable upstream browser image, browser matrix, and
+  runtime cost policy still need maintainer review.
   A local job-shaped container run using copied wasm artifacts and a
   pre-populated TuxBoot cache exercised the same helper and browser runner
   path in that Playwright image and reached ``QEMU_WASM_LINUX_BOOT_OK``.
