@@ -11,6 +11,8 @@ import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const THIS_FILE = fileURLToPath(import.meta.url);
+
 function usage(status) {
   const stream = status === 0 ? process.stdout : process.stderr;
   stream.write(`usage: wasm-browser-memory-probe-runner.mjs [OPTIONS]
@@ -71,15 +73,42 @@ function parseArgs(argv) {
     console.error("--timeout-ms must be a positive integer");
     usage(2);
   }
-  if (options.pages !== null) {
-    const pages = options.pages.split(",").map((item) => Number(item.trim()));
-    if (pages.length === 0 || pages.some((page) => !Number.isInteger(page) || page <= 0)) {
-      console.error("--pages must be a comma-separated list of positive integers");
-      usage(2);
-    }
+  try {
+    parsePageList(options.pages);
+  } catch (error) {
+    console.error(error.message);
+    usage(2);
   }
 
   return options;
+}
+
+export function parsePageList(value) {
+  if (value === null) {
+    return null;
+  }
+  const pages = value.split(",").map((item) => Number(item.trim()));
+  if (pages.length === 0 || pages.some((page) => !Number.isInteger(page) || page <= 0)) {
+    throw new Error("--pages must be a comma-separated list of positive integers");
+  }
+  return pages;
+}
+
+export function probeUrl(options) {
+  return new URL(`http://${options.host}:${options.port}/`);
+}
+
+export function annotateResult(result, options, browserVersion) {
+  return {
+    ...result,
+    runner: {
+      browser: options.browser,
+      browserVersion,
+      memory64: options.memory64,
+      pages: options.pages,
+      timeoutMs: options.timeoutMs,
+    },
+  };
 }
 
 async function loadPlaywright(browserName) {
@@ -155,7 +184,7 @@ async function run() {
     page.on("console", (message) => {
       console.log(`browser ${message.type()}: ${message.text()}`);
     });
-    await page.goto(`http://${options.host}:${options.port}/`, {
+    await page.goto(probeUrl(options).href, {
       waitUntil: "domcontentloaded",
       timeout: options.timeoutMs,
     });
@@ -177,14 +206,7 @@ async function run() {
       { timeout: options.timeoutMs },
     );
     const resultText = await page.textContent("#output");
-    const result = JSON.parse(resultText);
-    result.runner = {
-      browser: options.browser,
-      browserVersion: browser.version(),
-      memory64: options.memory64,
-      pages: options.pages,
-      timeoutMs: options.timeoutMs,
-    };
+    const result = annotateResult(JSON.parse(resultText), options, browser.version());
     const output = JSON.stringify(result, null, 2);
     console.log(output);
     if (options.out !== null) {
@@ -199,4 +221,6 @@ async function run() {
   }
 }
 
-run().catch(() => process.exit(1));
+if (process.argv[1] === THIS_FILE) {
+  run().catch(() => process.exit(1));
+}

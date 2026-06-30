@@ -822,6 +822,7 @@ smoke-wasm64-64bit-linux:
     - node --version
     - section_start smoke_args "Checking WASM browser smoke helpers"
     - node scripts/ci/wasm-node-preflight-test.mjs
+    - node scripts/ci/wasm-browser-memory-probe-runner-test.mjs
     - node scripts/ci/wasm-browser-smoke-args-test.mjs
     - node scripts/ci/wasm-browser-smoke-runner-test.mjs
     - section_end smoke_args
@@ -888,6 +889,7 @@ smoke-wasm64-64bit-browser:
     - section_end setup
     - section_start smoke_args "Checking WASM browser smoke QEMU arguments"
     - node scripts/ci/wasm-node-preflight-test.mjs
+    - node scripts/ci/wasm-browser-memory-probe-runner-test.mjs
     - node scripts/ci/wasm-browser-smoke-args-test.mjs
     - node scripts/ci/wasm-browser-smoke-runner-test.mjs
     - section_end smoke_args

@@ -805,6 +805,9 @@ The underlying command shape is::
   the result to a CI artifact.  The result now records runner metadata,
   including the selected Playwright browser name, browser version, requested
   pages, ``--memory64`` setting, and timeout.
+  ``scripts/ci/wasm-browser-memory-probe-runner-test.mjs`` covers the
+  runner's pure page-list parsing, probe URL generation, and result-annotation
+  helpers so CI can catch contract regressions before launching Playwright.
 * A Playwright ``v1.56.1`` browser matrix tested 1, 2, 3, 4, 6, 8, 16, and
   32 GiB equivalent page counts for shared and unshared memories.  All tested
   browsers reported ``crossOriginIsolated: true``.  HeadlessChrome
@@ -1206,6 +1209,7 @@ Scope:
 
 Touches:
   ``scripts/ci/wasm-browser-memory-probe-runner.mjs``,
+  ``scripts/ci/wasm-browser-memory-probe-runner-test.mjs``,
   ``.gitlab-ci.d/buildtest.yml``, and documentation.
 
 Proof:
@@ -1213,7 +1217,9 @@ Proof:
   the isolated probe server, drives a Playwright browser, prints JSON with
   browser runner metadata, and can save the JSON as a CI artifact.  Local
   Playwright runs recorded Chromium, Firefox, and WebKit behavior for
-  default-address memory and ``address: "i64"`` memory.
+  default-address memory and ``address: "i64"`` memory.  The deterministic
+  Node helper test verifies the page-list parser, generated probe URL, and
+  runner metadata shape without requiring Playwright.
 
 Non-goals:
   No guarantee that constructor success proves QEMU boot success in the same
