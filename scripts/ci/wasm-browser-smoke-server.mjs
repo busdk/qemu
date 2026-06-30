@@ -26,6 +26,8 @@ function usage(status) {
 Options:
   --artifact-dir DIR  Directory containing qemu-system-*.js/.wasm artifacts
   --firmware-dir DIR  Directory containing qboot.rom and linuxboot_dma.bin
+  --harness-self-test
+                     Serve only the browser display/input harness proof page
   --host HOST         Bind address (default: 127.0.0.1)
   --initrd FILE       Smoke initramfs image
   --kernel FILE       64-bit Linux bzImage
@@ -41,6 +43,7 @@ function parseArgs(argv) {
   const options = {
     artifactDir: null,
     firmwareDir: "pc-bios",
+    harnessSelfTest: false,
     host: "127.0.0.1",
     initrd: null,
     kernel: null,
@@ -55,6 +58,8 @@ function parseArgs(argv) {
       options.artifactDir = argv[++i];
     } else if (arg === "--firmware-dir") {
       options.firmwareDir = argv[++i];
+    } else if (arg === "--harness-self-test") {
+      options.harnessSelfTest = true;
     } else if (arg === "--host") {
       options.host = argv[++i];
     } else if (arg === "--initrd") {
@@ -75,15 +80,15 @@ function parseArgs(argv) {
     }
   }
 
-  if (options.artifactDir === null) {
+  if (!options.harnessSelfTest && options.artifactDir === null) {
     console.error("--artifact-dir is required");
     usage(2);
   }
-  if (options.kernel === null) {
+  if (!options.harnessSelfTest && options.kernel === null) {
     console.error("--kernel is required");
     usage(2);
   }
-  if (options.initrd === null && options.rootfs === null) {
+  if (!options.harnessSelfTest && options.initrd === null && options.rootfs === null) {
     console.error("either --initrd or --rootfs is required");
     usage(2);
   }
@@ -94,10 +99,11 @@ function parseArgs(argv) {
 
   return {
     ...options,
-    artifactDir: resolve(options.artifactDir),
+    artifactDir: options.artifactDir === null ? null : resolve(options.artifactDir),
     firmwareDir: resolve(options.firmwareDir),
+    harnessSelfTest: options.harnessSelfTest,
     initrd: options.initrd === null ? null : resolve(options.initrd),
-    kernel: resolve(options.kernel),
+    kernel: options.kernel === null ? null : resolve(options.kernel),
     rootfs: options.rootfs === null ? null : resolve(options.rootfs),
   };
 }
@@ -138,12 +144,15 @@ function routeFile(options, scriptDir, pathname) {
     ["/", join(scriptDir, "wasm-browser-smoke.html")],
     ["/wasm-browser-smoke.html", join(scriptDir, "wasm-browser-smoke.html")],
     ["/wasm-browser-smoke.mjs", join(scriptDir, "wasm-browser-smoke.mjs")],
-    ["/artifacts/qemu-system-x86_64.wasm", join(options.artifactDir, "qemu-system-x86_64.wasm")],
-    [`/artifacts/${basename(options.program)}`, join(options.artifactDir, basename(options.program))],
-    ["/guest/kernel", options.kernel],
-    ["/firmware/qboot.rom", join(options.firmwareDir, "qboot.rom")],
-    ["/firmware/linuxboot_dma.bin", join(options.firmwareDir, "linuxboot_dma.bin")],
   ]);
+  if (options.harnessSelfTest) {
+    return routes.get(pathname);
+  }
+  routes.set("/artifacts/qemu-system-x86_64.wasm", join(options.artifactDir, "qemu-system-x86_64.wasm"));
+  routes.set(`/artifacts/${basename(options.program)}`, join(options.artifactDir, basename(options.program)));
+  routes.set("/guest/kernel", options.kernel);
+  routes.set("/firmware/qboot.rom", join(options.firmwareDir, "qboot.rom"));
+  routes.set("/firmware/linuxboot_dma.bin", join(options.firmwareDir, "linuxboot_dma.bin"));
   for (const name of OPTIONAL_FIRMWARE_FILES) {
     const path = join(options.firmwareDir, name);
     if (isReadable(path)) {
@@ -162,20 +171,27 @@ function routeFile(options, scriptDir, pathname) {
 const options = parseArgs(process.argv.slice(2));
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
-requireReadable(join(options.artifactDir, basename(options.program)), "program");
-requireReadable(join(options.artifactDir, "qemu-system-x86_64.wasm"), "wasm module");
-requireReadable(options.kernel, "kernel");
-if (options.initrd !== null) {
-  requireReadable(options.initrd, "initrd");
+if (!options.harnessSelfTest) {
+  requireReadable(join(options.artifactDir, basename(options.program)), "program");
+  requireReadable(join(options.artifactDir, "qemu-system-x86_64.wasm"), "wasm module");
+  requireReadable(options.kernel, "kernel");
+  if (options.initrd !== null) {
+    requireReadable(options.initrd, "initrd");
+  }
+  if (options.rootfs !== null) {
+    requireReadable(options.rootfs, "rootfs");
+  }
+  requireReadable(join(options.firmwareDir, "qboot.rom"), "qboot firmware");
+  requireReadable(join(options.firmwareDir, "linuxboot_dma.bin"), "linuxboot firmware");
 }
-if (options.rootfs !== null) {
-  requireReadable(options.rootfs, "rootfs");
-}
-requireReadable(join(options.firmwareDir, "qboot.rom"), "qboot firmware");
-requireReadable(join(options.firmwareDir, "linuxboot_dma.bin"), "linuxboot firmware");
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url, `http://${options.host}:${options.port}`);
+  if (url.pathname === "/favicon.ico") {
+    response.writeHead(204);
+    response.end();
+    return;
+  }
   const file = routeFile(options, scriptDir, url.pathname);
 
   response.setHeader("Cross-Origin-Opener-Policy", "same-origin");

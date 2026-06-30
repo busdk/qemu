@@ -35,6 +35,14 @@ function numberOption(name, fallback) {
   return value;
 }
 
+function nonNegativeNumberOption(name, fallback) {
+  const value = Number(option(name, String(fallback)));
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${name} must be a non-negative integer`);
+  }
+  return value;
+}
+
 function text(id) {
   return document.getElementById(id);
 }
@@ -487,6 +495,8 @@ function buildConfig() {
     expectText: listOption("expectText"),
     expectedResolution: option("expectedResolution", ""),
     focusDisplay: boolOption("focusDisplay", false),
+    harnessExpectedKeyEvents: nonNegativeNumberOption("harnessExpectedKeyEvents", 0),
+    harnessSelfTest: boolOption("harnessSelfTest", false),
     initrd: pathOption("initrd", "/guest/initramfs.cpio.gz"),
     kernel: option("kernel", "/guest/kernel"),
     kernelAppend: option("kernelAppend", null),
@@ -505,6 +515,27 @@ function buildConfig() {
     visualMarker: option("visualMarker", ""),
     wasm: option("wasm", "/artifacts/qemu-system-x86_64.wasm"),
   };
+}
+
+function drawHarnessSelfTestFrame(canvas) {
+  canvas.width = 64;
+  canvas.height = 32;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    throw new Error("2D canvas context is not available for harness self-test");
+  }
+  context.fillStyle = "rgb(0, 0, 0)";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "rgb(255, 0, 0)";
+  context.fillRect(0, 0, 16, 16);
+  context.fillStyle = "rgb(0, 255, 0)";
+  context.fillRect(16, 0, 16, 16);
+  context.fillStyle = "rgb(0, 0, 255)";
+  context.fillRect(32, 0, 16, 16);
+  context.fillStyle = "rgb(255, 255, 255)";
+  context.fillRect(48, 0, 16, 16);
+  context.fillStyle = "rgb(255, 255, 0)";
+  context.fillRect(0, 16, 64, 4);
 }
 
 async function run() {
@@ -591,6 +622,17 @@ async function run() {
     canvas.hidden = true;
     canvas.setAttribute("aria-hidden", "true");
   }
+
+  if (config.harnessSelfTest) {
+    if (!["sdl", "wasm"].includes(config.display)) {
+      throw new Error("harnessSelfTest requires display=sdl or display=wasm");
+    }
+    if (config.focusDisplay) {
+      canvas.focus();
+      smokeState.display.focused = document.activeElement === canvas;
+    }
+  }
+
   const mounts = [
     { url: config.kernel, path: "/kernel" },
     { url: config.qboot, path: "/firmware/qboot.rom" },
@@ -616,6 +658,38 @@ async function run() {
   }
   if (typeof SharedArrayBuffer === "undefined") {
     throw new Error("SharedArrayBuffer is not available");
+  }
+
+  if (config.harnessSelfTest) {
+    const keyEvents = [];
+    const timeout = setTimeout(() => {
+      setPhase(
+        "timeout",
+        `timeout waiting for harness key events: ${config.harnessExpectedKeyEvents}`,
+      );
+    }, config.timeoutMs);
+    qemuKeySink = (linuxKey, down) => {
+      keyEvents.push({ linuxKey, down: Boolean(down) });
+      smokeState.display.harnessKeyEvents = keyEvents;
+      smokeState.display.harnessKeyEventCount = keyEvents.length;
+      if (keyEvents.length >= config.harnessExpectedKeyEvents) {
+        smokeState.markerSeen = true;
+        clearTimeout(timeout);
+        setPhase("success", `marker reached: ${config.marker}`);
+      }
+    };
+    drawHarnessSelfTestFrame(canvas);
+    smokeState.display.canvasWidth = canvas.width;
+    smokeState.display.canvasHeight = canvas.height;
+    smokeState.display.harnessSelfTest = true;
+    smokeState.display.harnessExpectedKeyEvents = config.harnessExpectedKeyEvents;
+    setPhase("harness-self-test", "browser harness self-test ready");
+    if (config.harnessExpectedKeyEvents === 0) {
+      smokeState.markerSeen = true;
+      clearTimeout(timeout);
+      setPhase("success", `marker reached: ${config.marker}`);
+    }
+    return;
   }
 
   const timeout = setTimeout(() => {

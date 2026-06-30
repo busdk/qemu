@@ -207,7 +207,7 @@ browser MVP. Keep Bus Engine product work downstream.
   display path that receives QEMU surface updates from the selected emulated
   display device and renders them into a browser canvas or equivalent 2D
   browser surface, with no guest-specific assumptions.
-- [ ] Add deterministic display harness coverage: DoD is a non-guest or tiny
+- [x] Add deterministic display harness coverage: DoD is a non-guest or tiny
   guest test path that produces a known visual frame, captures the browser
   canvas output, and compares stable pixels or a stable image hash while
   preserving the screenshot artifact on failure.
@@ -216,7 +216,7 @@ browser MVP. Keep Bus Engine product work downstream.
   Enter, Backspace, Tab, Escape, arrows, and function keys to the selected QEMU
   input path, and avoids stealing browser shortcuts that cannot safely be
   captured.
-- [ ] Add deterministic keyboard harness coverage: DoD is a browser test that
+- [x] Add deterministic keyboard harness coverage: DoD is a browser test that
   focuses the emulator surface, sends a known key sequence through Playwright
   or an equivalent runner, and observes the expected guest-visible response
   through serial output, display output, or a structured test hook.

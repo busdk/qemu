@@ -250,6 +250,45 @@ for (const status of [
 }
 
 {
+  const url = browserSmokeUrl({
+    allowSerialFallback: true,
+    appendExtra: "",
+    cpu: "Nehalem",
+    display: "wasm",
+    displayDevice: "default",
+    expectedResolution: "",
+    expectText: [],
+    focusDisplay: true,
+    harnessExpectedKeyEvents: 6,
+    harnessSelfTest: true,
+    host: "127.0.0.1",
+    initrd: null,
+    keyboardAfterText: "",
+    keyboardText: "ab\n",
+    idleAfterText: "",
+    kernelAppend: null,
+    machine: "microvm,acpi=off",
+    marker: "QEMU_WASM_BROWSER_HARNESS_OK",
+    maxOutputBytes: 60000,
+    memory: "512M",
+    network: "none",
+    port: 8010,
+    qemuArgs: [],
+    rootfs: null,
+    rootfsDevice: "virtio-mmio",
+    timeoutMs: 30000,
+    visualMarker: "",
+  });
+
+  assert.equal(url.searchParams.get("harnessSelfTest"), "1");
+  assert.equal(url.searchParams.get("harnessExpectedKeyEvents"), "6");
+  assert.equal(url.searchParams.get("display"), "wasm");
+  assert.equal(url.searchParams.get("focusDisplay"), "1");
+  assert.equal(url.searchParams.get("initrd"), "");
+  assert.equal(url.searchParams.has("rootfs"), false);
+}
+
+{
   const result = initialSmokeResult({
     allowSerialFallback: false,
     appendExtra: "ignore_loglevel",
@@ -258,8 +297,11 @@ for (const status of [
     display: "sdl",
     displayDevice: "virtio-gpu-pci",
     expectedResolution: "800x600",
+    expectDisplayHash: "fnv1a32:2a8cd5c5",
     expectText: ["Example Linux"],
     focusDisplay: true,
+    harnessExpectedKeyEvents: 6,
+    harnessSelfTest: true,
     keyboardAfterText: "login:",
     keyboardText: "uname -a\n",
     idleAfterText: "",
@@ -289,7 +331,10 @@ for (const status of [
   assert.equal(result.display, "sdl");
   assert.equal(result.displayDevice, "virtio-gpu-pci");
   assert.equal(result.expectedResolution, "800x600");
+  assert.equal(result.expectDisplayHash, "fnv1a32:2a8cd5c5");
   assert.equal(result.focusDisplay, true);
+  assert.equal(result.harnessExpectedKeyEvents, 6);
+  assert.equal(result.harnessSelfTest, true);
   assert.equal(result.keyboardAfterText, "login:");
   assert.equal(result.keyboardTextLength, "uname -a\n".length);
   assert.equal(result.network, "none");

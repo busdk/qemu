@@ -38,11 +38,18 @@ Options:
                      virtio-vga, or virtio-gpu-pci
   --expected-resolution WIDTHxHEIGHT
                      Expected browser canvas resolution metadata
+  --expect-display-hash HASH
+                     Require an exact display pixel hash
   --expect-text TEXT  Additional output text required for success
   --focus-display    Focus the browser display surface before QEMU starts
   --firmware-dir DIR  Directory containing qboot.rom and linuxboot_dma.bin
   --guest-manifest FILE
                      JSON file with guest and runner defaults
+  --harness-self-test
+                     Run deterministic browser display/input harness proof
+                     without launching QEMU
+  --harness-expected-key-events N
+                     Expected delivered key events in --harness-self-test
   --host HOST         Bind address for the local smoke server
   --idle-timeout-ms MS
                      Fail when serial output is idle for this long
@@ -112,10 +119,13 @@ function parseArgs(argv) {
     display: "none",
     displayDevice: "default",
     expectedResolution: "",
+    expectDisplayHash: "",
     expectText: [],
     focusDisplay: false,
     firmwareDir: "pc-bios",
     guestManifest: null,
+    harnessExpectedKeyEvents: 0,
+    harnessSelfTest: false,
     host: "127.0.0.1",
     idleAfterText: "",
     idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
@@ -171,6 +181,9 @@ function parseArgs(argv) {
     } else if (arg === "--expected-resolution") {
       options.expectedResolution = argv[++i];
       explicit.add("expectedResolution");
+    } else if (arg === "--expect-display-hash") {
+      options.expectDisplayHash = argv[++i];
+      explicit.add("expectDisplayHash");
     } else if (arg === "--expect-text") {
       options.expectText.push(argv[++i]);
       explicit.add("expectText");
@@ -182,6 +195,12 @@ function parseArgs(argv) {
       explicit.add("firmwareDir");
     } else if (arg === "--guest-manifest") {
       options.guestManifest = argv[++i];
+    } else if (arg === "--harness-expected-key-events") {
+      options.harnessExpectedKeyEvents = Number(argv[++i]);
+      explicit.add("harnessExpectedKeyEvents");
+    } else if (arg === "--harness-self-test") {
+      options.harnessSelfTest = true;
+      explicit.add("harnessSelfTest");
     } else if (arg === "--host") {
       options.host = argv[++i];
       explicit.add("host");
@@ -281,6 +300,7 @@ function parseArgs(argv) {
     booleanFields: [
       "allowSerialFallback",
       "focusDisplay",
+      "harnessSelfTest",
       "requireDisplayOutput",
       "screenshotFullPage",
     ],
@@ -288,6 +308,7 @@ function parseArgs(argv) {
     integerFields: [
       "maxOutputBytes",
       "displayMinNonblackPixels",
+      "harnessExpectedKeyEvents",
       "idleTimeoutMs",
       "pageTextTailBytes",
       "port",
@@ -312,6 +333,7 @@ function parseArgs(argv) {
       "display",
       "displayDevice",
       "expectedResolution",
+      "expectDisplayHash",
       "firmwareDir",
       "host",
       "idleAfterText",
@@ -334,16 +356,35 @@ function parseArgs(argv) {
     stringListFields: ["expectText", "qemuArgs"],
   });
 
-  if (options.artifactDir === null) {
+  if (options.harnessSelfTest) {
+    if (!explicit.has("display")) {
+      options.display = "wasm";
+    }
+    if (!explicit.has("focusDisplay")) {
+      options.focusDisplay = true;
+    }
+    if (!explicit.has("marker")) {
+      options.marker = "QEMU_WASM_BROWSER_HARNESS_OK";
+    }
+    if (!explicit.has("requireDisplayOutput")) {
+      options.requireDisplayOutput = true;
+    }
+  }
+
+  if (!options.harnessSelfTest && options.artifactDir === null) {
     console.error("--artifact-dir is required");
     usage(2);
   }
-  if (options.kernel === null) {
+  if (!options.harnessSelfTest && options.kernel === null) {
     console.error("--kernel is required");
     usage(2);
   }
-  if (options.initrd === null && options.rootfs === null) {
+  if (!options.harnessSelfTest && options.initrd === null && options.rootfs === null) {
     console.error("either --initrd or --rootfs is required");
+    usage(2);
+  }
+  if (!Number.isInteger(options.harnessExpectedKeyEvents) || options.harnessExpectedKeyEvents < 0) {
+    console.error("--harness-expected-key-events must be a non-negative integer");
     usage(2);
   }
   if (!Number.isInteger(options.port) || options.port <= 0 || options.port > 65535) {
@@ -414,6 +455,10 @@ function parseArgs(argv) {
   }
   if (options.requireDisplayOutput && !["sdl", "wasm"].includes(options.display)) {
     console.error("--require-display-output requires --display sdl or --display wasm");
+    usage(2);
+  }
+  if (options.harnessSelfTest && !["sdl", "wasm"].includes(options.display)) {
+    console.error("--harness-self-test requires --display sdl or --display wasm");
     usage(2);
   }
   if (!["none", "default"].includes(options.network)) {
@@ -572,19 +617,25 @@ function startServer(options) {
   const serverScript = resolve(scriptDir, "wasm-browser-smoke-server.mjs");
   const args = [
     serverScript,
-    "--artifact-dir",
-    options.artifactDir,
-    "--firmware-dir",
-    options.firmwareDir,
     "--host",
     options.host,
-    "--kernel",
-    options.kernel,
     "--port",
     String(options.port),
-    "--program",
-    options.program,
   ];
+  if (options.harnessSelfTest) {
+    args.push("--harness-self-test");
+  } else {
+    args.push(
+      "--artifact-dir",
+      options.artifactDir,
+      "--firmware-dir",
+      options.firmwareDir,
+      "--kernel",
+      options.kernel,
+      "--program",
+      options.program,
+    );
+  }
   if (options.initrd !== null) {
     args.push("--initrd", options.initrd);
   }
@@ -812,6 +863,10 @@ export function browserSmokeUrl(options) {
   url.searchParams.set("displayDevice", options.displayDevice);
   url.searchParams.set("expectedResolution", options.expectedResolution);
   url.searchParams.set("focusDisplay", options.focusDisplay ? "1" : "0");
+  if (options.harnessSelfTest) {
+    url.searchParams.set("harnessExpectedKeyEvents", String(options.harnessExpectedKeyEvents));
+    url.searchParams.set("harnessSelfTest", "1");
+  }
   url.searchParams.set("marker", options.marker);
   url.searchParams.set("maxOutputBytes", String(options.maxOutputBytes));
   url.searchParams.set("memory", options.memory);
@@ -849,8 +904,11 @@ export function initialSmokeResult(options, browserVersion) {
     display: options.display,
     displayDevice: options.displayDevice,
     expectedResolution: options.expectedResolution,
+    expectDisplayHash: options.expectDisplayHash,
     expectText: options.expectText,
     focusDisplay: options.focusDisplay,
+    harnessExpectedKeyEvents: options.harnessExpectedKeyEvents || 0,
+    harnessSelfTest: Boolean(options.harnessSelfTest),
     keyboardAfterText: options.keyboardAfterText,
     keyboardTextLength: options.keyboardText.length,
     kernelAppend: options.kernelAppend,
@@ -1026,6 +1084,11 @@ function validateDisplayEvidence(options, result) {
       `expected at least ${options.displayMinNonblackPixels}`,
     );
   }
+  if (options.expectDisplayHash !== "" && evidence.hash !== options.expectDisplayHash) {
+    throw new Error(
+      `required display hash was ${evidence.hash}; expected ${options.expectDisplayHash}`,
+    );
+  }
 }
 
 async function sampleSmokeProgress(page, result, startTime, reason, limit) {
@@ -1068,7 +1131,7 @@ async function typeKeyboardText(page, options, result) {
         return false;
       }
       if (afterText === "") {
-        return ["start-qemu", "guest-boot", "success"].includes(state.phase);
+        return ["harness-self-test", "start-qemu", "guest-boot", "success"].includes(state.phase);
       }
       const output = document.querySelector("#output")?.textContent || "";
       return output.includes(afterText);

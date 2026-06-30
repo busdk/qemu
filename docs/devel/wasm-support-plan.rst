@@ -2677,9 +2677,23 @@ Current status:
   and ``build/wasm-browser-proof-current/wasm-display-keyboard-hook-page.png``.
   The result recorded ``12`` delivered key events through the focused browser
   canvas and exported QEMU input hook, plus ``2157`` non-black display pixels.
-  This proves browser-to-QEMU key delivery metadata.  Deterministic tiny-guest
-  pixel comparison and a guest-visible keyboard response proof remain separate
-  follow-up tasks.
+  This proves browser-to-QEMU key delivery metadata.
+
+  Deterministic browser harness coverage now exercises the same focusable
+  display surface without launching QEMU.  A Chromium ``141.0.7390.37`` run
+  used ``--harness-self-test``, ``--display wasm``, ``--keyboard-text
+  'ab\n'``, ``--harness-expected-key-events 6``, and ``--expect-display-hash
+  fnv1a32:2a8cd5c5``.  It wrote
+  ``/tmp/qemu-wasm-harness-proof/harness-self-test-hash-result.json`` and
+  ``/tmp/qemu-wasm-harness-proof/harness-self-test-hash-page.png``.  The
+  browser captured a ``64x32`` 2D canvas, stable pixel hash
+  ``fnv1a32:2a8cd5c5``, ``1280`` non-black pixels, ``2048``
+  non-transparent pixels, and six structured key events:
+  ``KeyA`` down/up as Linux key ``30``, ``KeyB`` down/up as Linux key ``48``,
+  and Enter down/up as Linux key ``28``.  This closes the deterministic
+  display and keyboard harness coverage gaps while keeping generic Linux and
+  downstream Bus Engine OS graphical/input boot proofs as separate follow-up
+  tasks.
 
 Non-goals:
   No WebGPU, accelerated 3D, or full desktop support.
