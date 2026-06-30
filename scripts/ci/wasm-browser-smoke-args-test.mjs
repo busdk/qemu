@@ -17,6 +17,8 @@ function baseConfig(overrides = {}) {
   return {
     appendExtra: "",
     cpu: "Nehalem",
+    display: "none",
+    focusDisplay: false,
     initrd: "/guest/initramfs.cpio.gz",
     kernelAppend: null,
     machine: "microvm,acpi=off",
@@ -42,11 +44,24 @@ function valueAfter(args, option) {
   assert.equal(valueAfter(args, "-M"), "microvm,acpi=off");
   assert.equal(valueAfter(args, "-m"), "512M");
   assert.equal(valueAfter(args, "-cpu"), "Nehalem");
+  assert.equal(valueAfter(args, "-serial"), "mon:stdio");
   assert.equal(valueAfter(args, "-initrd"), "/initramfs.cpio.gz");
   assert.equal(valueAfter(args, "-L"), "/firmware");
   assert.equal(valueAfter(args, "-nic"), "none");
+  assert.equal(args.includes("-nographic"), true);
+  assert.equal(args.includes("-display"), false);
   assert.ok(valueAfter(args, "-append").includes("rdinit=/init"));
   assert.equal(args.includes("-drive"), false);
+}
+
+{
+  const args = qemuArgs(baseConfig({ display: "sdl" }));
+
+  assert.equal(args.includes("-nographic"), false);
+  assert.equal(valueAfter(args, "-display"), "sdl,gl=off");
+  assert.equal(valueAfter(args, "-serial"), "mon:stdio");
+  assert.equal(valueAfter(args, "-monitor"), "none");
+  assert.equal(valueAfter(args, "-nic"), "none");
 }
 
 {

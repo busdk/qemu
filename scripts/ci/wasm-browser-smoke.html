@@ -25,11 +25,28 @@
         padding: 1rem;
         white-space: pre-wrap;
       }
+      #display {
+        background: #000;
+        border: 1px solid #444;
+        display: block;
+        height: auto;
+        image-rendering: pixelated;
+        margin: 1rem 0;
+        max-width: 100%;
+        outline: 2px solid transparent;
+      }
+      #display:focus {
+        outline-color: #3677ff;
+      }
+      #display[hidden] {
+        display: none;
+      }
     </style>
   </head>
   <body>
     <h1>QEMU WebAssembly smoke test</h1>
     <p id="status">initializing</p>
+    <canvas id="display" width="640" height="480" tabindex="0" hidden aria-label="QEMU graphical display"></canvas>
     <pre id="output" aria-live="polite"></pre>
     <script type="module" src="./wasm-browser-smoke.mjs"></script>
   </body>

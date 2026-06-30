@@ -29,7 +29,9 @@ Options:
   --artifact-dir DIR  Directory containing qemu-system-*.js/.wasm artifacts
   --browser NAME      Browser engine to launch (default: chromium)
   --cpu MODEL         Guest CPU model passed to QEMU
+  --display MODE     Browser display mode: none or sdl (default: none)
   --expect-text TEXT  Additional output text required for success
+  --focus-display    Focus the browser display surface before QEMU starts
   --firmware-dir DIR  Directory containing qboot.rom and linuxboot_dma.bin
   --guest-manifest FILE
                      JSON file with guest and runner defaults
@@ -78,7 +80,9 @@ function parseArgs(argv) {
     artifactDir: null,
     browser: "chromium",
     cpu: "Nehalem",
+    display: "none",
     expectText: [],
+    focusDisplay: false,
     firmwareDir: "pc-bios",
     guestManifest: null,
     host: "127.0.0.1",
@@ -121,9 +125,15 @@ function parseArgs(argv) {
     } else if (arg === "--cpu") {
       options.cpu = argv[++i];
       explicit.add("cpu");
+    } else if (arg === "--display") {
+      options.display = argv[++i];
+      explicit.add("display");
     } else if (arg === "--expect-text") {
       options.expectText.push(argv[++i]);
       explicit.add("expectText");
+    } else if (arg === "--focus-display") {
+      options.focusDisplay = true;
+      explicit.add("focusDisplay");
     } else if (arg === "--firmware-dir") {
       options.firmwareDir = argv[++i];
       explicit.add("firmwareDir");
@@ -207,7 +217,7 @@ function parseArgs(argv) {
   }
 
   applyGuestManifest(options, explicit, {
-    booleanFields: ["screenshotFullPage"],
+    booleanFields: ["focusDisplay", "screenshotFullPage"],
     checksumFields: ["kernel", "initrd", "rootfs"],
     integerFields: [
       "maxOutputBytes",
@@ -232,6 +242,7 @@ function parseArgs(argv) {
       "artifactDir",
       "browser",
       "cpu",
+      "display",
       "firmwareDir",
       "host",
       "idleAfterText",
@@ -293,6 +304,10 @@ function parseArgs(argv) {
   }
   if (!["virtio-mmio", "virtio-pci"].includes(options.rootfsDevice)) {
     console.error("--rootfs-device must be virtio-mmio or virtio-pci");
+    usage(2);
+  }
+  if (!["none", "sdl"].includes(options.display)) {
+    console.error("--display must be none or sdl");
     usage(2);
   }
   if (!["none", "default"].includes(options.network)) {
@@ -617,6 +632,8 @@ export function browserSmokeUrl(options) {
   const url = new URL(`http://${options.host}:${options.port}/`);
   url.searchParams.set("appendExtra", options.appendExtra);
   url.searchParams.set("cpu", options.cpu);
+  url.searchParams.set("display", options.display);
+  url.searchParams.set("focusDisplay", options.focusDisplay ? "1" : "0");
   url.searchParams.set("marker", options.marker);
   url.searchParams.set("maxOutputBytes", String(options.maxOutputBytes));
   url.searchParams.set("memory", options.memory);
@@ -649,7 +666,9 @@ export function initialSmokeResult(options, browserVersion) {
     browser: options.browser,
     browserVersion,
     cpu: options.cpu,
+    display: options.display,
     expectText: options.expectText,
+    focusDisplay: options.focusDisplay,
     kernelAppend: options.kernelAppend,
     machine: options.machine,
     maxDiagnosticEntries: MAX_DIAGNOSTIC_ENTRIES,

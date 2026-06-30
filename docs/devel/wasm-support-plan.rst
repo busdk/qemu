@@ -12,11 +12,13 @@ refine the implementation plan from evidence.
 The target MVP is a browser-hosted QEMU system emulator that can boot a
 64-bit Linux guest, including Bus Engine OS, through modern browser APIs.  The
 downstream Bus Engine acceptance target is a browser-runnable Bus Engine OS
-console/demo that can be embedded on ``busdk.com/engine/`` as a
-screenshot-like or live-preview item.  The QEMU work remains generic and
-product-neutral.  The MVP is console-first and does not require WebGPU, a
-graphical desktop, production networking, or durable browser storage.  The
-experimental
+demo with serial diagnostics, visible graphics, and keyboard input that can be
+embedded on ``busdk.com/engine/`` as a screenshot-like or live-preview item.
+The QEMU work remains generic and product-neutral.  The accepted console boot
+proof remains the regression gate, but the active browser MVP expansion now
+includes a basic 2D graphics path and keyboard input.  The MVP does not
+require WebGPU, accelerated 3D, production networking, or durable browser
+storage.  The experimental
 ``ktock/qemu-wasm`` code is research material only; the upstreamable work must
 be designed as native QEMU support rather than importing the fork wholesale.
 
@@ -60,8 +62,8 @@ reviewable, incremental patches and developer documentation that:
   SharedArrayBuffer, and cross-origin isolation headers;
 * includes a staged path from TCI-only support to a native WebAssembly TCG
   backend;
-* describes the later path for browser graphics, networking, persistence, and
-  QMP integration without making them MVP requirements;
+* describes the active browser graphics/input MVP expansion and the later path
+  for networking, persistence, WebGPU, accelerated 3D, and QMP integration;
 * implements settled MVP infrastructure only when it has a local proof,
   repeatable command, or CI-shaped test;
 * records browser/runtime limits and failure modes with the tested runtime
@@ -2471,36 +2473,48 @@ Proof:
 Non-goals:
   No production networking promise.
 
-WASM-031: Document serial-only graphics boundary
-------------------------------------------------
+WASM-031: Add opt-in browser SDL/canvas harness path
+----------------------------------------------------
 
 Scope:
-  State that MVP has no framebuffer or desktop graphics.
+  Add an opt-in browser display mode that exposes a focusable canvas to the
+  Emscripten module while preserving the serial-console boot marker path.
 
 Touches:
-  Documentation only.
+  ``scripts/ci/wasm-browser-smoke.html``,
+  ``scripts/ci/wasm-browser-smoke.mjs``,
+  ``scripts/ci/wasm-browser-smoke-runner.mjs``,
+  ``scripts/ci/wasm-browser-smoke-args-test.mjs``, and
+  ``scripts/ci/wasm-browser-smoke-runner-test.mjs``.
 
 Proof:
-  No MVP test uses WebGPU, Canvas graphics, VGA, or virtio-gpu.
+  Deterministic Node tests verify that the default browser smoke command still
+  uses ``display=none`` with ``-nographic`` and ``-serial mon:stdio``, while
+  opt-in ``display=sdl`` removes ``-nographic``, adds
+  ``-display sdl,gl=off``, exposes a canvas, and keeps serial output available
+  for the boot marker.
 
 Non-goals:
-  No graphical support in MVP.
+  No claim that a guest has rendered a frame until a Chrome/Chromium graphics
+  proof captures the canvas output.
 
-WASM-032: Design framebuffer-to-canvas path
--------------------------------------------
+WASM-032: Prove framebuffer-to-canvas display output
+----------------------------------------------------
 
 Scope:
-  Plan the first graphical milestone after MVP.
+  Prove that the selected QEMU display path can produce browser-visible 2D
+  output in Chrome/Chromium.
 
 Touches:
-  Design docs.
+  Browser smoke harness, QEMU display arguments, and result artifacts.
 
 Proof:
-  The design distinguishes simple framebuffer presentation from accelerated
-  virtio-gpu/WebGPU research.
+  A generic Linux or tiny graphical guest produces a stable visible marker on
+  the browser canvas, the harness captures screenshot evidence, and the
+  existing serial marker still proves the guest boot path.
 
 Non-goals:
-  No WebGPU implementation.
+  No WebGPU, accelerated 3D, or full desktop support.
 
 WASM-033: Add license/source bundle checklist
 ---------------------------------------------
@@ -2757,16 +2771,20 @@ Acceptance:
 -------------------
 
 Scope:
-  Keep graphics out of the MVP while preserving a later path.
+  Add basic browser graphics and keyboard input to the MVP expansion while
+  keeping accelerated graphics as later work.
 
 Work items:
-  * MVP: serial console only.
-  * Later: framebuffer-to-canvas output.
-  * Later: 2D display backend suitable for simple graphical guests.
+  * Keep the serial console boot marker as the regression gate.
+  * MVP expansion: opt-in SDL/canvas display mode.
+  * MVP expansion: deterministic browser keyboard input path.
+  * MVP expansion: framebuffer or 2D display proof suitable for simple
+    graphical guests.
   * Research: WebGPU-backed acceleration and virtio-gpu integration.
 
 Acceptance:
-  No MVP acceptance test depends on WebGPU or browser graphics.
+  Chrome/Chromium boots a 64-bit guest, preserves serial diagnostics, captures
+  browser-visible graphics, and accepts a deterministic keyboard sequence.
 
 11. Automated acceptance
 ------------------------

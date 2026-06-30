@@ -140,6 +140,12 @@ browser MVP. Keep Bus Engine product work downstream.
 
 ## Interactive Browser MVP Expansion
 
+- [x] Add an opt-in browser SDL/canvas harness path without weakening the
+  console boot gate: DoD is a `display=sdl` browser smoke mode that exposes a
+  focusable canvas to the Emscripten module, passes `-display sdl,gl=off`, and
+  preserves `-serial mon:stdio` so the existing console marker remains the
+  default success oracle; deterministic Node tests cover both the default
+  `display=none` `-nographic` path and the opt-in SDL path.
 - [ ] Define the generic browser graphics/input MVP boundary: DoD is a
   developer note that makes browser graphics and keyboard input part of the
   MVP expansion, keeps WebGPU and accelerated 3D out of scope, selects the

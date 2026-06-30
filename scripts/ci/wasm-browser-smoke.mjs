@@ -39,6 +39,17 @@ function text(id) {
   return document.getElementById(id);
 }
 
+function boolOption(name, fallback) {
+  const value = option(name, fallback ? "1" : "0").toLowerCase();
+  if (["1", "true", "yes", "on"].includes(value)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(value)) {
+    return false;
+  }
+  throw new Error(`${name} must be a boolean`);
+}
+
 function appendLine(target, line) {
   target.textContent += `${line}\n`;
   target.scrollTop = target.scrollHeight;
@@ -101,16 +112,18 @@ export function qemuArgs(config) {
   if (config.cpu) {
     args.push("-cpu", config.cpu);
   }
+  args.push("-accel", "tcg,thread=single");
+  if (config.display === "none") {
+    args.push("-nographic");
+  } else if (config.display === "sdl") {
+    args.push("-display", "sdl,gl=off");
+  } else {
+    throw new Error("display must be none or sdl");
+  }
   args.push(
-    "-accel",
-    "tcg,thread=single",
-    "-nographic",
-    "-serial",
-    "mon:stdio",
-    "-monitor",
-    "none",
-    "-kernel",
-    "/kernel",
+    "-serial", "mon:stdio",
+    "-monitor", "none",
+    "-kernel", "/kernel",
   );
   if (config.initrd) {
     args.push("-initrd", "/initramfs.cpio.gz");
@@ -203,7 +216,9 @@ function buildConfig() {
   return {
     appendExtra: option("appendExtra", ""),
     cpu: option("cpu", "Nehalem"),
+    display: option("display", "none"),
     expectText: listOption("expectText"),
+    focusDisplay: boolOption("focusDisplay", false),
     initrd: pathOption("initrd", "/guest/initramfs.cpio.gz"),
     kernel: option("kernel", "/guest/kernel"),
     kernelAppend: option("kernelAppend", null),
@@ -226,7 +241,11 @@ function buildConfig() {
 async function run() {
   const status = text("status");
   const output = text("output");
+  const canvas = text("display");
   const config = buildConfig();
+  if (!["none", "sdl"].includes(config.display)) {
+    throw new Error("display must be none or sdl");
+  }
   if (!["virtio-mmio", "virtio-pci"].includes(config.rootfsDevice)) {
     throw new Error("rootfsDevice must be virtio-mmio or virtio-pci");
   }
@@ -246,6 +265,11 @@ async function run() {
     startedAtMs: startTime,
     qemuArgs: generatedQemuArgs,
     runtime: browserRuntimeSnapshot(globalThis),
+    display: {
+      mode: config.display,
+      focused: false,
+      canvasPresent: Boolean(canvas),
+    },
     markerSeen: false,
     expectedTextSeen: config.expectText.map((text) => ({ text, seen: false })),
     lastLine: "",
@@ -262,6 +286,17 @@ async function run() {
     status.textContent = message;
   };
   setPhase("init", "initializing smoke harness");
+  if (config.display === "sdl") {
+    canvas.hidden = false;
+    canvas.setAttribute("aria-hidden", "false");
+    if (config.focusDisplay) {
+      canvas.focus();
+    }
+    smokeState.display.focused = document.activeElement === canvas;
+  } else {
+    canvas.hidden = true;
+    canvas.setAttribute("aria-hidden", "true");
+  }
   const mounts = [
     { url: config.kernel, path: "/kernel" },
     { url: config.qboot, path: "/firmware/qboot.rom" },
@@ -361,6 +396,7 @@ async function run() {
   setPhase("start-qemu", "starting QEMU");
   await moduleFactory({
     arguments: generatedQemuArgs,
+    canvas,
     locateFile(path) {
       if (path === "qemu-system-x86_64.wasm") {
         return wasmUrl.href;

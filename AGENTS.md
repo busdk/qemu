@@ -9,7 +9,8 @@ The active target is a 64-bit browser MVP:
 
 - Emscripten `wasm64` host builds.
 - `x86_64-softmmu` system emulation.
-- TCI console boot first.
+- TCI console boot must keep working as the regression gate.
+- Browser graphics and keyboard input are part of the active MVP expansion.
 - Native WebAssembly TCG later.
 - Browser execution through modern APIs with cross-origin isolation.
 - Chrome or Chromium as the first browser acceptance target. Treat Firefox
@@ -23,8 +24,9 @@ QEMU code.
 ## Boundary
 
 QEMU changes may provide generic build support, browser smoke harnesses,
-artifact manifests, serial-console proof paths, diagnostics, documentation,
-and future generic browser integration points.
+artifact manifests, serial-console proof paths, 2D browser display/input
+surfaces, diagnostics, documentation, and future generic browser integration
+points.
 
 Downstream Bus Engine work owns:
 
@@ -34,9 +36,10 @@ Downstream Bus Engine work owns:
 - product UI, commercial release, and support boundaries.
 
 The intended downstream acceptance shape is a browser-runnable Bus Engine OS
-console/demo that can appear on the Bus Engine product website as a
-screenshot-like or live-preview item. Upstream QEMU should only provide the
-generic WebAssembly emulator capability needed by that proof.
+demo with serial diagnostics, visible graphics, and keyboard input that can
+appear on the Bus Engine product website as a screenshot-like or live-preview
+item. Upstream QEMU should only provide the generic WebAssembly emulator
+capability needed by that proof.
 
 ## Evidence
 

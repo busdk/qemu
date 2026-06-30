@@ -100,7 +100,9 @@ for (const status of [
   const url = browserSmokeUrl({
     appendExtra: "ignore_loglevel",
     cpu: "Nehalem",
+    display: "sdl",
     expectText: ["Example Linux", "systemd 261.1"],
+    focusDisplay: true,
     host: "127.0.0.1",
     initrd: null,
     idleAfterText: "",
@@ -121,6 +123,8 @@ for (const status of [
   assert.equal(url.href, "http://127.0.0.1:8010/?" +
     "appendExtra=ignore_loglevel&" +
     "cpu=Nehalem&" +
+    "display=sdl&" +
+    "focusDisplay=1&" +
     "marker=QEMU_WASM_LINUX_BOOT_OK&" +
     "maxOutputBytes=60000&" +
     "memory=512M&" +
@@ -141,7 +145,9 @@ for (const status of [
   const url = browserSmokeUrl({
     appendExtra: "",
     cpu: "",
+    display: "none",
     expectText: [],
+    focusDisplay: false,
     host: "localhost",
     initrd: "/tmp/initramfs.cpio.gz",
     kernelAppend: null,
@@ -160,6 +166,8 @@ for (const status of [
   assert.equal(url.searchParams.has("initrd"), false);
   assert.equal(url.searchParams.has("rootfs"), false);
   assert.equal(url.searchParams.has("kernelAppend"), false);
+  assert.equal(url.searchParams.get("display"), "none");
+  assert.equal(url.searchParams.get("focusDisplay"), "0");
   assert.equal(url.searchParams.get("network"), "default");
 }
 
@@ -168,7 +176,9 @@ for (const status of [
     appendExtra: "ignore_loglevel",
     browser: "chromium",
     cpu: "Nehalem",
+    display: "sdl",
     expectText: ["Example Linux"],
+    focusDisplay: true,
     idleAfterText: "",
     kernelAppend: "console=ttyS0 root=/dev/vda rw",
     idleTimeoutMs: 0,
@@ -189,6 +199,8 @@ for (const status of [
   assert.equal(result.success, false);
   assert.equal(result.browser, "chromium");
   assert.equal(result.browserVersion, "HeadlessChrome/141.0.7390.37");
+  assert.equal(result.display, "sdl");
+  assert.equal(result.focusDisplay, true);
   assert.equal(result.network, "none");
   assert.equal(result.idleAfterText, "");
   assert.equal(result.idleTimeoutMs, 0);
