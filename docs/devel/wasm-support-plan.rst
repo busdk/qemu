@@ -419,11 +419,15 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   The original static-local-BusyBox output remains byte-for-byte stable at
   SHA-256
   ``2b666d118642bb24da2019f88b4019387fedc3e402803f84c06ebaa1c1ef2544``.
-  A dynamic TuxBoot archive made from extracted ``/bin/busybox``,
-  ``/lib/ld64-uClibc-1.0.45.so``, ``/lib/libuClibc-1.0.45.so``, and
-  ``/usr/lib/libtirpc.so.3.0.0`` plus the required symlinks was also
-  byte-for-byte reproducible, with SHA-256
-  ``977f68d80f25d1b0bc2ec6c24de6257c22fdc8ff63ad9c01b4ce2b89b3e2593d``.
+  The current helper-generated dynamic TuxBoot archive made from extracted
+  ``/bin/busybox``, ``/lib/ld64-uClibc-1.0.45.so``,
+  ``/lib/libuClibc-1.0.45.so``, and ``/usr/lib/libtirpc.so.3.0.0`` plus the
+  required symlinks has SHA-256
+  ``9f94a297a5da2399a3ffb06853779bb3b5ce4f398aaa3cfd5ced162ad17c885d``.
+  ``debugfs`` writes dumped files with host-created modes, so the helper
+  normalizes the BusyBox closure to executable ``0755`` modes before building
+  the initramfs.  Without that normalization, the kernel reaches ``Run /init``
+  but fails with ``EACCES`` before the marker.
 * The dynamic TuxBoot archive reached ``Run /init`` with QEMU's default CPU
   model, then trapped with an invalid opcode inside ``libuClibc-1.0.45.so``.
   This matched the need for the existing x86_64 TuxRun test's explicit
@@ -434,16 +438,47 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   implementation proof for ``WASM-017b``; an official CI job still needs the
   asset-fetch wiring that supplies the pinned TuxBoot kernel and rootfs files
   before invoking these scripts.
+* ``scripts/ci/wasm-prepare-tuxboot-smoke-guest.py`` now provides that
+  CI-shaped guest-preparation path.  It downloads or reuses the existing
+  x86_64 TuxBoot kernel and rootfs assets, verifies them against the SHA-256
+  values already pinned by ``tests/functional/x86_64/test_tuxrun.py``,
+  decompresses the rootfs with ``zstd``, extracts the dynamic BusyBox closure
+  with ``debugfs``, builds the deterministic initramfs, writes a JSON
+  manifest, and prints the matching ``wasm-linux-boot-smoke.mjs`` command.
+  A local no-download run using the cached TuxBoot assets wrote
+  ``/tmp/qemu-wasm-tuxboot-smoke-helper-proof3/tuxboot-smoke-guest.json``;
+  the printed boot command reached ``QEMU_WASM_LINUX_BOOT_OK`` under
+  ``node:24-alpine`` with the cleaned wasm64 TCI artifact.  This provides the
+  reusable command path for ``WASM-017c``.  The remaining ``WASM-017c`` work is
+  deciding where to place the GitLab CI job and cache policy.
 
-The preferred Node.js smoke wrapper invocation is::
+The preferred product-neutral smoke guest preparation path is::
+
+  python3 scripts/ci/wasm-prepare-tuxboot-smoke-guest.py \
+    --output-dir /tmp/qemu-wasm-tuxboot-smoke-guest \
+    --artifact-dir /artifacts \
+    --firmware-dir pc-bios
+
+For offline diagnostics with already cached assets, use::
+
+  python3 scripts/ci/wasm-prepare-tuxboot-smoke-guest.py \
+    --kernel /tmp/qemu-wasm-tuxboot-x86_64-bzImage \
+    --rootfs /tmp/qemu-wasm-tuxboot-x86_64-rootfs.ext4.zst \
+    --output-dir /tmp/qemu-wasm-tuxboot-smoke-guest \
+    --artifact-dir /artifacts \
+    --firmware-dir pc-bios \
+    --no-download
+
+The helper prints a command equivalent to::
 
   node scripts/ci/wasm-linux-boot-smoke.mjs \
     --artifact-dir /artifacts \
-    --kernel /host-boot/vmlinuz-7.1.0 \
-    --initrd /guest/initramfs.cpio.gz \
+    --cpu Nehalem \
+    --kernel /tmp/qemu-wasm-tuxboot-x86_64-bzImage \
+    --initrd /tmp/qemu-wasm-tuxboot-smoke-guest/tuxboot-smoke-initramfs.cpio.gz \
     --firmware-dir pc-bios
 
-The tiny initramfs can be generated with::
+For manual diagnostics only, a tiny local initramfs can be generated with::
 
   python3 scripts/ci/wasm-build-smoke-initramfs.py \
     --busybox /usr/bin/busybox \
@@ -1333,6 +1368,12 @@ Proof:
   and SHA-256, generates the dynamic initramfs, and reaches
   ``QEMU_WASM_LINUX_BOOT_OK`` under Node.js ``v24`` with the wasm64 TCI
   artifact.
+
+Current status:
+  ``scripts/ci/wasm-prepare-tuxboot-smoke-guest.py`` provides the reusable
+  command path and has reached the readiness marker under ``node:24-alpine``.
+  The remaining task is to decide and wire the actual GitLab CI job placement,
+  artifact dependency, and cache policy.
 
 Non-goals:
   No new guest binary source, Bus Engine OS artifact, browser UI, networking,
