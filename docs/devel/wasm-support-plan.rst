@@ -604,9 +604,19 @@ The underlying command shape is::
   kernel, and initramfs routes, with
   ``Cross-Origin-Opener-Policy: same-origin``,
   ``Cross-Origin-Embedder-Policy: require-corp``, and
-  ``Cross-Origin-Resource-Policy: same-origin`` on each response.  No browser
-  executed the page during this pass, so this is route/header proof rather
-  than browser boot proof.
+  ``Cross-Origin-Resource-Policy: same-origin`` on each response.
+* ``scripts/ci/wasm-browser-smoke-runner.mjs`` now starts the browser smoke
+  server, launches a Playwright browser, waits for the readiness marker, and
+  stops the server.  A disposable
+  ``mcr.microsoft.com/playwright:v1.56.1-noble`` image
+  (digest
+  ``sha256:f1e7e01021efd65dd1a2c56064be399f3e4de00fd021ac561325f2bfbb2b837a``)
+  with ``playwright@1.56.1`` installed in a temporary directory ran the
+  browser harness under headless Chromium ``141.0.7390.37``.  The browser
+  reached ``QEMU_WASM_LINUX_BOOT_OK`` with the same cleaned wasm64 TCI
+  artifact, TuxBoot kernel, and helper-generated initramfs used by the Node.js
+  smoke path.  This is the first browser execution proof for the console-first
+  64-bit TCI boot path.  Browser memory-limit evidence remains separate.
 
 The browser smoke server can be started with the same prepared guest inputs::
 
@@ -620,6 +630,15 @@ The browser smoke server can be started with the same prepared guest inputs::
 Open the printed URL in a browser with SharedArrayBuffer support available
 under cross-origin isolation.  The page is successful only when it reaches
 ``QEMU_WASM_LINUX_BOOT_OK``.
+
+The headless browser proof can be run with Playwright available to Node.js::
+
+  node scripts/ci/wasm-browser-smoke-runner.mjs \
+    --artifact-dir /tmp/qemu-wasm64-tci-artifacts-pipe2-final \
+    --kernel /tmp/qemu-wasm-tuxboot-x86_64-bzImage \
+    --initrd /tmp/qemu-wasm-tuxboot-smoke-helper-proof3/tuxboot-smoke-initramfs.cpio.gz \
+    --firmware-dir pc-bios \
+    --timeout-ms 180000
 
 The local artifact proof used this source-copy build shape from the QEMU
 source root::
@@ -1076,9 +1095,9 @@ Proof:
   The Node smoke helper has proven the first part of this for MEMFS-hosted
   kernel, initrd, and firmware files.  The browser smoke server now exposes
   explicit kernel, initramfs, firmware, JavaScript, and WebAssembly artifact
-  routes with the required cross-origin isolation headers.  A local route
-  check proved the browser can request those paths, but no browser execution
-  has proved QEMU opens them yet.
+  routes with the required cross-origin isolation headers.  Headless Chromium
+  reached the marker through those routes, proving QEMU opened the browser
+  MEMFS-mounted kernel, initramfs, and firmware inputs.
 
 Non-goals:
   No persistent storage.
@@ -1100,10 +1119,10 @@ Current status:
   ``scripts/ci/wasm-browser-smoke.html`` and
   ``scripts/ci/wasm-browser-smoke.mjs`` provide the generic harness, and
   ``scripts/ci/wasm-browser-smoke-server.mjs`` serves it with explicit input
-  routes and cross-origin isolation headers.  Node syntax checks and local
-  ``curl`` route/header checks pass.  The acceptance proof still requires
-  running the page in Chromium, Firefox, or another supported browser and
-  observing ``QEMU_WASM_LINUX_BOOT_OK``.
+  routes and cross-origin isolation headers.  Node syntax checks, local
+  ``curl`` route/header checks, and a headless Chromium run through
+  ``scripts/ci/wasm-browser-smoke-runner.mjs`` pass.  The broader browser
+  matrix still needs Firefox and additional host/browser memory evidence.
 
 Non-goals:
   No branded UI, no WebGPU, no graphical desktop.
@@ -1138,6 +1157,12 @@ Touches:
 Proof:
   The test fails on timeout, kernel panic, missing rootfs, or QEMU startup
   failure, and passes only when the marker appears.
+
+Current status:
+  ``scripts/ci/wasm-browser-smoke-runner.mjs`` provides the first automated
+  headless-browser readiness-marker test.  It passed locally under Chromium
+  ``141.0.7390.37`` in the Playwright ``v1.56.1`` image.  It is not yet wired
+  into GitLab CI.
 
 Non-goals:
   No full distribution test suite.
