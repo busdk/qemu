@@ -474,6 +474,17 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``build-wasm64-64bit`` artifacts, adds ``/opt/node-qemu-wasm-smoke/bin`` to
   ``PATH``, prepares the pinned TuxBoot smoke guest, caches the downloaded
   TuxBoot inputs under ``wasm-smoke-cache``, and runs the Linux boot wrapper.
+* ``.gitlab-ci.d/buildtest.yml`` also contains an optional
+  ``smoke-wasm64-64bit-browser`` test job.  It uses the same
+  ``build-wasm64-64bit`` artifacts, prepares the pinned TuxBoot smoke guest in
+  a disposable Playwright ``v1.56.1`` browser image, installs the missing
+  ``zstd`` tool and the matching ``playwright@1.56.1`` Node package, then runs
+  ``scripts/ci/wasm-browser-smoke-runner.mjs``.  The job is optional because
+  the acceptable upstream browser image, browser matrix, and runtime cost
+  policy still need maintainer review.
+  A local job-shaped container run using copied wasm artifacts and a
+  pre-populated TuxBoot cache exercised the same helper and browser runner
+  path in that Playwright image and reached ``QEMU_WASM_LINUX_BOOT_OK``.
 
 The preferred product-neutral smoke guest preparation path is::
 
@@ -1161,8 +1172,12 @@ Proof:
 Current status:
   ``scripts/ci/wasm-browser-smoke-runner.mjs`` provides the first automated
   headless-browser readiness-marker test.  It passed locally under Chromium
-  ``141.0.7390.37`` in the Playwright ``v1.56.1`` image.  It is not yet wired
-  into GitLab CI.
+  ``141.0.7390.37`` in the Playwright ``v1.56.1`` image.
+  ``smoke-wasm64-64bit-browser`` wires that path into GitLab as an optional
+  job.  A local job-shaped container run passed with copied wasm artifacts and
+  a pre-populated TuxBoot cache.  The job still needs real GitLab execution
+  evidence and maintainer review of the external browser image and runtime
+  cost.
 
 Non-goals:
   No full distribution test suite.

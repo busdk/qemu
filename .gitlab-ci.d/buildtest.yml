@@ -834,6 +834,59 @@ smoke-wasm64-64bit-linux:
           --firmware-dir pc-bios
     - section_end smoke_boot
 
+smoke-wasm64-64bit-browser:
+  extends: .base_job_template
+  stage: test
+  image: mcr.microsoft.com/playwright:v1.56.1-noble
+  needs:
+    - job: build-wasm64-64bit
+      artifacts: true
+  cache:
+    key: "$CI_JOB_NAME"
+    paths:
+      - wasm-smoke-cache
+    when: always
+  artifacts:
+    name: "$CI_JOB_NAME-$CI_COMMIT_REF_SLUG"
+    when: always
+    expire_in: 7 days
+    paths:
+      - ci-runner-env
+      - build/wasm-browser-smoke-guest/tuxboot-smoke-guest.json
+  variables:
+    QEMU_JOB_OPTIONAL: 1
+  script:
+    - source scripts/ci/gitlab-ci-section
+    - mkdir -p ci-runner-env
+    - cp /proc/cpuinfo ci-runner-env/cpuinfo.txt
+    - cp /proc/meminfo ci-runner-env/meminfo.txt
+    - section_start setup "Preparing browser smoke runtime"
+    - apt-get update
+    - apt-get install -y zstd
+    - mkdir -p /tmp/qemu-playwright
+    - cd /tmp/qemu-playwright
+    - npm install --silent --no-audit --no-fund playwright@1.56.1
+    - cd "$CI_PROJECT_DIR"
+    - export NODE_PATH=/tmp/qemu-playwright/node_modules
+    - node --version
+    - /ms-playwright/chromium-1194/chrome-linux/chrome --version
+    - section_end setup
+    - section_start smoke_guest "Preparing WASM browser smoke guest"
+    - python3 scripts/ci/wasm-prepare-tuxboot-smoke-guest.py
+          --cache-dir wasm-smoke-cache
+          --output-dir build/wasm-browser-smoke-guest
+          --artifact-dir build
+          --firmware-dir pc-bios
+    - section_end smoke_guest
+    - section_start smoke_browser "Running WASM browser boot smoke"
+    - node scripts/ci/wasm-browser-smoke-runner.mjs
+          --artifact-dir build
+          --kernel wasm-smoke-cache/tuxboot-x86_64-bzImage
+          --initrd build/wasm-browser-smoke-guest/tuxboot-smoke-initramfs.cpio.gz
+          --firmware-dir pc-bios
+          --timeout-ms 180000
+    - section_end smoke_browser
+
 build-wasm64-32bit:
   extends: .wasm_build_job_template
   timeout: 2h
