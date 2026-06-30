@@ -64,6 +64,9 @@ Options:
                      before typing --keyboard-text
   --keyboard-text TEXT
                      Type TEXT into the focused browser display canvas
+  --post-keyboard-wait-ms MS
+                     Wait after successful marker detection before capturing
+                     final display evidence when --keyboard-text is used
   --kernel-append TEXT
                      Full Linux kernel arguments, replacing smoke defaults
   --machine MACHINE  QEMU machine name passed with -M
@@ -133,6 +136,7 @@ function parseArgs(argv) {
     kernel: null,
     keyboardAfterText: "",
     keyboardText: "",
+    postKeyboardWaitMs: 0,
     kernelAppend: null,
     machine: "microvm,acpi=off",
     marker: "QEMU_WASM_LINUX_BOOT_OK",
@@ -222,6 +226,9 @@ function parseArgs(argv) {
     } else if (arg === "--keyboard-text") {
       options.keyboardText = argv[++i];
       explicit.add("keyboardText");
+    } else if (arg === "--post-keyboard-wait-ms") {
+      options.postKeyboardWaitMs = Number(argv[++i]);
+      explicit.add("postKeyboardWaitMs");
     } else if (arg === "--kernel-append") {
       options.kernelAppend = argv[++i];
       explicit.add("kernelAppend");
@@ -312,6 +319,7 @@ function parseArgs(argv) {
       "idleTimeoutMs",
       "pageTextTailBytes",
       "port",
+      "postKeyboardWaitMs",
       "progressSampleIntervalMs",
       "progressSampleLimit",
       "timeoutMs",
@@ -451,6 +459,14 @@ function parseArgs(argv) {
   }
   if (options.keyboardAfterText !== "" && options.keyboardText === "") {
     console.error("--keyboard-after-text requires --keyboard-text");
+    usage(2);
+  }
+  if (!Number.isInteger(options.postKeyboardWaitMs) || options.postKeyboardWaitMs < 0) {
+    console.error("--post-keyboard-wait-ms must be a non-negative integer");
+    usage(2);
+  }
+  if (options.postKeyboardWaitMs > 0 && options.keyboardText === "") {
+    console.error("--post-keyboard-wait-ms requires --keyboard-text");
     usage(2);
   }
   if (options.requireDisplayOutput && !["sdl", "wasm"].includes(options.display)) {
@@ -911,6 +927,7 @@ export function initialSmokeResult(options, browserVersion) {
     harnessSelfTest: Boolean(options.harnessSelfTest),
     keyboardAfterText: options.keyboardAfterText,
     keyboardTextLength: options.keyboardText.length,
+    postKeyboardWaitMs: options.postKeyboardWaitMs,
     kernelAppend: options.kernelAppend,
     machine: options.machine,
     maxDiagnosticEntries: MAX_DIAGNOSTIC_ENTRIES,
@@ -1269,6 +1286,16 @@ async function run() {
     const pageStatus = await page.evaluate(() => document.querySelector("#status")?.textContent || "");
     if (pageStatus !== `marker reached: ${options.marker}`) {
       throw new Error(pageStatus);
+    }
+    if (options.postKeyboardWaitMs > 0) {
+      await page.waitForTimeout(options.postKeyboardWaitMs);
+      await sampleSmokeProgress(
+        page,
+        result,
+        startTime,
+        "post-keyboard-wait",
+        options.progressSampleLimit,
+      );
     }
     if (progressTimer !== null) {
       clearInterval(progressTimer);

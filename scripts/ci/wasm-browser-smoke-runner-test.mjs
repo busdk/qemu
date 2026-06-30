@@ -312,6 +312,7 @@ for (const status of [
     memory: "512M",
     network: "none",
     pageTextTailBytes: 60000,
+    postKeyboardWaitMs: 250,
     progressSampleIntervalMs: 10000,
     progressSampleLimit: 120,
     qemuArgs: ["-name", "wasm-smoke"],
@@ -337,6 +338,7 @@ for (const status of [
   assert.equal(result.harnessSelfTest, true);
   assert.equal(result.keyboardAfterText, "login:");
   assert.equal(result.keyboardTextLength, "uname -a\n".length);
+  assert.equal(result.postKeyboardWaitMs, 250);
   assert.equal(result.network, "none");
   assert.equal(result.idleAfterText, "");
   assert.equal(result.idleTimeoutMs, 0);
@@ -361,6 +363,39 @@ for (const status of [
     "--kernel", "/tmp/kernel",
     "--initrd", "/tmp/initrd",
     "--keyboard-text", "uname -a\n",
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+
+  assert.equal(child.status, 2);
+}
+
+{
+  const child = spawnSync(process.execPath, [
+    runnerPath,
+    "--artifact-dir", "/tmp/artifacts",
+    "--kernel", "/tmp/kernel",
+    "--initrd", "/tmp/initrd",
+    "--display", "wasm",
+    "--post-keyboard-wait-ms", "100",
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+
+  assert.equal(child.status, 2);
+}
+
+{
+  const child = spawnSync(process.execPath, [
+    runnerPath,
+    "--artifact-dir", "/tmp/artifacts",
+    "--kernel", "/tmp/kernel",
+    "--initrd", "/tmp/initrd",
+    "--display", "wasm",
+    "--keyboard-text", "uname -a\n",
+    "--post-keyboard-wait-ms", "-1",
   ], {
     cwd: process.cwd(),
     encoding: "utf8",
