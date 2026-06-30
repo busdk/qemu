@@ -1414,6 +1414,17 @@ Proof:
   ``pageStatus: program exited before marker: status 1``,
   ``programExitStatus: 1``, no request failures, no page errors, and
   ``elapsedMs: 3240``.
+  The Node smoke runner and Linux boot wrapper accept ``--out FILE`` to write
+  machine-readable result JSON.  The result records success, exit status,
+  marker state, expected text state, elapsed time, output truncation state, the
+  last emitted line, and a stable snapshot of the QEMU argument vector before
+  Emscripten mutates it.  A direct Node.js ``v24`` ``--version`` proof wrote
+  ``/tmp/qemu-node-json-proof/version.json`` with ``success: true``,
+  ``status: 0``, ``markerSeen: true``, first QEMU argument ``--version``, one
+  emitted line, and ``elapsedMs: 833``.  A wrapped early-failure proof wrote
+  ``/tmp/qemu-node-json-proof/wrapper-early-fail.json`` with ``success:
+  false``, ``status: 1``, ``markerSeen: false``, first QEMU argument ``-M``,
+  two emitted lines, and ``elapsedMs: 1587``.
 
   Example generic manifest shape for a root-disk proof::
 

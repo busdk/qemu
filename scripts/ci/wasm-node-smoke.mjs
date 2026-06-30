@@ -7,7 +7,7 @@
 
 import { pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 
 function parseArgs(argv) {
   const options = {
@@ -15,6 +15,7 @@ function parseArgs(argv) {
     program: "qemu-system-x86_64.js",
     marker: "QEMU emulator version",
     expectTexts: [],
+    out: null,
     mountFiles: [],
     dumpFiles: [],
     maxOutputBytes: null,
@@ -35,6 +36,8 @@ function parseArgs(argv) {
       options.marker = argv[++i];
     } else if (arg === "--expect-text") {
       options.expectTexts.push(argv[++i]);
+    } else if (arg === "--out") {
+      options.out = argv[++i];
     } else if (arg === "--mount-file") {
       options.mountFiles.push(parseMountFile(argv[++i]));
     } else if (arg === "--dump-file") {
@@ -112,6 +115,7 @@ Options:
   --program FILE      JavaScript launcher inside artifact dir
   --marker TEXT       Output text required for success
   --expect-text TEXT  Additional output text required for success
+  --out FILE          Write smoke result JSON to FILE
   --mount-file H:W    Copy host file H to absolute Emscripten path W
   --dump-file PATH[:N]
                      Print Emscripten file PATH on timeout, capped at N bytes
@@ -125,6 +129,8 @@ Options:
 
 const options = parseArgs(process.argv.slice(2));
 const programUrl = pathToFileURL(resolve(options.artifactDir, options.program));
+const startTime = Date.now();
+const qemuArgs = [...options.qemuArgs];
 
 let markerSeen = false;
 const expectedTextSeen = options.expectTexts.map((text) => ({ text, seen: false }));
@@ -132,12 +138,42 @@ let exitScheduled = false;
 let activeModule = null;
 let outputBytes = 0;
 let outputSuppressed = false;
+let lineCount = 0;
+let lastLine = "";
+
+function writeResult(status, extra = {}) {
+  if (options.out === null) {
+    return;
+  }
+  const result = {
+    format: 1,
+    success: status === 0,
+    status,
+    artifactDir: options.artifactDir,
+    program: options.program,
+    marker: options.marker,
+    markerSeen,
+    expectText: options.expectTexts,
+    expectedTextSeen,
+    elapsedMs: Date.now() - startTime,
+    timeoutMs: options.timeoutMs,
+    maxOutputBytes: options.maxOutputBytes,
+    outputBytes,
+    outputSuppressed,
+    lines: lineCount,
+    lastLine,
+    qemuArgs,
+    ...extra,
+  };
+  writeFileSync(options.out, `${JSON.stringify(result, null, 2)}\n`);
+}
 
 function scheduleExit(status) {
   if (exitScheduled) {
     return;
   }
   exitScheduled = true;
+  writeResult(status);
   setTimeout(() => process.exit(status), 50);
 }
 
@@ -163,6 +199,8 @@ function describeMissingText() {
 }
 
 function emit(line, stream) {
+  lineCount += 1;
+  lastLine = line;
   const text = `${line}\n`;
   if (options.maxOutputBytes === null) {
     stream.write(text);
@@ -247,13 +285,17 @@ const timeout = setTimeout(() => {
     }
   }
   dumpFiles();
+  writeResult(124, {
+    missingExpectedText: missingText,
+    timeout: true,
+  });
   process.exit(124);
 }, options.timeoutMs);
 
 try {
   const moduleFactory = (await import(programUrl.href)).default;
   const moduleOptions = {
-    arguments: options.qemuArgs,
+    arguments: [...qemuArgs],
     print: (line) => emit(line, process.stdout),
     printErr: (line) => emit(line, process.stderr),
   };
@@ -272,6 +314,10 @@ try {
 } catch (error) {
   clearTimeout(timeout);
   console.error(error && error.stack ? error.stack : String(error));
+  writeResult(1, {
+    errorName: error && error.name ? error.name : "Error",
+    errorMessage: error && error.message ? error.message : String(error),
+  });
   process.exit(1);
 }
 

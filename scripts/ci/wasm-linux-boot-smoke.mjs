@@ -35,6 +35,7 @@ function parseArgs(argv) {
     marker: "QEMU_WASM_LINUX_BOOT_OK",
     maxOutputBytes: 60000,
     memory: "512M",
+    out: null,
     program: "qemu-system-x86_64.js",
     qemuArgs: [],
     rootfs: null,
@@ -83,6 +84,9 @@ function parseArgs(argv) {
     } else if (arg === "--memory") {
       options.memory = argv[++i];
       explicit.add("memory");
+    } else if (arg === "--out") {
+      options.out = argv[++i];
+      explicit.add("out");
     } else if (arg === "--program") {
       options.program = argv[++i];
       explicit.add("program");
@@ -109,7 +113,7 @@ function parseArgs(argv) {
   applyGuestManifest(options, explicit, {
     checksumFields: ["kernel", "initrd", "rootfs"],
     integerFields: ["maxOutputBytes", "timeoutMs"],
-    pathFields: ["artifactDir", "firmwareDir", "initrd", "kernel", "rootfs"],
+    pathFields: ["artifactDir", "firmwareDir", "initrd", "kernel", "out", "rootfs"],
     stringFields: [
       "appendExtra",
       "artifactDir",
@@ -121,6 +125,7 @@ function parseArgs(argv) {
       "machine",
       "marker",
       "memory",
+      "out",
       "program",
       "rootfs",
       "rootfsDevice",
@@ -170,6 +175,7 @@ Options:
   --marker TEXT          Output text required for success
   --max-output-bytes N   Suppress stdout/stderr after N total output bytes
   --memory SIZE          Guest memory size passed to QEMU
+  --out FILE             Write smoke result JSON to FILE
   --program FILE         JavaScript launcher inside artifact dir
   --qemu-arg ARG         Extra QEMU argument appended to the smoke command
   --rootfs FILE          Raw root filesystem image exposed as /dev/vda
@@ -241,6 +247,9 @@ function runSmoke(options) {
     "--mount-file",
     `${options.kernel}:/kernel`,
   ];
+  if (options.out !== null) {
+    args.push("--out", options.out);
+  }
   for (const mount of firmwareMounts) {
     args.push("--mount-file", `${mount.hostPath}:${mount.wasmPath}`);
   }
