@@ -2547,6 +2547,16 @@ Proof:
   the browser canvas, the harness captures screenshot evidence, and the
   existing serial marker still proves the guest boot path.
 
+Current status:
+  The browser smoke runner can now sample the opt-in SDL canvas and record
+  display evidence in result JSON: canvas presence, dimensions, visibility,
+  focus state, non-zero pixel count, non-transparent pixel count, non-black
+  pixel count, total pixels, and a ``fnv1a32`` pixel hash.  The
+  ``--require-display-output`` runner option turns that evidence into an
+  explicit non-black-pixel gate for ``display=sdl`` runs.  The default
+  ``display=none`` smoke path still uses the serial marker as its only success
+  oracle.
+
 Non-goals:
   No WebGPU, accelerated 3D, or full desktop support.
 

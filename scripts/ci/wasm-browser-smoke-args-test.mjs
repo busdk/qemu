@@ -16,8 +16,11 @@ import {
 function baseConfig(overrides = {}) {
   return {
     appendExtra: "",
+    allowSerialFallback: true,
     cpu: "Nehalem",
     display: "none",
+    displayDevice: "default",
+    expectedResolution: "",
     focusDisplay: false,
     initrd: "/guest/initramfs.cpio.gz",
     kernelAppend: null,
@@ -27,6 +30,7 @@ function baseConfig(overrides = {}) {
     qemuArgs: [],
     rootfs: "",
     rootfsDevice: "virtio-mmio",
+    visualMarker: "",
     ...overrides,
   };
 }
@@ -63,6 +67,39 @@ function valueAfter(args, option) {
   assert.equal(valueAfter(args, "-monitor"), "none");
   assert.equal(valueAfter(args, "-nic"), "none");
 }
+
+{
+  const args = qemuArgs(baseConfig({
+    display: "sdl",
+    displayDevice: "stdvga",
+  }));
+
+  assert.equal(valueAfter(args, "-vga"), "std");
+}
+
+{
+  const args = qemuArgs(baseConfig({
+    display: "sdl",
+    displayDevice: "virtio-vga",
+  }));
+
+  assert.equal(valueAfter(args, "-vga"), "virtio");
+}
+
+{
+  const args = qemuArgs(baseConfig({
+    display: "sdl",
+    displayDevice: "virtio-gpu-pci",
+  }));
+
+  assert.equal(valueAfter(args, "-vga"), "none");
+  assert.equal(valueAfter(args, "-device"), "virtio-gpu-pci");
+}
+
+assert.throws(
+  () => qemuArgs(baseConfig({ displayDevice: "stdvga" })),
+  /displayDevice requires display=sdl/,
+);
 
 {
   const args = qemuArgs(baseConfig({ network: "default" }));

@@ -50,6 +50,20 @@ function boolOption(name, fallback) {
   throw new Error(`${name} must be a boolean`);
 }
 
+function parseResolution(value) {
+  if (value === "") {
+    return null;
+  }
+  const match = /^([1-9][0-9]{0,4})x([1-9][0-9]{0,4})$/.exec(value);
+  if (match === null) {
+    throw new Error("expectedResolution must use WIDTHxHEIGHT");
+  }
+  return {
+    width: Number(match[1]),
+    height: Number(match[2]),
+  };
+}
+
 function appendLine(target, line) {
   target.textContent += `${line}\n`;
   target.scrollTop = target.scrollHeight;
@@ -114,9 +128,23 @@ export function qemuArgs(config) {
   }
   args.push("-accel", "tcg,thread=single");
   if (config.display === "none") {
+    if (!["default", "none"].includes(config.displayDevice)) {
+      throw new Error("displayDevice requires display=sdl");
+    }
     args.push("-nographic");
   } else if (config.display === "sdl") {
     args.push("-display", "sdl,gl=off");
+    if (config.displayDevice === "none") {
+      args.push("-vga", "none");
+    } else if (config.displayDevice === "stdvga") {
+      args.push("-vga", "std");
+    } else if (config.displayDevice === "virtio-vga") {
+      args.push("-vga", "virtio");
+    } else if (config.displayDevice === "virtio-gpu-pci") {
+      args.push("-vga", "none", "-device", "virtio-gpu-pci");
+    } else if (config.displayDevice !== "default") {
+      throw new Error("unsupported displayDevice");
+    }
   } else {
     throw new Error("display must be none or sdl");
   }
@@ -215,9 +243,12 @@ export function browserRuntimeSnapshot(scope = globalThis) {
 function buildConfig() {
   return {
     appendExtra: option("appendExtra", ""),
+    allowSerialFallback: boolOption("allowSerialFallback", true),
     cpu: option("cpu", "Nehalem"),
     display: option("display", "none"),
+    displayDevice: option("displayDevice", "default"),
     expectText: listOption("expectText"),
+    expectedResolution: option("expectedResolution", ""),
     focusDisplay: boolOption("focusDisplay", false),
     initrd: pathOption("initrd", "/guest/initramfs.cpio.gz"),
     kernel: option("kernel", "/guest/kernel"),
@@ -234,6 +265,7 @@ function buildConfig() {
     rootfs: pathOption("rootfs", ""),
     rootfsDevice: option("rootfsDevice", "virtio-mmio"),
     timeoutMs: numberOption("timeoutMs", 180000),
+    visualMarker: option("visualMarker", ""),
     wasm: option("wasm", "/artifacts/qemu-system-x86_64.wasm"),
   };
 }
@@ -246,6 +278,12 @@ async function run() {
   if (!["none", "sdl"].includes(config.display)) {
     throw new Error("display must be none or sdl");
   }
+  if (!["default", "none", "stdvga", "virtio-vga", "virtio-gpu-pci"].includes(config.displayDevice)) {
+    throw new Error("displayDevice must be default, none, stdvga, virtio-vga, or virtio-gpu-pci");
+  }
+  if (config.display !== "sdl" && !["default", "none"].includes(config.displayDevice)) {
+    throw new Error("displayDevice requires display=sdl");
+  }
   if (!["virtio-mmio", "virtio-pci"].includes(config.rootfsDevice)) {
     throw new Error("rootfsDevice must be virtio-mmio or virtio-pci");
   }
@@ -255,6 +293,7 @@ async function run() {
   const programUrl = new URL(config.program, window.location.href);
   const wasmUrl = new URL(config.wasm, window.location.href);
   const generatedQemuArgs = qemuArgs(config);
+  const expectedResolution = parseResolution(config.expectedResolution);
   const startTime = performance.now();
   const smokeState = {
     lines: 0,
@@ -267,8 +306,12 @@ async function run() {
     runtime: browserRuntimeSnapshot(globalThis),
     display: {
       mode: config.display,
+      allowSerialFallback: config.allowSerialFallback,
       focused: false,
       canvasPresent: Boolean(canvas),
+      device: config.displayDevice,
+      expectedResolution,
+      visualMarker: config.visualMarker,
     },
     markerSeen: false,
     expectedTextSeen: config.expectText.map((text) => ({ text, seen: false })),
@@ -289,10 +332,16 @@ async function run() {
   if (config.display === "sdl") {
     canvas.hidden = false;
     canvas.setAttribute("aria-hidden", "false");
+    if (expectedResolution !== null) {
+      canvas.width = expectedResolution.width;
+      canvas.height = expectedResolution.height;
+    }
     if (config.focusDisplay) {
       canvas.focus();
     }
     smokeState.display.focused = document.activeElement === canvas;
+    smokeState.display.canvasWidth = canvas.width;
+    smokeState.display.canvasHeight = canvas.height;
   } else {
     canvas.hidden = true;
     canvas.setAttribute("aria-hidden", "true");

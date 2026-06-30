@@ -167,6 +167,11 @@ browser MVP. Keep Bus Engine product work downstream.
   first QEMU display/input device path to expose in a browser, and records why
   the implementation stays generic QEMU infrastructure rather than Bus Engine
   product code.
+- [x] Add opt-in browser display evidence plumbing without changing default
+  serial smoke behavior: DoD is runner support for sampling the SDL canvas,
+  recording canvas dimensions, focus, visibility, pixel counts, and an image
+  hash in result JSON, plus a `--require-display-output` gate that only applies
+  to explicit `display=sdl` runs.
 - [ ] Add a browser display backend proof for QEMU/WASM: DoD is a generic
   display path that receives QEMU surface updates from the selected emulated
   display device and renders them into a browser canvas or equivalent 2D

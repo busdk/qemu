@@ -13,6 +13,7 @@ import {
   appendBoundedLimit,
   browserSmokeUrl,
   consoleMessageDiagnostic,
+  displayPixelSummary,
   initialSmokeResult,
   isTerminalPageStatus,
   pageErrorDiagnostic,
@@ -100,10 +101,52 @@ for (const status of [
 }
 
 {
+  const blank = displayPixelSummary(
+    new Uint8ClampedArray([
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+    ]),
+    2,
+    1,
+  );
+  const visible = displayPixelSummary(
+    new Uint8ClampedArray([
+      0, 0, 0, 0,
+      0, 0, 0, 255,
+      10, 0, 0, 255,
+      0, 5, 0, 255,
+    ]),
+    2,
+    2,
+  );
+
+  assert.equal(blank.nonZeroPixels, 0);
+  assert.equal(blank.nonTransparentPixels, 0);
+  assert.equal(blank.nonBlackPixels, 0);
+  assert.equal(blank.totalPixels, 2);
+  assert.match(blank.hash, /^fnv1a32:[0-9a-f]{8}$/);
+  assert.equal(visible.nonZeroPixels, 3);
+  assert.equal(visible.nonTransparentPixels, 3);
+  assert.equal(visible.nonBlackPixels, 2);
+  assert.equal(visible.totalPixels, 4);
+  assert.notEqual(blank.hash, visible.hash);
+}
+
+{
+  assert.throws(
+    () => displayPixelSummary(new Uint8ClampedArray([0, 0, 0]), 1, 1),
+    /display pixel data length does not match dimensions/,
+  );
+}
+
+{
   const url = browserSmokeUrl({
+    allowSerialFallback: false,
     appendExtra: "ignore_loglevel",
     cpu: "Nehalem",
     display: "sdl",
+    displayDevice: "virtio-gpu-pci",
+    expectedResolution: "800x600",
     expectText: ["Example Linux", "systemd 261.1"],
     focusDisplay: true,
     host: "127.0.0.1",
@@ -123,12 +166,16 @@ for (const status of [
     rootfs: "/tmp/rootfs.raw",
     rootfsDevice: "virtio-pci",
     timeoutMs: 180000,
+    visualMarker: "login",
   });
 
   assert.equal(url.href, "http://127.0.0.1:8010/?" +
     "appendExtra=ignore_loglevel&" +
+    "allowSerialFallback=0&" +
     "cpu=Nehalem&" +
     "display=sdl&" +
+    "displayDevice=virtio-gpu-pci&" +
+    "expectedResolution=800x600&" +
     "focusDisplay=1&" +
     "marker=QEMU_WASM_LINUX_BOOT_OK&" +
     "maxOutputBytes=60000&" +
@@ -143,14 +190,18 @@ for (const status of [
     "rootfs=%2Fguest%2Frootfs.raw&" +
     "qemuArg=-name&" +
     "qemuArg=wasm-smoke&" +
-    "timeoutMs=180000");
+    "timeoutMs=180000&" +
+    "visualMarker=login");
 }
 
 {
   const url = browserSmokeUrl({
+    allowSerialFallback: true,
     appendExtra: "",
     cpu: "",
     display: "none",
+    displayDevice: "default",
+    expectedResolution: "",
     expectText: [],
     focusDisplay: false,
     host: "localhost",
@@ -168,22 +219,29 @@ for (const status of [
     rootfs: null,
     rootfsDevice: "virtio-mmio",
     timeoutMs: 30000,
+    visualMarker: "",
   });
 
   assert.equal(url.searchParams.has("initrd"), false);
   assert.equal(url.searchParams.has("rootfs"), false);
   assert.equal(url.searchParams.has("kernelAppend"), false);
   assert.equal(url.searchParams.get("display"), "none");
+  assert.equal(url.searchParams.get("displayDevice"), "default");
+  assert.equal(url.searchParams.get("expectedResolution"), "");
   assert.equal(url.searchParams.get("focusDisplay"), "0");
   assert.equal(url.searchParams.get("network"), "default");
+  assert.equal(url.searchParams.get("allowSerialFallback"), "1");
 }
 
 {
   const result = initialSmokeResult({
+    allowSerialFallback: false,
     appendExtra: "ignore_loglevel",
     browser: "chromium",
     cpu: "Nehalem",
     display: "sdl",
+    displayDevice: "virtio-gpu-pci",
+    expectedResolution: "800x600",
     expectText: ["Example Linux"],
     focusDisplay: true,
     keyboardAfterText: "login:",
@@ -199,23 +257,32 @@ for (const status of [
     progressSampleIntervalMs: 10000,
     progressSampleLimit: 120,
     qemuArgs: ["-name", "wasm-smoke"],
+    requireDisplayOutput: true,
+    displayMinNonblackPixels: 4,
     rootfs: "/tmp/rootfs.raw",
     rootfsDevice: "virtio-pci",
     timeoutMs: 180000,
+    visualMarker: "login",
   }, "HeadlessChrome/141.0.7390.37");
 
   assert.equal(result.format, 1);
   assert.equal(result.success, false);
   assert.equal(result.browser, "chromium");
   assert.equal(result.browserVersion, "HeadlessChrome/141.0.7390.37");
+  assert.equal(result.allowSerialFallback, false);
   assert.equal(result.display, "sdl");
+  assert.equal(result.displayDevice, "virtio-gpu-pci");
+  assert.equal(result.expectedResolution, "800x600");
   assert.equal(result.focusDisplay, true);
   assert.equal(result.keyboardAfterText, "login:");
   assert.equal(result.keyboardTextLength, "uname -a\n".length);
   assert.equal(result.network, "none");
   assert.equal(result.idleAfterText, "");
   assert.equal(result.idleTimeoutMs, 0);
+  assert.equal(result.requireDisplayOutput, true);
+  assert.equal(result.displayMinNonblackPixels, 4);
   assert.equal(result.rootfsDevice, "virtio-pci");
+  assert.equal(result.visualMarker, "login");
   assert.equal(result.maxDiagnosticEntries, 50);
   assert.deepEqual(result.expectText, ["Example Linux"]);
   assert.deepEqual(result.qemuArgs, ["-name", "wasm-smoke"]);
@@ -247,8 +314,71 @@ for (const status of [
     "--artifact-dir", "/tmp/artifacts",
     "--kernel", "/tmp/kernel",
     "--initrd", "/tmp/initrd",
+    "--display-device", "stdvga",
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+
+  assert.equal(child.status, 2);
+}
+
+{
+  const child = spawnSync(process.execPath, [
+    runnerPath,
+    "--artifact-dir", "/tmp/artifacts",
+    "--kernel", "/tmp/kernel",
+    "--initrd", "/tmp/initrd",
+    "--display", "sdl",
+    "--expected-resolution", "800*600",
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+
+  assert.equal(child.status, 2);
+}
+
+{
+  const child = spawnSync(process.execPath, [
+    runnerPath,
+    "--artifact-dir", "/tmp/artifacts",
+    "--kernel", "/tmp/kernel",
+    "--initrd", "/tmp/initrd",
     "--display", "sdl",
     "--keyboard-after-text", "login:",
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+
+  assert.equal(child.status, 2);
+}
+
+{
+  const child = spawnSync(process.execPath, [
+    runnerPath,
+    "--artifact-dir", "/tmp/artifacts",
+    "--kernel", "/tmp/kernel",
+    "--initrd", "/tmp/initrd",
+    "--require-display-output",
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+
+  assert.equal(child.status, 2);
+}
+
+{
+  const child = spawnSync(process.execPath, [
+    runnerPath,
+    "--artifact-dir", "/tmp/artifacts",
+    "--kernel", "/tmp/kernel",
+    "--initrd", "/tmp/initrd",
+    "--display", "sdl",
+    "--require-display-output",
+    "--display-min-nonblack-pixels", "0",
   ], {
     cwd: process.cwd(),
     encoding: "utf8",

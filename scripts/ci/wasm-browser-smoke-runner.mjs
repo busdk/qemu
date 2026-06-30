@@ -30,6 +30,11 @@ Options:
   --browser NAME      Browser engine to launch (default: chromium)
   --cpu MODEL         Guest CPU model passed to QEMU
   --display MODE     Browser display mode: none or sdl (default: none)
+  --display-device KIND
+                     QEMU display device: default, none, stdvga,
+                     virtio-vga, or virtio-gpu-pci
+  --expected-resolution WIDTHxHEIGHT
+                     Expected SDL canvas resolution metadata
   --expect-text TEXT  Additional output text required for success
   --focus-display    Focus the browser display surface before QEMU starts
   --firmware-dir DIR  Directory containing qboot.rom and linuxboot_dma.bin
@@ -57,6 +62,9 @@ Options:
                      Maximum browser page output bytes to keep
   --memory SIZE       Guest memory size passed to QEMU
   --network MODE      Network mode: none or default (default: none)
+  --no-serial-fallback
+                     Record that serial-only fallback is not acceptable for
+                     this display/input proof
   --out FILE          Write smoke result JSON to FILE
   --page-text-tail-bytes N
                      Maximum page text tail bytes to keep in result JSON
@@ -67,6 +75,10 @@ Options:
   --progress-sample-limit N
                      Maximum smoke progress samples to keep
   --qemu-arg ARG     Extra QEMU argument appended to the smoke command
+  --require-display-output
+                     Require non-black SDL canvas pixels before success
+  --display-min-nonblack-pixels N
+                     Minimum non-black pixels for --require-display-output
   --rootfs FILE       Raw root filesystem image exposed as /dev/vda
   --rootfs-device KIND
                      Rootfs block device kind: virtio-mmio or virtio-pci
@@ -74,6 +86,8 @@ Options:
   --screenshot-full-page
                      Capture the full scrollable page instead of the viewport
   --timeout-ms MS     Timeout in milliseconds
+  --visual-marker TEXT
+                     Expected visual marker metadata for display proofs
   --help              Show this help
 `);
   process.exit(status);
@@ -86,6 +100,8 @@ function parseArgs(argv) {
     browser: "chromium",
     cpu: "Nehalem",
     display: "none",
+    displayDevice: "default",
+    expectedResolution: "",
     expectText: [],
     focusDisplay: false,
     firmwareDir: "pc-bios",
@@ -103,6 +119,7 @@ function parseArgs(argv) {
     maxOutputBytes: 60000,
     memory: "512M",
     network: "none",
+    allowSerialFallback: true,
     out: null,
     pageTextTailBytes: DEFAULT_PAGE_TEXT_TAIL_BYTES,
     port: 8010,
@@ -110,11 +127,14 @@ function parseArgs(argv) {
     progressSampleIntervalMs: DEFAULT_PROGRESS_SAMPLE_INTERVAL_MS,
     progressSampleLimit: DEFAULT_PROGRESS_SAMPLE_LIMIT,
     qemuArgs: [],
+    requireDisplayOutput: false,
+    displayMinNonblackPixels: 1,
     rootfs: null,
     rootfsDevice: "virtio-mmio",
     screenshot: null,
     screenshotFullPage: false,
     timeoutMs: 180000,
+    visualMarker: "",
   };
   const explicit = new Set();
 
@@ -135,6 +155,12 @@ function parseArgs(argv) {
     } else if (arg === "--display") {
       options.display = argv[++i];
       explicit.add("display");
+    } else if (arg === "--display-device") {
+      options.displayDevice = argv[++i];
+      explicit.add("displayDevice");
+    } else if (arg === "--expected-resolution") {
+      options.expectedResolution = argv[++i];
+      explicit.add("expectedResolution");
     } else if (arg === "--expect-text") {
       options.expectText.push(argv[++i]);
       explicit.add("expectText");
@@ -185,6 +211,9 @@ function parseArgs(argv) {
     } else if (arg === "--network") {
       options.network = argv[++i];
       explicit.add("network");
+    } else if (arg === "--no-serial-fallback") {
+      options.allowSerialFallback = false;
+      explicit.add("allowSerialFallback");
     } else if (arg === "--out") {
       options.out = argv[++i];
       explicit.add("out");
@@ -206,6 +235,12 @@ function parseArgs(argv) {
     } else if (arg === "--qemu-arg") {
       options.qemuArgs.push(argv[++i]);
       explicit.add("qemuArgs");
+    } else if (arg === "--require-display-output") {
+      options.requireDisplayOutput = true;
+      explicit.add("requireDisplayOutput");
+    } else if (arg === "--display-min-nonblack-pixels") {
+      options.displayMinNonblackPixels = Number(argv[++i]);
+      explicit.add("displayMinNonblackPixels");
     } else if (arg === "--rootfs") {
       options.rootfs = argv[++i];
       explicit.add("rootfs");
@@ -221,6 +256,9 @@ function parseArgs(argv) {
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number(argv[++i]);
       explicit.add("timeoutMs");
+    } else if (arg === "--visual-marker") {
+      options.visualMarker = argv[++i];
+      explicit.add("visualMarker");
     } else if (arg === "--help") {
       usage(0);
     } else {
@@ -230,10 +268,16 @@ function parseArgs(argv) {
   }
 
   applyGuestManifest(options, explicit, {
-    booleanFields: ["focusDisplay", "screenshotFullPage"],
+    booleanFields: [
+      "allowSerialFallback",
+      "focusDisplay",
+      "requireDisplayOutput",
+      "screenshotFullPage",
+    ],
     checksumFields: ["kernel", "initrd", "rootfs"],
     integerFields: [
       "maxOutputBytes",
+      "displayMinNonblackPixels",
       "idleTimeoutMs",
       "pageTextTailBytes",
       "port",
@@ -256,6 +300,8 @@ function parseArgs(argv) {
       "browser",
       "cpu",
       "display",
+      "displayDevice",
+      "expectedResolution",
       "firmwareDir",
       "host",
       "idleAfterText",
@@ -273,6 +319,7 @@ function parseArgs(argv) {
       "rootfs",
       "rootfsDevice",
       "screenshot",
+      "visualMarker",
     ],
     stringListFields: ["expectText", "qemuArgs"],
   });
@@ -317,6 +364,13 @@ function parseArgs(argv) {
     console.error("--progress-sample-limit must be a positive integer");
     usage(2);
   }
+  if (
+    !Number.isInteger(options.displayMinNonblackPixels) ||
+    options.displayMinNonblackPixels <= 0
+  ) {
+    console.error("--display-min-nonblack-pixels must be a positive integer");
+    usage(2);
+  }
   if (!["virtio-mmio", "virtio-pci"].includes(options.rootfsDevice)) {
     console.error("--rootfs-device must be virtio-mmio or virtio-pci");
     usage(2);
@@ -325,12 +379,31 @@ function parseArgs(argv) {
     console.error("--display must be none or sdl");
     usage(2);
   }
+  if (!["default", "none", "stdvga", "virtio-vga", "virtio-gpu-pci"].includes(options.displayDevice)) {
+    console.error("--display-device must be default, none, stdvga, virtio-vga, or virtio-gpu-pci");
+    usage(2);
+  }
+  if (options.display !== "sdl" && !["default", "none"].includes(options.displayDevice)) {
+    console.error("--display-device requires --display sdl");
+    usage(2);
+  }
+  if (
+    options.expectedResolution !== "" &&
+    /^([1-9][0-9]{0,4})x([1-9][0-9]{0,4})$/.test(options.expectedResolution) === false
+  ) {
+    console.error("--expected-resolution must use WIDTHxHEIGHT");
+    usage(2);
+  }
   if (options.keyboardText !== "" && options.display !== "sdl") {
     console.error("--keyboard-text requires --display sdl");
     usage(2);
   }
   if (options.keyboardAfterText !== "" && options.keyboardText === "") {
     console.error("--keyboard-after-text requires --keyboard-text");
+    usage(2);
+  }
+  if (options.requireDisplayOutput && options.display !== "sdl") {
+    console.error("--require-display-output requires --display sdl");
     usage(2);
   }
   if (!["none", "default"].includes(options.network)) {
@@ -625,6 +698,56 @@ export function smokeResultSummary(result) {
   };
 }
 
+export function displayPixelSummary(data, width, height) {
+  if (!Number.isInteger(width) || width <= 0) {
+    throw new Error("display width must be a positive integer");
+  }
+  if (!Number.isInteger(height) || height <= 0) {
+    throw new Error("display height must be a positive integer");
+  }
+  if (!data || data.length !== width * height * 4) {
+    throw new Error("display pixel data length does not match dimensions");
+  }
+
+  let nonZeroPixels = 0;
+  let nonTransparentPixels = 0;
+  let nonBlackPixels = 0;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const a = data[i + 3];
+    if (r !== 0 || g !== 0 || b !== 0 || a !== 0) {
+      nonZeroPixels += 1;
+    }
+    if (a !== 0) {
+      nonTransparentPixels += 1;
+    }
+    if (r !== 0 || g !== 0 || b !== 0) {
+      nonBlackPixels += 1;
+    }
+    hash ^= r;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+    hash ^= g;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+    hash ^= b;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+    hash ^= a;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+
+  return {
+    hash: `fnv1a32:${hash.toString(16).padStart(8, "0")}`,
+    height,
+    nonBlackPixels,
+    nonTransparentPixels,
+    nonZeroPixels,
+    totalPixels: width * height,
+    width,
+  };
+}
+
 async function writeResult(options, result) {
   if (options.out === null) {
     return;
@@ -649,13 +772,17 @@ export function promoteSmokeState(result, smokeState) {
   result.outputBytes = smokeState.outputBytes;
   result.lastLine = smokeState.lastLine;
   result.browserRuntime = smokeState.runtime || null;
+  result.displayState = smokeState.display || null;
 }
 
 export function browserSmokeUrl(options) {
   const url = new URL(`http://${options.host}:${options.port}/`);
   url.searchParams.set("appendExtra", options.appendExtra);
+  url.searchParams.set("allowSerialFallback", options.allowSerialFallback ? "1" : "0");
   url.searchParams.set("cpu", options.cpu);
   url.searchParams.set("display", options.display);
+  url.searchParams.set("displayDevice", options.displayDevice);
+  url.searchParams.set("expectedResolution", options.expectedResolution);
   url.searchParams.set("focusDisplay", options.focusDisplay ? "1" : "0");
   url.searchParams.set("marker", options.marker);
   url.searchParams.set("maxOutputBytes", String(options.maxOutputBytes));
@@ -679,6 +806,7 @@ export function browserSmokeUrl(options) {
     url.searchParams.append("qemuArg", qemuArg);
   }
   url.searchParams.set("timeoutMs", String(options.timeoutMs));
+  url.searchParams.set("visualMarker", options.visualMarker);
   return url;
 }
 
@@ -686,10 +814,13 @@ export function initialSmokeResult(options, browserVersion) {
   return {
     format: 1,
     appendExtra: options.appendExtra,
+    allowSerialFallback: options.allowSerialFallback,
     browser: options.browser,
     browserVersion,
     cpu: options.cpu,
     display: options.display,
+    displayDevice: options.displayDevice,
+    expectedResolution: options.expectedResolution,
     expectText: options.expectText,
     focusDisplay: options.focusDisplay,
     keyboardAfterText: options.keyboardAfterText,
@@ -707,8 +838,11 @@ export function initialSmokeResult(options, browserVersion) {
     progressSampleIntervalMs: options.progressSampleIntervalMs,
     progressSampleLimit: options.progressSampleLimit,
     qemuArgs: options.qemuArgs,
+    requireDisplayOutput: options.requireDisplayOutput,
+    displayMinNonblackPixels: options.displayMinNonblackPixels,
     rootfs: options.rootfs,
     rootfsDevice: options.rootfsDevice,
+    visualMarker: options.visualMarker,
     success: false,
     consoleMessages: [],
     pageErrors: [],
@@ -746,6 +880,109 @@ async function captureScreenshot(page, options, result) {
     result.screenshotFullPage = options.screenshotFullPage;
   } catch (error) {
     result.screenshotError = error && error.message ? error.message : String(error);
+  }
+}
+
+async function captureDisplayEvidence(page, result) {
+  if (!page) {
+    return;
+  }
+  try {
+    result.displayEvidence = await page.evaluate(() => {
+      const canvas = document.querySelector("#display");
+      if (!(canvas instanceof HTMLCanvasElement)) {
+        return {
+          present: false,
+        };
+      }
+      const style = getComputedStyle(canvas);
+      const visible = !canvas.hidden &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        canvas.width > 0 &&
+        canvas.height > 0;
+      const evidence = {
+        present: true,
+        focused: document.activeElement === canvas,
+        height: canvas.height,
+        hidden: canvas.hidden,
+        visible,
+        width: canvas.width,
+      };
+      if (!visible) {
+        return evidence;
+      }
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) {
+        return {
+          ...evidence,
+          pixelError: "2D canvas context is not available",
+        };
+      }
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let nonZeroPixels = 0;
+      let nonTransparentPixels = 0;
+      let nonBlackPixels = 0;
+      let hash = 0x811c9dc5;
+      for (let i = 0; i < pixels.length; i += 4) {
+        const r = pixels[i];
+        const g = pixels[i + 1];
+        const b = pixels[i + 2];
+        const a = pixels[i + 3];
+        if (r !== 0 || g !== 0 || b !== 0 || a !== 0) {
+          nonZeroPixels += 1;
+        }
+        if (a !== 0) {
+          nonTransparentPixels += 1;
+        }
+        if (r !== 0 || g !== 0 || b !== 0) {
+          nonBlackPixels += 1;
+        }
+        hash ^= r;
+        hash = Math.imul(hash, 0x01000193) >>> 0;
+        hash ^= g;
+        hash = Math.imul(hash, 0x01000193) >>> 0;
+        hash ^= b;
+        hash = Math.imul(hash, 0x01000193) >>> 0;
+        hash ^= a;
+        hash = Math.imul(hash, 0x01000193) >>> 0;
+      }
+      return {
+        ...evidence,
+        hash: `fnv1a32:${hash.toString(16).padStart(8, "0")}`,
+        nonBlackPixels,
+        nonTransparentPixels,
+        nonZeroPixels,
+        totalPixels: canvas.width * canvas.height,
+      };
+    });
+  } catch (error) {
+    result.displayEvidenceError = error && error.message ? error.message : String(error);
+  }
+}
+
+function validateDisplayEvidence(options, result) {
+  if (!options.requireDisplayOutput) {
+    return;
+  }
+  const evidence = result.displayEvidence;
+  if (!evidence || !evidence.present) {
+    throw new Error("required display canvas was not present");
+  }
+  if (!evidence.visible) {
+    throw new Error("required display canvas was not visible");
+  }
+  if (evidence.pixelError) {
+    throw new Error(`required display pixels were not readable: ${evidence.pixelError}`);
+  }
+  const nonBlackPixels = Number.isInteger(evidence.nonBlackPixels)
+    ? evidence.nonBlackPixels
+    : 0;
+  if (nonBlackPixels < options.displayMinNonblackPixels) {
+    throw new Error(
+      `required display output had ${nonBlackPixels} non-black pixels; ` +
+      `expected at least ${options.displayMinNonblackPixels}`,
+    );
   }
 }
 
@@ -935,12 +1172,14 @@ async function run() {
       clearInterval(progressTimer);
       progressTimer = null;
     }
-    result.success = true;
     result.elapsedMs = Date.now() - startTime;
     await flushDiagnostics();
     await sampleSmokeProgress(page, result, startTime, "final", options.progressSampleLimit);
     await capturePageText(page, result, options.pageTextTailBytes);
+    await captureDisplayEvidence(page, result);
+    validateDisplayEvidence(options, result);
     await captureScreenshot(page, options, result);
+    result.success = true;
     await writeResult(options, result);
     console.log(`wasm-browser-smoke-runner: marker reached: ${options.marker}`);
   } catch (error) {
@@ -954,6 +1193,7 @@ async function run() {
     await flushDiagnostics();
     await sampleSmokeProgress(page, result, startTime, "final", options.progressSampleLimit);
     await capturePageText(page, result, options.pageTextTailBytes);
+    await captureDisplayEvidence(page, result);
     await captureScreenshot(page, options, result);
     await writeResult(options, result);
     console.error(error && error.stack ? error.stack : String(error));
