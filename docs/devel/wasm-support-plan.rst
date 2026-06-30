@@ -450,9 +450,10 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``--cpu MODEL``.  Native QEMU and the Node.js ``v24`` wasm64 TCI wrapper
   both reached ``QEMU_WASM_LINUX_BOOT_OK`` with ``--cpu Nehalem``, the pinned
   TuxBoot kernel, and the dynamic TuxBoot initramfs.  This closes the
-  implementation proof for ``WASM-017b``; an official CI job still needs the
-  asset-fetch wiring that supplies the pinned TuxBoot kernel and rootfs files
-  before invoking these scripts.
+  implementation proof for ``WASM-017b``.  The later ``WASM-017c`` CI path
+  supplies the pinned TuxBoot kernel and rootfs files through
+  ``scripts/ci/wasm-prepare-tuxboot-smoke-guest.py`` before invoking the boot
+  smoke wrapper.
 * A follow-up Node.js ``v24`` wasm64 TCI probe with ``--cpu qemu64`` ruled out
   that simpler CPU model for the current TuxBoot smoke guest.  The guest
   reached ``Run /init as init process`` but then trapped with an invalid opcode
@@ -630,8 +631,9 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``/tmp/qemu-wasm-tuxboot-smoke-helper-proof3/tuxboot-smoke-guest.json``;
   the printed boot command reached ``QEMU_WASM_LINUX_BOOT_OK`` under
   ``node:24-alpine`` with the cleaned wasm64 TCI artifact.  This provides the
-  reusable command path for ``WASM-017c``.  The remaining ``WASM-017c`` work is
-  deciding where to place the GitLab CI job and cache policy.
+  reusable command path for ``WASM-017c``.  The helper is now wired into the
+  ``smoke-wasm64-64bit-linux`` and ``smoke-wasm64-64bit-browser`` jobs; the
+  remaining evidence is execution in the accepted upstream CI environment.
 * The current local ``qemu/emsdk-wasm64-cross:latest`` image reports Node.js
   ``v22.16.0``.  That image can build the wasm64 artifact, but it cannot run
   the generated Emscripten module because the module requires Node.js
@@ -1844,8 +1846,10 @@ Proof:
   BusyBox and its required uClibc and ``libtirpc`` files; that dynamic archive
   reaches the marker under native QEMU and wasm64 TCI with the same
   ``Nehalem`` CPU model used by QEMU's x86_64 TuxRun functional test.
-  Remaining work is CI wiring, caching, and update policy for the pinned
-  TuxBoot kernel/rootfs assets.
+  CI wiring now downloads or reuses the pinned TuxBoot assets with SHA-256
+  verification and caches them under the smoke jobs.  Remaining work is
+  maintainer acceptance and update policy for the pinned TuxBoot
+  kernel/rootfs assets.
 
 Non-goals:
   Bus Engine OS is not bundled into upstream QEMU tests.
