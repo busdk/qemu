@@ -3212,3 +3212,120 @@ before guest graphics or serial output become visible.  The current harness
 shows status frames while guest files load, the QEMU WebAssembly runtime loads,
 and QEMU starts.  This keeps browser-hosted Engine OS iframe users from seeing a blank black
 display during large WASM/rootfs fetches and early emulator startup.
+
+Browser-to-guest service bridge design
+======================================
+
+The next browser-hosted QEMU milestone is a structured service bridge for
+frontend code that needs to talk to software running inside the guest.  This is
+not a network stack, not a REST server, and not a product-specific agent API.
+The QEMU side should provide a generic transport that a downstream guest can
+bind to its own service adapter.
+
+The MVP channel is:
+
+.. code-block:: text
+
+   parent page or frontend app
+       -> iframe postMessage or direct harness JavaScript API
+       -> browser worker message
+       -> QEMU WebAssembly browser chardev
+       -> virtio-console or virtserialport device
+       -> guest service adapter
+
+This selects browser ``postMessage`` only as the outer browser API.  The guest
+does not see ``postMessage`` directly.  The guest-visible side should be a
+dedicated QEMU character device attached to a virtio console or virtio serial
+port.  The first message format should be newline-delimited JSON frames with a
+small bounded payload, an opaque request id, operation name, timeout, and
+structured error response.  Binary payloads, streaming, file transfer, and
+arbitrary sockets are out of scope for the first bridge.
+
+Transport comparison
+--------------------
+
+Serial console messages
+  The serial console already works and is useful for diagnostics, but it mixes
+  kernel logs, login prompts, shell output, and automation markers.  It is not
+  the right default for frontend service calls because unrelated boot output
+  can interleave with request/response traffic.  Serial remains the regression
+  and failure-evidence path.
+
+QMP
+  QMP is the structured machine-control protocol for QEMU.  It is appropriate
+  for VM status, reset, power operations, and later monitor integration.  It is
+  not a guest application service channel and should not be extended with
+  downstream guest-service methods.  The bridge design preserves QMP JSON
+  semantics and does not describe QMP as REST.
+
+virtio-console or virtserialport
+  A dedicated virtio character port is the selected MVP guest channel.  Linux
+  guests can expose it as a device separate from the serial console, QEMU
+  already has chardev plumbing, and the browser-hosted implementation can
+  remain a generic character backend rather than a Bus Engine-specific device.
+  This also works naturally with automated smoke tests because the test can
+  wait for a readiness marker on serial, then send a service request over the
+  dedicated channel.
+
+virtio-vsock
+  Vsock is a good native VM service pattern, but it is a larger first browser
+  target because it implies socket semantics, address families, and more
+  guest-side networking assumptions.  It should remain a later option for
+  native QEMU and richer browser-hosted integrations after the chardev bridge
+  proves the request/response contract.
+
+9p or virtfs request files
+  A shared filesystem can be useful for importing and exporting files, but it
+  is awkward for interactive service calls.  It introduces file lifecycle,
+  polling or notification, persistence, and cleanup behavior before the bridge
+  has proven basic request/response semantics.  It remains a later file
+  exchange mechanism, not the MVP service channel.
+
+Browser networking
+  Browser WebAssembly code does not get raw host sockets, TAP, or arbitrary
+  TCP/UDP access.  Fetch is HTTP(S)-shaped and constrained by CORS and
+  forbidden-header rules; WebSocket delegate networking requires a separate
+  host-side service.  Therefore the service bridge must not claim arbitrary
+  host or Internet networking.  Any network-like path remains opt-in and
+  separately documented.
+
+Worker ``postMessage``
+  Worker messages are the right browser-side control surface between the page,
+  iframe, harness, and QEMU WebAssembly worker.  They are not a guest device by
+  themselves.  They should carry typed bridge frames to the browser chardev
+  backend, plus lifecycle events and diagnostics back to the harness.
+
+MVP security and browser assumptions
+------------------------------------
+
+The browser-hosted service bridge assumes Chrome or Chromium with the same
+cross-origin isolation requirements as the existing pthreaded WebAssembly
+runtime.  The parent page must validate origins before accepting iframe
+messages.  The harness must expose only named bridge operations declared in the
+guest manifest, reject oversized payloads before forwarding them to QEMU, apply
+per-request timeouts, and report errors without logging secrets.
+
+QEMU must not embed downstream product credentials or model-provider
+configuration.  Guest services that need credentials must receive them through
+downstream policy-controlled mechanisms, not through static QEMU artifacts or
+query strings.  The QEMU result JSON should record bridge kind, readiness,
+request id, operation name, status, timeout, and diagnostics, but not request
+payloads by default.
+
+First proof shape
+-----------------
+
+The generic proof should use a tiny Linux guest service that reads one JSON
+line from the dedicated virtio character port and writes one JSON response.
+The browser smoke runner should:
+
+* boot the guest using the existing serial marker gate;
+* wait for the service bridge readiness marker;
+* send a ``health`` request through the browser bridge API;
+* receive a structured ``ok`` response with the same request id;
+* write result JSON with bridge state, request id, response status, timeout,
+  last serial line, and screenshot path.
+
+The downstream Bus Engine OS proof can then replace the tiny echo service with
+a governed in-guest service adapter without adding product-specific code to
+QEMU.

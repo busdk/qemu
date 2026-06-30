@@ -24,7 +24,7 @@ that lets a browser frontend communicate with services running inside the
 emulated guest. Keep this generic QEMU infrastructure; Bus Engine OS and Codex
 App Server remain downstream proof payloads.
 
-- [ ] Define the browser-to-guest service bridge design: DoD is a developer
+- [x] Define the browser-to-guest service bridge design: DoD is a developer
   note comparing serial console messages, QMP, virtio-console, virtio-vsock,
   9p/virtfs request files, browser networking, and worker `postMessage` for
   structured browser/frontend-to-guest service calls; selects the MVP channel;
