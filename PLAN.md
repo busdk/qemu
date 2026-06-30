@@ -105,8 +105,8 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Add deterministic Node coverage for runtime memory probe helper behavior.
 - [x] Add deterministic Node coverage for browser memory probe runner helper
   behavior before Playwright launches a browser.
-- [ ] Continue recording browser/runtime versions, commands, results, and
-  failure modes in `docs/devel/wasm-support-plan.rst`.
+- [x] Record browser/runtime versions, commands, results, and failure modes in
+  `docs/devel/wasm-support-plan.rst`.
 - [x] Diagnose the wasm64 TCI guest stall where both Node.js v24 and
   Chrome/Chromium reach `x86/fpu: x87 FPU will use FXSAVE` and then time out
   instead of reaching the smoke marker.
@@ -156,12 +156,12 @@ browser MVP. Keep Bus Engine product work downstream.
 
 ## Definition Of Done
 
-- [ ] Upstream QEMU branch has reviewable incremental patches for the generic
+- [x] Upstream QEMU branch has reviewable incremental patches for the generic
   64-bit WebAssembly host path.
-- [ ] Developer documentation explains exact upstream baseline, browser
+- [x] Developer documentation explains exact upstream baseline, browser
   requirements, runtime limits, tests, and known gaps.
-- [ ] Generic QEMU smoke tests prove a 64-bit Linux serial boot in Node.js and
+- [x] Generic QEMU smoke tests prove a 64-bit Linux serial boot in Node.js and
   at least one browser.
-- [ ] Downstream Bus Engine OS proof boots through the generic QEMU/WASM
+- [x] Downstream Bus Engine OS proof boots through the generic QEMU/WASM
   browser harness and produces serial evidence plus a website-preview artifact.
-- [ ] No Bus Engine product logic is added to upstream QEMU code.
+- [x] No Bus Engine product logic is added to upstream QEMU code.
