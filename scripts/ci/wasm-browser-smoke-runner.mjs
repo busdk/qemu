@@ -286,7 +286,7 @@ function appendBounded(list, entry) {
   appendBoundedLimit(list, entry, MAX_DIAGNOSTIC_ENTRIES);
 }
 
-function appendBoundedLimit(list, entry, limit) {
+export function appendBoundedLimit(list, entry, limit) {
   list.push(entry);
   if (list.length > limit) {
     list.shift();

@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 
 import {
+  appendBoundedLimit,
   browserSmokeUrl,
   initialSmokeResult,
   isTerminalPageStatus,
@@ -178,4 +179,14 @@ for (const status of [
   assert.deepEqual(result.progressSampleErrors, []);
   assert.deepEqual(result.progressSamples, []);
   assert.deepEqual(result.requestFailures, []);
+}
+
+{
+  const entries = [];
+  appendBoundedLimit(entries, "first", 3);
+  appendBoundedLimit(entries, "second", 3);
+  appendBoundedLimit(entries, "third", 3);
+  appendBoundedLimit(entries, "fourth", 3);
+
+  assert.deepEqual(entries, ["second", "third", "fourth"]);
 }
