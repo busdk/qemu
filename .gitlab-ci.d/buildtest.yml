@@ -807,6 +807,7 @@ smoke-wasm64-64bit-linux:
     expire_in: 7 days
     paths:
       - ci-runner-env
+      - build/wasm-smoke-result.json
       - build/wasm-smoke-guest/tuxboot-smoke-guest.json
   variables:
     QEMU_JOB_OPTIONAL: 1
@@ -833,6 +834,7 @@ smoke-wasm64-64bit-linux:
           --kernel wasm-smoke-cache/tuxboot-x86_64-bzImage
           --initrd build/wasm-smoke-guest/tuxboot-smoke-initramfs.cpio.gz
           --firmware-dir pc-bios
+          --out build/wasm-smoke-result.json
     - section_end smoke_boot
 
 smoke-wasm64-64bit-browser:

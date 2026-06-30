@@ -603,6 +603,10 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``build-wasm64-64bit`` artifacts, adds ``/opt/node-qemu-wasm-smoke/bin`` to
   ``PATH``, prepares the pinned TuxBoot smoke guest, caches the downloaded
   TuxBoot inputs under ``wasm-smoke-cache``, and runs the Linux boot wrapper.
+  The job records structured Node smoke evidence in
+  ``build/wasm-smoke-result.json`` and archives it next to the guest manifest
+  so CI keeps the same marker, output-tail, and early-exit state that local
+  smoke runs produce.
 * ``.gitlab-ci.d/buildtest.yml`` also contains an optional
   ``smoke-wasm64-64bit-browser`` test job.  It uses the same
   ``build-wasm64-64bit`` artifacts, prepares the pinned TuxBoot smoke guest in
