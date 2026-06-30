@@ -1318,8 +1318,11 @@ Current status:
   predicate, it passed locally under Chromium ``141.0.7390.37`` in the
   Playwright ``v1.56.1`` image.  Firefox ``142.0.1`` reached normal kernel
   initialization but timed out before the marker within 420 seconds at both
-  ``512M`` and ``256M`` guest RAM.  A WebKit attempt timed out before QEMU
-  startup while waiting on ``wasm-instantiate``.
+  ``512M`` and ``256M`` guest RAM.  A follow-up Firefox run with
+  ``initcall_debug ignore_loglevel`` proved kernel argument forwarding and
+  narrowed the timeout to guest execution progress after early kernel CPU
+  initialization.  A WebKit attempt timed out before QEMU startup while
+  waiting on ``wasm-instantiate``.
   ``smoke-wasm64-64bit-browser`` wires that path into GitLab as an optional
   job.  A corrected local job-shaped Chromium container run passed with copied
   wasm artifacts and a pre-populated TuxBoot cache, writing the memory probe,
@@ -1477,6 +1480,35 @@ Proof:
 
 Non-goals:
   No guest boot-progress fix, networking, graphics, or browser storage work.
+
+WASM-016j: Diagnose Firefox browser guest progress
+--------------------------------------------------
+
+Scope:
+  Explain why Firefox reaches early Linux kernel output but does not reach the
+  smoke initramfs marker with the same wasm64 TCI artifact, guest inputs, CPU
+  model, memory size, and kernel command line that pass under Chromium and
+  Node.js.
+
+Touches:
+  Browser smoke diagnostics, bounded serial-output capture, kernel
+  command-line probes, Firefox JavaScript/WebAssembly runtime behavior, QEMU
+  timer/interrupt progress, and only the Emscripten/browser host glue needed
+  to identify the difference.
+
+Proof:
+  The diagnosis either makes Firefox reach ``QEMU_WASM_LINUX_BOOT_OK`` with
+  the canonical smoke guest or records a concrete Firefox-specific blocker
+  with browser version, command, result JSON, final page status, serial-output
+  tail, and the QEMU subsystem or browser runtime behavior implicated by the
+  stall.  Current evidence has already ruled out missing cross-origin
+  isolation, failed resource loading, marker predicate mismatch, memory size
+  at ``512M`` versus ``256M``, CPU model simplification to ``qemu64``, and
+  kernel argument forwarding.
+
+Non-goals:
+  No requirement to support Firefox in the first accepted MVP if Chromium is
+  selected as the initial browser target by maintainers.
 
 WASM-016e: Define canonical TCI smoke-boot command line
 -------------------------------------------------------
