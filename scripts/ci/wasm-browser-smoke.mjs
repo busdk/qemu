@@ -84,7 +84,7 @@ function programExitStatus(line) {
   return match === null ? null : Number(match[1]);
 }
 
-function qemuArgs(config) {
+export function qemuArgs(config) {
   const defaultKernelAppend = config.initrd
     ? "console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1"
     : "console=ttyS0 earlyprintk=serial,ttyS0,115200 root=/dev/vda rw init=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1";
@@ -317,21 +317,23 @@ async function run() {
   }
 }
 
-run().catch((error) => {
-  const state = globalThis.qemuWasmSmokeState;
-  if (state) {
-    state.failurePhase = state.phase;
-    state.phase = "failed";
-    state.failure = error && error.message ? error.message : String(error);
-    state.phases.push({
-      phase: "failed",
-      elapsedMs: typeof state.startedAtMs === "number"
-        ? Math.round(performance.now() - state.startedAtMs)
-        : 0,
-      failedDuring: state.failurePhase,
-      message: state.failure,
-    });
-  }
-  text("status").textContent = "failed";
-  appendLine(text("output"), error && error.stack ? error.stack : String(error));
-});
+if (typeof window !== "undefined") {
+  run().catch((error) => {
+    const state = globalThis.qemuWasmSmokeState;
+    if (state) {
+      state.failurePhase = state.phase;
+      state.phase = "failed";
+      state.failure = error && error.message ? error.message : String(error);
+      state.phases.push({
+        phase: "failed",
+        elapsedMs: typeof state.startedAtMs === "number"
+          ? Math.round(performance.now() - state.startedAtMs)
+          : 0,
+        failedDuring: state.failurePhase,
+        message: state.failure,
+      });
+    }
+    text("status").textContent = "failed";
+    appendLine(text("output"), error && error.stack ? error.stack : String(error));
+  });
+}

@@ -525,6 +525,13 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``-nic none`` to the generated QEMU command line.  Future networking
   diagnostics can opt into ``--network default`` without changing the MVP
   smoke default.  The setting is recorded in the runner result JSON.
+* ``scripts/ci/wasm-browser-smoke-args-test.mjs`` now imports the pure browser
+  smoke QEMU argument builder and verifies the deterministic command shape for
+  initrd boot, default no-network mode, rootfs boot through ``virtio-mmio``,
+  rootfs boot through ``virtio-pci``, appended kernel arguments, and extra
+  trailing QEMU arguments.  The browser CI job runs this test before the
+  memory probe and boot smoke so command-line regressions fail before the
+  expensive Chromium path starts.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
@@ -2214,9 +2221,12 @@ Current status:
   ``--network none|default`` for later networking probes and records the
   selected mode in result JSON.  The page also stores the exact generated QEMU
   argv in ``qemuWasmSmokeState.qemuArgs``, and the runner promotes that array
-  to top-level ``qemuCommand`` in result JSON.  A follow-up Chromium or Chrome
-  run should preserve a result artifact proving the default no-network command
-  line still reaches the expected serial marker.
+  to top-level ``qemuCommand`` in result JSON.  The deterministic
+  ``wasm-browser-smoke-args-test.mjs`` test verifies that the generated
+  command uses ``-nic none`` by default and omits it only for
+  ``network=default``.  A follow-up Chromium or Chrome run should preserve a
+  result artifact proving the default no-network command line still reaches
+  the expected serial marker.
 
 Non-goals:
   No TAP, slirp, arbitrary TCP, or UDP support.

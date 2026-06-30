@@ -1,0 +1,78 @@
+#!/usr/bin/env node
+/*
+ * Test QEMU argument generation for the browser WebAssembly smoke harness.
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ */
+
+import assert from "node:assert/strict";
+
+import { qemuArgs } from "./wasm-browser-smoke.mjs";
+
+function baseConfig(overrides = {}) {
+  return {
+    appendExtra: "",
+    cpu: "Nehalem",
+    initrd: "/guest/initramfs.cpio.gz",
+    kernelAppend: null,
+    machine: "microvm,acpi=off",
+    memory: "512M",
+    network: "none",
+    qemuArgs: [],
+    rootfs: "",
+    rootfsDevice: "virtio-mmio",
+    ...overrides,
+  };
+}
+
+function valueAfter(args, option) {
+  const index = args.indexOf(option);
+  assert.notEqual(index, -1, `${option} should be present`);
+  assert.ok(index + 1 < args.length, `${option} should have a value`);
+  return args[index + 1];
+}
+
+{
+  const args = qemuArgs(baseConfig());
+
+  assert.equal(valueAfter(args, "-M"), "microvm,acpi=off");
+  assert.equal(valueAfter(args, "-m"), "512M");
+  assert.equal(valueAfter(args, "-cpu"), "Nehalem");
+  assert.equal(valueAfter(args, "-initrd"), "/initramfs.cpio.gz");
+  assert.equal(valueAfter(args, "-L"), "/firmware");
+  assert.equal(valueAfter(args, "-nic"), "none");
+  assert.ok(valueAfter(args, "-append").includes("rdinit=/init"));
+  assert.equal(args.includes("-drive"), false);
+}
+
+{
+  const args = qemuArgs(baseConfig({ network: "default" }));
+
+  assert.equal(args.includes("-nic"), false);
+}
+
+{
+  const args = qemuArgs(baseConfig({
+    initrd: "",
+    rootfs: "/guest/rootfs.raw",
+    rootfsDevice: "virtio-mmio",
+  }));
+
+  assert.equal(valueAfter(args, "-drive"), "file=/rootfs.raw,format=raw,if=none,id=hd0");
+  assert.equal(valueAfter(args, "-device"), "virtio-blk-device,drive=hd0");
+  assert.ok(valueAfter(args, "-append").includes("root=/dev/vda"));
+}
+
+{
+  const args = qemuArgs(baseConfig({
+    appendExtra: "ignore_loglevel",
+    initrd: "",
+    qemuArgs: ["-name", "wasm-smoke"],
+    rootfs: "/guest/rootfs.raw",
+    rootfsDevice: "virtio-pci",
+  }));
+
+  assert.equal(valueAfter(args, "-drive"), "file=/rootfs.raw,format=raw,if=virtio");
+  assert.ok(valueAfter(args, "-append").endsWith("ignore_loglevel"));
+  assert.deepEqual(args.slice(-2), ["-name", "wasm-smoke"]);
+}
