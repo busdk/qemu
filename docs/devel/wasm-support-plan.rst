@@ -142,6 +142,9 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   artifact kind, byte size, and SHA-256 hash.  The manifest deliberately does
   not include guest kernel, rootfs, or product metadata; those belong to the
   later harness or downstream integration layer.
+  ``scripts/ci/wasm-artifact-manifest-test.py`` verifies the manifest contract
+  with synthetic JavaScript and WebAssembly artifacts before the smoke jobs run
+  browser or guest boot work.
 * The generated JavaScript is ``MODULARIZE`` ES module output.  Directly
   running ``node qemu-system-x86_64.js --version`` only loads the module
   factory and is not a QEMU startup test.  A real Node startup test must import
@@ -1356,15 +1359,18 @@ Scope:
   Define a small manifest for generated QEMU/WASM build artifacts.
 
 Touches:
-  ``scripts/ci/wasm-artifact-manifest.py``, CI artifact configuration, and
-  documentation.
+  ``scripts/ci/wasm-artifact-manifest.py``,
+  ``scripts/ci/wasm-artifact-manifest-test.py``, CI artifact configuration,
+  and documentation.
 
 Proof:
   The CI job writes ``qemu-system-wasm-artifacts.json`` with format version,
   artifact paths, artifact kinds, byte sizes, and SHA-256 hashes.  Later
   harness manifests may reference guest kernel, rootfs, optional initrd,
   firmware paths, memory size, and boot arguments, but those inputs are not
-  part of this QEMU build-artifact manifest.
+  part of this QEMU build-artifact manifest.  The deterministic unit test
+  verifies JavaScript and WebAssembly artifact entries and the no-artifacts
+  error path.
 
 Non-goals:
   No package manager or product release format.

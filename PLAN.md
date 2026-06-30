@@ -19,6 +19,7 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Add artifact capture for `qemu-system-x86_64.js` and
   `qemu-system-x86_64.wasm`.
 - [x] Add machine-readable artifact metadata.
+- [x] Add deterministic test coverage for WebAssembly build artifact manifests.
 - [x] Add a generic Node.js serial boot smoke harness.
 - [x] Add a generic browser smoke harness with cross-origin isolation.
 - [x] Add bounded browser serial evidence capture.
