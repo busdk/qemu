@@ -149,6 +149,52 @@ def test_missing_target_pair_file() -> None:
         assert "WebAssembly module does not exist" in check.stderr
 
 
+def test_target_pair_checksum_mismatch() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        js_data = b"console.log('qemu wasm');\n"
+        wasm_data = b"\0asmqemu"
+
+        (root / "qemu-system-x86_64.js").write_bytes(js_data)
+        wasm = root / "qemu-system-x86_64.wasm"
+        wasm.write_bytes(wasm_data)
+
+        output = root / "manifest.json"
+        result = run_manifest(root, output)
+        assert result.returncode == 0, result.stderr
+
+        wasm.write_bytes(wasm_data + b"stale")
+
+        check = run_check(output, "x86_64")
+        assert check.returncode == 1
+        assert "WebAssembly module checksum mismatch" in check.stderr
+
+
+def test_missing_artifact_entry_for_target_pair() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        js_data = b"console.log('qemu wasm');\n"
+        wasm_data = b"\0asmqemu"
+
+        (root / "qemu-system-x86_64.js").write_bytes(js_data)
+        (root / "qemu-system-x86_64.wasm").write_bytes(wasm_data)
+
+        output = root / "manifest.json"
+        result = run_manifest(root, output)
+        assert result.returncode == 0, result.stderr
+
+        manifest = json.loads(output.read_text(encoding="utf-8"))
+        manifest["artifacts"] = [
+            artifact for artifact in manifest["artifacts"]
+            if artifact["path"] != "qemu-system-x86_64.js"
+        ]
+        output.write_text(json.dumps(manifest), encoding="utf-8")
+
+        check = run_check(output, "x86_64")
+        assert check.returncode == 1
+        assert "has no entry for JavaScript launcher" in check.stderr
+
+
 def test_missing_artifacts() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
@@ -164,6 +210,8 @@ def main() -> int:
     test_manifest()
     test_incomplete_target_pair()
     test_missing_target_pair_file()
+    test_target_pair_checksum_mismatch()
+    test_missing_artifact_entry_for_target_pair()
     test_missing_artifacts()
     return 0
 

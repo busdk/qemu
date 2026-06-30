@@ -150,9 +150,9 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   before the smoke jobs run browser or guest boot work.
   ``scripts/ci/wasm-artifact-manifest-check.py`` verifies that a requested
   target has a complete JavaScript/WebAssembly pair and that both paths exist
-  relative to the manifest.  Both wasm64 smoke jobs now run that checker for
-  ``x86_64`` before guest preparation or browser launch, so a broken artifact
-  handoff fails before the expensive boot paths.
+  relative to the manifest with matching SHA-256 values.  Both wasm64 smoke
+  jobs now run that checker for ``x86_64`` before guest preparation or browser
+  launch, so a broken artifact handoff fails before the expensive boot paths.
 * The generated JavaScript is ``MODULARIZE`` ES module output.  Directly
   running ``node qemu-system-x86_64.js --version`` only loads the module
   factory and is not a QEMU startup test.  A real Node startup test must import
@@ -1464,8 +1464,9 @@ Proof:
   this QEMU build-artifact manifest.  The deterministic unit test verifies
   JavaScript and WebAssembly artifact entries, complete pair metadata,
   incomplete pair metadata, missing-file checker failures, and the
-  no-artifacts error path.  Both wasm64 smoke jobs run the checker for
-  ``x86_64`` before preparing the guest.
+  no-artifacts error path.  The checker tests also cover stale artifact bytes
+  and target pairs whose manifest entries have been dropped.  Both wasm64
+  smoke jobs run the checker for ``x86_64`` before preparing the guest.
 
 Non-goals:
   No package manager or product release format.
