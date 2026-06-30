@@ -565,6 +565,28 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``scripts/ci/wasm-node-preflight-test.mjs`` covers the version parser and
   both pass and fail preflight result shapes with synthetic Node.js versions,
   so CI keeps the JSON contract stable even on newer smoke runners.
+* A current local CI-shaped Chromium proof was re-run in the cached
+  Playwright ``v1.56.1`` Noble container with Chromium ``141.0.7390.37`` and
+  Node.js ``v22.20.0``.  The run used the existing cleaned wasm64 TCI
+  artifacts with SHA-256
+  ``a072f5c3280a7d832dd7511c8ef7a961a43a2ce009f0658702965553298ba697`` for
+  ``qemu-system-x86_64.js`` and
+  ``7666234b6325366b4ff9fc0e0bb91f08d1ad71803e5ee12da4531022017f2a33`` for
+  ``qemu-system-x86_64.wasm``.  The TuxBoot kernel SHA-256 was
+  ``f57bfc6553bcd6e0a54aab86095bf642b33b5571d14e3af1731b18c87ed5aef8`` and
+  the helper initramfs SHA-256 was
+  ``9f94a297a5da2399a3ffb06853779bb3b5ce4f398aaa3cfd5ced162ad17c885d``.
+  With the current default ``network=none`` command, the browser passed
+  cross-origin isolation and reached QEMU guest boot, but timed out after
+  ``240181`` ms with ``107`` serial lines, ``5585`` captured bytes,
+  ``lastLine`` equal to ``x86/fpu: x87 FPU will use FXSAVE``, and one page
+  error: ``RuntimeError: memory access out of bounds``.  A comparison run with
+  ``--network default`` removed ``-nic none`` from the QEMU command but also
+  timed out after ``240274`` ms at the same final serial line, without page
+  errors.  This means the current failure is not explained solely by the
+  explicit no-network command shape; the next Chrome/Chromium diagnostic
+  should target the wasm64 TCI execution path around post-FPU kernel progress
+  and the intermittent browser memory exception.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
@@ -1459,7 +1481,11 @@ Proof:
   ``crossOriginIsolated: true``, no request failures, ``174`` serial lines, and
   a ``1280x720`` screenshot.  A negative Node.js proof with a deliberately
   wrong rootfs SHA-256 exited with status ``2`` and reported a checksum
-  mismatch before QEMU startup.  The smoke helpers also accept repeated
+  mismatch before QEMU startup.
+  ``scripts/ci/wasm-guest-manifest-test.mjs`` now covers relative path
+  resolution, SHA-256 normalization and verification, explicit command-line
+  override behavior, manifest ``qemuArgs`` ordering, and the checksum-mismatch
+  failure path without running QEMU.  The smoke helpers also accept repeated
   ``--expect-text TEXT`` arguments, or a manifest ``expectText`` array, so a
   downstream guest proof can require serial identity text in addition to the
   readiness marker.  A Node.js ``v24`` positive proof required

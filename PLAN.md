@@ -37,6 +37,8 @@ browser MVP. Keep Bus Engine product work downstream.
   product-specific QEMU code.
 - [x] Resolve manifest relative paths from the manifest file and verify
   optional SHA-256 checksums for guest kernel, initrd, and rootfs inputs.
+- [x] Add deterministic test coverage for guest manifest path, checksum, and
+  override behavior.
 - [x] Add generic expected serial-text assertions so downstream proofs can
   require OS identity text in addition to a readiness marker.
 - [x] Keep the accepted smoke profile stable while diagnostic arguments vary.
@@ -59,6 +61,9 @@ browser MVP. Keep Bus Engine product work downstream.
   behavior before Playwright launches a browser.
 - [ ] Continue recording browser/runtime versions, commands, results, and
   failure modes in `docs/devel/wasm-support-plan.rst`.
+- [ ] Diagnose the current Chrome/Chromium TCI guest stall where the
+  Playwright container reaches `x86/fpu: x87 FPU will use FXSAVE` and then
+  times out instead of reaching the smoke marker.
 
 ## Bus Engine OS Downstream Proof
 
