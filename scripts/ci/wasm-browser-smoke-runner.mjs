@@ -26,6 +26,8 @@ Options:
   --initrd FILE       Smoke initramfs image
   --kernel FILE       64-bit Linux bzImage
   --marker TEXT       Output text required for success
+  --max-output-bytes N
+                     Maximum browser page output bytes to keep
   --out FILE          Write smoke result JSON to FILE
   --port PORT         Local smoke server port
   --program FILE      JavaScript launcher inside artifact dir
@@ -44,6 +46,7 @@ function parseArgs(argv) {
     initrd: null,
     kernel: null,
     marker: "QEMU_WASM_LINUX_BOOT_OK",
+    maxOutputBytes: 60000,
     out: null,
     port: 8010,
     program: "qemu-system-x86_64.js",
@@ -66,6 +69,8 @@ function parseArgs(argv) {
       options.kernel = argv[++i];
     } else if (arg === "--marker") {
       options.marker = argv[++i];
+    } else if (arg === "--max-output-bytes") {
+      options.maxOutputBytes = Number(argv[++i]);
     } else if (arg === "--out") {
       options.out = argv[++i];
     } else if (arg === "--port") {
@@ -100,6 +105,10 @@ function parseArgs(argv) {
   }
   if (!Number.isInteger(options.timeoutMs) || options.timeoutMs <= 0) {
     console.error("--timeout-ms must be a positive integer");
+    usage(2);
+  }
+  if (!Number.isInteger(options.maxOutputBytes) || options.maxOutputBytes <= 0) {
+    console.error("--max-output-bytes must be a positive integer");
     usage(2);
   }
 
@@ -248,7 +257,11 @@ async function run() {
         failureText: failure && failure.errorText ? failure.errorText : null,
       });
     });
-    await page.goto(`http://${options.host}:${options.port}/`, {
+    const url = new URL(`http://${options.host}:${options.port}/`);
+    url.searchParams.set("marker", options.marker);
+    url.searchParams.set("maxOutputBytes", String(options.maxOutputBytes));
+    url.searchParams.set("timeoutMs", String(options.timeoutMs));
+    await page.goto(url.href, {
       waitUntil: "domcontentloaded",
       timeout: options.timeoutMs,
     });
