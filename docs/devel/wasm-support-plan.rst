@@ -443,6 +443,12 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   implementation proof for ``WASM-017b``; an official CI job still needs the
   asset-fetch wiring that supplies the pinned TuxBoot kernel and rootfs files
   before invoking these scripts.
+* A follow-up Node.js ``v24`` wasm64 TCI probe with ``--cpu qemu64`` ruled out
+  that simpler CPU model for the current TuxBoot smoke guest.  The guest
+  reached ``Run /init as init process`` but then trapped with an invalid opcode
+  in ``libuClibc-1.0.45.so`` and timed out without the marker.  The Firefox
+  browser gap should therefore not be chased by switching the current smoke
+  guest from ``Nehalem`` to ``qemu64``.
 * ``scripts/ci/wasm-prepare-tuxboot-smoke-guest.py`` now provides that
   CI-shaped guest-preparation path.  It downloads or reuses the existing
   x86_64 TuxBoot kernel and rootfs assets, verifies them against the SHA-256
