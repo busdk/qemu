@@ -458,6 +458,24 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``QEMU_WASM_LINUX_BOOT_OK``.  This gives the Firefox and browser-matrix
   investigation a safe way to add temporary kernel diagnostics such as
   initcall tracing while keeping the default smoke path stable.
+* The browser smoke runner now records the final page status and supports
+  ``--page-text-tail-bytes`` so browser failures can preserve a larger bounded
+  serial-output tail in JSON without changing the page output cap.  A Chromium
+  ``141.0.7390.37`` proof with ``--append-extra qemu_wasm_append_probe=1``
+  reached ``QEMU_WASM_LINUX_BOOT_OK`` after roughly ``81`` seconds.  Its
+  result JSON recorded ``pageStatus`` as
+  ``marker reached: QEMU_WASM_LINUX_BOOT_OK`` and the captured page tail
+  contained both kernel command-line records with the appended probe.
+* A Firefox ``142.0.1`` diagnostic run with
+  ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
+  ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
+  console, page, or request errors.  The guest printed the appended kernel
+  arguments and progressed through timer setup, skipped delay-loop
+  calibration, ``random: crng init done``, TLB reporting, and Spectre
+  mitigation output, but did not reach ``Run /init`` or the marker.  This
+  narrows the Firefox gap to guest execution progress after early kernel CPU
+  initialization rather than harness setup, cross-origin isolation, resource
+  loading, kernel argument forwarding, or marker detection.
 * ``scripts/ci/wasm-prepare-tuxboot-smoke-guest.py`` now provides that
   CI-shaped guest-preparation path.  It downloads or reuses the existing
   x86_64 TuxBoot kernel and rootfs assets, verifies them against the SHA-256

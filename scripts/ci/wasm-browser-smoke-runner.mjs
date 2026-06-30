@@ -12,7 +12,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MAX_DIAGNOSTIC_ENTRIES = 50;
-const MAX_PAGE_TEXT_BYTES = 8192;
+const DEFAULT_PAGE_TEXT_TAIL_BYTES = 8192;
 
 function usage(status) {
   const stream = status === 0 ? process.stdout : process.stderr;
@@ -32,6 +32,8 @@ Options:
                      Maximum browser page output bytes to keep
   --memory SIZE       Guest memory size passed to QEMU
   --out FILE          Write smoke result JSON to FILE
+  --page-text-tail-bytes N
+                     Maximum page text tail bytes to keep in result JSON
   --port PORT         Local smoke server port
   --program FILE      JavaScript launcher inside artifact dir
   --timeout-ms MS     Timeout in milliseconds
@@ -54,6 +56,7 @@ function parseArgs(argv) {
     maxOutputBytes: 60000,
     memory: "512M",
     out: null,
+    pageTextTailBytes: DEFAULT_PAGE_TEXT_TAIL_BYTES,
     port: 8010,
     program: "qemu-system-x86_64.js",
     timeoutMs: 180000,
@@ -85,6 +88,8 @@ function parseArgs(argv) {
       options.memory = argv[++i];
     } else if (arg === "--out") {
       options.out = argv[++i];
+    } else if (arg === "--page-text-tail-bytes") {
+      options.pageTextTailBytes = Number(argv[++i]);
     } else if (arg === "--port") {
       options.port = Number(argv[++i]);
     } else if (arg === "--program") {
@@ -121,6 +126,10 @@ function parseArgs(argv) {
   }
   if (!Number.isInteger(options.maxOutputBytes) || options.maxOutputBytes <= 0) {
     console.error("--max-output-bytes must be a positive integer");
+    usage(2);
+  }
+  if (!Number.isInteger(options.pageTextTailBytes) || options.pageTextTailBytes <= 0) {
+    console.error("--page-text-tail-bytes must be a positive integer");
     usage(2);
   }
 
@@ -211,13 +220,14 @@ async function writeResult(options, result) {
   await writeFile(options.out, `${JSON.stringify(result, null, 2)}\n`);
 }
 
-async function capturePageText(page, result) {
+async function capturePageText(page, result, tailBytes) {
   if (!page) {
     return;
   }
   try {
+    result.pageStatus = await page.evaluate(() => document.querySelector("#status")?.textContent || "");
     const text = await page.evaluate(() => document.body.textContent || "");
-    result.pageTextTail = text.slice(-MAX_PAGE_TEXT_BYTES);
+    result.pageTextTail = text.slice(-tailBytes);
   } catch (error) {
     result.pageTextError = error && error.message ? error.message : String(error);
   }
@@ -242,6 +252,7 @@ async function run() {
     marker: options.marker,
     memory: options.memory,
     timeoutMs: options.timeoutMs,
+    pageTextTailBytes: options.pageTextTailBytes,
     success: false,
     consoleMessages: [],
     pageErrors: [],
@@ -292,14 +303,14 @@ async function run() {
     );
     result.success = true;
     result.elapsedMs = Date.now() - startTime;
-    await capturePageText(page, result);
+    await capturePageText(page, result, options.pageTextTailBytes);
     await writeResult(options, result);
     console.log(`wasm-browser-smoke-runner: marker reached: ${options.marker}`);
   } catch (error) {
     result.elapsedMs = Date.now() - startTime;
     result.errorName = error && error.name ? error.name : "Error";
     result.errorMessage = error && error.message ? error.message : String(error);
-    await capturePageText(page, result);
+    await capturePageText(page, result, options.pageTextTailBytes);
     await writeResult(options, result);
     console.error(error && error.stack ? error.stack : String(error));
     throw error;
