@@ -17,6 +17,7 @@ import {
   progressSampleDiagnostic,
   promoteSmokeState,
   requestFailureDiagnostic,
+  smokeResultSummary,
 } from "./wasm-browser-smoke-runner.mjs";
 
 const marker = "QEMU_WASM_LINUX_BOOT_OK";
@@ -301,5 +302,79 @@ for (const status of [
     outputByteDelta: 120,
     lastLineChanged: true,
     previousElapsedMs: 10000,
+  });
+}
+
+{
+  assert.deepEqual(smokeResultSummary({
+    errorName: "TimeoutError",
+    errorMessage: "page wait timed out",
+    lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+    markerSeen: false,
+    outputLines: 107,
+    pageStatus: "QEMU started; waiting for marker",
+    phase: "guest-boot",
+    pageErrors: [
+      {
+        elapsedMs: 240181,
+        name: "RuntimeError",
+        message: "memory access out of bounds",
+        state: {
+          phase: "guest-boot",
+          lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+        },
+      },
+    ],
+    progressSamples: [
+      {
+        elapsedMs: 240000,
+        reason: "final",
+        lineDelta: 0,
+        outputByteDelta: 0,
+        lastLineChanged: false,
+        state: {
+          lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+        },
+      },
+    ],
+    requestFailures: [],
+    success: false,
+  }), {
+    success: false,
+    phase: "guest-boot",
+    pageStatus: "QEMU started; waiting for marker",
+    markerSeen: false,
+    lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+    outputLines: 107,
+    primaryError: {
+      name: "TimeoutError",
+      message: "page wait timed out",
+    },
+    pageErrorCount: 1,
+    firstPageError: {
+      elapsedMs: 240181,
+      name: "RuntimeError",
+      message: "memory access out of bounds",
+      phase: "guest-boot",
+      lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+    },
+    lastPageError: {
+      elapsedMs: 240181,
+      name: "RuntimeError",
+      message: "memory access out of bounds",
+      phase: "guest-boot",
+      lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+    },
+    requestFailureCount: 0,
+    firstRequestFailure: null,
+    progressSampleCount: 1,
+    lastProgressSample: {
+      elapsedMs: 240000,
+      reason: "final",
+      lineDelta: 0,
+      outputByteDelta: 0,
+      lastLineChanged: false,
+      lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+    },
   });
 }

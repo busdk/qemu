@@ -423,10 +423,88 @@ async function stopServer(child) {
   });
 }
 
+function firstEntry(entries) {
+  return entries && entries.length > 0 ? entries[0] : null;
+}
+
+function lastEntry(entries) {
+  return entries && entries.length > 0 ? entries[entries.length - 1] : null;
+}
+
+function compactPageError(error) {
+  if (error === null) {
+    return null;
+  }
+  return {
+    elapsedMs: error.elapsedMs,
+    name: error.name,
+    message: error.message,
+    phase: error.state && error.state.phase ? error.state.phase : null,
+    lastLine: error.state && error.state.lastLine ? error.state.lastLine : null,
+  };
+}
+
+function compactRequestFailure(failure) {
+  if (failure === null) {
+    return null;
+  }
+  return {
+    elapsedMs: failure.elapsedMs,
+    method: failure.method,
+    url: failure.url,
+    failureText: failure.failureText,
+  };
+}
+
+function compactProgressSample(sample) {
+  if (sample === null) {
+    return null;
+  }
+  return {
+    elapsedMs: sample.elapsedMs,
+    reason: sample.reason,
+    lineDelta: sample.lineDelta,
+    outputByteDelta: sample.outputByteDelta,
+    lastLineChanged: sample.lastLineChanged,
+    lastLine: sample.state && sample.state.lastLine ? sample.state.lastLine : null,
+  };
+}
+
+export function smokeResultSummary(result) {
+  const firstPageError = compactPageError(firstEntry(result.pageErrors || []));
+  const lastPageError = compactPageError(lastEntry(result.pageErrors || []));
+  const firstRequestFailure = compactRequestFailure(firstEntry(result.requestFailures || []));
+  const lastProgressSample = compactProgressSample(lastEntry(result.progressSamples || []));
+  const primaryError = result.errorMessage
+    ? {
+        name: result.errorName || "Error",
+        message: result.errorMessage,
+      }
+    : firstPageError;
+
+  return {
+    success: Boolean(result.success),
+    phase: result.phase || null,
+    pageStatus: result.pageStatus || null,
+    markerSeen: Boolean(result.markerSeen),
+    lastLine: result.lastLine || "",
+    outputLines: Number.isInteger(result.outputLines) ? result.outputLines : null,
+    primaryError,
+    pageErrorCount: (result.pageErrors || []).length,
+    firstPageError,
+    lastPageError,
+    requestFailureCount: (result.requestFailures || []).length,
+    firstRequestFailure,
+    progressSampleCount: (result.progressSamples || []).length,
+    lastProgressSample,
+  };
+}
+
 async function writeResult(options, result) {
   if (options.out === null) {
     return;
   }
+  result.summary = smokeResultSummary(result);
   await writeFile(options.out, `${JSON.stringify(result, null, 2)}\n`);
 }
 

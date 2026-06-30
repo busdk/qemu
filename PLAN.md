@@ -57,6 +57,9 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Flush pending Chromium page-error diagnostics before writing browser
   smoke result JSON so intermittent WebAssembly traps keep their smoke-state
   snapshot and page-error progress sample.
+- [x] Add a compact browser smoke result summary so Chromium timeout artifacts
+  expose the primary error, page-error count, request-failure count, final
+  progress sample, and last serial line without manual JSON correlation.
 - [x] Preserve browser harness failure name and stack in `qemuWasmSmokeState`.
 - [x] Add progress-sample deltas so Chromium stall runs show whether serial
   output advanced between samples.

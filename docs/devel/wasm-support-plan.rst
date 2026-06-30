@@ -602,6 +602,11 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   pending page-error diagnostics before writing result JSON.  This keeps the
   intermittent Chromium ``RuntimeError: memory access out of bounds`` evidence
   tied to the guest phase and last serial line observed by the page.
+  Browser smoke result JSON now also includes a compact ``summary`` object
+  with the primary runner error, page status, marker state, last serial line,
+  page-error count, request-failure count, and final progress sample.  The
+  deterministic helper test covers the current Chromium timeout shape so the
+  next run can be triaged from the summary before inspecting the full arrays.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
