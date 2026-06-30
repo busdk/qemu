@@ -58,17 +58,49 @@ def test_manifest() -> None:
                 {
                     "path": "qemu-system-x86_64.js",
                     "kind": "emscripten-javascript",
+                    "target": "x86_64",
                     "size_bytes": len(js_data),
                     "sha256": sha256(js_data),
                 },
                 {
                     "path": "qemu-system-x86_64.wasm",
                     "kind": "webassembly-module",
+                    "target": "x86_64",
                     "size_bytes": len(wasm_data),
                     "sha256": sha256(wasm_data),
                 },
             ],
+            "targets": [
+                {
+                    "target": "x86_64",
+                    "javascript": "qemu-system-x86_64.js",
+                    "wasm": "qemu-system-x86_64.wasm",
+                    "complete": True,
+                },
+            ],
         }
+
+
+def test_incomplete_target_pair() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        js_data = b"console.log('qemu wasm');\n"
+
+        (root / "qemu-system-riscv64.js").write_bytes(js_data)
+
+        output = root / "manifest.json"
+        result = run_manifest(root, output)
+        assert result.returncode == 0, result.stderr
+
+        manifest = json.loads(output.read_text(encoding="utf-8"))
+        assert manifest["targets"] == [
+            {
+                "target": "riscv64",
+                "javascript": "qemu-system-riscv64.js",
+                "wasm": None,
+                "complete": False,
+            },
+        ]
 
 
 def test_missing_artifacts() -> None:
@@ -84,6 +116,7 @@ def test_missing_artifacts() -> None:
 
 def main() -> int:
     test_manifest()
+    test_incomplete_target_pair()
     test_missing_artifacts()
     return 0
 

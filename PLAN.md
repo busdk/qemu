@@ -19,6 +19,9 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Add artifact capture for `qemu-system-x86_64.js` and
   `qemu-system-x86_64.wasm`.
 - [x] Add machine-readable artifact metadata.
+- [x] Add target-pair metadata to the WebAssembly artifact manifest so smoke
+  jobs and downstream replay tooling can verify the `qemu-system-$target`
+  JavaScript launcher and WebAssembly module pair before browser startup.
 - [x] Add deterministic test coverage for WebAssembly build artifact manifests.
 - [x] Add a generic Node.js serial boot smoke harness.
 - [x] Add a generic browser smoke harness with cross-origin isolation.
@@ -70,6 +73,7 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Compare the current Chromium stall against the older known-passing
   browser harness commit using the same wasm artifacts and guest inputs.
 - [x] Probe the current Chromium stall with reduced guest memory.
+- [x] Probe the current Chromium stall with the simpler `qemu64` CPU model.
 - [x] Expose browser smoke CI variables for append-extra kernel arguments,
   guest CPU, guest memory, and timeout so Chrome/Chromium diagnostics can be
   replayed without editing CI YAML.

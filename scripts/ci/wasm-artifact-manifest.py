@@ -27,6 +27,42 @@ def artifact_kind(path: Path) -> str:
     return "unknown"
 
 
+def artifact_target(path: Path) -> str:
+    name = path.name
+    for suffix in (".js", ".wasm"):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    if not name.startswith("qemu-system-"):
+        return ""
+    return name[len("qemu-system-") :]
+
+
+def target_pairs(paths, root: Path) -> list:
+    pairs = {}
+    for path in paths:
+        target = artifact_target(path)
+        if not target:
+            continue
+        pair = pairs.setdefault(target, {
+            "target": target,
+            "javascript": None,
+            "wasm": None,
+            "complete": False,
+        })
+        if path.suffix == ".js":
+            pair["javascript"] = str(path.relative_to(root))
+        elif path.suffix == ".wasm":
+            pair["wasm"] = str(path.relative_to(root))
+
+    result = []
+    for target in sorted(pairs):
+        pair = pairs[target]
+        pair["complete"] = pair["javascript"] is not None and pair["wasm"] is not None
+        result.append(pair)
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Create a JSON manifest for QEMU WebAssembly artifacts."
@@ -60,11 +96,13 @@ def main() -> int:
             {
                 "path": str(path.relative_to(root)),
                 "kind": artifact_kind(path),
+                "target": artifact_target(path),
                 "size_bytes": path.stat().st_size,
                 "sha256": sha256(path),
             }
             for path in paths
         ],
+        "targets": target_pairs(paths, root),
     }
 
     args.output.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

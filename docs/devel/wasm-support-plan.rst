@@ -139,12 +139,15 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
 * The wasm CI template now also emits
   ``build/qemu-system-wasm-artifacts.json``.  The manifest format starts at
   version ``1`` and records each generated QEMU WebAssembly artifact path,
-  artifact kind, byte size, and SHA-256 hash.  The manifest deliberately does
-  not include guest kernel, rootfs, or product metadata; those belong to the
-  later harness or downstream integration layer.
+  artifact kind, target name, byte size, and SHA-256 hash.  It also records a
+  ``targets`` list that groups each ``qemu-system-$target`` JavaScript
+  launcher with the matching WebAssembly module and marks whether the pair is
+  complete.  The manifest deliberately does not include guest kernel, rootfs,
+  or product metadata; those belong to the later harness or downstream
+  integration layer.
   ``scripts/ci/wasm-artifact-manifest-test.py`` verifies the manifest contract
-  with synthetic JavaScript and WebAssembly artifacts before the smoke jobs run
-  browser or guest boot work.
+  with synthetic complete and incomplete JavaScript/WebAssembly target pairs
+  before the smoke jobs run browser or guest boot work.
 * The generated JavaScript is ``MODULARIZE`` ES module output.  Directly
   running ``node qemu-system-x86_64.js --version`` only loads the module
   factory and is not a QEMU startup test.  A real Node startup test must import
@@ -631,6 +634,13 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   simple 512 MiB guest-memory size pressure and confirms that the failure is a
   quiet guest-execution stall after the FPU line in the tested browser
   runtime.
+  A current-harness Chromium probe with ``--cpu qemu64`` also timed out after
+  ``240178`` ms at the same final serial line, with no page errors or request
+  failures.  It emitted ``103`` serial lines and the summary's final progress
+  sample again recorded ``lineDelta: 0``, ``outputByteDelta: 0``, and
+  ``lastLineChanged: false``.  This means the simpler CPU model that works in
+  the Node.js smoke path is not sufficient to make the current Chromium TCI
+  browser run progress beyond the FPU line.
   The browser smoke CI job now exposes
   ``QEMU_WASM_BROWSER_APPEND_EXTRA``, ``QEMU_WASM_BROWSER_CPU``,
   ``QEMU_WASM_BROWSER_MEMORY``, and ``QEMU_WASM_BROWSER_TIMEOUT_MS`` so the
@@ -1441,12 +1451,14 @@ Touches:
 
 Proof:
   The CI job writes ``qemu-system-wasm-artifacts.json`` with format version,
-  artifact paths, artifact kinds, byte sizes, and SHA-256 hashes.  Later
-  harness manifests may reference guest kernel, rootfs, optional initrd,
-  firmware paths, memory size, and boot arguments, but those inputs are not
-  part of this QEMU build-artifact manifest.  The deterministic unit test
-  verifies JavaScript and WebAssembly artifact entries and the no-artifacts
-  error path.
+  artifact paths, artifact kinds, target names, byte sizes, SHA-256 hashes,
+  and a target-pair list that identifies complete or incomplete
+  ``qemu-system-$target`` JavaScript/WebAssembly pairs.  Later harness
+  manifests may reference guest kernel, rootfs, optional initrd, firmware
+  paths, memory size, and boot arguments, but those inputs are not part of
+  this QEMU build-artifact manifest.  The deterministic unit test verifies
+  JavaScript and WebAssembly artifact entries, complete pair metadata,
+  incomplete pair metadata, and the no-artifacts error path.
 
 Non-goals:
   No package manager or product release format.
