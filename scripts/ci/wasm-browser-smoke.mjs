@@ -11,6 +11,11 @@ function option(name, fallback) {
   return value === null || value === "" ? fallback : value;
 }
 
+function pathOption(name, fallback) {
+  const value = new URLSearchParams(window.location.search).get(name);
+  return value === null ? fallback : value;
+}
+
 function listOption(name) {
   return new URLSearchParams(window.location.search).getAll(name);
 }
@@ -58,7 +63,9 @@ function mountFiles(module, mounts) {
 
 function qemuArgs(config) {
   const kernelAppend = [
-    "console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1",
+    config.initrd
+      ? "console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1"
+      : "console=ttyS0 earlyprintk=serial,ttyS0,115200 root=/dev/vda rw init=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1",
     config.appendExtra,
   ].filter(Boolean).join(" ");
   const args = [
@@ -80,13 +87,20 @@ function qemuArgs(config) {
     "none",
     "-kernel",
     "/kernel",
-    "-initrd",
-    "/initramfs.cpio.gz",
-    "-append",
-    kernelAppend,
-    "-L",
-    "/firmware",
   );
+  if (config.initrd) {
+    args.push("-initrd", "/initramfs.cpio.gz");
+  }
+  args.push("-append", kernelAppend);
+  if (config.rootfs) {
+    args.push(
+      "-drive",
+      "file=/rootfs.raw,format=raw,if=none,id=hd0",
+      "-device",
+      "virtio-blk-device,drive=hd0",
+    );
+  }
+  args.push("-L", "/firmware");
   args.push(...config.qemuArgs);
   return args;
 }
@@ -95,7 +109,7 @@ function buildConfig() {
   return {
     appendExtra: option("appendExtra", ""),
     cpu: option("cpu", "Nehalem"),
-    initrd: option("initrd", "/guest/initramfs.cpio.gz"),
+    initrd: pathOption("initrd", "/guest/initramfs.cpio.gz"),
     kernel: option("kernel", "/guest/kernel"),
     linuxboot: option("linuxboot", "/firmware/linuxboot_dma.bin"),
     marker: option("marker", DEFAULT_MARKER),
@@ -104,6 +118,7 @@ function buildConfig() {
     program: option("program", "/artifacts/qemu-system-x86_64.js"),
     qemuArgs: listOption("qemuArg"),
     qboot: option("qboot", "/firmware/qboot.rom"),
+    rootfs: pathOption("rootfs", ""),
     timeoutMs: numberOption("timeoutMs", 180000),
     wasm: option("wasm", "/artifacts/qemu-system-x86_64.wasm"),
   };
@@ -125,10 +140,15 @@ async function run() {
   globalThis.qemuWasmSmokeState = smokeState;
   const mounts = [
     { url: config.kernel, path: "/kernel" },
-    { url: config.initrd, path: "/initramfs.cpio.gz" },
     { url: config.qboot, path: "/firmware/qboot.rom" },
     { url: config.linuxboot, path: "/firmware/linuxboot_dma.bin" },
   ];
+  if (config.initrd) {
+    mounts.push({ url: config.initrd, path: "/initramfs.cpio.gz" });
+  }
+  if (config.rootfs) {
+    mounts.push({ url: config.rootfs, path: "/rootfs.raw" });
+  }
 
   if (!crossOriginIsolated) {
     throw new Error("cross-origin isolation is required for pthread WebAssembly");

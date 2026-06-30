@@ -23,6 +23,7 @@ function parseArgs(argv) {
     memory: "512M",
     program: "qemu-system-x86_64.js",
     qemuArgs: [],
+    rootfs: null,
     timeoutMs: 180000,
   };
 
@@ -50,6 +51,8 @@ function parseArgs(argv) {
       options.program = argv[++i];
     } else if (arg === "--qemu-arg") {
       options.qemuArgs.push(argv[++i]);
+    } else if (arg === "--rootfs") {
+      options.rootfs = argv[++i];
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number(argv[++i]);
     } else if (arg === "--help") {
@@ -64,8 +67,8 @@ function parseArgs(argv) {
     console.error("--kernel is required");
     usage(2);
   }
-  if (options.initrd === null) {
-    console.error("--initrd is required");
+  if (options.initrd === null && options.rootfs === null) {
+    console.error("either --initrd or --rootfs is required");
     usage(2);
   }
   if (!Number.isInteger(options.maxOutputBytes) || options.maxOutputBytes <= 0) {
@@ -96,6 +99,7 @@ Options:
   --memory SIZE          Guest memory size passed to QEMU
   --program FILE         JavaScript launcher inside artifact dir
   --qemu-arg ARG         Extra QEMU argument appended to the smoke command
+  --rootfs FILE          Raw root filesystem image exposed as /dev/vda
   --timeout-ms MS        Timeout in milliseconds
   --help                 Show this help
 `);
@@ -120,7 +124,12 @@ function runSmoke(options) {
   requireReadable(resolve(options.artifactDir, options.program), "program");
   requireReadable(resolve(options.artifactDir, "qemu-system-x86_64.wasm"), "wasm module");
   requireReadable(options.kernel, "kernel");
-  requireReadable(options.initrd, "initrd");
+  if (options.initrd !== null) {
+    requireReadable(options.initrd, "initrd");
+  }
+  if (options.rootfs !== null) {
+    requireReadable(options.rootfs, "rootfs");
+  }
   requireReadable(qboot, "qboot firmware");
   requireReadable(linuxboot, "linuxboot firmware");
 
@@ -139,24 +148,29 @@ function runSmoke(options) {
     "--mount-file",
     `${options.kernel}:/kernel`,
     "--mount-file",
-    `${options.initrd}:/initramfs.cpio.gz`,
-    "--mount-file",
     `${qboot}:/firmware/qboot.rom`,
     "--mount-file",
     `${linuxboot}:/firmware/linuxboot_dma.bin`,
-    "--",
-    "-M",
-    "microvm,acpi=off",
-    "-m",
-    options.memory,
   ];
+
+  const kernelAppend = [
+    options.initrd !== null
+      ? "console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1"
+      : "console=ttyS0 earlyprintk=serial,ttyS0,115200 root=/dev/vda rw init=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1",
+    options.appendExtra,
+  ].filter(Boolean).join(" ");
+
+  if (options.initrd !== null) {
+    args.push("--mount-file", `${options.initrd}:/initramfs.cpio.gz`);
+  }
+  if (options.rootfs !== null) {
+    args.push("--mount-file", `${options.rootfs}:/rootfs.raw`);
+  }
+
+  args.push("--", "-M", "microvm,acpi=off", "-m", options.memory);
   if (options.cpu !== null) {
     args.push("-cpu", options.cpu);
   }
-  const kernelAppend = [
-    "console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1",
-    options.appendExtra,
-  ].filter(Boolean).join(" ");
 
   args.push(
     "-accel",
@@ -168,13 +182,20 @@ function runSmoke(options) {
     "none",
     "-kernel",
     "/kernel",
-    "-initrd",
-    "/initramfs.cpio.gz",
-    "-append",
-    kernelAppend,
-    "-L",
-    "/firmware",
   );
+  if (options.initrd !== null) {
+    args.push("-initrd", "/initramfs.cpio.gz");
+  }
+  args.push("-append", kernelAppend);
+  if (options.rootfs !== null) {
+    args.push(
+      "-drive",
+      "file=/rootfs.raw,format=raw,if=none,id=hd0",
+      "-device",
+      "virtio-blk-device,drive=hd0",
+    );
+  }
+  args.push("-L", "/firmware");
   args.push(...options.qemuArgs);
 
   const child = spawn(process.execPath, args, { stdio: "inherit" });

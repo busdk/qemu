@@ -43,6 +43,7 @@ Options:
   --progress-sample-limit N
                      Maximum smoke progress samples to keep
   --qemu-arg ARG     Extra QEMU argument appended to the smoke command
+  --rootfs FILE       Raw root filesystem image exposed as /dev/vda
   --screenshot FILE  Save a browser page screenshot to FILE
   --screenshot-full-page
                      Capture the full scrollable page instead of the viewport
@@ -72,6 +73,7 @@ function parseArgs(argv) {
     progressSampleIntervalMs: DEFAULT_PROGRESS_SAMPLE_INTERVAL_MS,
     progressSampleLimit: DEFAULT_PROGRESS_SAMPLE_LIMIT,
     qemuArgs: [],
+    rootfs: null,
     screenshot: null,
     screenshotFullPage: false,
     timeoutMs: 180000,
@@ -115,6 +117,8 @@ function parseArgs(argv) {
       options.progressSampleLimit = Number(argv[++i]);
     } else if (arg === "--qemu-arg") {
       options.qemuArgs.push(argv[++i]);
+    } else if (arg === "--rootfs") {
+      options.rootfs = argv[++i];
     } else if (arg === "--screenshot") {
       options.screenshot = argv[++i];
     } else if (arg === "--screenshot-full-page") {
@@ -137,8 +141,8 @@ function parseArgs(argv) {
     console.error("--kernel is required");
     usage(2);
   }
-  if (options.initrd === null) {
-    console.error("--initrd is required");
+  if (options.initrd === null && options.rootfs === null) {
+    console.error("either --initrd or --rootfs is required");
     usage(2);
   }
   if (!Number.isInteger(options.port) || options.port <= 0 || options.port > 65535) {
@@ -207,8 +211,6 @@ function startServer(options) {
     options.firmwareDir,
     "--host",
     options.host,
-    "--initrd",
-    options.initrd,
     "--kernel",
     options.kernel,
     "--port",
@@ -216,6 +218,12 @@ function startServer(options) {
     "--program",
     options.program,
   ];
+  if (options.initrd !== null) {
+    args.push("--initrd", options.initrd);
+  }
+  if (options.rootfs !== null) {
+    args.push("--rootfs", options.rootfs);
+  }
   const child = spawn(process.execPath, args, {
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -330,6 +338,7 @@ async function run() {
     progressSampleIntervalMs: options.progressSampleIntervalMs,
     progressSampleLimit: options.progressSampleLimit,
     qemuArgs: options.qemuArgs,
+    rootfs: options.rootfs,
     success: false,
     consoleMessages: [],
     pageErrors: [],
@@ -369,6 +378,12 @@ async function run() {
     url.searchParams.set("marker", options.marker);
     url.searchParams.set("maxOutputBytes", String(options.maxOutputBytes));
     url.searchParams.set("memory", options.memory);
+    if (options.initrd === null) {
+      url.searchParams.set("initrd", "");
+    }
+    if (options.rootfs !== null) {
+      url.searchParams.set("rootfs", "/guest/rootfs.raw");
+    }
     for (const qemuArg of options.qemuArgs) {
       url.searchParams.append("qemuArg", qemuArg);
     }

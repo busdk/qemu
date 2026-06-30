@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 
 function usage(status) {
   const stream = status === 0 ? process.stdout : process.stderr;
-  stream.write(`usage: wasm-browser-smoke-server.mjs --artifact-dir DIR --kernel FILE --initrd FILE [OPTIONS]
+  stream.write(`usage: wasm-browser-smoke-server.mjs --artifact-dir DIR --kernel FILE [--initrd FILE | --rootfs FILE] [OPTIONS]
 
 Options:
   --artifact-dir DIR  Directory containing qemu-system-*.js/.wasm artifacts
@@ -23,6 +23,7 @@ Options:
   --kernel FILE       64-bit Linux bzImage
   --port PORT         Bind port (default: 8010)
   --program FILE      JavaScript launcher inside artifact dir
+  --rootfs FILE       Raw root filesystem image exposed as /dev/vda
   --help              Show this help
 `);
   process.exit(status);
@@ -37,6 +38,7 @@ function parseArgs(argv) {
     kernel: null,
     port: 8010,
     program: "qemu-system-x86_64.js",
+    rootfs: null,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -55,6 +57,8 @@ function parseArgs(argv) {
       options.port = Number(argv[++i]);
     } else if (arg === "--program") {
       options.program = argv[++i];
+    } else if (arg === "--rootfs") {
+      options.rootfs = argv[++i];
     } else if (arg === "--help") {
       usage(0);
     } else {
@@ -71,8 +75,8 @@ function parseArgs(argv) {
     console.error("--kernel is required");
     usage(2);
   }
-  if (options.initrd === null) {
-    console.error("--initrd is required");
+  if (options.initrd === null && options.rootfs === null) {
+    console.error("either --initrd or --rootfs is required");
     usage(2);
   }
   if (!Number.isInteger(options.port) || options.port <= 0 || options.port > 65535) {
@@ -84,8 +88,9 @@ function parseArgs(argv) {
     ...options,
     artifactDir: resolve(options.artifactDir),
     firmwareDir: resolve(options.firmwareDir),
-    initrd: resolve(options.initrd),
+    initrd: options.initrd === null ? null : resolve(options.initrd),
     kernel: resolve(options.kernel),
+    rootfs: options.rootfs === null ? null : resolve(options.rootfs),
   };
 }
 
@@ -119,10 +124,15 @@ function routeFile(options, scriptDir, pathname) {
     ["/artifacts/qemu-system-x86_64.wasm", join(options.artifactDir, "qemu-system-x86_64.wasm")],
     [`/artifacts/${basename(options.program)}`, join(options.artifactDir, basename(options.program))],
     ["/guest/kernel", options.kernel],
-    ["/guest/initramfs.cpio.gz", options.initrd],
     ["/firmware/qboot.rom", join(options.firmwareDir, "qboot.rom")],
     ["/firmware/linuxboot_dma.bin", join(options.firmwareDir, "linuxboot_dma.bin")],
   ]);
+  if (options.initrd !== null) {
+    routes.set("/guest/initramfs.cpio.gz", options.initrd);
+  }
+  if (options.rootfs !== null) {
+    routes.set("/guest/rootfs.raw", options.rootfs);
+  }
   return routes.get(pathname);
 }
 
@@ -132,7 +142,12 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 requireReadable(join(options.artifactDir, basename(options.program)), "program");
 requireReadable(join(options.artifactDir, "qemu-system-x86_64.wasm"), "wasm module");
 requireReadable(options.kernel, "kernel");
-requireReadable(options.initrd, "initrd");
+if (options.initrd !== null) {
+  requireReadable(options.initrd, "initrd");
+}
+if (options.rootfs !== null) {
+  requireReadable(options.rootfs, "rootfs");
+}
 requireReadable(join(options.firmwareDir, "qboot.rom"), "qboot firmware");
 requireReadable(join(options.firmwareDir, "linuxboot_dma.bin"), "linuxboot firmware");
 

@@ -1349,6 +1349,17 @@ Proof:
   within a 30 second host timeout.  The current browser proof still uses the
   smaller helper-generated initramfs; browser raw-rootfs support should be
   added with a suitably small proof image before it is treated as accepted.
+  That smaller proof image was then created as a 32 MiB ext4 root filesystem
+  from the helper-generated smoke initramfs contents.  Native QEMU reached
+  ``QEMU_WASM_LINUX_BOOT_OK`` from that image with ``root=/dev/vda rw
+  init=/init``.  ``scripts/ci/wasm-linux-boot-smoke.mjs`` now accepts either
+  ``--initrd`` or ``--rootfs``; the rootfs path mounts the image at
+  ``/rootfs.raw`` and adds ``virtio-blk-device`` as ``/dev/vda``.  The browser
+  smoke server, page, and runner expose the same optional rootfs path.  A
+  Node.js ``v24`` wasm64 TCI proof reached the marker with the 32 MiB ext4
+  rootfs, and a Chromium ``141.0.7390.37`` browser proof reached the marker
+  after roughly ``74`` seconds with ``crossOriginIsolated: true``, no request
+  failures, ``174`` emitted serial lines, and a ``1280x720`` screenshot.
 
 Non-goals:
   No persistent storage.
