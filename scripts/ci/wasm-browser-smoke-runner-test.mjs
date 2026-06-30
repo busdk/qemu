@@ -10,9 +10,12 @@ import assert from "node:assert/strict";
 import {
   appendBoundedLimit,
   browserSmokeUrl,
+  consoleMessageDiagnostic,
   initialSmokeResult,
   isTerminalPageStatus,
+  pageErrorDiagnostic,
   promoteSmokeState,
+  requestFailureDiagnostic,
 } from "./wasm-browser-smoke-runner.mjs";
 
 const marker = "QEMU_WASM_LINUX_BOOT_OK";
@@ -189,4 +192,60 @@ for (const status of [
   appendBoundedLimit(entries, "fourth", 3);
 
   assert.deepEqual(entries, ["second", "third", "fourth"]);
+}
+
+{
+  const diagnostic = consoleMessageDiagnostic({
+    type: () => "warning",
+    text: () => "browser warning",
+    location: () => ({
+      url: "http://127.0.0.1:8010/wasm-browser-smoke.mjs",
+      lineNumber: 12,
+      columnNumber: 34,
+    }),
+  }, 1234);
+
+  assert.deepEqual(diagnostic, {
+    elapsedMs: 1234,
+    type: "warning",
+    text: "browser warning",
+    location: {
+      url: "http://127.0.0.1:8010/wasm-browser-smoke.mjs",
+      lineNumber: 12,
+      columnNumber: 34,
+    },
+  });
+}
+
+{
+  const error = new Error("memory access out of bounds");
+  error.name = "RuntimeError";
+  error.stack = "RuntimeError: memory access out of bounds\n    at wasm://wasm/...";
+  const state = {
+    phase: "guest-boot",
+    lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+  };
+
+  assert.deepEqual(pageErrorDiagnostic(error, 240181, state), {
+    elapsedMs: 240181,
+    name: "RuntimeError",
+    message: "memory access out of bounds",
+    stack: "RuntimeError: memory access out of bounds\n    at wasm://wasm/...",
+    state,
+  });
+}
+
+{
+  const diagnostic = requestFailureDiagnostic({
+    method: () => "GET",
+    url: () => "http://127.0.0.1:8010/qemu-system-x86_64.wasm",
+    failure: () => ({ errorText: "net::ERR_FAILED" }),
+  }, 99);
+
+  assert.deepEqual(diagnostic, {
+    elapsedMs: 99,
+    method: "GET",
+    url: "http://127.0.0.1:8010/qemu-system-x86_64.wasm",
+    failureText: "net::ERR_FAILED",
+  });
 }

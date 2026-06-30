@@ -587,6 +587,11 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   explicit no-network command shape; the next Chrome/Chromium diagnostic
   should target the wasm64 TCI execution path around post-FPU kernel progress
   and the intermittent browser memory exception.
+  The browser smoke runner now preserves console source locations, page-error
+  stack traces, request-failure details, elapsed time, and the current smoke
+  state in result JSON, so follow-up Chromium runs can associate a
+  ``RuntimeError: memory access out of bounds`` with the last serial line and
+  browser-side stack context.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser

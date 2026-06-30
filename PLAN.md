@@ -52,6 +52,8 @@ browser MVP. Keep Bus Engine product work downstream.
   generation, including no-network, initrd, rootfs, and extra-argument paths.
 - [x] Add deterministic Node coverage for browser runner terminal-status
   detection so page-level failures are captured promptly.
+- [x] Preserve browser diagnostic source location, stack, and smoke state for
+  Chromium page errors and failed resource requests.
 - [x] Add Node smoke runtime preflight so unsupported local Node versions fail
   with structured JSON evidence before importing the generated wasm module.
 - [x] Add deterministic Node coverage for the Node smoke runtime preflight

@@ -300,6 +300,35 @@ export function isTerminalPageStatus(status, marker) {
     status === "failed";
 }
 
+export function consoleMessageDiagnostic(message, elapsedMs) {
+  return {
+    elapsedMs,
+    type: message.type(),
+    text: message.text(),
+    location: message.location ? message.location() : null,
+  };
+}
+
+export function pageErrorDiagnostic(error, elapsedMs, state = null) {
+  return {
+    elapsedMs,
+    name: error && error.name ? error.name : "Error",
+    message: error && error.message ? error.message : String(error),
+    stack: error && error.stack ? error.stack : null,
+    state,
+  };
+}
+
+export function requestFailureDiagnostic(request, elapsedMs) {
+  const failure = request.failure();
+  return {
+    elapsedMs,
+    method: request.method(),
+    url: request.url(),
+    failureText: failure && failure.errorText ? failure.errorText : null,
+  };
+}
+
 async function loadPlaywright(browserName) {
   try {
     const require = createRequire(import.meta.url);
@@ -508,6 +537,17 @@ async function sampleSmokeProgress(page, result, startTime, reason, limit) {
   }
 }
 
+async function currentSmokeState(page) {
+  if (!page) {
+    return null;
+  }
+  try {
+    return await page.evaluate(() => globalThis.qemuWasmSmokeState || null);
+  } catch {
+    return null;
+  }
+}
+
 async function run() {
   const options = parseArgs(process.argv.slice(2));
   const browserType = await loadPlaywright(options.browser);
@@ -527,26 +567,20 @@ async function run() {
         "globalThis.qemuWasmIsTerminalPageStatus = isTerminalPageStatus;\n",
     });
     page.on("console", (message) => {
-      const text = message.text();
-      appendBounded(result.consoleMessages, {
-        type: message.type(),
-        text,
-      });
-      console.log(`browser ${message.type()}: ${text}`);
+      const entry = consoleMessageDiagnostic(message, Date.now() - startTime);
+      appendBounded(result.consoleMessages, entry);
+      console.log(`browser ${entry.type}: ${entry.text}`);
     });
-    page.on("pageerror", (error) => {
-      appendBounded(result.pageErrors, {
-        name: error && error.name ? error.name : "Error",
-        message: error && error.message ? error.message : String(error),
-      });
+    page.on("pageerror", async (error) => {
+      const entry = pageErrorDiagnostic(error, Date.now() - startTime);
+      appendBounded(result.pageErrors, entry);
+      entry.state = await currentSmokeState(page);
     });
     page.on("requestfailed", (request) => {
-      const failure = request.failure();
-      appendBounded(result.requestFailures, {
-        method: request.method(),
-        url: request.url(),
-        failureText: failure && failure.errorText ? failure.errorText : null,
-      });
+      appendBounded(result.requestFailures, requestFailureDiagnostic(
+        request,
+        Date.now() - startTime,
+      ));
     });
     const url = browserSmokeUrl(options);
     result.smokeUrl = url.href;
