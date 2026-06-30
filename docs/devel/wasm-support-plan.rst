@@ -5,9 +5,9 @@ WebAssembly support plan
 Goal
 ====
 
-Review upstream QEMU, the experimental QEMU/WASM implementations, and the
-browser runtime requirements in order to produce an exact implementation plan
-for official QEMU WebAssembly host support.
+Implement official QEMU WebAssembly host support incrementally, starting with
+the parts that are already settled enough to build and test while continuing to
+refine the implementation plan from evidence.
 
 The target MVP is a browser-hosted QEMU system emulator that can boot a
 64-bit Linux guest, including Bus Engine OS, through modern browser APIs.  The
@@ -33,8 +33,8 @@ TCI path can boot a 64-bit Linux guest in a browser-controlled runtime.
 Strict definition of done
 =========================
 
-The planning work is complete only when the feature branch contains a reviewed
-developer plan that:
+This implementation line is complete only when the feature branch contains
+reviewable, incremental patches and developer documentation that:
 
 * identifies the exact upstream QEMU baseline for Emscripten/WebAssembly host
   support;
@@ -55,7 +55,12 @@ developer plan that:
   backend;
 * describes the later path for browser graphics, networking, persistence, and
   QMP integration without making them MVP requirements;
-* contains no implementation code for the QEMU/WASM MVP.
+* implements settled MVP infrastructure only when it has a local proof,
+  repeatable command, or CI-shaped test;
+* records browser/runtime limits and failure modes with the tested runtime
+  version, command, and observed result;
+* keeps Bus Engine-specific integration downstream from the upstream QEMU
+  support work.
 
 Current upstream baseline
 =========================
@@ -478,7 +483,9 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``smoke-wasm64-64bit-browser`` test job.  It uses the same
   ``build-wasm64-64bit`` artifacts, prepares the pinned TuxBoot smoke guest in
   a disposable Playwright ``v1.56.1`` browser image, installs the missing
-  ``zstd`` tool and the matching ``playwright@1.56.1`` Node package, then runs
+  ``zstd`` tool and the matching ``playwright@1.56.1`` Node package, records
+  ``build/wasm-browser-memory-probe.json`` with
+  ``scripts/ci/wasm-browser-memory-probe-runner.mjs``, then runs
   ``scripts/ci/wasm-browser-smoke-runner.mjs``.  The job is optional because
   the acceptable upstream browser image, browser matrix, and runtime cost
   policy still need maintainer review.
@@ -591,10 +598,30 @@ The underlying command shape is::
   printed local URL in each browser under test.  The resulting JSON must be
   recorded with the browser name, version, host OS, available memory, and
   whether the page reported ``crossOriginIsolated``.
-* No Chromium, Chrome, Firefox, or Playwright browser runtime was available on
-  the local host during this pass.  Browser memory-limit evidence remains a
-  separate required matrix item; the current evidence is limited to Node.js/V8
-  constructor behavior and primary browser/runtime documentation.
+* ``scripts/ci/wasm-browser-memory-probe-runner.mjs`` now drives that browser
+  memory probe through Playwright.  It starts the cross-origin-isolated probe
+  server, launches the selected browser engine, applies the requested page
+  counts and ``address: "i64"`` setting, prints the JSON result, and can write
+  the result to a CI artifact.
+* A Playwright ``v1.56.1`` Chromium run using HeadlessChrome
+  ``141.0.7390.37`` reported ``crossOriginIsolated: true``.  Default-address
+  shared and unshared memories accepted 4 GiB and rejected 8 GiB.  The
+  ``address: "i64"`` form accepted shared and unshared memories at 4, 8, and
+  16 GiB, then rejected 32 GiB with an upper bound of ``262144``
+  WebAssembly pages.  This is the first browser memory-limit evidence for the
+  Chromium side of the console MVP.
+* A Playwright ``v1.56.1`` Firefox run using Firefox ``142.0`` reported
+  ``crossOriginIsolated: true``.  Default-address shared and unshared memories
+  accepted 4 GiB and rejected 8 GiB.  The ``address: "i64"`` form accepted
+  shared and unshared memories at 4, 8, and 16 GiB in the tested range.
+  Firefox boot-smoke coverage remains a separate task.
+* A Playwright ``v1.56.1`` WebKit run using the Safari-compatible WebKit user
+  agent ``Version/26.0 Safari/605.1.15`` reported ``crossOriginIsolated:
+  true``.  Default-address shared and unshared memories accepted 4 GiB and
+  rejected 8 GiB.  The ``address: "i64"`` constructor form failed with
+  ``TypeError: Conversion from 'BigInt' to 'number' is not allowed.``  WebKit
+  therefore cannot be treated as ready for the wasm64 QEMU browser MVP from
+  this evidence alone.
 * ``scripts/ci/wasm-browser-smoke.html``,
   ``scripts/ci/wasm-browser-smoke.mjs``, and
   ``scripts/ci/wasm-browser-smoke-server.mjs`` now provide a generic browser
@@ -931,6 +958,28 @@ Proof:
 
 Non-goals:
   No claim that Node.js memory behavior represents browser compatibility.
+
+WASM-007b: Add browser memory probe runner
+------------------------------------------
+
+Scope:
+  Make browser memory-limit evidence repeatable without manual copy/paste from
+  a browser window.
+
+Touches:
+  ``scripts/ci/wasm-browser-memory-probe-runner.mjs``,
+  ``.gitlab-ci.d/buildtest.yml``, and documentation.
+
+Proof:
+  ``node scripts/ci/wasm-browser-memory-probe-runner.mjs --memory64`` starts
+  the isolated probe server, drives a Playwright browser, prints JSON, and can
+  save the JSON as a CI artifact.  Local Playwright runs recorded Chromium,
+  Firefox, and WebKit behavior for default-address memory and
+  ``address: "i64"`` memory.
+
+Non-goals:
+  No guarantee that constructor success proves QEMU boot success in the same
+  browser.  No claim that every WebKit or Safari build supports wasm64.
 
 WASM-008: Audit host POSIX assumptions
 --------------------------------------

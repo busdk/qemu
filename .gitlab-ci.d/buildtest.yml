@@ -852,6 +852,7 @@ smoke-wasm64-64bit-browser:
     expire_in: 7 days
     paths:
       - ci-runner-env
+      - build/wasm-browser-memory-probe.json
       - build/wasm-browser-smoke-guest/tuxboot-smoke-guest.json
   variables:
     QEMU_JOB_OPTIONAL: 1
@@ -871,6 +872,11 @@ smoke-wasm64-64bit-browser:
     - node --version
     - /ms-playwright/chromium-1194/chrome-linux/chrome --version
     - section_end setup
+    - section_start memory_probe "Running WASM browser memory probe"
+    - node scripts/ci/wasm-browser-memory-probe-runner.mjs
+          --memory64
+          --out build/wasm-browser-memory-probe.json
+    - section_end memory_probe
     - section_start smoke_guest "Preparing WASM browser smoke guest"
     - python3 scripts/ci/wasm-prepare-tuxboot-smoke-guest.py
           --cache-dir wasm-smoke-cache
