@@ -381,6 +381,18 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   initramfs construction part of ``WASM-017``; the remaining guest-input
   decision is a declared upstream source for the 64-bit Linux kernel and the
   statically linked BusyBox binary or package used by CI.
+* QEMU's functional-test documentation says tests that download Linux kernels,
+  initrds, firmware, or similar guest assets should use ``qemu_test.Asset``
+  with a URL and SHA-256, and that downloaded-asset tests should not run in
+  default quick checks.  The existing ``tests/functional/x86_64/test_tuxrun.py``
+  already pins a TuxBoot x86_64 Buildroot ``bzImage`` at
+  ``https://storage.tuxboot.com/buildroot/20241119/x86_64/bzImage`` with
+  SHA-256
+  ``f57bfc6553bcd6e0a54aab86095bf642b33b5571d14e3af1731b18c87ed5aef8``.
+  That kernel is the first candidate for upstream WASM smoke CI because it is
+  already referenced by QEMU tests.  It still needs a direct proof with the
+  generated initramfs and the ``wasm-linux-boot-smoke.mjs`` command line before
+  it can replace the local ``/boot/vmlinuz-7.1.0`` proof.
 
 The preferred Node.js smoke wrapper invocation is::
 
@@ -1177,6 +1189,47 @@ Proof:
 
 Non-goals:
   Bus Engine OS is not bundled into upstream QEMU tests.
+
+Guest input policy:
+  The upstream QEMU smoke guest must stay product-neutral.  It may use QEMU's
+  existing functional-test asset model for downloaded inputs, but it must not
+  depend on the developer host's ``/boot`` directory or on Bus Engine OS
+  artifacts.  A local host kernel or ``/usr/bin/busybox`` is acceptable for
+  manual diagnostics only, because those inputs are not reproducible across
+  CI runners.
+
+  The preferred kernel candidate is the x86_64 TuxBoot ``bzImage`` already
+  pinned by ``tests/functional/x86_64/test_tuxrun.py``.  If that kernel boots
+  with the generated initramfs and the WASM smoke wrapper, reuse its
+  ``qemu_test.Asset`` URL and SHA-256 rather than introducing another x86_64
+  Linux binary.
+
+  The preferred initramfs path is to generate it during the smoke job with
+  ``scripts/ci/wasm-build-smoke-initramfs.py`` from an explicit static BusyBox
+  input.  Before the job is made official, that BusyBox input must also have a
+  declared source: either a QEMU functional-test asset with URL and SHA-256, or
+  a reproducible public build step.  If the selected binary lacks public source
+  or build-process evidence, the test must follow QEMU's
+  ``QEMU_TEST_ALLOW_UNTRUSTED_CODE`` convention.
+
+WASM-017a: Prove TuxBoot kernel with generated initramfs
+-------------------------------------------------------
+
+Scope:
+  Replace the local ``/boot/vmlinuz-7.1.0`` proof input with the existing
+  x86_64 TuxBoot kernel asset candidate and the generated smoke initramfs.
+
+Touches:
+  Smoke-test documentation, optional fetch helper, and CI notes.
+
+Proof:
+  Native QEMU and the Node.js ``v24`` wasm64 TCI wrapper both reach
+  ``QEMU_WASM_LINUX_BOOT_OK`` using the TuxBoot ``bzImage`` and the generated
+  initramfs.
+
+Non-goals:
+  No Bus Engine OS root filesystem, browser UI, networking, or native
+  WebAssembly TCG backend work.
 
 WASM-018: Add Bus Engine OS downstream proof recipe
 --------------------------------------------------
