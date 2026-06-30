@@ -53,6 +53,10 @@ function mountFiles(module, mounts) {
 }
 
 function qemuArgs(config) {
+  const kernelAppend = [
+    "console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1",
+    config.appendExtra,
+  ].filter(Boolean).join(" ");
   const args = [
     "-M",
     "microvm,acpi=off",
@@ -75,7 +79,7 @@ function qemuArgs(config) {
     "-initrd",
     "/initramfs.cpio.gz",
     "-append",
-    "console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1",
+    kernelAppend,
     "-L",
     "/firmware",
   );
@@ -84,6 +88,7 @@ function qemuArgs(config) {
 
 function buildConfig() {
   return {
+    appendExtra: option("appendExtra", ""),
     cpu: option("cpu", "Nehalem"),
     initrd: option("initrd", "/guest/initramfs.cpio.gz"),
     kernel: option("kernel", "/guest/kernel"),

@@ -19,6 +19,7 @@ function usage(status) {
   stream.write(`usage: wasm-browser-smoke-runner.mjs --artifact-dir DIR --kernel FILE --initrd FILE [OPTIONS]
 
 Options:
+  --append-extra TEXT Extra Linux kernel arguments appended to the default
   --artifact-dir DIR  Directory containing qemu-system-*.js/.wasm artifacts
   --browser NAME      Browser engine to launch (default: chromium)
   --cpu MODEL         Guest CPU model passed to QEMU
@@ -41,6 +42,7 @@ Options:
 
 function parseArgs(argv) {
   const options = {
+    appendExtra: "",
     artifactDir: null,
     browser: "chromium",
     cpu: "Nehalem",
@@ -59,7 +61,9 @@ function parseArgs(argv) {
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--artifact-dir") {
+    if (arg === "--append-extra") {
+      options.appendExtra = argv[++i];
+    } else if (arg === "--artifact-dir") {
       options.artifactDir = argv[++i];
     } else if (arg === "--browser") {
       options.browser = argv[++i];
@@ -230,6 +234,7 @@ async function run() {
   const startTime = Date.now();
   const result = {
     format: 1,
+    appendExtra: options.appendExtra,
     browser: options.browser,
     browserVersion: browser.version(),
     cpu: options.cpu,
@@ -268,6 +273,7 @@ async function run() {
       });
     });
     const url = new URL(`http://${options.host}:${options.port}/`);
+    url.searchParams.set("appendExtra", options.appendExtra);
     url.searchParams.set("cpu", options.cpu);
     url.searchParams.set("marker", options.marker);
     url.searchParams.set("maxOutputBytes", String(options.maxOutputBytes));

@@ -449,6 +449,15 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   in ``libuClibc-1.0.45.so`` and timed out without the marker.  The Firefox
   browser gap should therefore not be chased by switching the current smoke
   guest from ``Nehalem`` to ``qemu64``.
+* The Node and browser smoke wrappers now accept ``--append-extra`` so
+  diagnostic runs can append Linux kernel arguments without copying or
+  hand-editing the canonical smoke command line.  A Node.js ``v24`` wasm64 TCI
+  proof appended ``qemu_wasm_append_probe=1`` to the pinned TuxBoot smoke
+  guest, and the guest printed that value in both the early ``Command line``
+  and later ``Kernel command line`` records before reaching
+  ``QEMU_WASM_LINUX_BOOT_OK``.  This gives the Firefox and browser-matrix
+  investigation a safe way to add temporary kernel diagnostics such as
+  initcall tracing while keeping the default smoke path stable.
 * ``scripts/ci/wasm-prepare-tuxboot-smoke-guest.py`` now provides that
   CI-shaped guest-preparation path.  It downloads or reuses the existing
   x86_64 TuxBoot kernel and rootfs assets, verifies them against the SHA-256

@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 
 function parseArgs(argv) {
   const options = {
+    appendExtra: "",
     artifactDir: ".",
     cpu: null,
     firmwareDir: "pc-bios",
@@ -26,7 +27,9 @@ function parseArgs(argv) {
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--artifact-dir") {
+    if (arg === "--append-extra") {
+      options.appendExtra = argv[++i];
+    } else if (arg === "--artifact-dir") {
       options.artifactDir = argv[++i];
     } else if (arg === "--cpu") {
       options.cpu = argv[++i];
@@ -79,6 +82,7 @@ function usage(status) {
   stream.write(`usage: wasm-linux-boot-smoke.mjs --kernel FILE --initrd FILE [OPTIONS]
 
 Options:
+  --append-extra TEXT   Extra Linux kernel arguments appended to the default
   --artifact-dir DIR     Directory containing qemu-system-*.js/.wasm artifacts
   --cpu MODEL            Optional guest CPU model passed to QEMU
   --firmware-dir DIR     Directory containing qboot.rom and linuxboot_dma.bin
@@ -145,6 +149,11 @@ function runSmoke(options) {
   if (options.cpu !== null) {
     args.push("-cpu", options.cpu);
   }
+  const kernelAppend = [
+    "console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1",
+    options.appendExtra,
+  ].filter(Boolean).join(" ");
+
   args.push(
     "-accel",
     "tcg,thread=single",
@@ -158,7 +167,7 @@ function runSmoke(options) {
     "-initrd",
     "/initramfs.cpio.gz",
     "-append",
-    "console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1",
+    kernelAppend,
     "-L",
     "/firmware",
   );
