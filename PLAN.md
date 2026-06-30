@@ -9,9 +9,10 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Prove `x86_64-softmmu` can build for wasm64 with TCI.
 - [x] Prove a tiny 64-bit Linux console guest reaches a serial readiness
   marker under Node.js.
-- [x] Prove the same generic smoke guest reaches the marker in Chromium.
-- [x] Keep the browser MVP focused on Chromium unless another browser becomes
-  necessary for the accepted Bus Engine OS proof.
+- [x] Prove the same generic smoke guest reaches the marker in Chrome or
+  Chromium.
+- [x] Keep the browser MVP focused on Chrome/Chromium unless another browser
+  becomes necessary for the accepted Bus Engine OS proof.
 
 ## MVP Generic QEMU Work
 
@@ -82,7 +83,7 @@ browser MVP. Keep Bus Engine product work downstream.
 
 - [ ] Diagnose Firefox boot progress enough to either make it pass or document
   the concrete Firefox-specific blocker. This is not required for the first
-  MVP if Chromium remains the accepted browser proof.
+  MVP if Chrome/Chromium remains the accepted browser proof.
 - [ ] Keep WebKit out of the first MVP unless wasm64 instantiation becomes
   reliable in the tested runtime.
 

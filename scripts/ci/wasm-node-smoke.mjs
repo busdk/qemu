@@ -9,6 +9,8 @@ import { pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
 
+const MIN_NODE_MAJOR = 23;
+
 function parseArgs(argv) {
   const options = {
     artifactDir: ".",
@@ -168,6 +170,28 @@ function writeResult(status, extra = {}) {
   writeFileSync(options.out, `${JSON.stringify(result, null, 2)}\n`);
 }
 
+function nodeMajorVersion() {
+  return Number(process.versions.node.split(".")[0]);
+}
+
+function checkNodeVersion() {
+  if (nodeMajorVersion() >= MIN_NODE_MAJOR) {
+    return;
+  }
+  const errorMessage =
+    `Node.js ${process.version} is too old for the wasm64 Emscripten smoke runtime; ` +
+    `Node.js v${MIN_NODE_MAJOR}.0.0 or newer is required`;
+  console.error(errorMessage);
+  writeResult(1, {
+    errorName: "Error",
+    errorMessage,
+    preflight: "node-version",
+    requiredNodeMajor: MIN_NODE_MAJOR,
+    nodeVersion: process.version,
+  });
+  process.exit(1);
+}
+
 function scheduleExit(status) {
   if (exitScheduled) {
     return;
@@ -272,6 +296,8 @@ function dumpFiles() {
     process.stderr.write(`----- end ${dump.path} -----\n`);
   }
 }
+
+checkNodeVersion();
 
 const timeout = setTimeout(() => {
   if (!markerSeen) {

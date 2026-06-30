@@ -153,6 +153,9 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``qemu/emsdk-wasm64-cross:latest`` image had Node.js ``v22.16.0``.  This is
   a toolchain/runtime mismatch for Node-based smoke tests, not evidence that
   the QEMU emulator itself failed.
+  ``scripts/ci/wasm-node-smoke.mjs`` now performs this as an explicit
+  preflight and writes ``preflight: "node-version"`` plus the required and
+  actual Node.js versions into result JSON before any QEMU module import.
 * A Node.js ``v24.18.0`` container successfully ran the generated
   ``qemu-system-x86_64.js`` module with ``--version`` using
   ``scripts/ci/wasm-node-smoke.mjs``.  The proof saw
