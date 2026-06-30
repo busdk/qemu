@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 
-import { qemuArgs } from "./wasm-browser-smoke.mjs";
+import { qemuArgs, recordHarnessFailure } from "./wasm-browser-smoke.mjs";
 
 function baseConfig(overrides = {}) {
   return {
@@ -76,3 +76,33 @@ function valueAfter(args, option) {
   assert.ok(valueAfter(args, "-append").endsWith("ignore_loglevel"));
   assert.deepEqual(args.slice(-2), ["-name", "wasm-smoke"]);
 }
+
+{
+  const state = {
+    phase: "import-qemu-module",
+    phases: [],
+  };
+  const error = new Error("failed to load QEMU module");
+  error.name = "TypeError";
+  error.stack = "TypeError: failed to load QEMU module\n    at import-qemu-module";
+
+  assert.equal(recordHarnessFailure(state, error, 42), state);
+  assert.deepEqual(state, {
+    phase: "failed",
+    phases: [
+      {
+        phase: "failed",
+        elapsedMs: 42,
+        failedDuring: "import-qemu-module",
+        message: "failed to load QEMU module",
+        name: "TypeError",
+      },
+    ],
+    failurePhase: "import-qemu-module",
+    failureName: "TypeError",
+    failure: "failed to load QEMU module",
+    failureStack: "TypeError: failed to load QEMU module\n    at import-qemu-module",
+  });
+}
+
+assert.equal(recordHarnessFailure(null, new Error("ignored"), 1), null);

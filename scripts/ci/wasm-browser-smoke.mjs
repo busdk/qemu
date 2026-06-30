@@ -136,6 +136,25 @@ export function qemuArgs(config) {
   return args;
 }
 
+export function recordHarnessFailure(state, error, elapsedMs) {
+  if (!state) {
+    return null;
+  }
+  state.failurePhase = state.phase;
+  state.phase = "failed";
+  state.failureName = error && error.name ? error.name : "Error";
+  state.failure = error && error.message ? error.message : String(error);
+  state.failureStack = error && error.stack ? error.stack : null;
+  state.phases.push({
+    phase: "failed",
+    elapsedMs,
+    failedDuring: state.failurePhase,
+    message: state.failure,
+    name: state.failureName,
+  });
+  return state;
+}
+
 function buildConfig() {
   return {
     appendExtra: option("appendExtra", ""),
@@ -321,17 +340,13 @@ if (typeof window !== "undefined") {
   run().catch((error) => {
     const state = globalThis.qemuWasmSmokeState;
     if (state) {
-      state.failurePhase = state.phase;
-      state.phase = "failed";
-      state.failure = error && error.message ? error.message : String(error);
-      state.phases.push({
-        phase: "failed",
-        elapsedMs: typeof state.startedAtMs === "number"
+      recordHarnessFailure(
+        state,
+        error,
+        typeof state.startedAtMs === "number"
           ? Math.round(performance.now() - state.startedAtMs)
           : 0,
-        failedDuring: state.failurePhase,
-        message: state.failure,
-      });
+      );
     }
     text("status").textContent = "failed";
     appendLine(text("output"), error && error.stack ? error.stack : String(error));

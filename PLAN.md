@@ -54,6 +54,7 @@ browser MVP. Keep Bus Engine product work downstream.
   detection so page-level failures are captured promptly.
 - [x] Preserve browser diagnostic source location, stack, and smoke state for
   Chromium page errors and failed resource requests.
+- [x] Preserve browser harness failure name and stack in `qemuWasmSmokeState`.
 - [x] Add Node smoke runtime preflight so unsupported local Node versions fail
   with structured JSON evidence before importing the generated wasm module.
 - [x] Add deterministic Node coverage for the Node smoke runtime preflight

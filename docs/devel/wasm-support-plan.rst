@@ -591,7 +591,9 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   stack traces, request-failure details, elapsed time, and the current smoke
   state in result JSON, so follow-up Chromium runs can associate a
   ``RuntimeError: memory access out of bounds`` with the last serial line and
-  browser-side stack context.
+  browser-side stack context.  The browser harness also records failure name,
+  message, stack, and failed phase directly in ``qemuWasmSmokeState`` when its
+  own startup or module-import path rejects.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
