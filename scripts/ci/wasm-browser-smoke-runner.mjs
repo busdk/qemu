@@ -748,6 +748,10 @@ export function displayPixelSummary(data, width, height) {
   };
 }
 
+function displayPixelSummarySource() {
+  return `(${displayPixelSummary.toString()})`;
+}
+
 async function writeResult(options, result) {
   if (options.out === null) {
     return;
@@ -888,7 +892,8 @@ async function captureDisplayEvidence(page, result) {
     return;
   }
   try {
-    result.displayEvidence = await page.evaluate(() => {
+    result.displayEvidence = await page.evaluate((summarySource) => {
+      const summarizePixels = eval(summarySource);
       const canvas = document.querySelector("#display");
       if (!(canvas instanceof HTMLCanvasElement)) {
         return {
@@ -914,49 +919,41 @@ async function captureDisplayEvidence(page, result) {
         return evidence;
       }
       const context = canvas.getContext("2d", { willReadFrequently: true });
-      if (!context) {
+      if (context) {
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
         return {
           ...evidence,
-          pixelError: "2D canvas context is not available",
+          contextType: "2d",
+          ...summarizePixels(pixels, canvas.width, canvas.height),
         };
       }
-      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-      let nonZeroPixels = 0;
-      let nonTransparentPixels = 0;
-      let nonBlackPixels = 0;
-      let hash = 0x811c9dc5;
-      for (let i = 0; i < pixels.length; i += 4) {
-        const r = pixels[i];
-        const g = pixels[i + 1];
-        const b = pixels[i + 2];
-        const a = pixels[i + 3];
-        if (r !== 0 || g !== 0 || b !== 0 || a !== 0) {
-          nonZeroPixels += 1;
-        }
-        if (a !== 0) {
-          nonTransparentPixels += 1;
-        }
-        if (r !== 0 || g !== 0 || b !== 0) {
-          nonBlackPixels += 1;
-        }
-        hash ^= r;
-        hash = Math.imul(hash, 0x01000193) >>> 0;
-        hash ^= g;
-        hash = Math.imul(hash, 0x01000193) >>> 0;
-        hash ^= b;
-        hash = Math.imul(hash, 0x01000193) >>> 0;
-        hash ^= a;
-        hash = Math.imul(hash, 0x01000193) >>> 0;
+      const gl = canvas.getContext("webgl2", { preserveDrawingBuffer: true }) ||
+        canvas.getContext("webgl", { preserveDrawingBuffer: true }) ||
+        canvas.getContext("experimental-webgl", { preserveDrawingBuffer: true });
+      if (!gl) {
+        return {
+          ...evidence,
+          pixelError: "2D or WebGL canvas context is not available",
+        };
       }
+      const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+      gl.readPixels(
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        pixels,
+      );
       return {
         ...evidence,
-        hash: `fnv1a32:${hash.toString(16).padStart(8, "0")}`,
-        nonBlackPixels,
-        nonTransparentPixels,
-        nonZeroPixels,
-        totalPixels: canvas.width * canvas.height,
+        contextType: gl.constructor && gl.constructor.name
+          ? gl.constructor.name
+          : "webgl",
+        ...summarizePixels(pixels, canvas.width, canvas.height),
       };
-    });
+    }, displayPixelSummarySource());
   } catch (error) {
     result.displayEvidenceError = error && error.message ? error.message : String(error);
   }

@@ -172,6 +172,12 @@ browser MVP. Keep Bus Engine product work downstream.
   recording canvas dimensions, focus, visibility, pixel counts, and an image
   hash in result JSON, plus a `--require-display-output` gate that only applies
   to explicit `display=sdl` runs.
+- [x] Capture the first downstream SDL/browser blocker against the existing
+  Bus Engine browser-lab artifacts: DoD is Chrome/Chromium result JSON and a
+  screenshot showing that `display=sdl` plus `stdvga` starts the browser path
+  but fails before the serial marker with an Emscripten WebGL context error,
+  and the documented next build fix is OffscreenCanvas support for pthreaded
+  SDL/WebGL.
 - [ ] Add a browser display backend proof for QEMU/WASM: DoD is a generic
   display path that receives QEMU surface updates from the selected emulated
   display device and renders them into a browser canvas or equivalent 2D

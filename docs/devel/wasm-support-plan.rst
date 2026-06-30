@@ -2565,11 +2565,23 @@ Current status:
   The browser smoke runner can now sample the opt-in SDL canvas and record
   display evidence in result JSON: canvas presence, dimensions, visibility,
   focus state, non-zero pixel count, non-transparent pixel count, non-black
-  pixel count, total pixels, and a ``fnv1a32`` pixel hash.  The
+  pixel count, total pixels, context type, and a ``fnv1a32`` pixel hash.  The
+  sampler supports 2D canvases and WebGL-backed SDL canvases.  The
   ``--require-display-output`` runner option turns that evidence into an
   explicit non-black-pixel gate for ``display=sdl`` runs.  The default
   ``display=none`` smoke path still uses the serial marker as its only success
   oracle.
+
+  A Chrome/Chromium run against the existing Bus Engine browser-lab artifacts
+  was captured in ``build/wasm-browser-proof/stdvga-result.json`` with
+  ``--display sdl --display-device stdvga --require-display-output``.  That
+  run reached QEMU startup and created the SDL canvas, but it did not reach the
+  serial marker.  The failure was an Emscripten WebGL context error:
+  ``Cannot read properties of undefined (reading 'createShader')``.  This is
+  consistent with a pthreaded SDL/WebGL build that lacks OffscreenCanvas
+  transfer support.  The Emscripten cross file now enables
+  ``-sOFFSCREENCANVAS_SUPPORT=1`` and ``-sOFFSCREEN_FRAMEBUFFER=1`` so rebuilt
+  artifacts can transfer WebGL canvases to the pthreaded QEMU main loop.
 
 Non-goals:
   No WebGPU, accelerated 3D, or full desktop support.
