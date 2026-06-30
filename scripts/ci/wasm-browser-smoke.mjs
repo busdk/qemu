@@ -129,11 +129,11 @@ export function qemuArgs(config) {
   args.push("-accel", "tcg,thread=single");
   if (config.display === "none") {
     if (!["default", "none"].includes(config.displayDevice)) {
-      throw new Error("displayDevice requires display=sdl");
+      throw new Error("displayDevice requires display=sdl or display=wasm");
     }
     args.push("-nographic");
-  } else if (config.display === "sdl") {
-    args.push("-display", "sdl,gl=off");
+  } else if (config.display === "sdl" || config.display === "wasm") {
+    args.push("-display", config.display === "sdl" ? "sdl,gl=off" : "wasm");
     if (config.displayDevice === "none") {
       args.push("-vga", "none");
     } else if (config.displayDevice === "stdvga") {
@@ -146,7 +146,7 @@ export function qemuArgs(config) {
       throw new Error("unsupported displayDevice");
     }
   } else {
-    throw new Error("display must be none or sdl");
+    throw new Error("display must be none, sdl, or wasm");
   }
   args.push(
     "-serial", "mon:stdio",
@@ -260,6 +260,107 @@ const CAPTURED_BROWSER_KEYS = new Set([
   "Tab",
 ]);
 
+const BROWSER_CODE_TO_LINUX = new Map([
+  ["Backquote", 41],
+  ["Backslash", 43],
+  ["Backspace", 14],
+  ["BracketLeft", 26],
+  ["BracketRight", 27],
+  ["Comma", 51],
+  ["ControlLeft", 29],
+  ["ControlRight", 97],
+  ["Digit0", 11],
+  ["Digit1", 2],
+  ["Digit2", 3],
+  ["Digit3", 4],
+  ["Digit4", 5],
+  ["Digit5", 6],
+  ["Digit6", 7],
+  ["Digit7", 8],
+  ["Digit8", 9],
+  ["Digit9", 10],
+  ["Enter", 28],
+  ["Equal", 13],
+  ["Escape", 1],
+  ["F1", 59],
+  ["F2", 60],
+  ["F3", 61],
+  ["F4", 62],
+  ["F5", 63],
+  ["F6", 64],
+  ["F7", 65],
+  ["F8", 66],
+  ["F9", 67],
+  ["F10", 68],
+  ["F11", 87],
+  ["F12", 88],
+  ["Minus", 12],
+  ["Period", 52],
+  ["Quote", 40],
+  ["Semicolon", 39],
+  ["ShiftLeft", 42],
+  ["ShiftRight", 54],
+  ["Slash", 53],
+  ["Space", 57],
+  ["Tab", 15],
+  ["AltLeft", 56],
+  ["AltRight", 100],
+  ["ArrowDown", 108],
+  ["ArrowLeft", 105],
+  ["ArrowRight", 106],
+  ["ArrowUp", 103],
+  ["Delete", 111],
+  ["End", 107],
+  ["Home", 102],
+  ["Insert", 110],
+  ["PageDown", 109],
+  ["PageUp", 104],
+  ["MetaLeft", 125],
+  ["MetaRight", 126],
+  ["KeyA", 30],
+  ["KeyB", 48],
+  ["KeyC", 46],
+  ["KeyD", 32],
+  ["KeyE", 18],
+  ["KeyF", 33],
+  ["KeyG", 34],
+  ["KeyH", 35],
+  ["KeyI", 23],
+  ["KeyJ", 36],
+  ["KeyK", 37],
+  ["KeyL", 38],
+  ["KeyM", 50],
+  ["KeyN", 49],
+  ["KeyO", 24],
+  ["KeyP", 25],
+  ["KeyQ", 16],
+  ["KeyR", 19],
+  ["KeyS", 31],
+  ["KeyT", 20],
+  ["KeyU", 22],
+  ["KeyV", 47],
+  ["KeyW", 17],
+  ["KeyX", 45],
+  ["KeyY", 21],
+  ["KeyZ", 44],
+]);
+
+export function browserKeyLinuxCode(event) {
+  const code = event && typeof event.code === "string" ? event.code : "";
+  return BROWSER_CODE_TO_LINUX.get(code) || 0;
+}
+
+export function deliverDisplayKeyEvent(event, down, inputSink) {
+  if (typeof inputSink !== "function") {
+    return false;
+  }
+  const linuxCode = browserKeyLinuxCode(event);
+  if (linuxCode === 0) {
+    return false;
+  }
+  return inputSink(linuxCode, down) !== false;
+}
+
 export function displayKeyPolicy(event) {
   if (event.key === "Escape") {
     return "release-focus";
@@ -274,7 +375,7 @@ export function displayKeyPolicy(event) {
   return "pass-through";
 }
 
-export function installDisplayInputPolicy(canvas, displayState) {
+export function installDisplayInputPolicy(canvas, displayState, inputSink = null) {
   if (!canvas || !displayState) {
     return null;
   }
@@ -293,6 +394,7 @@ export function installDisplayInputPolicy(canvas, displayState) {
   displayState.escapeReleaseEvents = 0;
   displayState.browserShortcutEvents = 0;
   displayState.capturedBrowserKeyEvents = 0;
+  displayState.deliveredKeyEvents = 0;
   displayState.pasteEvents = 0;
   displayState.lastPasteLength = 0;
   canvas.dataset.inputActive = canvas.ownerDocument && canvas.ownerDocument.activeElement === canvas
@@ -323,6 +425,22 @@ export function installDisplayInputPolicy(canvas, displayState) {
       displayState.browserShortcutEvents += 1;
     } else if (action === "capture-browser-key") {
       displayState.capturedBrowserKeyEvents += 1;
+      event.preventDefault();
+      if (deliverDisplayKeyEvent(event, true, inputSink)) {
+        displayState.deliveredKeyEvents += 1;
+      }
+    } else if (deliverDisplayKeyEvent(event, true, inputSink)) {
+      displayState.deliveredKeyEvents += 1;
+      event.preventDefault();
+    }
+  });
+  canvas.addEventListener("keyup", (event) => {
+    const action = displayKeyPolicy(event);
+    if (action === "release-focus" || action === "browser-shortcut") {
+      return;
+    }
+    if (deliverDisplayKeyEvent(event, false, inputSink)) {
+      displayState.deliveredKeyEvents += 1;
       event.preventDefault();
     }
   });
@@ -373,14 +491,14 @@ async function run() {
   const output = text("output");
   const canvas = text("canvas");
   const config = buildConfig();
-  if (!["none", "sdl"].includes(config.display)) {
-    throw new Error("display must be none or sdl");
+  if (!["none", "sdl", "wasm"].includes(config.display)) {
+    throw new Error("display must be none, sdl, or wasm");
   }
   if (!["default", "none", "stdvga", "virtio-vga", "virtio-gpu-pci"].includes(config.displayDevice)) {
     throw new Error("displayDevice must be default, none, stdvga, virtio-vga, or virtio-gpu-pci");
   }
-  if (config.display !== "sdl" && !["default", "none"].includes(config.displayDevice)) {
-    throw new Error("displayDevice requires display=sdl");
+  if (!["sdl", "wasm"].includes(config.display) && !["default", "none"].includes(config.displayDevice)) {
+    throw new Error("displayDevice requires display=sdl or display=wasm");
   }
   if (!["virtio-mmio", "virtio-pci"].includes(config.rootfsDevice)) {
     throw new Error("rootfsDevice must be virtio-mmio or virtio-pci");
@@ -417,6 +535,7 @@ async function run() {
     programExitStatus: null,
   };
   globalThis.qemuWasmSmokeState = smokeState;
+  let qemuKeySink = null;
   const setPhase = (phase, message = phase) => {
     smokeState.phase = phase;
     smokeState.phases.push({
@@ -427,10 +546,16 @@ async function run() {
     status.textContent = message;
   };
   setPhase("init", "initializing smoke harness");
-  if (config.display === "sdl") {
+  if (config.display === "sdl" || config.display === "wasm") {
     canvas.hidden = false;
     canvas.setAttribute("aria-hidden", "false");
-    installDisplayInputPolicy(canvas, smokeState.display);
+    installDisplayInputPolicy(canvas, smokeState.display, (linuxKey, down) => {
+      if (qemuKeySink === null) {
+        return false;
+      }
+      qemuKeySink(linuxKey, down);
+      return true;
+    });
     if (expectedResolution !== null) {
       canvas.width = expectedResolution.width;
       canvas.height = expectedResolution.height;
@@ -542,9 +667,17 @@ async function run() {
   setPhase("import-qemu-module", "loading QEMU WebAssembly module");
   const moduleFactory = (await import(programUrl.href)).default;
   setPhase("start-qemu", "starting QEMU");
-  await moduleFactory({
+  const installWasmKeySink = (module) => {
+    if (config.display === "wasm" && typeof module._qemu_wasm_display_key_event === "function") {
+      qemuKeySink = (linuxKey, down) => {
+        module._qemu_wasm_display_key_event(linuxKey, down ? 1 : 0);
+      };
+    }
+  };
+  const moduleOptions = {
     arguments: generatedQemuArgs,
     canvas,
+    qemuWasmDisplayCanvas: canvas,
     locateFile(path) {
       if (path === "qemu-system-x86_64.wasm") {
         return wasmUrl.href;
@@ -557,9 +690,14 @@ async function run() {
         mountFiles(module, availableMounts);
       },
     ],
+    onRuntimeInitialized() {
+      installWasmKeySink(moduleOptions);
+    },
     print: emit,
     printErr: emit,
-  });
+  };
+  const qemuModule = await moduleFactory(moduleOptions);
+  installWasmKeySink(qemuModule);
   if (!smokeState.markerSeen || !allExpectedTextSeen()) {
     setPhase("guest-boot", "QEMU started; waiting for marker");
   }

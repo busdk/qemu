@@ -2616,6 +2616,31 @@ Current status:
   fix that avoids both the eager canvas-transfer context failure and the
   no-transfer pthread unaligned-access trap.
 
+  A follow-up implementation moved the browser proof path away from SDL by
+  adding a generic ``-display wasm`` backend.  The backend is Emscripten-only,
+  registers a QEMU display listener, copies 2D display surfaces into RGBA, and
+  presents them through a browser 2D canvas.  The browser smoke harness accepts
+  ``display=wasm``, keeps ``display=none`` as the default serial gate, and maps
+  focused canvas keyboard events to QEMU Linux key events through an exported
+  Emscripten symbol.  A wasm64 container build reached the
+  ``qemu-system-x86_64.js`` final link and produced
+  ``build/wasm-artifacts-wasm-display-check`` with SHA-256 values
+  ``2084cbf630360a60f2ad8c8536006ebec3af0b9c3cf32dfe3133bbf968617dc7`` for
+  ``qemu-system-x86_64.js`` and
+  ``eb64b63a5e6980df5a66de156a4371ce34931dc6aff7bc04f726798279c7b37a`` for
+  ``qemu-system-x86_64.wasm``.
+
+  The rebuilt debug artifact has not yet passed the default serial regression
+  gate.  A Chromium ``149.0.7827.55`` ``display=none`` run against the Bus
+  Engine OS browser-lab inputs wrote
+  ``build/wasm-browser-proof/wasm-display-default-serial-result.json`` and
+  ``build/wasm-browser-proof/wasm-display-default-serial-page.png``.  QEMU
+  started, emitted SeaBIOS output, and stalled at ``Booting from ROM...`` until
+  the 180 second timeout.  It did not reach the ``bus@bus-engine-os`` marker or
+  the expected ``systemd 261.1`` text.  The next accepted proof must therefore
+  restore the default serial marker before the ``display=wasm`` graphics and
+  keyboard proof can be accepted.
+
 Non-goals:
   No WebGPU, accelerated 3D, or full desktop support.
 

@@ -8,7 +8,9 @@
 import assert from "node:assert/strict";
 
 import {
+  browserKeyLinuxCode,
   browserRuntimeSnapshot,
+  deliverDisplayKeyEvent,
   displayKeyPolicy,
   installDisplayInputPolicy,
   qemuArgs,
@@ -131,8 +133,18 @@ function fakePasteEvent(text) {
 }
 
 {
+  const args = qemuArgs(baseConfig({ display: "wasm" }));
+
+  assert.equal(args.includes("-nographic"), false);
+  assert.equal(valueAfter(args, "-display"), "wasm");
+  assert.equal(valueAfter(args, "-serial"), "mon:stdio");
+  assert.equal(valueAfter(args, "-monitor"), "none");
+  assert.equal(valueAfter(args, "-nic"), "none");
+}
+
+{
   const args = qemuArgs(baseConfig({
-    display: "sdl",
+    display: "wasm",
     displayDevice: "stdvga",
   }));
 
@@ -160,8 +172,25 @@ function fakePasteEvent(text) {
 
 assert.throws(
   () => qemuArgs(baseConfig({ displayDevice: "stdvga" })),
-  /displayDevice requires display=sdl/,
+  /displayDevice requires display=sdl or display=wasm/,
 );
+
+assert.equal(browserKeyLinuxCode({ code: "KeyA" }), 30);
+assert.equal(browserKeyLinuxCode({ code: "Enter" }), 28);
+assert.equal(browserKeyLinuxCode({ code: "ArrowUp" }), 103);
+assert.equal(browserKeyLinuxCode({ code: "Unknown" }), 0);
+
+{
+  const delivered = [];
+  const event = { code: "KeyB" };
+  assert.equal(deliverDisplayKeyEvent(event, true, (linuxKey, down) => {
+    delivered.push({ linuxKey, down });
+  }), true);
+  assert.deepEqual(delivered, [{ linuxKey: 48, down: true }]);
+  assert.equal(deliverDisplayKeyEvent({ code: "Unknown" }, true, () => {
+    throw new Error("unknown keys must not be delivered");
+  }), false);
+}
 
 assert.equal(displayKeyPolicy(fakeKeyEvent("Escape")), "release-focus");
 assert.equal(displayKeyPolicy(fakeKeyEvent("l", { ctrlKey: true })), "browser-shortcut");
@@ -171,7 +200,10 @@ assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
 {
   const canvas = new FakeCanvas();
   const displayState = { focused: false };
-  const policy = installDisplayInputPolicy(canvas, displayState);
+  const delivered = [];
+  const policy = installDisplayInputPolicy(canvas, displayState, (linuxKey, down) => {
+    delivered.push({ linuxKey, down });
+  });
 
   assert.equal(policy.escapeReleasesFocus, true);
   assert.equal(policy.pointerFocus, "focus-on-pointer-down");
@@ -186,14 +218,29 @@ assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
   assert.equal(canvas.dataset.inputActive, "true");
 
   const tab = fakeKeyEvent("Tab");
+  tab.code = "Tab";
   canvas.dispatch("keydown", tab);
   assert.equal(tab.prevented, true);
   assert.equal(displayState.capturedBrowserKeyEvents, 1);
+  assert.equal(displayState.deliveredKeyEvents, 1);
 
   const browserShortcut = fakeKeyEvent("l", { ctrlKey: true });
+  browserShortcut.code = "KeyL";
   canvas.dispatch("keydown", browserShortcut);
   assert.equal(browserShortcut.prevented, false);
   assert.equal(displayState.browserShortcutEvents, 1);
+
+  const keyA = fakeKeyEvent("a");
+  keyA.code = "KeyA";
+  canvas.dispatch("keydown", keyA);
+  assert.equal(keyA.prevented, true);
+  canvas.dispatch("keyup", keyA);
+  assert.equal(displayState.deliveredKeyEvents, 3);
+  assert.deepEqual(delivered, [
+    { linuxKey: 15, down: true },
+    { linuxKey: 30, down: true },
+    { linuxKey: 30, down: false },
+  ]);
 
   const paste = fakePasteEvent("uname -a\n");
   canvas.dispatch("paste", paste);

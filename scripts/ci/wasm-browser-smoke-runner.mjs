@@ -32,12 +32,12 @@ Options:
   --artifact-dir DIR  Directory containing qemu-system-*.js/.wasm artifacts
   --browser NAME      Browser engine to launch (default: chromium)
   --cpu MODEL         Guest CPU model passed to QEMU
-  --display MODE     Browser display mode: none or sdl (default: none)
+  --display MODE     Browser display mode: none, sdl, or wasm (default: none)
   --display-device KIND
                      QEMU display device: default, none, stdvga,
                      virtio-vga, or virtio-gpu-pci
   --expected-resolution WIDTHxHEIGHT
-                     Expected SDL canvas resolution metadata
+                     Expected browser canvas resolution metadata
   --expect-text TEXT  Additional output text required for success
   --focus-display    Focus the browser display surface before QEMU starts
   --firmware-dir DIR  Directory containing qboot.rom and linuxboot_dma.bin
@@ -56,7 +56,7 @@ Options:
                      Wait until browser-captured serial output contains TEXT
                      before typing --keyboard-text
   --keyboard-text TEXT
-                     Type TEXT into the focused SDL browser display canvas
+                     Type TEXT into the focused browser display canvas
   --kernel-append TEXT
                      Full Linux kernel arguments, replacing smoke defaults
   --machine MACHINE  QEMU machine name passed with -M
@@ -79,7 +79,7 @@ Options:
                      Maximum smoke progress samples to keep
   --qemu-arg ARG     Extra QEMU argument appended to the smoke command
   --require-display-output
-                     Require non-black SDL canvas pixels before success
+                     Require non-black browser display pixels before success
   --display-min-nonblack-pixels N
                      Minimum non-black pixels for --require-display-output
   --rootfs FILE       Raw root filesystem image exposed as /dev/vda
@@ -385,16 +385,16 @@ function parseArgs(argv) {
     console.error("--rootfs-device must be virtio-mmio or virtio-pci");
     usage(2);
   }
-  if (!["none", "sdl"].includes(options.display)) {
-    console.error("--display must be none or sdl");
+  if (!["none", "sdl", "wasm"].includes(options.display)) {
+    console.error("--display must be none, sdl, or wasm");
     usage(2);
   }
   if (!["default", "none", "stdvga", "virtio-vga", "virtio-gpu-pci"].includes(options.displayDevice)) {
     console.error("--display-device must be default, none, stdvga, virtio-vga, or virtio-gpu-pci");
     usage(2);
   }
-  if (options.display !== "sdl" && !["default", "none"].includes(options.displayDevice)) {
-    console.error("--display-device requires --display sdl");
+  if (!["sdl", "wasm"].includes(options.display) && !["default", "none"].includes(options.displayDevice)) {
+    console.error("--display-device requires --display sdl or --display wasm");
     usage(2);
   }
   if (
@@ -404,16 +404,16 @@ function parseArgs(argv) {
     console.error("--expected-resolution must use WIDTHxHEIGHT");
     usage(2);
   }
-  if (options.keyboardText !== "" && options.display !== "sdl") {
-    console.error("--keyboard-text requires --display sdl");
+  if (options.keyboardText !== "" && !["sdl", "wasm"].includes(options.display)) {
+    console.error("--keyboard-text requires --display sdl or --display wasm");
     usage(2);
   }
   if (options.keyboardAfterText !== "" && options.keyboardText === "") {
     console.error("--keyboard-after-text requires --keyboard-text");
     usage(2);
   }
-  if (options.requireDisplayOutput && options.display !== "sdl") {
-    console.error("--require-display-output requires --display sdl");
+  if (options.requireDisplayOutput && !["sdl", "wasm"].includes(options.display)) {
+    console.error("--require-display-output requires --display sdl or --display wasm");
     usage(2);
   }
   if (!["none", "default"].includes(options.network)) {

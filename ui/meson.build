@@ -173,6 +173,10 @@ if sdl.found()
   ui_modules += {'sdl' : sdl_ss}
 endif
 
+if host_os == 'emscripten' and pixman.found()
+  system_ss.add(files('wasm-display.c'))
+endif
+
 if spice.found()
   spice_core_ss = ss.source_set()
   spice_core_ss.add(spice, pixman, files(

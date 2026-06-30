@@ -330,6 +330,25 @@ for (const status of [
     "--artifact-dir", "/tmp/artifacts",
     "--kernel", "/tmp/kernel",
     "--initrd", "/tmp/initrd",
+    "--display", "wasm",
+    "--display-device", "stdvga",
+    "--keyboard-text", "uname -a\n",
+    "--require-display-output",
+    "--timeout-ms", "1",
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+
+  assert.notEqual(child.status, 2, child.stderr);
+}
+
+{
+  const child = spawnSync(process.execPath, [
+    runnerPath,
+    "--artifact-dir", "/tmp/artifacts",
+    "--kernel", "/tmp/kernel",
+    "--initrd", "/tmp/initrd",
     "--display-device", "stdvga",
   ], {
     cwd: process.cwd(),
