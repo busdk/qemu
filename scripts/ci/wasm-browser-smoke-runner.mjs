@@ -580,6 +580,17 @@ async function run() {
   const result = initialSmokeResult(options, browser.version());
   let page = null;
   let progressTimer = null;
+  const pendingDiagnostics = new Set();
+  const trackDiagnostic = (promise) => {
+    pendingDiagnostics.add(promise);
+    promise.then(
+      () => pendingDiagnostics.delete(promise),
+      () => pendingDiagnostics.delete(promise),
+    );
+  };
+  const flushDiagnostics = async () => {
+    await Promise.allSettled([...pendingDiagnostics]);
+  };
   try {
     page = await browser.newPage();
     await page.addInitScript({
@@ -591,10 +602,22 @@ async function run() {
       appendBounded(result.consoleMessages, entry);
       console.log(`browser ${entry.type}: ${entry.text}`);
     });
-    page.on("pageerror", async (error) => {
-      const entry = pageErrorDiagnostic(error, Date.now() - startTime);
-      appendBounded(result.pageErrors, entry);
-      entry.state = await currentSmokeState(page);
+    page.on("pageerror", (error) => {
+      trackDiagnostic((async () => {
+        const entry = pageErrorDiagnostic(
+          error,
+          Date.now() - startTime,
+          await currentSmokeState(page),
+        );
+        appendBounded(result.pageErrors, entry);
+        await sampleSmokeProgress(
+          page,
+          result,
+          startTime,
+          "page-error",
+          options.progressSampleLimit,
+        );
+      })());
     });
     page.on("requestfailed", (request) => {
       appendBounded(result.requestFailures, requestFailureDiagnostic(
@@ -637,6 +660,7 @@ async function run() {
     }
     result.success = true;
     result.elapsedMs = Date.now() - startTime;
+    await flushDiagnostics();
     await sampleSmokeProgress(page, result, startTime, "final", options.progressSampleLimit);
     await capturePageText(page, result, options.pageTextTailBytes);
     await captureScreenshot(page, options, result);
@@ -650,6 +674,7 @@ async function run() {
     result.elapsedMs = Date.now() - startTime;
     result.errorName = error && error.name ? error.name : "Error";
     result.errorMessage = error && error.message ? error.message : String(error);
+    await flushDiagnostics();
     await sampleSmokeProgress(page, result, startTime, "final", options.progressSampleLimit);
     await capturePageText(page, result, options.pageTextTailBytes);
     await captureScreenshot(page, options, result);

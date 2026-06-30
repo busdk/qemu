@@ -54,6 +54,9 @@ browser MVP. Keep Bus Engine product work downstream.
   detection so page-level failures are captured promptly.
 - [x] Preserve browser diagnostic source location, stack, and smoke state for
   Chromium page errors and failed resource requests.
+- [x] Flush pending Chromium page-error diagnostics before writing browser
+  smoke result JSON so intermittent WebAssembly traps keep their smoke-state
+  snapshot and page-error progress sample.
 - [x] Preserve browser harness failure name and stack in `qemuWasmSmokeState`.
 - [x] Add progress-sample deltas so Chromium stall runs show whether serial
   output advanced between samples.

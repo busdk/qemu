@@ -597,6 +597,11 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   line-count deltas, output-byte deltas, previous sample time, and whether the
   last serial line changed, so a follow-up run can distinguish a quiet stall
   from slow but continuing guest output without manually diffing samples.
+  Page-error handling now waits for the smoke-state snapshot before appending
+  the diagnostic, records a ``page-error`` progress sample, and flushes
+  pending page-error diagnostics before writing result JSON.  This keeps the
+  intermittent Chromium ``RuntimeError: memory access out of bounds`` evidence
+  tied to the guest phase and last serial line observed by the page.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
