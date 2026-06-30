@@ -9,10 +9,12 @@ import assert from "node:assert/strict";
 
 import {
   browserKeyLinuxCode,
+  browserNonInteractiveStdin,
   browserRuntimeSnapshot,
   deliverDisplayKeyEvent,
   displayKeyPolicy,
   emscriptenModuleCanvas,
+  installBrowserDialogSuppression,
   installDisplayInputPolicy,
   qemuArgs,
   recordHarnessFailure,
@@ -209,6 +211,40 @@ assert.equal(browserKeyLinuxCode({ code: "KeyA" }), 30);
 assert.equal(browserKeyLinuxCode({ code: "Enter" }), 28);
 assert.equal(browserKeyLinuxCode({ code: "ArrowUp" }), 103);
 assert.equal(browserKeyLinuxCode({ code: "Unknown" }), 0);
+assert.equal(browserNonInteractiveStdin(), null);
+
+{
+  const calls = [];
+  const fakeWindow = {
+    alert(message) {
+      calls.push(["alert", message]);
+    },
+    confirm(message) {
+      calls.push(["confirm", message]);
+      return true;
+    },
+    prompt(message, fallback = "") {
+      calls.push(["prompt", message, fallback]);
+      return "typed";
+    },
+  };
+  const smokeState = {};
+  const restore = installBrowserDialogSuppression({ window: fakeWindow }, smokeState);
+
+  assert.equal(fakeWindow.alert("visible alert"), undefined);
+  assert.equal(fakeWindow.confirm("visible confirm"), false);
+  assert.equal(fakeWindow.prompt("Input: "), null);
+  assert.equal(fakeWindow.prompt("Abort/Retry/Ignore/AlwaysIgnore? [ariA] :", "i"), "i");
+  assert.deepEqual(calls, []);
+  assert.equal(smokeState.browserDialogs.suppressed, true);
+  assert.equal(smokeState.browserDialogs.alertCount, 1);
+  assert.equal(smokeState.browserDialogs.confirmCount, 1);
+  assert.equal(smokeState.browserDialogs.promptCount, 2);
+
+  restore();
+  assert.equal(fakeWindow.prompt("Input: "), "typed");
+  assert.deepEqual(calls, [["prompt", "Input: ", ""]]);
+}
 
 {
   const delivered = [];

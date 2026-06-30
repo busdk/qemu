@@ -3191,3 +3191,15 @@ Open decisions
   download, or runtime cost problems.
 * Whether browser QMP should be a generic chardev/transport feature or an
   example harness feature.
+
+Current browser input invariant
+===============================
+
+The Browser Lab harness must not use browser modal dialogs as an input path.
+Emscripten's generated fallback can call ``window.prompt("Input: ")`` when
+stdin is read in a browser, and some abort paths can request an
+abort/retry/ignore decision through ``window.prompt``.  The harness now passes
+a non-interactive stdin handler that returns EOF and suppresses browser
+``alert``, ``confirm``, and ``prompt`` calls while recording counts in the
+smoke state.  Guest keyboard input must enter through the display canvas and
+the QEMU display key event path.

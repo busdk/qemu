@@ -510,6 +510,70 @@ export function emscriptenModuleCanvas(display, canvas) {
   return workerCanvas;
 }
 
+export function browserNonInteractiveStdin() {
+  return null;
+}
+
+export function installBrowserDialogSuppression(globalObject, smokeState) {
+  const windowObject = globalObject && globalObject.window
+    ? globalObject.window
+    : globalObject;
+  if (!windowObject) {
+    return null;
+  }
+
+  const original = {
+    alert: windowObject.alert,
+    confirm: windowObject.confirm,
+    prompt: windowObject.prompt,
+  };
+  const dialogs = {
+    alertCount: 0,
+    confirmCount: 0,
+    promptCount: 0,
+    suppressed: true,
+  };
+  if (smokeState) {
+    smokeState.browserDialogs = dialogs;
+  }
+
+  if (typeof original.alert === "function") {
+    windowObject.alert = (message) => {
+      dialogs.alertCount += 1;
+      dialogs.lastAlert = String(message);
+    };
+  }
+  if (typeof original.confirm === "function") {
+    windowObject.confirm = (message) => {
+      dialogs.confirmCount += 1;
+      dialogs.lastConfirm = String(message);
+      return false;
+    };
+  }
+  if (typeof original.prompt === "function") {
+    windowObject.prompt = (message, fallback = "") => {
+      dialogs.promptCount += 1;
+      dialogs.lastPrompt = String(message);
+      if (fallback === "i") {
+        return "i";
+      }
+      return null;
+    };
+  }
+
+  return () => {
+    if (typeof original.alert === "function") {
+      windowObject.alert = original.alert;
+    }
+    if (typeof original.confirm === "function") {
+      windowObject.confirm = original.confirm;
+    }
+    if (typeof original.prompt === "function") {
+      windowObject.prompt = original.prompt;
+    }
+  };
+}
+
 function buildConfig() {
   return {
     appendExtra: option("appendExtra", ""),
@@ -612,6 +676,7 @@ async function run() {
     programExitStatus: null,
   };
   globalThis.qemuWasmSmokeState = smokeState;
+  installBrowserDialogSuppression(globalThis, smokeState);
   let qemuKeySink = null;
   let qemuModule = null;
   const setPhase = (phase, message = phase) => {
@@ -827,6 +892,7 @@ async function run() {
     },
     print: emit,
     printErr: emit,
+    stdin: browserNonInteractiveStdin,
   };
   const moduleCanvas = emscriptenModuleCanvas(config.display, canvas);
   if (moduleCanvas !== undefined) {
