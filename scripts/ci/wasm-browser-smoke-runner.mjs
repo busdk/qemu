@@ -165,6 +165,7 @@ function parseArgs(argv) {
 
   applyGuestManifest(options, explicit, {
     booleanFields: ["screenshotFullPage"],
+    checksumFields: ["kernel", "initrd", "rootfs"],
     integerFields: [
       "maxOutputBytes",
       "pageTextTailBytes",
@@ -172,6 +173,15 @@ function parseArgs(argv) {
       "progressSampleIntervalMs",
       "progressSampleLimit",
       "timeoutMs",
+    ],
+    pathFields: [
+      "artifactDir",
+      "firmwareDir",
+      "initrd",
+      "kernel",
+      "out",
+      "rootfs",
+      "screenshot",
     ],
     stringFields: [
       "appendExtra",

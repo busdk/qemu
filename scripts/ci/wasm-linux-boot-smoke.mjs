@@ -83,7 +83,9 @@ function parseArgs(argv) {
   }
 
   applyGuestManifest(options, explicit, {
+    checksumFields: ["kernel", "initrd", "rootfs"],
     integerFields: ["maxOutputBytes", "timeoutMs"],
+    pathFields: ["artifactDir", "firmwareDir", "initrd", "kernel", "rootfs"],
     stringFields: [
       "appendExtra",
       "artifactDir",

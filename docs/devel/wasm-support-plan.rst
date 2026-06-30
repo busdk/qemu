@@ -1367,13 +1367,21 @@ Proof:
   ``cpu``, ``memory``, ``marker``, ``appendExtra``, ``qemuArgs``, and timeout
   or capture settings.  Explicit command-line options override manifest
   values, and repeated command-line ``--qemu-arg`` values are appended after
-  manifest ``qemuArgs``.  A Node.js ``v24`` rootfs proof and a Chromium
-  ``141.0.7390.37`` browser proof both reached ``QEMU_WASM_LINUX_BOOT_OK``
-  using the manifest for guest inputs; the Chromium run again recorded
+  manifest ``qemuArgs``.  Manifest path fields are resolved relative to the
+  manifest file when they are not absolute, so a downstream bundle can carry
+  local artifact paths without requiring the caller's current directory to
+  match.  A manifest may also include a ``sha256`` object keyed by input field
+  name; QEMU smoke helpers verify ``kernel``, ``initrd``, and ``rootfs``
+  checksums before starting the emulator.  A Node.js ``v24`` rootfs proof and a
+  Chromium ``141.0.7390.37`` browser proof both reached
+  ``QEMU_WASM_LINUX_BOOT_OK`` using a relative-path manifest with SHA-256
+  checksums for the kernel and rootfs; the Chromium run again recorded
   ``crossOriginIsolated: true``, no request failures, ``174`` serial lines, and
-  a ``1280x720`` screenshot.  This manifest is the generic handoff shape that
-  downstream Bus Engine OS can populate without adding Bus-specific code to
-  upstream QEMU.
+  a ``1280x720`` screenshot.  A negative Node.js proof with a deliberately
+  wrong rootfs SHA-256 exited with status ``2`` and reported a checksum
+  mismatch before QEMU startup.  This manifest is the generic handoff shape
+  that downstream Bus Engine OS can populate without adding Bus-specific code
+  to upstream QEMU.
 
   Example generic manifest shape for a root-disk proof::
 
@@ -1388,7 +1396,11 @@ Proof:
       "marker": "QEMU_WASM_LINUX_BOOT_OK",
       "maxOutputBytes": 90000,
       "pageTextTailBytes": 120000,
-      "timeoutMs": 180000
+      "timeoutMs": 180000,
+      "sha256": {
+        "kernel": "f57bfc6553bcd6e0a54aab86095bf642b33b5571d14e3af1731b18c87ed5aef8",
+        "rootfs": "sha256:8abbea06dcb29a2edbdda27d682d021b8cdd8bae68fa7b296476e6ce9dd514a5"
+      }
     }
 
 Non-goals:

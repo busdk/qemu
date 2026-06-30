@@ -35,6 +35,8 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Add a generic guest manifest so downstream systems can hand off kernel,
   initrd or rootfs, firmware, memory, marker, and diagnostic defaults without
   product-specific QEMU code.
+- [x] Resolve manifest relative paths from the manifest file and verify
+  optional SHA-256 checksums for guest kernel, initrd, and rootfs inputs.
 - [ ] Keep the accepted smoke profile stable while diagnostic arguments vary.
 - [ ] Continue recording browser/runtime versions, commands, results, and
   failure modes in `docs/devel/wasm-support-plan.rst`.
