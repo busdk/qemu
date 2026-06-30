@@ -2585,6 +2585,37 @@ Current status:
   ``-sOFFSCREENCANVAS_SUPPORT=1`` and ``-sOFFSCREEN_FRAMEBUFFER=1`` so rebuilt
   artifacts can transfer WebGL canvases to the pthreaded QEMU main loop.
 
+  A rebuilt current artifact was produced under
+  ``build/wasm-artifacts-display-current`` with SHA-256 values
+  ``243cd2133934f3677b38a4c60795f35a81d90caeb5dcfaf42b9ef5d38c70de9b``
+  for ``qemu-system-x86_64.js`` and
+  ``69b471147626fc031416aca6f60c569c96eeb8d13f643142ad7242b968e0510c``
+  for ``qemu-system-x86_64.wasm``.  The configure summary reported
+  ``SDL support: YES 2.0.10`` and the link flags included
+  ``-sOFFSCREENCANVAS_SUPPORT=1`` and ``-sOFFSCREEN_FRAMEBUFFER=1``.  Running
+  that artifact in Chromium ``149.0.0.0`` against the Bus Engine OS browser-lab
+  inputs wrote ``build/wasm-browser-proof/display-current-result.json`` and
+  ``build/wasm-browser-proof/display-current-page.png``.  It reached QEMU
+  startup and created the focused SDL canvas, but the page reported
+  ``InvalidStateError: Failed to execute 'getContext' on 'HTMLCanvasElement':
+  Cannot get context from a canvas that has transferred its control to
+  offscreen.``  No serial lines were emitted before timeout.
+
+  A temporary generated-JavaScript probe changed the Emscripten default
+  transferred canvas set from ``#canvas`` to empty in
+  ``build/wasm-artifacts-display-no-transfer``.  This is not a source fix, but
+  it separated the two failure modes.  The corresponding Chromium run wrote
+  ``build/wasm-browser-proof/display-no-transfer-result.json`` and
+  ``build/wasm-browser-proof/display-no-transfer-page.png``.  It avoided the
+  transferred-canvas ``getContext`` exception, drew into the browser page
+  through a ``WebGLRenderingContext``, and recorded non-zero/non-transparent
+  display pixels, but then the pthread reported
+  ``RuntimeError: operation does not support unaligned accesses`` through a
+  ``dynCall_vfi`` trampoline before guest serial boot progressed.  The next
+  implementation step is therefore a source-level wasm64 SDL/canvas ownership
+  fix that avoids both the eager canvas-transfer context failure and the
+  no-transfer pthread unaligned-access trap.
+
 Non-goals:
   No WebGPU, accelerated 3D, or full desktop support.
 

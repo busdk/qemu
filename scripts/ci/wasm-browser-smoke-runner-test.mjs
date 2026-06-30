@@ -13,6 +13,7 @@ import {
   appendBoundedLimit,
   browserSmokeUrl,
   consoleMessageDiagnostic,
+  displayContextErrorEvidence,
   displayPixelSummary,
   initialSmokeResult,
   isTerminalPageStatus,
@@ -130,6 +131,21 @@ for (const status of [
   assert.equal(visible.nonBlackPixels, 2);
   assert.equal(visible.totalPixels, 4);
   assert.notEqual(blank.hash, visible.hash);
+}
+
+{
+  const transferred = displayContextErrorEvidence({
+    name: "InvalidStateError",
+    message: "Failed to execute 'getContext' on 'HTMLCanvasElement': Cannot get context from a canvas that has transferred its control to offscreen.",
+  });
+  const generic = displayContextErrorEvidence(new Error("ordinary canvas failure"));
+
+  assert.equal(transferred.controlTransferredOffscreen, true);
+  assert.equal(transferred.contextErrorName, "InvalidStateError");
+  assert.match(transferred.pixelError, /transferred to OffscreenCanvas/);
+  assert.equal(generic.controlTransferredOffscreen, false);
+  assert.equal(generic.contextErrorName, "Error");
+  assert.equal(generic.pixelError, "ordinary canvas failure");
 }
 
 {

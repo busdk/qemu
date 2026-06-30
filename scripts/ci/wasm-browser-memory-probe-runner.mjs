@@ -7,9 +7,13 @@
 
 import { spawn } from "node:child_process";
 import { writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import {
+  loadPlaywrightBrowser,
+  playwrightLaunchOptions,
+} from "./wasm-playwright-loader.mjs";
 
 const THIS_FILE = fileURLToPath(import.meta.url);
 
@@ -26,6 +30,13 @@ Options:
   --port PORT        Local probe server port
   --timeout-ms MS    Timeout in milliseconds
   --help             Show this help
+
+Environment:
+  QEMU_WASM_BROWSER_EXECUTABLE
+                    Browser executable path used for Playwright launch
+  QEMU_WASM_CHROMIUM_EXECUTABLE
+                    Chromium-specific executable path; overrides the generic
+                    executable when --browser chromium
 `);
   process.exit(status);
 }
@@ -113,12 +124,7 @@ export function annotateResult(result, options, browserVersion) {
 
 async function loadPlaywright(browserName) {
   try {
-    const require = createRequire(import.meta.url);
-    const playwright = require("playwright");
-    if (!playwright[browserName]) {
-      throw new Error(`unsupported Playwright browser: ${browserName}`);
-    }
-    return playwright[browserName];
+    return loadPlaywrightBrowser(browserName);
   } catch (error) {
     console.error(
       "Playwright is required. Run with, for example: npm exec --yes --package=playwright -- node scripts/ci/wasm-browser-memory-probe-runner.mjs ...",
@@ -175,10 +181,7 @@ async function run() {
   const options = parseArgs(process.argv.slice(2));
   const browserType = await loadPlaywright(options.browser);
   const server = await startServer(options);
-  const browser = await browserType.launch({
-    headless: true,
-    args: options.browser === "chromium" ? ["--no-sandbox"] : [],
-  });
+  const browser = await browserType.launch(playwrightLaunchOptions(options.browser));
   try {
     const page = await browser.newPage();
     page.on("console", (message) => {

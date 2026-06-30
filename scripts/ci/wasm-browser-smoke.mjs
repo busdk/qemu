@@ -371,7 +371,7 @@ function buildConfig() {
 async function run() {
   const status = text("status");
   const output = text("output");
-  const canvas = text("display");
+  const canvas = text("canvas");
   const config = buildConfig();
   if (!["none", "sdl"].includes(config.display)) {
     throw new Error("display must be none or sdl");

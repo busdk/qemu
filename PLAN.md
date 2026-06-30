@@ -172,12 +172,29 @@ browser MVP. Keep Bus Engine product work downstream.
   recording canvas dimensions, focus, visibility, pixel counts, and an image
   hash in result JSON, plus a `--require-display-output` gate that only applies
   to explicit `display=sdl` runs.
+- [x] Make local Chrome/Chromium proof runs independent of Playwright-managed
+  browser downloads: DoD is a shared Playwright loader that can use
+  `QEMU_WASM_BROWSER_EXECUTABLE` or browser-specific executable environment
+  variables, both browser runners use it, and deterministic Node coverage
+  verifies package loading and executable selection.
 - [x] Capture the first downstream SDL/browser blocker against the existing
   Bus Engine browser-lab artifacts: DoD is Chrome/Chromium result JSON and a
   screenshot showing that `display=sdl` plus `stdvga` starts the browser path
   but fails before the serial marker with an Emscripten WebGL context error,
   and the documented next build fix is OffscreenCanvas support for pthreaded
   SDL/WebGL.
+- [x] Rebuild the wasm64 SDL artifact with OffscreenCanvas flags and capture
+  the next blocker: DoD is a current QEMU build with
+  `-sOFFSCREENCANVAS_SUPPORT=1` and `-sOFFSCREEN_FRAMEBUFFER=1`, Chromium
+  evidence showing the default canvas transfer now fails with a transferred
+  DOM-canvas `getContext` error, and a temporary no-transfer artifact proving
+  the next failure is an Emscripten pthread/runtime unaligned-access trap after
+  SDL draws into the browser page.
+- [ ] Resolve the pthreaded SDL canvas ownership path for wasm64: DoD is a
+  source-level build configuration or QEMU/Emscripten integration fix that
+  avoids both the transferred-canvas `getContext` failure and the no-transfer
+  unaligned-access trap, while preserving the default serial-console boot
+  proof and the opt-in `display=sdl` harness.
 - [ ] Add a browser display backend proof for QEMU/WASM: DoD is a generic
   display path that receives QEMU surface updates from the selected emulated
   display device and renders them into a browser canvas or equivalent 2D

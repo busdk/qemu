@@ -7,11 +7,14 @@
 
 import { spawn } from "node:child_process";
 import { writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { applyGuestManifest } from "./wasm-guest-manifest.mjs";
+import {
+  loadPlaywrightBrowser,
+  playwrightLaunchOptions,
+} from "./wasm-playwright-loader.mjs";
 
 const THIS_FILE = fileURLToPath(import.meta.url);
 const MAX_DIAGNOSTIC_ENTRIES = 50;
@@ -89,6 +92,13 @@ Options:
   --visual-marker TEXT
                      Expected visual marker metadata for display proofs
   --help              Show this help
+
+Environment:
+  QEMU_WASM_BROWSER_EXECUTABLE
+                     Browser executable path used for Playwright launch
+  QEMU_WASM_CHROMIUM_EXECUTABLE
+                     Chromium-specific executable path; overrides the generic
+                     executable when --browser chromium
 `);
   process.exit(status);
 }
@@ -548,12 +558,7 @@ export function serialIdleDiagnostic(samples, idleTimeoutMs, idleAfterText = "")
 
 async function loadPlaywright(browserName) {
   try {
-    const require = createRequire(import.meta.url);
-    const playwright = require("playwright");
-    if (!playwright[browserName]) {
-      throw new Error(`unsupported Playwright browser: ${browserName}`);
-    }
-    return playwright[browserName];
+    return loadPlaywrightBrowser(browserName);
   } catch (error) {
     console.error(
       "Playwright is required. Run with, for example: npm exec --yes --package=playwright -- node scripts/ci/wasm-browser-smoke-runner.mjs ...",
@@ -748,8 +753,27 @@ export function displayPixelSummary(data, width, height) {
   };
 }
 
+export function displayContextErrorEvidence(error) {
+  const name = error && error.name ? error.name : "Error";
+  const message = error && error.message ? error.message : String(error);
+  const controlTransferredOffscreen =
+    name === "InvalidStateError" &&
+    /transferred.*offscreen/i.test(message);
+  return {
+    contextErrorName: name,
+    controlTransferredOffscreen,
+    pixelError: controlTransferredOffscreen
+      ? "canvas control was transferred to OffscreenCanvas; main-thread pixel sampling is unavailable"
+      : message,
+  };
+}
+
 function displayPixelSummarySource() {
   return `(${displayPixelSummary.toString()})`;
+}
+
+function displayContextErrorEvidenceSource() {
+  return `(${displayContextErrorEvidence.toString()})`;
 }
 
 async function writeResult(options, result) {
@@ -892,9 +916,10 @@ async function captureDisplayEvidence(page, result) {
     return;
   }
   try {
-    result.displayEvidence = await page.evaluate((summarySource) => {
-      const summarizePixels = eval(summarySource);
-      const canvas = document.querySelector("#display");
+    result.displayEvidence = await page.evaluate((sources) => {
+      const contextErrorEvidence = eval(sources.contextErrorEvidence);
+      const summarizePixels = eval(sources.pixelSummary);
+      const canvas = document.querySelector("#canvas");
       if (!(canvas instanceof HTMLCanvasElement)) {
         return {
           present: false,
@@ -918,7 +943,15 @@ async function captureDisplayEvidence(page, result) {
       if (!visible) {
         return evidence;
       }
-      const context = canvas.getContext("2d", { willReadFrequently: true });
+      let context;
+      try {
+        context = canvas.getContext("2d", { willReadFrequently: true });
+      } catch (error) {
+        return {
+          ...evidence,
+          ...contextErrorEvidence(error),
+        };
+      }
       if (context) {
         const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
         return {
@@ -927,9 +960,17 @@ async function captureDisplayEvidence(page, result) {
           ...summarizePixels(pixels, canvas.width, canvas.height),
         };
       }
-      const gl = canvas.getContext("webgl2", { preserveDrawingBuffer: true }) ||
-        canvas.getContext("webgl", { preserveDrawingBuffer: true }) ||
-        canvas.getContext("experimental-webgl", { preserveDrawingBuffer: true });
+      let gl;
+      try {
+        gl = canvas.getContext("webgl2", { preserveDrawingBuffer: true }) ||
+          canvas.getContext("webgl", { preserveDrawingBuffer: true }) ||
+          canvas.getContext("experimental-webgl", { preserveDrawingBuffer: true });
+      } catch (error) {
+        return {
+          ...evidence,
+          ...contextErrorEvidence(error),
+        };
+      }
       if (!gl) {
         return {
           ...evidence,
@@ -953,7 +994,10 @@ async function captureDisplayEvidence(page, result) {
           : "webgl",
         ...summarizePixels(pixels, canvas.width, canvas.height),
       };
-    }, displayPixelSummarySource());
+    }, {
+      contextErrorEvidence: displayContextErrorEvidenceSource(),
+      pixelSummary: displayPixelSummarySource(),
+    });
   } catch (error) {
     result.displayEvidenceError = error && error.message ? error.message : String(error);
   }
@@ -1019,7 +1063,7 @@ async function typeKeyboardText(page, options, result) {
   await page.waitForFunction(
     (afterText) => {
       const state = globalThis.qemuWasmSmokeState || null;
-      const display = document.querySelector("#display");
+      const display = document.querySelector("#canvas");
       if (!state || !display || display.hidden) {
         return false;
       }
@@ -1032,11 +1076,11 @@ async function typeKeyboardText(page, options, result) {
     options.keyboardAfterText,
     { timeout: options.timeoutMs },
   );
-  await page.locator("#display").focus();
+  await page.locator("#canvas").focus();
   await page.keyboard.type(options.keyboardText);
   result.keyboardInput = {
     afterText: options.keyboardAfterText,
-    target: "#display",
+    target: "#canvas",
     textLength: options.keyboardText.length,
   };
 }
@@ -1056,10 +1100,7 @@ async function run() {
   const options = parseArgs(process.argv.slice(2));
   const browserType = await loadPlaywright(options.browser);
   const server = await startServer(options);
-  const browser = await browserType.launch({
-    headless: true,
-    args: options.browser === "chromium" ? ["--no-sandbox"] : [],
-  });
+  const browser = await browserType.launch(playwrightLaunchOptions(options.browser));
   const startTime = Date.now();
   const result = initialSmokeResult(options, browser.version());
   let page = null;
