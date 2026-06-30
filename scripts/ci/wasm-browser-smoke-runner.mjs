@@ -21,6 +21,7 @@ function usage(status) {
 Options:
   --artifact-dir DIR  Directory containing qemu-system-*.js/.wasm artifacts
   --browser NAME      Browser engine to launch (default: chromium)
+  --cpu MODEL         Guest CPU model passed to QEMU
   --firmware-dir DIR  Directory containing qboot.rom and linuxboot_dma.bin
   --host HOST         Bind address for the local smoke server
   --initrd FILE       Smoke initramfs image
@@ -28,6 +29,7 @@ Options:
   --marker TEXT       Output text required for success
   --max-output-bytes N
                      Maximum browser page output bytes to keep
+  --memory SIZE       Guest memory size passed to QEMU
   --out FILE          Write smoke result JSON to FILE
   --port PORT         Local smoke server port
   --program FILE      JavaScript launcher inside artifact dir
@@ -41,12 +43,14 @@ function parseArgs(argv) {
   const options = {
     artifactDir: null,
     browser: "chromium",
+    cpu: "Nehalem",
     firmwareDir: "pc-bios",
     host: "127.0.0.1",
     initrd: null,
     kernel: null,
     marker: "QEMU_WASM_LINUX_BOOT_OK",
     maxOutputBytes: 60000,
+    memory: "512M",
     out: null,
     port: 8010,
     program: "qemu-system-x86_64.js",
@@ -59,6 +63,8 @@ function parseArgs(argv) {
       options.artifactDir = argv[++i];
     } else if (arg === "--browser") {
       options.browser = argv[++i];
+    } else if (arg === "--cpu") {
+      options.cpu = argv[++i];
     } else if (arg === "--firmware-dir") {
       options.firmwareDir = argv[++i];
     } else if (arg === "--host") {
@@ -71,6 +77,8 @@ function parseArgs(argv) {
       options.marker = argv[++i];
     } else if (arg === "--max-output-bytes") {
       options.maxOutputBytes = Number(argv[++i]);
+    } else if (arg === "--memory") {
+      options.memory = argv[++i];
     } else if (arg === "--out") {
       options.out = argv[++i];
     } else if (arg === "--port") {
@@ -224,8 +232,10 @@ async function run() {
     format: 1,
     browser: options.browser,
     browserVersion: browser.version(),
+    cpu: options.cpu,
     maxDiagnosticEntries: MAX_DIAGNOSTIC_ENTRIES,
     marker: options.marker,
+    memory: options.memory,
     timeoutMs: options.timeoutMs,
     success: false,
     consoleMessages: [],
@@ -258,8 +268,10 @@ async function run() {
       });
     });
     const url = new URL(`http://${options.host}:${options.port}/`);
+    url.searchParams.set("cpu", options.cpu);
     url.searchParams.set("marker", options.marker);
     url.searchParams.set("maxOutputBytes", String(options.maxOutputBytes));
+    url.searchParams.set("memory", options.memory);
     url.searchParams.set("timeoutMs", String(options.timeoutMs));
     await page.goto(url.href, {
       waitUntil: "domcontentloaded",

@@ -661,12 +661,13 @@ The underlying command shape is::
   browser name, browser version, marker, elapsed time, cross-origin isolation
   state, bounded console diagnostics, request failures, page errors, page text,
   and error text, and stops the server.  It forwards the selected marker,
-  timeout, and page-output byte cap into the browser page as query parameters
-  so the Playwright wait and browser harness use the same smoke-test settings.
-  The runner originally searched all page text for the marker; that was a
-  false-positive risk because failure messages can quote the marker.  The
-  corrected runner no longer treats ``timeout waiting for marker: MARKER`` or
-  ``QEMU returned before marker: MARKER`` as success.  A disposable
+  CPU model, guest memory size, timeout, and page-output byte cap into the
+  browser page as query parameters so the Playwright wait and browser harness
+  use the same smoke-test settings.  The runner originally searched all page
+  text for the marker; that was a false-positive risk because failure messages
+  can quote the marker.  The corrected runner no longer treats ``timeout
+  waiting for marker: MARKER`` or ``QEMU returned before marker: MARKER`` as
+  success.  A disposable
   ``mcr.microsoft.com/playwright:v1.56.1-noble`` image
   (digest
   ``sha256:f1e7e01021efd65dd1a2c56064be399f3e4de00fd021ac561325f2bfbb2b837a``)
@@ -689,6 +690,11 @@ The underlying command shape is::
   reaching ``/init``.  Firefox therefore remains an incomplete browser-boot
   investigation, even though its separate memory probe accepted the tested
   wasm64 memory sizes.
+* Re-running Firefox ``142.0.1`` with ``--memory 256M`` and the same 420 second
+  timeout produced the same failure shape.  The page text again reached normal
+  kernel initialization and ended after ``random: crng init done`` without
+  reaching ``/init``.  Reducing guest RAM from ``512M`` to ``256M`` therefore
+  did not resolve the Firefox browser-boot gap.
 * A WebKit boot-smoke attempt in the same Playwright image did not reach guest
   execution.  The browser console repeatedly reported that the runtime was
   still waiting on the ``wasm-instantiate`` dependency, and the runner timed
@@ -1233,8 +1239,9 @@ Current status:
   ``curl`` route/header checks, and a headless Chromium run through
   ``scripts/ci/wasm-browser-smoke-runner.mjs`` pass with the corrected
   explicit-status predicate.  Firefox reached normal kernel initialization but
-  timed out before the marker within 420 seconds.  WebKit timed out during
-  WebAssembly instantiation and remains unproven for the wasm64 MVP.
+  timed out before the marker within 420 seconds at both ``512M`` and ``256M``
+  guest RAM.  WebKit timed out during WebAssembly instantiation and remains
+  unproven for the wasm64 MVP.
 
 Non-goals:
   No branded UI, no WebGPU, no graphical desktop.
@@ -1277,8 +1284,9 @@ Current status:
   headless-browser readiness-marker test.  With the corrected explicit-status
   predicate, it passed locally under Chromium ``141.0.7390.37`` in the
   Playwright ``v1.56.1`` image.  Firefox ``142.0.1`` reached normal kernel
-  initialization but timed out before the marker within 420 seconds.  A WebKit
-  attempt timed out before QEMU startup while waiting on ``wasm-instantiate``.
+  initialization but timed out before the marker within 420 seconds at both
+  ``512M`` and ``256M`` guest RAM.  A WebKit attempt timed out before QEMU
+  startup while waiting on ``wasm-instantiate``.
   ``smoke-wasm64-64bit-browser`` wires that path into GitLab as an optional
   job.  A corrected local job-shaped Chromium container run passed with copied
   wasm artifacts and a pre-populated TuxBoot cache, writing the memory probe,
