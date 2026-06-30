@@ -10,7 +10,7 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Prove a tiny 64-bit Linux console guest reaches a serial readiness
   marker under Node.js.
 - [x] Prove the same generic smoke guest reaches the marker in Chromium.
-- [ ] Keep the browser MVP focused on Chromium unless another browser becomes
+- [x] Keep the browser MVP focused on Chromium unless another browser becomes
   necessary for the accepted Bus Engine OS proof.
 
 ## MVP Generic QEMU Work
@@ -43,12 +43,12 @@ browser MVP. Keep Bus Engine product work downstream.
 
 ## Bus Engine OS Downstream Proof
 
-- [ ] Treat Bus Engine OS as the downstream proof guest, not as upstream QEMU
+- [x] Treat Bus Engine OS as the downstream proof guest, not as upstream QEMU
   test data.
 - [x] Define the Bus Engine OS browser-lab guest artifact contract:
   kernel, initramfs or rootfs/disk image, firmware inputs, checksums, memory
   size, CPU model, boot arguments, readiness marker, and expected serial text.
-- [ ] Use the existing Bus Engine OS `virtual-server` profile as the first
+- [x] Use the existing Bus Engine OS `virtual-server` profile as the first
   downstream input path because it is already the accepted console-oriented
   QEMU image profile.
 - [ ] Document the expected downstream build command:
@@ -65,7 +65,7 @@ browser MVP. Keep Bus Engine product work downstream.
   image provides a browser-lab readiness path that does not depend on network.
 - [x] Capture a screenshot-like browser preview suitable for the
   `busdk.com/engine/` product page.
-- [ ] Keep the website preview code and product presentation outside upstream
+- [x] Keep the website preview code and product presentation outside upstream
   QEMU.
 
 ## Compatibility Tracking
