@@ -2145,9 +2145,14 @@ Current status:
   ``qemuWasmSmokeState.phases`` timeline for feature validation, guest input
   loading, QEMU module import, QEMU startup, guest boot, timeout, early QEMU
   exit, success, and page-level failure.  The runner now exits promptly when
-  the page reports ``failed`` or ``timeout waiting...``.  The remaining proof
-  work is to run the negative cases under Chromium or Chrome and preserve the
-  resulting JSON artifacts.
+  the page reports ``failed`` or ``timeout waiting...``.  The runner also
+  promotes the browser state summary into top-level JSON fields including
+  ``phase``, ``phases``, ``markerSeen``, ``expectedTextSeen``,
+  ``programExitStatus``, ``outputLines``, ``outputBytes``,
+  ``outputSuppressed``, and ``lastLine`` so CI artifacts can be inspected
+  without parsing the full page text.  The remaining proof work is to run the
+  negative cases under Chromium or Chrome and preserve the resulting JSON
+  artifacts.
 
 Non-goals:
   No product-specific telemetry.

@@ -370,6 +370,17 @@ async function capturePageText(page, result, tailBytes) {
   try {
     result.pageStatus = await page.evaluate(() => document.querySelector("#status")?.textContent || "");
     result.smokeState = await page.evaluate(() => globalThis.qemuWasmSmokeState || null);
+    if (result.smokeState !== null) {
+      result.phase = result.smokeState.phase || null;
+      result.phases = result.smokeState.phases || [];
+      result.markerSeen = Boolean(result.smokeState.markerSeen);
+      result.expectedTextSeen = result.smokeState.expectedTextSeen || [];
+      result.programExitStatus = result.smokeState.programExitStatus;
+      result.outputSuppressed = Boolean(result.smokeState.outputSuppressed);
+      result.outputLines = result.smokeState.lines;
+      result.outputBytes = result.smokeState.outputBytes;
+      result.lastLine = result.smokeState.lastLine;
+    }
     const text = await page.evaluate(() => document.body.textContent || "");
     result.pageTextTail = text.slice(-tailBytes);
   } catch (error) {
