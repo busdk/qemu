@@ -14,6 +14,7 @@ import {
   initialSmokeResult,
   isTerminalPageStatus,
   pageErrorDiagnostic,
+  progressSampleDiagnostic,
   promoteSmokeState,
   requestFailureDiagnostic,
 } from "./wasm-browser-smoke-runner.mjs";
@@ -247,5 +248,58 @@ for (const status of [
     method: "GET",
     url: "http://127.0.0.1:8010/qemu-system-x86_64.wasm",
     failureText: "net::ERR_FAILED",
+  });
+}
+
+{
+  const result = {
+    progressSamples: [],
+  };
+  const firstState = {
+    lines: 100,
+    outputBytes: 5000,
+    lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+  };
+  const first = progressSampleDiagnostic(result, 10000, "interval", firstState);
+
+  assert.deepEqual(first, {
+    elapsedMs: 10000,
+    reason: "interval",
+    state: firstState,
+    lineDelta: null,
+    outputByteDelta: null,
+    lastLineChanged: null,
+    previousElapsedMs: null,
+  });
+
+  result.progressSamples.push(first);
+  const secondState = {
+    lines: 100,
+    outputBytes: 5000,
+    lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+  };
+  assert.deepEqual(progressSampleDiagnostic(result, 20000, "interval", secondState), {
+    elapsedMs: 20000,
+    reason: "interval",
+    state: secondState,
+    lineDelta: 0,
+    outputByteDelta: 0,
+    lastLineChanged: false,
+    previousElapsedMs: 10000,
+  });
+
+  const thirdState = {
+    lines: 103,
+    outputBytes: 5120,
+    lastLine: "Freeing unused kernel image memory",
+  };
+  assert.deepEqual(progressSampleDiagnostic(result, 30000, "interval", thirdState), {
+    elapsedMs: 30000,
+    reason: "interval",
+    state: thirdState,
+    lineDelta: 3,
+    outputByteDelta: 120,
+    lastLineChanged: true,
+    previousElapsedMs: 10000,
   });
 }

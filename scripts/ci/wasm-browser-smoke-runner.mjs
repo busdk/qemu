@@ -329,6 +329,26 @@ export function requestFailureDiagnostic(request, elapsedMs) {
   };
 }
 
+export function progressSampleDiagnostic(result, elapsedMs, reason, state) {
+  const previous = result.progressSamples.length > 0
+    ? result.progressSamples[result.progressSamples.length - 1]
+    : null;
+  const previousState = previous ? previous.state : null;
+  return {
+    elapsedMs,
+    reason,
+    state,
+    lineDelta: state && previousState ? state.lines - previousState.lines : null,
+    outputByteDelta: state && previousState
+      ? state.outputBytes - previousState.outputBytes
+      : null,
+    lastLineChanged: state && previousState
+      ? state.lastLine !== previousState.lastLine
+      : null,
+    previousElapsedMs: previous ? previous.elapsedMs : null,
+  };
+}
+
 async function loadPlaywright(browserName) {
   try {
     const require = createRequire(import.meta.url);
@@ -523,11 +543,11 @@ async function sampleSmokeProgress(page, result, startTime, reason, limit) {
   }
   try {
     const state = await page.evaluate(() => globalThis.qemuWasmSmokeState || null);
-    appendBoundedLimit(result.progressSamples, {
-      elapsedMs: Date.now() - startTime,
-      reason,
-      state,
-    }, limit);
+    appendBoundedLimit(
+      result.progressSamples,
+      progressSampleDiagnostic(result, Date.now() - startTime, reason, state),
+      limit,
+    );
   } catch (error) {
     appendBounded(result.progressSampleErrors, {
       elapsedMs: Date.now() - startTime,

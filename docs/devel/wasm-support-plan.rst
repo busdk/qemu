@@ -593,7 +593,10 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``RuntimeError: memory access out of bounds`` with the last serial line and
   browser-side stack context.  The browser harness also records failure name,
   message, stack, and failed phase directly in ``qemuWasmSmokeState`` when its
-  own startup or module-import path rejects.
+  own startup or module-import path rejects.  Progress samples now also record
+  line-count deltas, output-byte deltas, previous sample time, and whether the
+  last serial line changed, so a follow-up run can distinguish a quiet stall
+  from slow but continuing guest output without manually diffing samples.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
