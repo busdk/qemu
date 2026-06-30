@@ -365,8 +365,21 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   ``__syscall_pipe2`` warning appeared.  The passing run used the artifact set
   ``/tmp/qemu-wasm64-tci-artifacts-pipe2-final`` with the hashes recorded
   above.
+* ``scripts/ci/wasm-linux-boot-smoke.mjs`` now wraps the canonical boot
+  profile.  It requires explicit kernel, initrd, firmware, and artifact
+  inputs, then delegates to ``wasm-node-smoke.mjs`` with the APIC-enabled
+  qboot command line.  Running the wrapper under ``node:24-alpine`` with the
+  same artifact set reached ``QEMU_WASM_LINUX_BOOT_OK``.
 
-The current passing Node.js smoke command shape is::
+The preferred Node.js smoke wrapper invocation is::
+
+  node scripts/ci/wasm-linux-boot-smoke.mjs \
+    --artifact-dir /artifacts \
+    --kernel /host-boot/vmlinuz-7.1.0 \
+    --initrd /guest/initramfs.cpio.gz \
+    --firmware-dir pc-bios
+
+The underlying command shape is::
 
   docker run --rm \
     -v "$PWD:/qemu:ro" \
@@ -1094,6 +1107,8 @@ Proof:
   ``-serial mon:stdio`` for marker capture, an optimized TCI build for
   runtime tests, mounted ``qboot.rom`` and ``linuxboot_dma.bin`` firmware, and
   explicit timer/calibration arguments when the smoke guest needs them.
+  ``scripts/ci/wasm-linux-boot-smoke.mjs`` provides the same profile as a
+  repeatable Node.js smoke wrapper.
 
 Non-goals:
   No product-specific Bus Engine OS arguments in upstream QEMU.
