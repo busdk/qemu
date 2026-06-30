@@ -471,6 +471,18 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``qemuArgs`` as ``["-name", "wasm-smoke"]``.  This gives Firefox and future
   browser-matrix probes a stable way to test QEMU timer, interrupt, tracing,
   or naming options while leaving the accepted smoke profile unchanged.
+* The browser smoke runner now accepts ``--screenshot FILE``.  When supplied,
+  the runner captures a viewport screenshot after the success marker is reached
+  or after failure diagnostics are collected, and records the screenshot path
+  in result JSON.  ``--screenshot-full-page`` is available for diagnostic runs
+  that need the complete scrollable serial log.  This is generic QEMU evidence
+  infrastructure; downstream Bus Engine can use the same path to produce a
+  product-page preview after its own OS artifact boots through the harness.
+  A Chromium ``141.0.7390.37`` proof with the cleaned wasm64 TCI artifact,
+  pinned TuxBoot kernel, and helper-generated initramfs reached
+  ``QEMU_WASM_LINUX_BOOT_OK`` after roughly ``80`` seconds and wrote a
+  viewport PNG at ``1280x720``.  The result JSON recorded ``screenshot`` and
+  ``screenshotFullPage: false``.
 * The browser smoke runner now records the final page status and supports
   ``--page-text-tail-bytes`` so browser failures can preserve a larger bounded
   serial-output tail in JSON without changing the page output cap.  A Chromium

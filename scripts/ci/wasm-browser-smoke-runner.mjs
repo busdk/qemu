@@ -43,6 +43,9 @@ Options:
   --progress-sample-limit N
                      Maximum smoke progress samples to keep
   --qemu-arg ARG     Extra QEMU argument appended to the smoke command
+  --screenshot FILE  Save a browser page screenshot to FILE
+  --screenshot-full-page
+                     Capture the full scrollable page instead of the viewport
   --timeout-ms MS     Timeout in milliseconds
   --help              Show this help
 `);
@@ -69,6 +72,8 @@ function parseArgs(argv) {
     progressSampleIntervalMs: DEFAULT_PROGRESS_SAMPLE_INTERVAL_MS,
     progressSampleLimit: DEFAULT_PROGRESS_SAMPLE_LIMIT,
     qemuArgs: [],
+    screenshot: null,
+    screenshotFullPage: false,
     timeoutMs: 180000,
   };
 
@@ -110,6 +115,10 @@ function parseArgs(argv) {
       options.progressSampleLimit = Number(argv[++i]);
     } else if (arg === "--qemu-arg") {
       options.qemuArgs.push(argv[++i]);
+    } else if (arg === "--screenshot") {
+      options.screenshot = argv[++i];
+    } else if (arg === "--screenshot-full-page") {
+      options.screenshotFullPage = true;
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number(argv[++i]);
     } else if (arg === "--help") {
@@ -262,6 +271,22 @@ async function capturePageText(page, result, tailBytes) {
   }
 }
 
+async function captureScreenshot(page, options, result) {
+  if (!page || options.screenshot === null) {
+    return;
+  }
+  try {
+    await page.screenshot({
+      path: options.screenshot,
+      fullPage: options.screenshotFullPage,
+    });
+    result.screenshot = options.screenshot;
+    result.screenshotFullPage = options.screenshotFullPage;
+  } catch (error) {
+    result.screenshotError = error && error.message ? error.message : String(error);
+  }
+}
+
 async function sampleSmokeProgress(page, result, startTime, reason, limit) {
   if (!page) {
     return;
@@ -376,6 +401,7 @@ async function run() {
     result.elapsedMs = Date.now() - startTime;
     await sampleSmokeProgress(page, result, startTime, "final", options.progressSampleLimit);
     await capturePageText(page, result, options.pageTextTailBytes);
+    await captureScreenshot(page, options, result);
     await writeResult(options, result);
     console.log(`wasm-browser-smoke-runner: marker reached: ${options.marker}`);
   } catch (error) {
@@ -388,6 +414,7 @@ async function run() {
     result.errorMessage = error && error.message ? error.message : String(error);
     await sampleSmokeProgress(page, result, startTime, "final", options.progressSampleLimit);
     await capturePageText(page, result, options.pageTextTailBytes);
+    await captureScreenshot(page, options, result);
     await writeResult(options, result);
     console.error(error && error.stack ? error.stack : String(error));
     throw error;

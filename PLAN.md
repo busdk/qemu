@@ -26,6 +26,8 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Add repeated `--append-extra` kernel argument diagnostics.
 - [x] Add repeated `--qemu-arg` QEMU argument diagnostics and commit the
   current proof.
+- [x] Add a generic browser smoke screenshot artifact so downstream users can
+  preserve the terminal-like page state from success or failure runs.
 - [ ] Keep the accepted smoke profile stable while diagnostic arguments vary.
 - [ ] Continue recording browser/runtime versions, commands, results, and
   failure modes in `docs/devel/wasm-support-plan.rst`.
