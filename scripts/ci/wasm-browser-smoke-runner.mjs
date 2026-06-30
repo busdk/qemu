@@ -13,6 +13,8 @@ import { fileURLToPath } from "node:url";
 
 const MAX_DIAGNOSTIC_ENTRIES = 50;
 const DEFAULT_PAGE_TEXT_TAIL_BYTES = 8192;
+const DEFAULT_PROGRESS_SAMPLE_INTERVAL_MS = 10000;
+const DEFAULT_PROGRESS_SAMPLE_LIMIT = 120;
 
 function usage(status) {
   const stream = status === 0 ? process.stdout : process.stderr;
@@ -36,6 +38,10 @@ Options:
                      Maximum page text tail bytes to keep in result JSON
   --port PORT         Local smoke server port
   --program FILE      JavaScript launcher inside artifact dir
+  --progress-sample-interval-ms MS
+                     Interval for smoke progress samples in result JSON
+  --progress-sample-limit N
+                     Maximum smoke progress samples to keep
   --timeout-ms MS     Timeout in milliseconds
   --help              Show this help
 `);
@@ -59,6 +65,8 @@ function parseArgs(argv) {
     pageTextTailBytes: DEFAULT_PAGE_TEXT_TAIL_BYTES,
     port: 8010,
     program: "qemu-system-x86_64.js",
+    progressSampleIntervalMs: DEFAULT_PROGRESS_SAMPLE_INTERVAL_MS,
+    progressSampleLimit: DEFAULT_PROGRESS_SAMPLE_LIMIT,
     timeoutMs: 180000,
   };
 
@@ -94,6 +102,10 @@ function parseArgs(argv) {
       options.port = Number(argv[++i]);
     } else if (arg === "--program") {
       options.program = argv[++i];
+    } else if (arg === "--progress-sample-interval-ms") {
+      options.progressSampleIntervalMs = Number(argv[++i]);
+    } else if (arg === "--progress-sample-limit") {
+      options.progressSampleLimit = Number(argv[++i]);
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number(argv[++i]);
     } else if (arg === "--help") {
@@ -132,13 +144,25 @@ function parseArgs(argv) {
     console.error("--page-text-tail-bytes must be a positive integer");
     usage(2);
   }
+  if (!Number.isInteger(options.progressSampleIntervalMs) || options.progressSampleIntervalMs <= 0) {
+    console.error("--progress-sample-interval-ms must be a positive integer");
+    usage(2);
+  }
+  if (!Number.isInteger(options.progressSampleLimit) || options.progressSampleLimit <= 0) {
+    console.error("--progress-sample-limit must be a positive integer");
+    usage(2);
+  }
 
   return options;
 }
 
 function appendBounded(list, entry) {
+  appendBoundedLimit(list, entry, MAX_DIAGNOSTIC_ENTRIES);
+}
+
+function appendBoundedLimit(list, entry, limit) {
   list.push(entry);
-  if (list.length > MAX_DIAGNOSTIC_ENTRIES) {
+  if (list.length > limit) {
     list.shift();
   }
 }
@@ -234,6 +258,26 @@ async function capturePageText(page, result, tailBytes) {
   }
 }
 
+async function sampleSmokeProgress(page, result, startTime, reason, limit) {
+  if (!page) {
+    return;
+  }
+  try {
+    const state = await page.evaluate(() => globalThis.qemuWasmSmokeState || null);
+    appendBoundedLimit(result.progressSamples, {
+      elapsedMs: Date.now() - startTime,
+      reason,
+      state,
+    }, limit);
+  } catch (error) {
+    appendBounded(result.progressSampleErrors, {
+      elapsedMs: Date.now() - startTime,
+      reason,
+      message: error && error.message ? error.message : String(error),
+    });
+  }
+}
+
 async function run() {
   const options = parseArgs(process.argv.slice(2));
   const browserType = await loadPlaywright(options.browser);
@@ -254,12 +298,17 @@ async function run() {
     memory: options.memory,
     timeoutMs: options.timeoutMs,
     pageTextTailBytes: options.pageTextTailBytes,
+    progressSampleIntervalMs: options.progressSampleIntervalMs,
+    progressSampleLimit: options.progressSampleLimit,
     success: false,
     consoleMessages: [],
     pageErrors: [],
+    progressSampleErrors: [],
+    progressSamples: [],
     requestFailures: [],
   };
   let page = null;
+  let progressTimer = null;
   try {
     page = await browser.newPage();
     page.on("console", (message) => {
@@ -297,20 +346,39 @@ async function run() {
     });
     result.userAgent = await page.evaluate(() => navigator.userAgent);
     result.crossOriginIsolated = await page.evaluate(() => Boolean(globalThis.crossOriginIsolated));
+    progressTimer = setInterval(() => {
+      if (result.progressSamples.length >= options.progressSampleLimit) {
+        clearInterval(progressTimer);
+        progressTimer = null;
+        return;
+      }
+      sampleSmokeProgress(page, result, startTime, "interval", options.progressSampleLimit);
+    }, options.progressSampleIntervalMs);
+    await sampleSmokeProgress(page, result, startTime, "after-load", options.progressSampleLimit);
     await page.waitForFunction(
       (marker) => document.querySelector("#status")?.textContent === `marker reached: ${marker}`,
       options.marker,
       { timeout: options.timeoutMs },
     );
+    if (progressTimer !== null) {
+      clearInterval(progressTimer);
+      progressTimer = null;
+    }
     result.success = true;
     result.elapsedMs = Date.now() - startTime;
+    await sampleSmokeProgress(page, result, startTime, "final", options.progressSampleLimit);
     await capturePageText(page, result, options.pageTextTailBytes);
     await writeResult(options, result);
     console.log(`wasm-browser-smoke-runner: marker reached: ${options.marker}`);
   } catch (error) {
+    if (progressTimer !== null) {
+      clearInterval(progressTimer);
+      progressTimer = null;
+    }
     result.elapsedMs = Date.now() - startTime;
     result.errorName = error && error.name ? error.name : "Error";
     result.errorMessage = error && error.message ? error.message : String(error);
+    await sampleSmokeProgress(page, result, startTime, "final", options.progressSampleLimit);
     await capturePageText(page, result, options.pageTextTailBytes);
     await writeResult(options, result);
     console.error(error && error.stack ? error.stack : String(error));

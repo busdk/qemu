@@ -474,6 +474,13 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``8601`` captured output bytes, ``outputSuppressed: false``, and
   ``lastLine`` as ``QEMU_WASM_LINUX_BOOT_OK``.  This gives timeout artifacts a
   compact progress summary without parsing the full page-text tail.
+* The browser smoke runner now also records a bounded ``progressSamples``
+  timeline.  The default sampling interval is ``10000`` ms and the default
+  limit is ``120`` samples; both can be changed with runner options.  A
+  sampled Chromium ``141.0.7390.37`` proof reached the marker after roughly
+  ``79`` seconds.  Its timeline showed no progress past the FPU line at
+  roughly ``40`` and ``50`` seconds, then progress to ``io scheduler kyber
+  registered`` by roughly ``60`` seconds, and finally the marker.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
@@ -503,6 +510,16 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``x86/fpu: x87 FPU will use FXSAVE``.  This rules out the previous
   ``420000`` ms timeout as the primary explanation for Firefox failing to
   reach ``Run /init``.
+* A sampled Firefox ``142.0.1`` baseline run with the canonical smoke command
+  timed out after ``420000`` ms.  Its progress timeline showed the guest
+  sitting at the early blank line from roughly ``12`` seconds through
+  ``222`` seconds, then progressing through memory setup, APIC timer setup,
+  and delay-loop calibration.  It reached ``random: crng init done`` at
+  roughly ``342`` seconds and emitted no more serial lines through the final
+  sample at roughly ``422`` seconds.  This makes the current Firefox
+  difference more specific than "slow": Chromium pauses near the FPU line and
+  resumes, while Firefox can spend much longer before timer/calibration
+  progress and then stalls after entropy initialization in the sampled run.
 * ``scripts/ci/wasm-prepare-tuxboot-smoke-guest.py`` now provides that
   CI-shaped guest-preparation path.  It downloads or reuses the existing
   x86_64 TuxBoot kernel and rootfs assets, verifies them against the SHA-256
@@ -1538,7 +1555,9 @@ Proof:
   page-table isolation disabled still timed out before ``Run /init``, so that
   mitigation path is not sufficient to explain the gap.  A ``900000`` ms
   baseline run also timed out, which rules out the original ``420000`` ms
-  timeout as the primary explanation.
+  timeout as the primary explanation.  The sampled Firefox baseline reached
+  ``random: crng init done`` at roughly ``342`` seconds and then emitted no
+  more serial lines before timeout.
 
 Non-goals:
   No requirement to support Firefox in the first accepted MVP if Chromium is
