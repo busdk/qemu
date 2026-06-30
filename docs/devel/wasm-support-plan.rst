@@ -3404,6 +3404,9 @@ is::
 That command writes ``tuxboot-browser-smoke-guest.json`` for
 ``scripts/ci/wasm-browser-smoke-runner.mjs --guest-manifest`` and records the
 matching browser-runner command in ``tuxboot-smoke-guest.json``.
+The GitLab ``smoke-wasm64-64bit-service-bridge`` job uses the same manifest
+shape with the bridge-enabled WebAssembly artifact from ``build-wasm64-64bit``
+and archives the service bridge result JSON plus screenshot.
 
 The browser smoke runner should:
 

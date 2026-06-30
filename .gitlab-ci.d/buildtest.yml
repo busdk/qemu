@@ -834,6 +834,7 @@ smoke-wasm64-64bit-linux:
     - node scripts/ci/wasm-browser-memory-probe-runner-test.mjs
     - node scripts/ci/wasm-browser-smoke-args-test.mjs
     - node scripts/ci/wasm-browser-smoke-runner-test.mjs
+    - python3 scripts/ci/wasm-prepare-tuxboot-smoke-guest-test.py
     - section_end smoke_args
     - section_start smoke_guest "Preparing WASM smoke guest"
     - python3 scripts/ci/wasm-prepare-tuxboot-smoke-guest.py
@@ -916,6 +917,7 @@ smoke-wasm64-64bit-browser:
     - node scripts/ci/wasm-browser-memory-probe-runner-test.mjs
     - node scripts/ci/wasm-browser-smoke-args-test.mjs
     - node scripts/ci/wasm-browser-smoke-runner-test.mjs
+    - python3 scripts/ci/wasm-prepare-tuxboot-smoke-guest-test.py
     - section_end smoke_args
     - section_start memory_probe "Running WASM browser memory probe"
     - node scripts/ci/wasm-browser-memory-probe-runner.mjs
@@ -949,6 +951,78 @@ smoke-wasm64-64bit-browser:
           --progress-sample-limit "$QEMU_WASM_BROWSER_PROGRESS_SAMPLE_LIMIT"
           --screenshot "$QEMU_WASM_BROWSER_SCREENSHOT"
           --timeout-ms "$QEMU_WASM_BROWSER_TIMEOUT_MS"
+    - section_end smoke_browser
+
+smoke-wasm64-64bit-service-bridge:
+  extends: .base_job_template
+  stage: test
+  image: mcr.microsoft.com/playwright:v1.56.1-noble
+  needs:
+    - job: build-wasm64-64bit
+      artifacts: true
+  cache:
+    key: "$CI_JOB_NAME"
+    paths:
+      - wasm-smoke-cache
+    when: always
+  artifacts:
+    name: "$CI_JOB_NAME-$CI_COMMIT_REF_SLUG"
+    when: always
+    expire_in: 7 days
+    paths:
+      - ci-runner-env
+      - build/wasm-service-bridge-smoke.png
+      - build/wasm-service-bridge-smoke-result.json
+      - build/wasm-service-bridge-smoke-guest/tuxboot-browser-smoke-guest.json
+      - build/wasm-service-bridge-smoke-guest/tuxboot-smoke-guest.json
+  variables:
+    QEMU_JOB_OPTIONAL: 1
+    QEMU_WASM_BROWSER: chromium
+    QEMU_WASM_SERVICE_BRIDGE_TIMEOUT_MS: 180000
+  script:
+    - source scripts/ci/gitlab-ci-section
+    - mkdir -p ci-runner-env
+    - cp /proc/cpuinfo ci-runner-env/cpuinfo.txt
+    - cp /proc/meminfo ci-runner-env/meminfo.txt
+    - section_start setup "Preparing browser service bridge smoke runtime"
+    - apt-get update
+    - apt-get install -y zstd
+    - mkdir -p /tmp/qemu-playwright
+    - cd /tmp/qemu-playwright
+    - npm install --silent --no-audit --no-fund playwright@1.56.1
+    - cd "$CI_PROJECT_DIR"
+    - export NODE_PATH=/tmp/qemu-playwright/node_modules
+    - node --version
+    - /ms-playwright/chromium-1194/chrome-linux/chrome --version
+    - section_end setup
+    - section_start smoke_args "Checking WASM service bridge smoke helpers"
+    - python3 scripts/ci/wasm-artifact-manifest-test.py
+    - python3 scripts/ci/wasm-artifact-manifest-check.py
+          --manifest build/qemu-system-wasm-artifacts.json
+          --target x86_64
+    - node scripts/ci/wasm-guest-manifest-test.mjs
+    - node scripts/ci/wasm-browser-smoke-args-test.mjs
+    - node scripts/ci/wasm-browser-smoke-runner-test.mjs
+    - python3 scripts/ci/wasm-build-smoke-initramfs-test.py
+    - python3 scripts/ci/wasm-prepare-tuxboot-smoke-guest-test.py
+    - section_end smoke_args
+    - section_start smoke_guest "Preparing WASM service bridge smoke guest"
+    - python3 scripts/ci/wasm-prepare-tuxboot-smoke-guest.py
+          --cache-dir wasm-smoke-cache
+          --output-dir build/wasm-service-bridge-smoke-guest
+          --artifact-dir build
+          --firmware-dir pc-bios
+          --service-bridge-smoke
+    - section_end smoke_guest
+    - section_start smoke_browser "Running WASM service bridge browser smoke"
+    - node scripts/ci/wasm-browser-smoke-runner.mjs
+          --browser "$QEMU_WASM_BROWSER"
+          --artifact-dir build
+          --firmware-dir pc-bios
+          --guest-manifest build/wasm-service-bridge-smoke-guest/tuxboot-browser-smoke-guest.json
+          --out build/wasm-service-bridge-smoke-result.json
+          --screenshot build/wasm-service-bridge-smoke.png
+          --timeout-ms "$QEMU_WASM_SERVICE_BRIDGE_TIMEOUT_MS"
     - section_end smoke_browser
 
 build-wasm64-32bit:
