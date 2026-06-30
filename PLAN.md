@@ -138,6 +138,54 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Keep the website preview code and product presentation outside upstream
   QEMU.
 
+## Interactive Browser MVP Expansion
+
+- [ ] Define the generic browser graphics/input MVP boundary: DoD is a
+  developer note that makes browser graphics and keyboard input part of the
+  MVP expansion, keeps WebGPU and accelerated 3D out of scope, selects the
+  first QEMU display/input device path to expose in a browser, and records why
+  the implementation stays generic QEMU infrastructure rather than Bus Engine
+  product code.
+- [ ] Add a browser display backend proof for QEMU/WASM: DoD is a generic
+  display path that receives QEMU surface updates from the selected emulated
+  display device and renders them into a browser canvas or equivalent 2D
+  browser surface, with no guest-specific assumptions.
+- [ ] Add deterministic display harness coverage: DoD is a non-guest or tiny
+  guest test path that produces a known visual frame, captures the browser
+  canvas output, and compares stable pixels or a stable image hash while
+  preserving the screenshot artifact on failure.
+- [ ] Add browser keyboard input mapping: DoD is a browser-side input bridge
+  that captures focused keyboard events, maps printable keys, modifiers,
+  Enter, Backspace, Tab, Escape, arrows, and function keys to the selected QEMU
+  input path, and avoids stealing browser shortcuts that cannot safely be
+  captured.
+- [ ] Add deterministic keyboard harness coverage: DoD is a browser test that
+  focuses the emulator surface, sends a known key sequence through Playwright
+  or an equivalent runner, and observes the expected guest-visible response
+  through serial output, display output, or a structured test hook.
+- [ ] Add pointer/focus policy for the interactive surface: DoD is a minimal
+  browser UI policy for focus, blur, keyboard capture, paste handling, pointer
+  lock if used, and visible input state, with accessibility-safe escape
+  behavior so the browser tab remains controllable.
+- [ ] Extend the generic guest manifest for graphics/input requirements: DoD is
+  manifest metadata for display mode, preferred device, expected resolution,
+  keyboard test sequence, expected visual marker, screenshot output, and
+  whether serial-only fallback is acceptable for that run.
+- [ ] Prove a generic Linux graphical/input smoke before Bus Engine OS desktop:
+  DoD is a Chrome/Chromium run where QEMU/WASM boots a small 64-bit Linux guest
+  with the selected display/input devices, renders a stable visible marker,
+  accepts keyboard input, and records result JSON plus screenshot evidence.
+- [ ] Prove Bus Engine OS with graphics and keyboard in the browser: DoD is a
+  Chrome/Chromium run where the downstream Bus Engine OS artifact reaches a
+  visible graphical or framebuffer-backed state, accepts a deterministic
+  keyboard sequence, preserves serial and screenshot evidence, and records any
+  limitations separately from the already accepted serial-console proof.
+- [ ] Update the browser MVP acceptance definition after graphics/input proof:
+  DoD is that the MVP is no longer described as serial-console-only; it
+  requires 64-bit QEMU/WASM boot, visible graphics output, keyboard input,
+  serial diagnostics, result JSON, screenshot artifacts, and clear fallback
+  language for non-interactive runs.
+
 ## Compatibility Tracking
 
 - [ ] Track Firefox boot progress only after the Chrome/Chromium proof path is
@@ -209,8 +257,8 @@ browser MVP. Keep Bus Engine product work downstream.
 
 - [ ] Add QMP or structured browser-control integration only after the
   console MVP is stable.
-- [ ] Treat networking, persistence, WebGPU, and graphical desktop support as
-  later research tracks.
+- [ ] Treat networking, persistence, WebGPU, accelerated 3D, and richer
+  graphical desktop support as later research tracks.
 
 ## Definition Of Done
 
