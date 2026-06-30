@@ -228,7 +228,7 @@ browser MVP. Keep Bus Engine product work downstream.
   manifest metadata for display mode, preferred device, expected resolution,
   keyboard test sequence, expected visual marker, screenshot output, and
   whether serial-only fallback is acceptable for that run.
-- [ ] Prove a generic Linux graphical/input smoke before Bus Engine OS desktop:
+- [x] Prove a generic Linux graphical/input smoke before Bus Engine OS desktop:
   DoD is a Chrome/Chromium run where QEMU/WASM boots a small 64-bit Linux guest
   with the selected display/input devices, renders a stable visible marker,
   accepts keyboard input, and records result JSON plus screenshot evidence.

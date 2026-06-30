@@ -464,6 +464,31 @@ export function installDisplayInputPolicy(canvas, displayState, inputSink = null
   return policy;
 }
 
+export function updateWasmDisplayKeyStats(module, displayState) {
+  if (!module || !displayState) {
+    return null;
+  }
+  const readCounter = (name) => {
+    const fn = module[name];
+    if (typeof fn !== "function") {
+      return null;
+    }
+    const value = Number(fn());
+    return Number.isFinite(value) ? value : null;
+  };
+  const stats = {
+    received: readCounter("_qemu_wasm_display_key_events_received"),
+    dropped: readCounter("_qemu_wasm_display_key_events_dropped"),
+    drained: readCounter("_qemu_wasm_display_key_events_drained"),
+    sent: readCounter("_qemu_wasm_display_key_events_sent"),
+  };
+  if (Object.values(stats).every((value) => value === null)) {
+    return null;
+  }
+  displayState.wasmKeyStats = stats;
+  return stats;
+}
+
 export function emscriptenModuleCanvas(display, canvas) {
   if (display === "sdl") {
     return canvas;
@@ -588,6 +613,7 @@ async function run() {
   };
   globalThis.qemuWasmSmokeState = smokeState;
   let qemuKeySink = null;
+  let qemuModule = null;
   const setPhase = (phase, message = phase) => {
     smokeState.phase = phase;
     smokeState.phases.push({
@@ -605,8 +631,7 @@ async function run() {
       if (qemuKeySink === null) {
         return false;
       }
-      qemuKeySink(linuxKey, down);
-      return true;
+      return qemuKeySink(linuxKey, down) !== false;
     });
     if (expectedResolution !== null) {
       canvas.width = expectedResolution.width;
@@ -765,8 +790,21 @@ async function run() {
   const installWasmKeySink = (module) => {
     if (config.display === "wasm" && typeof module._qemu_wasm_display_key_event === "function") {
       qemuKeySink = (linuxKey, down) => {
-        module._qemu_wasm_display_key_event(linuxKey, down ? 1 : 0);
+        smokeState.display.wasmKeySinkCalls =
+          (Number(smokeState.display.wasmKeySinkCalls) || 0) + 1;
+        try {
+          module._qemu_wasm_display_key_event(linuxKey, down ? 1 : 0);
+          updateWasmDisplayKeyStats(module, smokeState.display);
+          return true;
+        } catch (error) {
+          smokeState.display.wasmKeySinkErrors =
+            (Number(smokeState.display.wasmKeySinkErrors) || 0) + 1;
+          smokeState.display.lastWasmKeySinkError =
+            error && error.message ? error.message : String(error);
+          return false;
+        }
       };
+      updateWasmDisplayKeyStats(module, smokeState.display);
     }
   };
   const moduleOptions = {
@@ -794,8 +832,13 @@ async function run() {
   if (moduleCanvas !== undefined) {
     moduleOptions.canvas = moduleCanvas;
   }
-  const qemuModule = await moduleFactory(moduleOptions);
+  qemuModule = await moduleFactory(moduleOptions);
   installWasmKeySink(qemuModule);
+  if (config.display === "wasm") {
+    setInterval(() => {
+      updateWasmDisplayKeyStats(qemuModule, smokeState.display);
+    }, 250);
+  }
   if (!smokeState.markerSeen || !allExpectedTextSeen()) {
     setPhase("guest-boot", "QEMU started; waiting for marker");
   }

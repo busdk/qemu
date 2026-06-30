@@ -2537,10 +2537,8 @@ Current status:
   The harness and runner plumbing is implemented.  Emscripten SDL2 was also
   verified as a viable wasm64 build dependency with ``-sUSE_SDL=2``: QEMU
   configured with ``SDL support: YES 2.32.0`` and compiled through the SDL 2D
-  and input sources to the final link.  The current keyboard path is a
-  deterministic input harness, not yet a guest-visible keyboard acceptance
-  proof.  Browser-visible rendering and guest-observed keyboard input still
-  need Chrome/Chromium screenshot and serial/display evidence.
+  and input sources to the final link.  The accepted browser display/input
+  path now uses the generic ``display=wasm`` backend described below.
 
 Non-goals:
   No claim that a guest has rendered a frame until a Chrome/Chromium graphics
@@ -2691,9 +2689,43 @@ Current status:
   non-transparent pixels, and six structured key events:
   ``KeyA`` down/up as Linux key ``30``, ``KeyB`` down/up as Linux key ``48``,
   and Enter down/up as Linux key ``28``.  This closes the deterministic
-  display and keyboard harness coverage gaps while keeping generic Linux and
-  downstream Bus Engine OS graphical/input boot proofs as separate follow-up
-  tasks.
+  display and keyboard harness coverage gaps while keeping guest-visible boot
+  proofs separate from browser-side harness self-tests.
+
+  A generic Linux guest-visible display/input proof passed with the rebuilt
+  ``display=wasm`` artifact in
+  ``build/wasm-artifacts-wasm-display-qkbd-20260630T192949Z-3665554``.  The
+  artifact SHA-256 values are
+  ``eb9b11953222b2d0ac271220a82ef6c94c28ec03c7964d8959f2c2ac174d1b8f`` for
+  ``qemu-system-x86_64.js`` and
+  ``37b1933264ea0c85d4e18ebd82478838912e51d7c3d0e04724b199db733572ea`` for
+  ``qemu-system-x86_64.wasm``.  Chromium ``149.0.7827.55`` ran
+  ``display=wasm`` with ``-vga std``, ``--focus-display``,
+  ``--keyboard-after-text QEMU_WASM_LINUX_INPUT_READY``, and
+  ``--keyboard-text 'ab\n'`` against the local ``/boot/vmlinuz-7.1.0``
+  kernel.  The display/input initramfs SHA-256 was
+  ``6b619902c9abfb76ff66d8d693fec8ea067cd615ee64686bfe4ac3d690fb5a0f`` and
+  the kernel SHA-256 was
+  ``5e701f3daaaff8f36a235d55d6f68a18a747b39f7b435cca5894a2d9e7a7f1d3``.
+  The run wrote
+  ``build/wasm-browser-proof-current/generic-display-input-qkbd-result.json``
+  and
+  ``build/wasm-browser-proof-current/generic-display-input-qkbd-page.png``.
+  It reached ``QEMU_WASM_LINUX_BOOT_OK`` in ``103029`` ms, observed expected
+  serial text ``QEMU_WASM_LINUX_INPUT_TEXT:ab\n``, recorded a focused
+  ``720x400`` 2D canvas, ``7141`` display frames, pixel hash
+  ``fnv1a32:04d5901d``, ``861`` non-black pixels, and six browser key events
+  that QEMU reported as ``received=6``, ``dropped=0``, ``drained=6``, and
+  ``sent=6``.  This proves guest-visible keyboard input for the generic Linux
+  smoke path, not merely browser-side hook invocation.
+
+  The same rebuilt artifact preserved the mandatory default serial-console
+  regression gate.  Chromium ``149.0.7827.55`` ran ``display=none`` with the
+  serial initramfs SHA-256
+  ``2a12aedec5fe8d3e0fa9eb5d8974f38d8dcf0fbc06d8e9f2c24f34fd45eae3b6`` and
+  reached ``QEMU_WASM_LINUX_BOOT_OK`` in ``97526`` ms.  That run wrote
+  ``build/wasm-browser-proof-current/default-serial-qkbd-result.json`` and
+  ``build/wasm-browser-proof-current/default-serial-qkbd-page.png``.
 
 Non-goals:
   No WebGPU, accelerated 3D, or full desktop support.

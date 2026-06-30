@@ -7,19 +7,43 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/atomic.h"
 #include "qemu/module.h"
+#include "qemu/thread.h"
 #include "ui/console.h"
 #include "ui/input.h"
+#include "ui/kbd-state.h"
 #include <emscripten.h>
+
+#define WASM_DISPLAY_KEY_QUEUE_SIZE 128
+
+typedef struct WasmDisplayKeyEvent {
+    unsigned int linux_key;
+    bool down;
+} WasmDisplayKeyEvent;
 
 typedef struct WasmDisplay {
     DisplayChangeListener dcl;
     DisplaySurface *surface;
+    QKbdState *kbd;
+    QemuMutex key_lock;
+    WasmDisplayKeyEvent key_queue[WASM_DISPLAY_KEY_QUEUE_SIZE];
+    unsigned int key_read;
+    unsigned int key_write;
+    unsigned int key_count;
+    unsigned int key_events_received;
+    unsigned int key_events_dropped;
+    unsigned int key_events_drained;
+    unsigned int key_events_sent;
     uint8_t *rgba;
     size_t rgba_size;
 } WasmDisplay;
 
 void qemu_wasm_display_key_event(unsigned int linux_key, int down);
+unsigned int qemu_wasm_display_key_events_received(void);
+unsigned int qemu_wasm_display_key_events_dropped(void);
+unsigned int qemu_wasm_display_key_events_drained(void);
+unsigned int qemu_wasm_display_key_events_sent(void);
 
 static WasmDisplay *wasm_display;
 
@@ -62,6 +86,53 @@ static void wasm_display_present(int width, int height, const uint8_t *rgba)
             state.display.canvasHeight = height;
         }
     }, width, height, rgba);
+}
+
+static void wasm_display_queue_key_event(WasmDisplay *wd,
+                                         unsigned int linux_key, bool down)
+{
+    qemu_mutex_lock(&wd->key_lock);
+    if (wd->key_count == WASM_DISPLAY_KEY_QUEUE_SIZE) {
+        wd->key_read = (wd->key_read + 1) % WASM_DISPLAY_KEY_QUEUE_SIZE;
+        wd->key_count--;
+        qatomic_inc(&wd->key_events_dropped);
+    }
+    wd->key_queue[wd->key_write] = (WasmDisplayKeyEvent) {
+        .linux_key = linux_key,
+        .down = down,
+    };
+    wd->key_write = (wd->key_write + 1) % WASM_DISPLAY_KEY_QUEUE_SIZE;
+    wd->key_count++;
+    qatomic_inc(&wd->key_events_received);
+    qemu_mutex_unlock(&wd->key_lock);
+}
+
+static bool wasm_display_pop_key_event(WasmDisplay *wd,
+                                       WasmDisplayKeyEvent *event)
+{
+    qemu_mutex_lock(&wd->key_lock);
+    if (wd->key_count == 0) {
+        qemu_mutex_unlock(&wd->key_lock);
+        return false;
+    }
+    *event = wd->key_queue[wd->key_read];
+    wd->key_read = (wd->key_read + 1) % WASM_DISPLAY_KEY_QUEUE_SIZE;
+    wd->key_count--;
+    qemu_mutex_unlock(&wd->key_lock);
+    return true;
+}
+
+static void wasm_display_drain_key_events(WasmDisplay *wd)
+{
+    WasmDisplayKeyEvent event;
+
+    while (wasm_display_pop_key_event(wd, &event)) {
+        qatomic_inc(&wd->key_events_drained);
+        if (wd->kbd) {
+            qkbd_state_key_event(wd->kbd, event.linux_key, event.down);
+            qatomic_inc(&wd->key_events_sent);
+        }
+    }
 }
 
 static void wasm_display_convert_xrgb8888(uint8_t *dst, const uint8_t *src,
@@ -215,6 +286,9 @@ static void wasm_display_switch(DisplayChangeListener *dcl,
 
 static void wasm_display_refresh(DisplayChangeListener *dcl)
 {
+    WasmDisplay *wd = container_of(dcl, WasmDisplay, dcl);
+
+    wasm_display_drain_key_events(wd);
     qemu_console_hw_update(dcl->con);
 }
 
@@ -247,9 +321,11 @@ static void wasm_display_init(DisplayState *ds, DisplayOptions *opts)
     (void)opts;
 
     wasm_display = g_new0(WasmDisplay, 1);
+    qemu_mutex_init(&wasm_display->key_lock);
     qemu_console_register_listener(qemu_console_lookup_default(),
                                    &wasm_display->dcl,
                                    &wasm_display_ops);
+    wasm_display->kbd = qkbd_state_init(wasm_display->dcl.con);
 }
 
 static void wasm_display_cleanup(void)
@@ -258,6 +334,8 @@ static void wasm_display_cleanup(void)
         return;
     }
     qemu_console_unregister_listener(&wasm_display->dcl);
+    qkbd_state_free(wasm_display->kbd);
+    qemu_mutex_destroy(&wasm_display->key_lock);
     g_free(wasm_display->rgba);
     g_free(wasm_display);
     wasm_display = NULL;
@@ -266,7 +344,46 @@ static void wasm_display_cleanup(void)
 EMSCRIPTEN_KEEPALIVE
 void qemu_wasm_display_key_event(unsigned int linux_key, int down)
 {
-    qemu_input_event_send_key_linux(NULL, linux_key, down != 0);
+    if (!wasm_display) {
+        return;
+    }
+    wasm_display_queue_key_event(wasm_display, linux_key, down != 0);
+}
+
+EMSCRIPTEN_KEEPALIVE
+unsigned int qemu_wasm_display_key_events_received(void)
+{
+    if (!wasm_display) {
+        return 0;
+    }
+    return qatomic_read(&wasm_display->key_events_received);
+}
+
+EMSCRIPTEN_KEEPALIVE
+unsigned int qemu_wasm_display_key_events_dropped(void)
+{
+    if (!wasm_display) {
+        return 0;
+    }
+    return qatomic_read(&wasm_display->key_events_dropped);
+}
+
+EMSCRIPTEN_KEEPALIVE
+unsigned int qemu_wasm_display_key_events_drained(void)
+{
+    if (!wasm_display) {
+        return 0;
+    }
+    return qatomic_read(&wasm_display->key_events_drained);
+}
+
+EMSCRIPTEN_KEEPALIVE
+unsigned int qemu_wasm_display_key_events_sent(void)
+{
+    if (!wasm_display) {
+        return 0;
+    }
+    return qatomic_read(&wasm_display->key_events_sent);
 }
 
 static QemuDisplay qemu_display_wasm = {

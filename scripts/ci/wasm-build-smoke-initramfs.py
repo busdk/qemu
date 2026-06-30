@@ -12,6 +12,8 @@ import sys
 
 
 DEFAULT_MARKER = "QEMU_WASM_LINUX_BOOT_OK"
+DEFAULT_INPUT_READY_MARKER = "QEMU_WASM_LINUX_INPUT_READY"
+DEFAULT_INPUT_TEXT = "ab"
 
 
 def parse_args():
@@ -46,6 +48,25 @@ def parse_args():
         "--marker",
         default=DEFAULT_MARKER,
         help=f"serial-console marker printed by /init (default: {DEFAULT_MARKER})",
+    )
+    parser.add_argument(
+        "--display-input-smoke",
+        action="store_true",
+        help="generate an init that writes to the VGA console and waits for keyboard input",
+    )
+    parser.add_argument(
+        "--input-ready-marker",
+        default=DEFAULT_INPUT_READY_MARKER,
+        help="serial marker printed before waiting for keyboard input",
+    )
+    parser.add_argument(
+        "--input-text",
+        default=DEFAULT_INPUT_TEXT,
+        help="keyboard line expected by --display-input-smoke",
+    )
+    parser.add_argument(
+        "--input-helper",
+        help="static guest helper binary that reads Linux input events for --display-input-smoke",
     )
     return parser.parse_args()
 
@@ -101,10 +122,14 @@ class NewcWriter:
         self.add_parent_dirs(name)
         self._add_entry(name, stat.S_IFLNK | 0o777, 1, target.encode("utf-8"))
 
+    def add_char_device(self, name, major, minor, mode=0o600):
+        self.add_parent_dirs(name)
+        self._add_entry(name, stat.S_IFCHR | mode, 1, b"", major, minor)
+
     def finish(self):
         self._add_entry("TRAILER!!!", 0, 1, b"")
 
-    def _add_entry(self, name, mode, nlink, data):
+    def _add_entry(self, name, mode, nlink, data, rdev_major=0, rdev_minor=0):
         encoded_name = name.encode("utf-8") + b"\0"
         fields = [
             "070701",
@@ -117,8 +142,8 @@ class NewcWriter:
             f"{len(data):08x}",
             "00000000",
             "00000000",
-            "00000000",
-            "00000000",
+            f"{rdev_major:08x}",
+            f"{rdev_minor:08x}",
             f"{len(encoded_name):08x}",
             "00000000",
         ]
@@ -140,6 +165,68 @@ poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || sleep 5
 """.encode("utf-8")
 
 
+def build_display_input_init(marker, ready_marker, input_text, helper_path):
+    helper_command = ""
+    if helper_path:
+        helper_command = (
+            f"if [ -x {shell_quote(helper_path)} ] && "
+            f"{shell_quote(helper_path)} /dev/input "
+            f"{shell_quote(input_text)} 30 "
+            f"{shell_quote(ready_marker)} > \"$serial\" 2>&1; then\n"
+            "    input_ok=1\n"
+            "else\n"
+            "    say 'QEMU_WASM_LINUX_INPUT_EVENT_HELPER_FAILED'\n"
+            "fi\n"
+            "input_ready=1\n"
+        )
+    return f"""#!/bin/sh
+PATH=/bin
+mount -t proc proc /proc 2>/dev/null || true
+mount -t sysfs sysfs /sys 2>/dev/null || true
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+
+serial=/dev/ttyS0
+[ -c "$serial" ] || serial=/dev/console
+say() {{
+    printf '%s\\n' "$1" > "$serial" 2>/dev/null || printf '%s\\n' "$1"
+}}
+
+expected={shell_quote(input_text)}
+
+input_ok=0
+input_ready=0
+{helper_command}
+if [ "$input_ready" != 1 ]; then
+    say {shell_quote(ready_marker)}
+fi
+if [ "$input_ok" != 1 ]; then
+    input=''
+    if IFS= read -r input < /dev/tty1 2>/dev/null; then
+        say "QEMU_WASM_LINUX_INPUT_TEXT:$input"
+        if [ "$input" = "$expected" ]; then
+            input_ok=1
+        else
+            say "QEMU_WASM_LINUX_INPUT_MISMATCH:$input"
+        fi
+    else
+        say 'QEMU_WASM_LINUX_INPUT_TTY_READ_FAILED'
+    fi
+fi
+
+if [ "$input_ok" = 1 ]; then
+    {{
+        printf '\\033[2J\\033[H'
+        printf '%s\\n' 'QEMU WASM DISPLAY INPUT OK'
+    }} > /dev/tty0 2>/dev/null || true
+    say {shell_quote(marker)}
+else
+    say 'QEMU_WASM_LINUX_INPUT_FAILED'
+fi
+
+poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || sleep 5
+""".encode("utf-8")
+
+
 def shell_quote(value):
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
@@ -151,6 +238,13 @@ def main():
         busybox = busybox_file.read()
 
     extra_files = []
+    input_helper_guest_path = ""
+    if args.input_helper:
+        with open(args.input_helper, "rb") as helper_file:
+            helper = helper_file.read()
+        input_helper_guest_path = "/bin/wasm-display-input-helper"
+        extra_files.append((archive_name(input_helper_guest_path), helper, 0o755))
+
     for spec in args.extra_file:
         host_path, guest_path = parse_guest_mapping(spec, "--extra-file")
         with open(host_path, "rb") as extra_file:
@@ -172,9 +266,30 @@ def main():
             archive = NewcWriter(gz)
             archive.add_dir(".")
             archive.add_dir("bin")
+            archive.add_dir("dev")
+            archive.add_dir("dev/input")
             archive.add_dir("proc")
             archive.add_dir("sys")
-            archive.add_file("init", build_init(args.marker))
+            archive.add_char_device("dev/console", 5, 1)
+            archive.add_char_device("dev/tty0", 4, 0)
+            archive.add_char_device("dev/tty1", 4, 1)
+            archive.add_char_device("dev/ttyS0", 4, 64)
+            for event_minor in range(64, 96):
+                archive.add_char_device(
+                    f"dev/input/event{event_minor - 64}",
+                    13,
+                    event_minor,
+                )
+            if args.display_input_smoke:
+                init = build_display_input_init(
+                    args.marker,
+                    args.input_ready_marker,
+                    args.input_text,
+                    input_helper_guest_path,
+                )
+            else:
+                init = build_init(args.marker)
+            archive.add_file("init", init)
             archive.add_file("bin/busybox", busybox)
             archive.add_symlink("bin/sh", "busybox")
             for name, data, mode in sorted(extra_files):
