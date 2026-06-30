@@ -53,6 +53,7 @@ browser MVP. Keep Bus Engine product work downstream.
   with structured JSON evidence before importing the generated wasm module.
 - [x] Add deterministic Node coverage for the Node smoke runtime preflight
   using synthetic runtime versions.
+- [x] Add deterministic Node coverage for runtime memory probe helper behavior.
 - [x] Add deterministic Node coverage for browser memory probe runner helper
   behavior before Playwright launches a browser.
 - [ ] Continue recording browser/runtime versions, commands, results, and

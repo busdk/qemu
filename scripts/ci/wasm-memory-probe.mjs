@@ -7,6 +7,10 @@
 
 const PAGE_SIZE_BYTES = 64 * 1024;
 const DEFAULT_PAGES = [16384, 32768, 65536, 131072];
+const IS_NODE = typeof process !== "undefined" && process.versions && process.versions.node;
+const MAIN_URL = IS_NODE && process.argv[1]
+  ? new URL(process.argv[1], `file://${process.cwd()}/`).href
+  : null;
 
 function usage(status) {
   const stream = status === 0 ? process.stdout : process.stderr;
@@ -30,7 +34,12 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--pages") {
-      options.pages = parsePages(argv[++i]);
+      try {
+        options.pages = parsePages(argv[++i]);
+      } catch (error) {
+        console.error(error.message);
+        usage(2);
+      }
     } else if (arg === "--memory64") {
       options.memory64 = true;
     } else if (arg === "--help") {
@@ -45,10 +54,12 @@ function parseArgs(argv) {
 }
 
 function parsePages(value) {
+  if (typeof value !== "string") {
+    throw new Error("--pages must be a comma-separated list of positive integers");
+  }
   const pages = value.split(",").map((item) => Number(item.trim()));
   if (pages.length === 0 || pages.some((page) => !Number.isInteger(page) || page <= 0)) {
-    console.error("--pages must be a comma-separated list of positive integers");
-    usage(2);
+    throw new Error("--pages must be a comma-separated list of positive integers");
   }
   return pages;
 }
@@ -133,11 +144,11 @@ function runProbe(options = {}) {
   };
 }
 
-export { runProbe };
+export { PAGE_SIZE_BYTES, DEFAULT_PAGES, memoryDescriptor, parsePages, runProbe };
 
-if (typeof process !== "undefined" && process.versions && process.versions.node) {
+if (IS_NODE && import.meta.url === MAIN_URL) {
   const options = parseArgs(process.argv.slice(2));
   console.log(JSON.stringify(runProbe(options), null, 2));
-} else {
+} else if (!IS_NODE) {
   globalThis.qemuWasmMemoryProbe = { runProbe };
 }

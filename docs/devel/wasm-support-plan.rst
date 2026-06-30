@@ -778,7 +778,9 @@ The underlying command shape is::
   ``v22.19.0`` accepts default-address shared and unshared memories at 1, 2,
   and 4 GiB, rejects default-address 8 GiB, and rejects the ``address: "i64"``
   constructor form with ``TypeError: Cannot convert a BigInt value to a
-  number``.
+  number``.  ``scripts/ci/wasm-memory-probe-test.mjs`` covers the page-list
+  parser, memory descriptor construction, and a minimal Node.js probe so CI can
+  catch contract regressions without allocating the full browser matrix.
 * The same probe under the ``node:24-alpine`` runtime used for the WASM boot
   smoke tests reported Node.js ``v24.18.0`` with V8
   ``13.6.233.17-node.50``.  Default-address shared and unshared memories
@@ -1189,13 +1191,17 @@ Scope:
   runtime.
 
 Touches:
-  ``scripts/ci/wasm-memory-probe.mjs`` and documentation.
+  ``scripts/ci/wasm-memory-probe.mjs``,
+  ``scripts/ci/wasm-memory-probe-test.mjs``, CI helper-test wiring, and
+  documentation.
 
 Proof:
   ``node scripts/ci/wasm-memory-probe.mjs --memory64`` emits JSON with the
   runtime version, page size, tested memory sizes, shared/unshared mode,
   optional ``address: "i64"`` mode, and exact constructor failures.  The
-  helper can also be imported by a later browser harness.
+  helper can also be imported by a later browser harness.  The deterministic
+  Node helper test verifies page parsing, descriptor shape, and minimal probe
+  result structure.
 
 Non-goals:
   No claim that Node.js memory behavior represents browser compatibility.
