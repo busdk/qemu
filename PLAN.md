@@ -87,6 +87,9 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Archive a default browser smoke screenshot artifact from CI so every
   Chrome/Chromium proof or timeout preserves the visible terminal page state
   next to result JSON.
+- [x] Add an optional browser smoke serial-idle watchdog so Chrome/Chromium
+  stall probes can fail with explicit no-progress evidence before the full
+  marker timeout.
 - [x] Add Node smoke runtime preflight so unsupported local Node versions fail
   with structured JSON evidence before importing the generated wasm module.
 - [x] Add deterministic Node coverage for the Node smoke runtime preflight

@@ -877,6 +877,7 @@ smoke-wasm64-64bit-browser:
     QEMU_WASM_BROWSER: chromium
     QEMU_WASM_BROWSER_APPEND_EXTRA: ""
     QEMU_WASM_BROWSER_CPU: Nehalem
+    QEMU_WASM_BROWSER_IDLE_TIMEOUT_MS: 0
     QEMU_WASM_BROWSER_MEMORY: 512M
     QEMU_WASM_BROWSER_PAGE_TEXT_TAIL_BYTES: 60000
     QEMU_WASM_BROWSER_PROGRESS_SAMPLE_INTERVAL_MS: 10000
@@ -936,6 +937,7 @@ smoke-wasm64-64bit-browser:
           --kernel wasm-smoke-cache/tuxboot-x86_64-bzImage
           --initrd build/wasm-browser-smoke-guest/tuxboot-smoke-initramfs.cpio.gz
           --firmware-dir pc-bios
+          --idle-timeout-ms "$QEMU_WASM_BROWSER_IDLE_TIMEOUT_MS"
           --memory "$QEMU_WASM_BROWSER_MEMORY"
           --out build/wasm-browser-smoke-result.json
           --page-text-tail-bytes "$QEMU_WASM_BROWSER_PAGE_TEXT_TAIL_BYTES"

@@ -667,6 +667,13 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``build/wasm-browser-smoke.png`` and archives it with the JSON artifacts, so
   both successful and timed-out browser runs preserve the visible terminal
   page state for review.
+  The browser smoke runner now also accepts ``--idle-timeout-ms`` and the
+  GitLab browser job exposes it as ``QEMU_WASM_BROWSER_IDLE_TIMEOUT_MS``.
+  The default is ``0`` so canonical smoke behavior is unchanged.  When a
+  diagnostic run enables it, repeated progress samples with unchanged serial
+  output produce an ``idleTimeout`` result summary containing the idle
+  duration, the last serial line, output byte count, and line count.  This is
+  intended for Chrome/Chromium probes of the current post-FPU stall.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
@@ -2335,6 +2342,11 @@ Current status:
   ``smokeUrl`` so CI artifacts can be inspected without parsing the full page
   text.  ``phase`` is the terminal page state, while ``failurePhase`` records
   the startup phase that was active before a page-level failure.  The
+  runner also has an opt-in serial-idle watchdog via ``--idle-timeout-ms``.
+  It classifies repeated progress samples with unchanged serial output as an
+  ``idleTimeout`` result summary, which lets Chrome/Chromium stall probes fail
+  with the last serial line and idle duration instead of only a generic marker
+  timeout.  The
   remaining proof work is to run the negative cases under Chromium or Chrome
   and preserve the resulting JSON artifacts.
   ``wasm-browser-smoke-runner-test.mjs`` provides deterministic coverage for

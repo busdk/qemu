@@ -18,6 +18,7 @@ const MAX_DIAGNOSTIC_ENTRIES = 50;
 const DEFAULT_PAGE_TEXT_TAIL_BYTES = 8192;
 const DEFAULT_PROGRESS_SAMPLE_INTERVAL_MS = 10000;
 const DEFAULT_PROGRESS_SAMPLE_LIMIT = 120;
+const DEFAULT_IDLE_TIMEOUT_MS = 0;
 
 function usage(status) {
   const stream = status === 0 ? process.stdout : process.stderr;
@@ -33,6 +34,9 @@ Options:
   --guest-manifest FILE
                      JSON file with guest and runner defaults
   --host HOST         Bind address for the local smoke server
+  --idle-timeout-ms MS
+                     Fail when serial output is idle for this long
+                     after guest output has started (default: disabled)
   --initrd FILE       Smoke initramfs image
   --kernel FILE       64-bit Linux bzImage
   --kernel-append TEXT
@@ -75,6 +79,7 @@ function parseArgs(argv) {
     firmwareDir: "pc-bios",
     guestManifest: null,
     host: "127.0.0.1",
+    idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
     initrd: null,
     kernel: null,
     kernelAppend: null,
@@ -123,6 +128,9 @@ function parseArgs(argv) {
     } else if (arg === "--host") {
       options.host = argv[++i];
       explicit.add("host");
+    } else if (arg === "--idle-timeout-ms") {
+      options.idleTimeoutMs = Number(argv[++i]);
+      explicit.add("idleTimeoutMs");
     } else if (arg === "--initrd") {
       options.initrd = argv[++i];
       explicit.add("initrd");
@@ -196,6 +204,7 @@ function parseArgs(argv) {
     checksumFields: ["kernel", "initrd", "rootfs"],
     integerFields: [
       "maxOutputBytes",
+      "idleTimeoutMs",
       "pageTextTailBytes",
       "port",
       "progressSampleIntervalMs",
@@ -256,6 +265,10 @@ function parseArgs(argv) {
   }
   if (!Number.isInteger(options.maxOutputBytes) || options.maxOutputBytes <= 0) {
     console.error("--max-output-bytes must be a positive integer");
+    usage(2);
+  }
+  if (!Number.isInteger(options.idleTimeoutMs) || options.idleTimeoutMs < 0) {
+    console.error("--idle-timeout-ms must be a non-negative integer");
     usage(2);
   }
   if (!Number.isInteger(options.pageTextTailBytes) || options.pageTextTailBytes <= 0) {
@@ -346,6 +359,64 @@ export function progressSampleDiagnostic(result, elapsedMs, reason, state) {
       ? state.lastLine !== previousState.lastLine
       : null,
     previousElapsedMs: previous ? previous.elapsedMs : null,
+  };
+}
+
+function serialProgressSignature(sample) {
+  const state = sample && sample.state ? sample.state : null;
+  if (state === null || !Number.isInteger(state.outputBytes)) {
+    return null;
+  }
+  if (state.outputBytes <= 0) {
+    return null;
+  }
+  return {
+    lines: Number.isInteger(state.lines) ? state.lines : null,
+    outputBytes: state.outputBytes,
+    lastLine: typeof state.lastLine === "string" ? state.lastLine : "",
+  };
+}
+
+function sameSerialProgress(left, right) {
+  return left !== null &&
+    right !== null &&
+    left.lines === right.lines &&
+    left.outputBytes === right.outputBytes &&
+    left.lastLine === right.lastLine;
+}
+
+export function serialIdleDiagnostic(samples, idleTimeoutMs) {
+  if (!Number.isInteger(idleTimeoutMs) || idleTimeoutMs <= 0) {
+    return null;
+  }
+  const current = lastEntry(samples);
+  const currentSignature = serialProgressSignature(current);
+  if (current === null || currentSignature === null) {
+    return null;
+  }
+
+  let idleSinceElapsedMs = current.elapsedMs;
+  for (let index = samples.length - 2; index >= 0; index--) {
+    const previous = samples[index];
+    const previousSignature = serialProgressSignature(previous);
+    if (!sameSerialProgress(currentSignature, previousSignature)) {
+      break;
+    }
+    idleSinceElapsedMs = previous.elapsedMs;
+  }
+
+  const idleMs = current.elapsedMs - idleSinceElapsedMs;
+  if (idleMs < idleTimeoutMs) {
+    return null;
+  }
+  return {
+    idle: true,
+    idleMs,
+    idleSinceElapsedMs,
+    idleTimeoutMs,
+    lastLine: currentSignature.lastLine,
+    outputBytes: currentSignature.outputBytes,
+    outputLines: currentSignature.lines,
   };
 }
 
@@ -495,6 +566,7 @@ export function smokeResultSummary(result) {
     lastPageError,
     requestFailureCount: (result.requestFailures || []).length,
     firstRequestFailure,
+    idleTimeout: result.idleTimeout || null,
     progressSampleCount: (result.progressSamples || []).length,
     lastProgressSample,
   };
@@ -569,6 +641,7 @@ export function initialSmokeResult(options, browserVersion) {
     marker: options.marker,
     memory: options.memory,
     network: options.network,
+    idleTimeoutMs: options.idleTimeoutMs,
     timeoutMs: options.timeoutMs,
     pageTextTailBytes: options.pageTextTailBytes,
     progressSampleIntervalMs: options.progressSampleIntervalMs,
@@ -618,21 +691,29 @@ async function captureScreenshot(page, options, result) {
 
 async function sampleSmokeProgress(page, result, startTime, reason, limit) {
   if (!page) {
-    return;
+    return null;
   }
   try {
     const state = await page.evaluate(() => globalThis.qemuWasmSmokeState || null);
+    const sample = progressSampleDiagnostic(
+      result,
+      Date.now() - startTime,
+      reason,
+      state,
+    );
     appendBoundedLimit(
       result.progressSamples,
-      progressSampleDiagnostic(result, Date.now() - startTime, reason, state),
+      sample,
       limit,
     );
+    return sample;
   } catch (error) {
     appendBounded(result.progressSampleErrors, {
       elapsedMs: Date.now() - startTime,
       reason,
       message: error && error.message ? error.message : String(error),
     });
+    return null;
   }
 }
 
@@ -659,6 +740,10 @@ async function run() {
   const result = initialSmokeResult(options, browser.version());
   let page = null;
   let progressTimer = null;
+  let rejectIdle = null;
+  const idleFailure = new Promise((resolve, reject) => {
+    rejectIdle = reject;
+  });
   const pendingDiagnostics = new Set();
   const trackDiagnostic = (promise) => {
     pendingDiagnostics.add(promise);
@@ -712,23 +797,45 @@ async function run() {
     });
     result.userAgent = await page.evaluate(() => navigator.userAgent);
     result.crossOriginIsolated = await page.evaluate(() => Boolean(globalThis.crossOriginIsolated));
+    const sampleAndCheckIdle = async (reason) => {
+      await sampleSmokeProgress(
+        page,
+        result,
+        startTime,
+        reason,
+        options.progressSampleLimit,
+      );
+      const idle = serialIdleDiagnostic(
+        result.progressSamples,
+        options.idleTimeoutMs,
+      );
+      if (idle !== null) {
+        result.idleTimeout = idle;
+        rejectIdle(new Error(
+          `serial output idle for ${idle.idleMs} ms after: ${idle.lastLine}`,
+        ));
+      }
+    };
     progressTimer = setInterval(() => {
       if (result.progressSamples.length >= options.progressSampleLimit) {
         clearInterval(progressTimer);
         progressTimer = null;
         return;
       }
-      sampleSmokeProgress(page, result, startTime, "interval", options.progressSampleLimit);
+      sampleAndCheckIdle("interval");
     }, options.progressSampleIntervalMs);
-    await sampleSmokeProgress(page, result, startTime, "after-load", options.progressSampleLimit);
-    await page.waitForFunction(
-      (marker) => {
-        const status = document.querySelector("#status")?.textContent || "";
-        return globalThis.qemuWasmIsTerminalPageStatus(status, marker);
-      },
-      options.marker,
-      { timeout: options.timeoutMs },
-    );
+    await sampleAndCheckIdle("after-load");
+    await Promise.race([
+      page.waitForFunction(
+        (marker) => {
+          const status = document.querySelector("#status")?.textContent || "";
+          return globalThis.qemuWasmIsTerminalPageStatus(status, marker);
+        },
+        options.marker,
+        { timeout: options.timeoutMs },
+      ),
+      idleFailure,
+    ]);
     const pageStatus = await page.evaluate(() => document.querySelector("#status")?.textContent || "");
     if (pageStatus !== `marker reached: ${options.marker}`) {
       throw new Error(pageStatus);

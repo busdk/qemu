@@ -17,6 +17,7 @@ import {
   progressSampleDiagnostic,
   promoteSmokeState,
   requestFailureDiagnostic,
+  serialIdleDiagnostic,
   smokeResultSummary,
 } from "./wasm-browser-smoke-runner.mjs";
 
@@ -103,6 +104,7 @@ for (const status of [
     host: "127.0.0.1",
     initrd: null,
     kernelAppend: "console=ttyS0 root=/dev/vda rw",
+    idleTimeoutMs: 0,
     machine: "pc",
     marker,
     maxOutputBytes: 60000,
@@ -167,6 +169,7 @@ for (const status of [
     cpu: "Nehalem",
     expectText: ["Bus Engine OS"],
     kernelAppend: "console=ttyS0 root=/dev/vda rw",
+    idleTimeoutMs: 0,
     machine: "pc",
     marker,
     memory: "512M",
@@ -185,6 +188,7 @@ for (const status of [
   assert.equal(result.browser, "chromium");
   assert.equal(result.browserVersion, "HeadlessChrome/141.0.7390.37");
   assert.equal(result.network, "none");
+  assert.equal(result.idleTimeoutMs, 0);
   assert.equal(result.rootfsDevice, "virtio-pci");
   assert.equal(result.maxDiagnosticEntries, 50);
   assert.deepEqual(result.expectText, ["Bus Engine OS"]);
@@ -316,12 +320,83 @@ for (const status of [
 }
 
 {
+  assert.equal(serialIdleDiagnostic([], 10000), null);
+  assert.equal(serialIdleDiagnostic([
+    {
+      elapsedMs: 10000,
+      state: {
+        lines: 0,
+        outputBytes: 0,
+        lastLine: "",
+      },
+    },
+  ], 10000), null);
+
+  const samples = [
+    {
+      elapsedMs: 10000,
+      state: {
+        lines: 100,
+        outputBytes: 5000,
+        lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+      },
+    },
+    {
+      elapsedMs: 20000,
+      state: {
+        lines: 100,
+        outputBytes: 5000,
+        lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+      },
+    },
+    {
+      elapsedMs: 30000,
+      state: {
+        lines: 100,
+        outputBytes: 5000,
+        lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+      },
+    },
+  ];
+  assert.equal(serialIdleDiagnostic(samples, 25000), null);
+  assert.deepEqual(serialIdleDiagnostic(samples, 20000), {
+    idle: true,
+    idleMs: 20000,
+    idleSinceElapsedMs: 10000,
+    idleTimeoutMs: 20000,
+    lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+    outputBytes: 5000,
+    outputLines: 100,
+  });
+  assert.equal(serialIdleDiagnostic([
+    ...samples,
+    {
+      elapsedMs: 40000,
+      state: {
+        lines: 103,
+        outputBytes: 5120,
+        lastLine: "Freeing unused kernel image memory",
+      },
+    },
+  ], 10000), null);
+}
+
+{
   assert.deepEqual(smokeResultSummary({
     errorName: "TimeoutError",
     errorMessage: "page wait timed out",
     lastLine: "x86/fpu: x87 FPU will use FXSAVE",
     markerSeen: false,
     outputLines: 107,
+    idleTimeout: {
+      idle: true,
+      idleMs: 20000,
+      idleSinceElapsedMs: 220000,
+      idleTimeoutMs: 20000,
+      lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+      outputBytes: 5585,
+      outputLines: 107,
+    },
     pageStatus: "QEMU started; waiting for marker",
     phase: "guest-boot",
     pageErrors: [
@@ -377,6 +452,15 @@ for (const status of [
     },
     requestFailureCount: 0,
     firstRequestFailure: null,
+    idleTimeout: {
+      idle: true,
+      idleMs: 20000,
+      idleSinceElapsedMs: 220000,
+      idleTimeoutMs: 20000,
+      lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+      outputBytes: 5585,
+      outputLines: 107,
+    },
     progressSampleCount: 1,
     lastProgressSample: {
       elapsedMs: 240000,
