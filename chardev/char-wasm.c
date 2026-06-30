@@ -96,7 +96,7 @@ static bool wasm_chr_open(Chardev *chr, ChardevBackend *backend, Error **errp)
     ChardevWasm *opts = backend->u.wasm.data;
     WasmChardev *s = WASM_CHARDEV(chr);
 
-    s->channel = g_strdup(opts->has_channel ? opts->channel : chr->label);
+    s->channel = g_strdup(opts->channel ? opts->channel : chr->label);
     if (opts->has_max_payload &&
         (opts->max_payload <= 0 ||
          opts->max_payload > WASM_CHARDEV_MAX_PAYLOAD_LIMIT)) {
@@ -142,7 +142,6 @@ static void wasm_chr_parse(QemuOpts *opts, ChardevBackend *backend,
 
     channel = qemu_opt_get(opts, "channel");
     if (channel) {
-        wasm->has_channel = true;
         wasm->channel = g_strdup(channel);
     }
 
