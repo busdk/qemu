@@ -53,6 +53,7 @@ function manifestSchema() {
     stringListFields: ["expectText", "qemuArgs"],
     pathFields: ["kernel", "initrd", "screenshot"],
     checksumFields: ["kernel", "initrd"],
+    serviceBridgeField: "serviceBridge",
   };
 }
 
@@ -81,6 +82,19 @@ function manifestSchema() {
     timeoutMs: 120000,
     visualMarker: "login",
     memory64: true,
+    serviceBridge: {
+      kind: "virtio-serial-jsonl",
+      requestChannel: "org.qemu.wasm.service.request",
+      responseChannel: "org.qemu.wasm.service.response",
+      readinessMarker: "QEMU_WASM_SERVICE_READY",
+      healthRequest: {
+        id: "health-1",
+        operation: "health",
+      },
+      timeoutMs: 5000,
+      maxPayloadBytes: 4096,
+      interactiveOnly: false,
+    },
     expectText: ["manifest text"],
     qemuArgs: ["-name", "manifest-smoke"],
     sha256: {
@@ -108,6 +122,7 @@ function manifestSchema() {
     timeoutMs: null,
     visualMarker: "",
     memory64: false,
+    serviceBridge: null,
     expectText: [],
     qemuArgs: ["-trace", "wasm"],
   };
@@ -131,6 +146,19 @@ function manifestSchema() {
   assert.equal(options.timeoutMs, 120000);
   assert.equal(options.visualMarker, "login");
   assert.equal(options.memory64, true);
+  assert.deepEqual(options.serviceBridge, {
+    kind: "virtio-serial-jsonl",
+    requestChannel: "org.qemu.wasm.service.request",
+    responseChannel: "org.qemu.wasm.service.response",
+    readinessMarker: "QEMU_WASM_SERVICE_READY",
+    healthRequest: {
+      id: "health-1",
+      operation: "health",
+    },
+    timeoutMs: 5000,
+    maxPayloadBytes: 4096,
+    interactiveOnly: false,
+  });
   assert.deepEqual(options.expectText, ["manifest text"]);
   assert.deepEqual(options.qemuArgs, ["-name", "manifest-smoke", "-trace", "wasm"]);
 }
@@ -177,4 +205,53 @@ function manifestSchema() {
   }
 
   assert.match(errors.join("\n"), /guest manifest checksum mismatch for kernel/);
+}
+
+{
+  const dir = mkdtempSync(join(tmpdir(), "qemu-wasm-guest-manifest-bridge-bad-"));
+  const manifestPath = join(dir, "guest.json");
+  writeJson(manifestPath, {
+    serviceBridge: {
+      kind: "serial-console",
+      requestChannel: "org.qemu.wasm.service.request",
+      responseChannel: "org.qemu.wasm.service.response",
+      readinessMarker: "QEMU_WASM_SERVICE_READY",
+      healthRequest: {
+        operation: "health",
+      },
+      timeoutMs: 5000,
+      maxPayloadBytes: 4096,
+      interactiveOnly: false,
+    },
+  });
+
+  const originalExit = process.exit;
+  const originalError = console.error;
+  const errors = [];
+  process.exit = (status) => {
+    throw new ProcessExit(status);
+  };
+  console.error = (message) => {
+    errors.push(String(message));
+  };
+  try {
+    assert.throws(
+      () => applyGuestManifest(
+        {
+          guestManifest: manifestPath,
+          serviceBridge: null,
+        },
+        new Set(),
+        {
+          serviceBridgeField: "serviceBridge",
+        },
+      ),
+      (error) => error instanceof ProcessExit && error.status === 2,
+    );
+  } finally {
+    process.exit = originalExit;
+    console.error = originalError;
+  }
+
+  assert.match(errors.join("\n"), /serviceBridge.kind must be virtio-console-jsonl or virtio-serial-jsonl/);
 }

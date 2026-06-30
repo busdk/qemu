@@ -3312,6 +3312,41 @@ query strings.  The QEMU result JSON should record bridge kind, readiness,
 request id, operation name, status, timeout, and diagnostics, but not request
 payloads by default.
 
+Manifest metadata
+-----------------
+
+The guest manifest may describe a future service bridge with a generic
+``serviceBridge`` object.  The object is metadata until the browser transport
+implementation lands; it lets downstream artifacts declare the intended bridge
+shape without product-specific QEMU code.
+
+The supported metadata fields are:
+
+``kind``
+  The guest channel framing.  The first accepted values are
+  ``virtio-console-jsonl`` and ``virtio-serial-jsonl``.
+
+``requestChannel`` and ``responseChannel``
+  Stable channel names for browser-to-guest requests and guest-to-browser
+  responses.
+
+``readinessMarker``
+  Serial or bridge-visible text indicating that the guest service adapter is
+  ready for requests.
+
+``healthRequest``
+  A small JSON object the harness can later send as the first deterministic
+  request.
+
+``timeoutMs`` and ``maxPayloadBytes``
+  Per-request timeout and maximum payload size.  The manifest helper rejects
+  invalid limits before a smoke run.
+
+``interactiveOnly``
+  ``false`` means the bridge is intended for deterministic automated smoke
+  checks.  ``true`` reserves the bridge for manual interaction until a
+  deterministic proof exists.
+
 First proof shape
 -----------------
 

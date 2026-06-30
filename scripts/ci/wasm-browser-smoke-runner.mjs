@@ -161,6 +161,7 @@ function parseArgs(argv) {
     rootfsDevice: "virtio-mmio",
     screenshot: null,
     screenshotFullPage: false,
+    serviceBridge: null,
     timeoutMs: 180000,
     visualMarker: "",
   };
@@ -370,6 +371,7 @@ function parseArgs(argv) {
       "visualMarker",
     ],
     stringListFields: ["expectText", "qemuArgs"],
+    serviceBridgeField: "serviceBridge",
   });
 
   if (options.harnessSelfTest) {
@@ -920,6 +922,9 @@ export function browserSmokeUrl(options) {
   for (const qemuArg of options.qemuArgs) {
     url.searchParams.append("qemuArg", qemuArg);
   }
+  if (options.serviceBridge != null) {
+    url.searchParams.set("serviceBridge", JSON.stringify(options.serviceBridge));
+  }
   url.searchParams.set("timeoutMs", String(options.timeoutMs));
   url.searchParams.set("visualMarker", options.visualMarker);
   return url;
@@ -962,6 +967,7 @@ export function initialSmokeResult(options, browserVersion) {
     displayMinNonblackPixels: options.displayMinNonblackPixels,
     rootfs: options.rootfs,
     rootfsDevice: options.rootfsDevice,
+    serviceBridge: options.serviceBridge,
     visualMarker: options.visualMarker,
     success: false,
     consoleMessages: [],

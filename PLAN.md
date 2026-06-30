@@ -30,7 +30,7 @@ App Server remain downstream proof payloads.
   structured browser/frontend-to-guest service calls; selects the MVP channel;
   documents why no arbitrary host networking is promised; and records the
   security and origin-isolation assumptions for Chrome/Chromium.
-- [ ] Extend the browser harness manifest for service bridge metadata: DoD is
+- [x] Extend the browser harness manifest for service bridge metadata: DoD is
   generic manifest fields for bridge kind, request/response channel names,
   readiness marker, health request, timeout, maximum payload size, and whether
   the bridge is interactive-only or suitable for automated smoke tests, with

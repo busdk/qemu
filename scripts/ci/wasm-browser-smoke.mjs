@@ -58,6 +58,23 @@ function boolOption(name, fallback) {
   throw new Error(`${name} must be a boolean`);
 }
 
+function jsonObjectOption(name, fallback) {
+  const raw = new URLSearchParams(window.location.search).get(name);
+  if (raw === null || raw === "") {
+    return fallback;
+  }
+  let value;
+  try {
+    value = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`${name} must be a JSON object`);
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${name} must be a JSON object`);
+  }
+  return value;
+}
+
 function parseResolution(value) {
   if (value === "") {
     return null;
@@ -600,6 +617,7 @@ function buildConfig() {
     qboot: option("qboot", "/firmware/qboot.rom"),
     rootfs: pathOption("rootfs", ""),
     rootfsDevice: option("rootfsDevice", "virtio-mmio"),
+    serviceBridge: jsonObjectOption("serviceBridge", null),
     timeoutMs: numberOption("timeoutMs", 180000),
     visualMarker: option("visualMarker", ""),
     wasm: option("wasm", "/artifacts/qemu-system-x86_64.wasm"),
@@ -696,6 +714,7 @@ async function run() {
     expectedTextSeen: config.expectText.map((text) => ({ text, seen: false })),
     lastLine: "",
     programExitStatus: null,
+    serviceBridge: config.serviceBridge,
   };
   globalThis.qemuWasmSmokeState = smokeState;
   installBrowserDialogSuppression(globalThis, smokeState);

@@ -81,6 +81,60 @@ function manifestObject(manifest, name) {
   return value;
 }
 
+function serviceBridgeString(bridge, name) {
+  const value = bridge[name];
+  if (typeof value !== "string" || value === "") {
+    fail(`guest manifest serviceBridge.${name} must be a non-empty string`);
+  }
+  return value;
+}
+
+function serviceBridgeInteger(bridge, name, maximum) {
+  const value = bridge[name];
+  if (!Number.isInteger(value) || value <= 0 || value > maximum) {
+    fail(`guest manifest serviceBridge.${name} must be a positive integer <= ${maximum}`);
+  }
+  return value;
+}
+
+function serviceBridgeBoolean(bridge, name) {
+  const value = bridge[name];
+  if (typeof value !== "boolean") {
+    fail(`guest manifest serviceBridge.${name} must be a boolean`);
+  }
+  return value;
+}
+
+function serviceBridgeObject(bridge, name) {
+  const value = bridge[name];
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    fail(`guest manifest serviceBridge.${name} must be an object`);
+  }
+  return value;
+}
+
+function normalizeServiceBridgeManifest(manifest) {
+  const bridge = manifestObject(manifest, "serviceBridge");
+  if (bridge === null) {
+    return null;
+  }
+  const kind = serviceBridgeString(bridge, "kind");
+  if (!["virtio-console-jsonl", "virtio-serial-jsonl"].includes(kind)) {
+    fail("guest manifest serviceBridge.kind must be virtio-console-jsonl or virtio-serial-jsonl");
+  }
+  const normalized = {
+    kind,
+    requestChannel: serviceBridgeString(bridge, "requestChannel"),
+    responseChannel: serviceBridgeString(bridge, "responseChannel"),
+    readinessMarker: serviceBridgeString(bridge, "readinessMarker"),
+    healthRequest: serviceBridgeObject(bridge, "healthRequest"),
+    timeoutMs: serviceBridgeInteger(bridge, "timeoutMs", 300000),
+    maxPayloadBytes: serviceBridgeInteger(bridge, "maxPayloadBytes", 1048576),
+    interactiveOnly: serviceBridgeBoolean(bridge, "interactiveOnly"),
+  };
+  return normalized;
+}
+
 function normalizeChecksum(value, name) {
   if (typeof value !== "string") {
     fail(`guest manifest checksum for ${name} must be a string`);
@@ -139,6 +193,12 @@ export function applyGuestManifest(options, explicit, schema) {
     const value = manifestStringList(manifest, field);
     if (value !== null) {
       options[field] = explicit.has(field) ? [...value, ...options[field]] : value;
+    }
+  }
+  if (schema.serviceBridgeField) {
+    const value = normalizeServiceBridgeManifest(manifest);
+    if (value !== null && !explicit.has(schema.serviceBridgeField)) {
+      options[schema.serviceBridgeField] = value;
     }
   }
   const checksums = manifestObject(manifest, "sha256");

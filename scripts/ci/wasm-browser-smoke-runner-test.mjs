@@ -289,6 +289,51 @@ for (const status of [
 }
 
 {
+  const serviceBridge = {
+    kind: "virtio-serial-jsonl",
+    requestChannel: "org.qemu.wasm.service.request",
+    responseChannel: "org.qemu.wasm.service.response",
+    readinessMarker: "QEMU_WASM_SERVICE_READY",
+    healthRequest: {
+      id: "health-1",
+      operation: "health",
+    },
+    timeoutMs: 5000,
+    maxPayloadBytes: 4096,
+    interactiveOnly: false,
+  };
+  const url = browserSmokeUrl({
+    allowSerialFallback: true,
+    appendExtra: "",
+    cpu: "Nehalem",
+    display: "none",
+    displayDevice: "default",
+    expectedResolution: "",
+    expectText: [],
+    focusDisplay: false,
+    host: "127.0.0.1",
+    initrd: "/tmp/initramfs.cpio.gz",
+    keyboardAfterText: "",
+    keyboardText: "",
+    kernelAppend: null,
+    machine: "microvm,acpi=off",
+    marker,
+    maxOutputBytes: 60000,
+    memory: "512M",
+    network: "none",
+    port: 8010,
+    qemuArgs: [],
+    rootfs: null,
+    rootfsDevice: "virtio-mmio",
+    serviceBridge,
+    timeoutMs: 30000,
+    visualMarker: "",
+  });
+
+  assert.deepEqual(JSON.parse(url.searchParams.get("serviceBridge")), serviceBridge);
+}
+
+{
   const result = initialSmokeResult({
     allowSerialFallback: false,
     appendExtra: "ignore_loglevel",
@@ -321,6 +366,18 @@ for (const status of [
     displayMinNonblackPixels: 4,
     rootfs: "/tmp/rootfs.raw",
     rootfsDevice: "virtio-pci",
+    serviceBridge: {
+      kind: "virtio-console-jsonl",
+      requestChannel: "org.qemu.wasm.service.request",
+      responseChannel: "org.qemu.wasm.service.response",
+      readinessMarker: "QEMU_WASM_SERVICE_READY",
+      healthRequest: {
+        operation: "health",
+      },
+      timeoutMs: 5000,
+      maxPayloadBytes: 4096,
+      interactiveOnly: false,
+    },
     timeoutMs: 180000,
     visualMarker: "login",
   }, "HeadlessChrome/141.0.7390.37");
@@ -348,6 +405,18 @@ for (const status of [
   assert.equal(result.displayMinNonblackPixels, 4);
   assert.equal(result.rootfsDevice, "virtio-pci");
   assert.equal(result.visualMarker, "login");
+  assert.deepEqual(result.serviceBridge, {
+    kind: "virtio-console-jsonl",
+    requestChannel: "org.qemu.wasm.service.request",
+    responseChannel: "org.qemu.wasm.service.response",
+    readinessMarker: "QEMU_WASM_SERVICE_READY",
+    healthRequest: {
+      operation: "health",
+    },
+    timeoutMs: 5000,
+    maxPayloadBytes: 4096,
+    interactiveOnly: false,
+  });
   assert.equal(result.maxDiagnosticEntries, 50);
   assert.deepEqual(result.expectText, ["Example Linux"]);
   assert.deepEqual(result.qemuArgs, ["-name", "wasm-smoke"]);
