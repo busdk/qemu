@@ -74,6 +74,12 @@ for (const status of [
       sharedArrayBuffer: true,
       webAssembly: true,
     },
+    serviceBridge: {
+      ready: true,
+      healthRequested: true,
+      healthRequestId: "health-1",
+      healthStatus: "ok",
+    },
   });
 
   assert.equal(result.phase, "failed");
@@ -90,6 +96,12 @@ for (const status of [
     crossOriginIsolated: true,
     sharedArrayBuffer: true,
     webAssembly: true,
+  });
+  assert.deepEqual(result.serviceBridgeState, {
+    ready: true,
+    healthRequested: true,
+    healthRequestId: "health-1",
+    healthStatus: "ok",
   });
   assert.equal(result.phases[1].failedDuring, "fetch-guest-inputs");
 }

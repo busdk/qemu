@@ -886,6 +886,7 @@ export function promoteSmokeState(result, smokeState) {
   result.lastLine = smokeState.lastLine;
   result.browserRuntime = smokeState.runtime || null;
   result.displayState = smokeState.display || null;
+  result.serviceBridgeState = smokeState.serviceBridge || null;
 }
 
 export function browserSmokeUrl(options) {

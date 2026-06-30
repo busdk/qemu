@@ -3394,14 +3394,25 @@ fixture waits for the request and response virtio character ports, prints the
 configured service readiness marker, reads one JSON line from the request
 port, and writes one JSON response on the response port.
 
+For the pinned TuxBoot x86_64 smoke guest, the CI-shaped preparation command
+is::
+
+  python3 scripts/ci/wasm-prepare-tuxboot-smoke-guest.py \
+    --output-dir build/wasm-service-bridge-smoke-guest \
+    --service-bridge-smoke
+
+That command writes ``tuxboot-browser-smoke-guest.json`` for
+``scripts/ci/wasm-browser-smoke-runner.mjs --guest-manifest`` and records the
+matching browser-runner command in ``tuxboot-smoke-guest.json``.
+
 The browser smoke runner should:
 
 * boot the guest using the existing serial marker gate;
 * wait for the service bridge readiness marker;
 * send the manifest ``healthRequest`` through the browser bridge API;
 * receive a structured ``ok`` response with the same request id;
-* write result JSON with bridge state, request id, response status, timeout,
-  last serial line, and screenshot path.
+* write result JSON with ``serviceBridgeState`` covering bridge readiness,
+  request id, response status, timeout, last serial line, and screenshot path.
 
 The downstream Bus Engine OS proof can then replace the tiny echo service with
 a governed in-guest service adapter without adding product-specific code to
