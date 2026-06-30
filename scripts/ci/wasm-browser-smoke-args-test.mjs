@@ -425,9 +425,37 @@ assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
   assert.deepEqual(args.filter((arg) => arg === "-chardev"), ["-chardev", "-chardev"]);
   assert.ok(args.includes(`wasm,id=qemu-wasm-service-request,channel=${bridge.requestChannel},max-payload=4096`));
   assert.ok(args.includes(`wasm,id=qemu-wasm-service-response,channel=${bridge.responseChannel},max-payload=4096`));
-  assert.ok(args.includes("virtio-serial-pci"));
+  assert.ok(args.includes("virtio-serial-device"));
+  assert.equal(args.includes("virtio-serial-pci"), false);
   assert.ok(args.includes(`virtserialport,chardev=qemu-wasm-service-request,name=${bridge.requestChannel}`));
   assert.ok(args.includes(`virtserialport,chardev=qemu-wasm-service-response,name=${bridge.responseChannel}`));
+}
+
+{
+  const bridge = serviceBridgeConfig({ kind: "serial-jsonl" });
+  const args = qemuArgs(baseConfig({
+    machine: "pc",
+    serviceBridge: bridge,
+  }));
+
+  assert.deepEqual(args.filter((arg) => arg === "-chardev"), ["-chardev", "-chardev"]);
+  assert.ok(args.includes(`wasm,id=qemu-wasm-service-request,channel=${bridge.requestChannel},max-payload=4096`));
+  assert.ok(args.includes(`wasm,id=qemu-wasm-service-response,channel=${bridge.responseChannel},max-payload=4096`));
+  assert.equal(args.includes("virtio-serial-pci"), false);
+  assert.equal(args.includes("virtio-serial-device"), false);
+  assert.ok(args.includes("chardev:qemu-wasm-service-request"));
+  assert.ok(args.includes("chardev:qemu-wasm-service-response"));
+}
+
+{
+  const bridge = serviceBridgeConfig();
+  const args = qemuArgs(baseConfig({
+    machine: "pc",
+    serviceBridge: bridge,
+  }));
+
+  assert.ok(args.includes("virtio-serial-pci"));
+  assert.equal(args.includes("virtio-serial-device"), false);
 }
 
 {

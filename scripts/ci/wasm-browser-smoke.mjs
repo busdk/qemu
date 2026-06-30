@@ -429,13 +429,27 @@ export function qemuArgs(config) {
       `wasm,id=${requestChardev},channel=${config.serviceBridge.requestChannel},max-payload=${maxPayload}`,
       "-chardev",
       `wasm,id=${responseChardev},channel=${config.serviceBridge.responseChannel},max-payload=${maxPayload}`,
-      "-device",
-      "virtio-serial-pci",
-      "-device",
-      `virtserialport,chardev=${requestChardev},name=${config.serviceBridge.requestChannel}`,
-      "-device",
-      `virtserialport,chardev=${responseChardev},name=${config.serviceBridge.responseChannel}`,
     );
+    if (config.serviceBridge.kind === "serial-jsonl") {
+      args.push(
+        "-serial",
+        `chardev:${requestChardev}`,
+        "-serial",
+        `chardev:${responseChardev}`,
+      );
+    } else {
+      const serviceBridgeDevice = String(config.machine).startsWith("microvm")
+        ? "virtio-serial-device"
+        : "virtio-serial-pci";
+      args.push(
+        "-device",
+        serviceBridgeDevice,
+        "-device",
+        `virtserialport,chardev=${requestChardev},name=${config.serviceBridge.requestChannel}`,
+        "-device",
+        `virtserialport,chardev=${responseChardev},name=${config.serviceBridge.responseChannel}`,
+      );
+    }
   }
   if (config.network === "none") {
     args.push("-nic", "none");

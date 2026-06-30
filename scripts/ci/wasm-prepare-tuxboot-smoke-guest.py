@@ -7,6 +7,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -19,6 +20,8 @@ MARKER = "QEMU_WASM_LINUX_BOOT_OK"
 SERVICE_READY_MARKER = "QEMU_WASM_SERVICE_READY"
 SERVICE_REQUEST_CHANNEL = "org.qemu.wasm.service.request"
 SERVICE_RESPONSE_CHANNEL = "org.qemu.wasm.service.response"
+SERVICE_REQUEST_SERIAL = "/dev/ttyS1"
+SERVICE_RESPONSE_SERIAL = "/dev/ttyS2"
 KERNEL_URL = "https://storage.tuxboot.com/buildroot/20241119/x86_64/bzImage"
 KERNEL_SHA256 = "f57bfc6553bcd6e0a54aab86095bf642b33b5571d14e3af1731b18c87ed5aef8"
 ROOTFS_URL = "https://storage.tuxboot.com/buildroot/20241119/x86_64/rootfs.ext4.zst"
@@ -191,7 +194,15 @@ def build_initramfs(output_dir, extracted_files, service_bridge_smoke):
     for guest_path, target in INITRAMFS_SYMLINKS:
         argv.extend(["--extra-symlink", f"{guest_path}:{target}"])
     if service_bridge_smoke:
-        argv.append("--service-bridge-smoke")
+        argv.extend(
+            [
+                "--service-bridge-smoke",
+                "--service-request-path",
+                SERVICE_REQUEST_SERIAL,
+                "--service-response-path",
+                SERVICE_RESPONSE_SERIAL,
+            ]
+        )
     run(argv)
     return output
 
@@ -215,7 +226,7 @@ def node_boot_command(args, kernel, initramfs):
 
 def service_bridge_config():
     return {
-        "kind": "virtio-serial-jsonl",
+        "kind": "serial-jsonl",
         "requestChannel": SERVICE_REQUEST_CHANNEL,
         "responseChannel": SERVICE_RESPONSE_CHANNEL,
         "readinessMarker": SERVICE_READY_MARKER,
@@ -229,10 +240,14 @@ def service_bridge_config():
     }
 
 
-def browser_guest_manifest(kernel, initramfs, service_bridge_smoke):
+def manifest_relative(output_dir, path):
+    return os.path.relpath(Path(path), start=output_dir)
+
+
+def browser_guest_manifest(output_dir, kernel, initramfs, service_bridge_smoke):
     manifest = {
-        "kernel": str(kernel),
-        "initrd": str(initramfs),
+        "kernel": manifest_relative(output_dir, kernel),
+        "initrd": manifest_relative(output_dir, initramfs),
         "marker": MARKER,
         "cpu": "Nehalem",
         "machine": "microvm,acpi=off",
@@ -246,6 +261,7 @@ def browser_guest_manifest(kernel, initramfs, service_bridge_smoke):
         },
     }
     if service_bridge_smoke:
+        manifest["machine"] = "pc"
         manifest["serviceBridge"] = service_bridge_config()
     return manifest
 
@@ -308,7 +324,12 @@ def main():
     initramfs = build_initramfs(output_dir, extracted_files, args.service_bridge_smoke)
     node_command = node_boot_command(args, kernel, initramfs)
     browser_manifest_path = output_dir / "tuxboot-browser-smoke-guest.json"
-    browser_manifest = browser_guest_manifest(kernel, initramfs, args.service_bridge_smoke)
+    browser_manifest = browser_guest_manifest(
+        output_dir,
+        kernel,
+        initramfs,
+        args.service_bridge_smoke,
+    )
     browser_manifest_path.write_text(
         json.dumps(browser_manifest, indent=2) + "\n",
         encoding="utf-8",

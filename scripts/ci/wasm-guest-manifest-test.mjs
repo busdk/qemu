@@ -83,7 +83,7 @@ function manifestSchema() {
     visualMarker: "login",
     memory64: true,
     serviceBridge: {
-      kind: "virtio-serial-jsonl",
+      kind: "serial-jsonl",
       requestChannel: "org.qemu.wasm.service.request",
       responseChannel: "org.qemu.wasm.service.response",
       readinessMarker: "QEMU_WASM_SERVICE_READY",
@@ -147,7 +147,7 @@ function manifestSchema() {
   assert.equal(options.visualMarker, "login");
   assert.equal(options.memory64, true);
   assert.deepEqual(options.serviceBridge, {
-    kind: "virtio-serial-jsonl",
+    kind: "serial-jsonl",
     requestChannel: "org.qemu.wasm.service.request",
     responseChannel: "org.qemu.wasm.service.response",
     readinessMarker: "QEMU_WASM_SERVICE_READY",
@@ -253,5 +253,5 @@ function manifestSchema() {
     console.error = originalError;
   }
 
-  assert.match(errors.join("\n"), /serviceBridge.kind must be virtio-console-jsonl or virtio-serial-jsonl/);
+  assert.match(errors.join("\n"), /serviceBridge.kind must be serial-jsonl, virtio-console-jsonl, or virtio-serial-jsonl/);
 }

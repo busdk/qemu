@@ -119,8 +119,8 @@ function normalizeServiceBridgeManifest(manifest) {
     return null;
   }
   const kind = serviceBridgeString(bridge, "kind");
-  if (!["virtio-console-jsonl", "virtio-serial-jsonl"].includes(kind)) {
-    fail("guest manifest serviceBridge.kind must be virtio-console-jsonl or virtio-serial-jsonl");
+  if (!["serial-jsonl", "virtio-console-jsonl", "virtio-serial-jsonl"].includes(kind)) {
+    fail("guest manifest serviceBridge.kind must be serial-jsonl, virtio-console-jsonl, or virtio-serial-jsonl");
   }
   const normalized = {
     kind,

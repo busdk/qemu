@@ -7,6 +7,17 @@ when the active plan is empty or blocked on a concrete external dependency
 should the next highest-value item be moved from `FUTURE_WORK.md` into this
 file and then implemented.
 
+## Active Goal
+
+Implement the next browser-hosted Bus Engine WebAssembly MVP by finishing the
+active `PLAN.md` work first: QEMU must provide a generic browser-to-guest
+service bridge with graphics, keyboard, power-control, and suspend/resume
+planning hooks suitable for a 64-bit Bus Engine OS guest; Bus Engine OS and
+Bus Engine layers remain downstream consumers that package and run the
+in-guest services. If every active `PLAN.md` item is complete or blocked on a
+concrete external dependency, promote the highest-value item from the future
+plan backlog in `FUTURE_WORK.md` into `PLAN.md` before implementing more work.
+
 ## Current Direction
 
 - [x] Use upstream QEMU's existing Emscripten/wasm64 baseline.
@@ -41,7 +52,7 @@ App Server remain downstream proof payloads.
   JavaScript interface or iframe `postMessage`, worker-to-QEMU plumbing for
   the selected guest channel, structured request/response correlation,
   timeout/error reporting, and no product-specific service names in QEMU code.
-- [ ] Prove the service bridge with a tiny generic guest service: DoD is a
+- [x] Prove the service bridge with a tiny generic guest service: DoD is a
   Chrome/Chromium smoke run where a minimal 64-bit guest starts a small
   echo/health service on the selected guest channel, the browser sends a
   structured health request, the guest returns a structured response, and the

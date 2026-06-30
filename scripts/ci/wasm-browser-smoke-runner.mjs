@@ -1362,5 +1362,8 @@ async function run() {
 }
 
 if (process.argv[1] === THIS_FILE) {
-  run().catch(() => process.exit(1));
+  run().catch((error) => {
+    console.error(error && error.stack ? error.stack : String(error));
+    process.exit(1);
+  });
 }

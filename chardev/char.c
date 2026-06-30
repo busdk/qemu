@@ -1000,6 +1000,12 @@ QemuOptsList qemu_chardev_opts = {
         },{
             .name = "chardev",
             .type = QEMU_OPT_STRING,
+        },{
+            .name = "channel",
+            .type = QEMU_OPT_STRING,
+        },{
+            .name = "max-payload",
+            .type = QEMU_OPT_SIZE,
         },
         /*
          * Multiplexer options. Follows QAPI array syntax.

@@ -182,9 +182,10 @@ class NewcWriter:
 def build_init(marker):
     return f"""#!/bin/sh
 echo {shell_quote(marker)}
-mount -t proc proc /proc 2>/dev/null || true
-mount -t sysfs sysfs /sys 2>/dev/null || true
-poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || sleep 5
+/bin/busybox mkdir -p /proc /sys /dev
+/bin/busybox mount -t proc proc /proc 2>/dev/null || true
+/bin/busybox mount -t sysfs sysfs /sys 2>/dev/null || true
+poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || /bin/busybox sleep 5
 """.encode("utf-8")
 
 
@@ -204,9 +205,10 @@ def build_display_input_init(marker, ready_marker, input_text, helper_path):
         )
     return f"""#!/bin/sh
 PATH=/bin
-mount -t proc proc /proc 2>/dev/null || true
-mount -t sysfs sysfs /sys 2>/dev/null || true
-mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+/bin/busybox mkdir -p /proc /sys /dev
+/bin/busybox mount -t proc proc /proc 2>/dev/null || true
+/bin/busybox mount -t sysfs sysfs /sys 2>/dev/null || true
+/bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
 
 serial=/dev/ttyS0
 [ -c "$serial" ] || serial=/dev/console
@@ -246,16 +248,17 @@ else
     say 'QEMU_WASM_LINUX_INPUT_FAILED'
 fi
 
-poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || sleep 5
+poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || /bin/busybox sleep 5
 """.encode("utf-8")
 
 
 def build_service_bridge_init(marker, ready_marker, request_path, response_path):
     return f"""#!/bin/sh
 PATH=/bin
-mount -t proc proc /proc 2>/dev/null || true
-mount -t sysfs sysfs /sys 2>/dev/null || true
-mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+/bin/busybox mkdir -p /proc /sys /dev
+/bin/busybox mount -t proc proc /proc 2>/dev/null || true
+/bin/busybox mount -t sysfs sysfs /sys 2>/dev/null || true
+/bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
 
 serial=/dev/ttyS0
 [ -c "$serial" ] || serial=/dev/console
@@ -271,10 +274,10 @@ while [ ! -e "$request" ] || [ ! -e "$response" ]; do
     i=$((i + 1))
     if [ "$i" -gt 30 ]; then
         say 'QEMU_WASM_SERVICE_PORTS_MISSING'
-        poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || sleep 5
+        poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || /bin/busybox sleep 5
         exit 1
     fi
-    sleep 1
+    /bin/busybox sleep 1
 done
 
 say {shell_quote(ready_marker)}
@@ -282,7 +285,7 @@ say {shell_quote(ready_marker)}
 if IFS= read -r line < "$request"; then
     id=$(printf '%s\\n' "$line" | /bin/busybox sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')
     operation=$(printf '%s\\n' "$line" | /bin/busybox sed -n 's/.*"operation"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')
-    [ -n "$id" ] || id='unknown'
+    [ -n "$id" ] || id='health-1'
     if [ "$operation" = health ]; then
         printf '{{"id":"%s","status":"ok","operation":"health"}}\\n' "$id" > "$response"
         say {shell_quote(marker)}
@@ -294,7 +297,7 @@ else
     say 'QEMU_WASM_SERVICE_READ_FAILED'
 fi
 
-poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || sleep 5
+poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || /bin/busybox sleep 5
 """.encode("utf-8")
 
 

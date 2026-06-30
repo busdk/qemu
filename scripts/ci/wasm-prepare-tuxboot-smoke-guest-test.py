@@ -38,17 +38,18 @@ def test_service_bridge_browser_manifest():
         kernel.write_bytes(b"kernel\n")
         initramfs.write_bytes(b"initramfs\n")
 
-        manifest = module.browser_guest_manifest(kernel, initramfs, True)
+        manifest = module.browser_guest_manifest(root, kernel, initramfs, True)
 
-        assert manifest["kernel"] == str(kernel)
-        assert manifest["initrd"] == str(initramfs)
+        assert manifest["kernel"] == "bzImage"
+        assert manifest["initrd"] == "initramfs.cpio.gz"
         assert manifest["marker"] == module.MARKER
         assert manifest["cpu"] == "Nehalem"
+        assert manifest["machine"] == "pc"
         assert manifest["network"] == "none"
         assert manifest["sha256"]["kernel"] == sha256(b"kernel\n")
         assert manifest["sha256"]["initrd"] == sha256(b"initramfs\n")
         assert manifest["serviceBridge"] == {
-            "kind": "virtio-serial-jsonl",
+            "kind": "serial-jsonl",
             "requestChannel": "org.qemu.wasm.service.request",
             "responseChannel": "org.qemu.wasm.service.response",
             "readinessMarker": "QEMU_WASM_SERVICE_READY",
@@ -61,7 +62,8 @@ def test_service_bridge_browser_manifest():
             "interactiveOnly": False,
         }
 
-        plain = module.browser_guest_manifest(kernel, initramfs, False)
+        plain = module.browser_guest_manifest(root, kernel, initramfs, False)
+        assert plain["machine"] == "microvm,acpi=off"
         assert "serviceBridge" not in plain
 
 

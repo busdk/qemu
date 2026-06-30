@@ -9,9 +9,11 @@
 #include "qemu/osdep.h"
 #include "chardev/char.h"
 #include "qapi/error.h"
+#include "qemu/main-loop.h"
 #include "qemu/module.h"
 #include "qemu/option.h"
 #include "qemu/thread.h"
+#include "qemu/timer.h"
 #include "qom/object.h"
 #include <emscripten.h>
 
@@ -22,6 +24,10 @@ typedef struct WasmChardev {
     Chardev parent;
     char *channel;
     uint64_t max_payload;
+    QemuMutex pending_input_lock;
+    QEMUTimer *flush_timer;
+    uint8_t *pending_input;
+    int pending_input_len;
 } WasmChardev;
 
 DECLARE_INSTANCE_CHECKER(WasmChardev, WASM_CHARDEV,
@@ -89,6 +95,60 @@ static int wasm_chr_write(Chardev *chr, const uint8_t *buf, int len)
     }, s->channel, buf, len);
 
     return len;
+}
+
+static void wasm_chr_schedule_flush(WasmChardev *s)
+{
+    if (s->flush_timer) {
+        timer_mod(s->flush_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + 1);
+        qemu_notify_event();
+    }
+}
+
+static void wasm_chr_flush_pending_input(WasmChardev *s)
+{
+    Chardev *chr = CHARDEV(s);
+    int can_write;
+    int write_len;
+
+    qemu_mutex_lock(&s->pending_input_lock);
+    while (s->pending_input_len > 0) {
+        can_write = qemu_chr_be_can_write(chr);
+        if (can_write <= 0) {
+            qemu_mutex_unlock(&s->pending_input_lock);
+            wasm_chr_schedule_flush(s);
+            return;
+        }
+
+        write_len = MIN(can_write, s->pending_input_len);
+        qemu_chr_be_write(chr, s->pending_input, write_len);
+
+        s->pending_input_len -= write_len;
+        if (s->pending_input_len == 0) {
+            g_clear_pointer(&s->pending_input, g_free);
+            qemu_mutex_unlock(&s->pending_input_lock);
+            return;
+        }
+
+        memmove(s->pending_input,
+                s->pending_input + write_len,
+                s->pending_input_len);
+    }
+    qemu_mutex_unlock(&s->pending_input_lock);
+}
+
+static void wasm_chr_flush_timer_cb(void *opaque)
+{
+    wasm_chr_flush_pending_input(WASM_CHARDEV(opaque));
+}
+
+static void wasm_chr_init(Object *obj)
+{
+    WasmChardev *s = WASM_CHARDEV(obj);
+
+    qemu_mutex_init(&s->pending_input_lock);
+    s->flush_timer = timer_new_ms(QEMU_CLOCK_REALTIME,
+                                  wasm_chr_flush_timer_cb, s);
 }
 
 static bool wasm_chr_open(Chardev *chr, ChardevBackend *backend, Error **errp)
@@ -160,7 +220,10 @@ static void wasm_chr_finalize(Object *obj)
     wasm_chardevs = g_list_remove(wasm_chardevs, s);
     qemu_mutex_unlock(&wasm_chardevs_lock);
 
+    timer_free(s->flush_timer);
     g_free(s->channel);
+    g_free(s->pending_input);
+    qemu_mutex_destroy(&s->pending_input_lock);
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -169,10 +232,8 @@ int qemu_wasm_chardev_write_pending(void)
     g_autofree char *channel = NULL;
     g_autofree uint8_t *data = NULL;
     WasmChardev *s;
-    Chardev *chr;
     int channel_len = wasm_chardev_pending_channel_len();
     int data_len = wasm_chardev_pending_data_len();
-    int can_write;
 
     if (channel_len <= 1 || data_len <= 0) {
         return -1;
@@ -190,22 +251,25 @@ int qemu_wasm_chardev_write_pending(void)
     if (data_len > s->max_payload) {
         return -3;
     }
-
-    chr = CHARDEV(s);
-    can_write = qemu_chr_be_can_write(chr);
-    if (can_write < data_len) {
-        return -4;
+    qemu_mutex_lock(&s->pending_input_lock);
+    if (s->pending_input_len > 0) {
+        qemu_mutex_unlock(&s->pending_input_lock);
+        return -5;
     }
 
     data = g_malloc(data_len);
     wasm_chardev_copy_pending_data(data, data_len);
-    qemu_chr_be_write(chr, data, data_len);
+
+    s->pending_input = g_steal_pointer(&data);
+    s->pending_input_len = data_len;
+    qemu_mutex_unlock(&s->pending_input_lock);
+    wasm_chr_schedule_flush(s);
     return data_len;
 }
 
 static void wasm_chr_accept_input(Chardev *chr)
 {
-    (void)chr;
+    wasm_chr_flush_pending_input(WASM_CHARDEV(chr));
 }
 
 static void char_wasm_class_init(ObjectClass *oc, const void *data)
@@ -223,6 +287,7 @@ static const TypeInfo char_wasm_type_info = {
     .parent = TYPE_CHARDEV,
     .class_init = char_wasm_class_init,
     .instance_size = sizeof(WasmChardev),
+    .instance_init = wasm_chr_init,
     .instance_finalize = wasm_chr_finalize,
 };
 
