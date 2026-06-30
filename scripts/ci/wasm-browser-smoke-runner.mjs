@@ -64,6 +64,9 @@ Options:
                      before typing --keyboard-text
   --keyboard-text TEXT
                      Type TEXT into the focused browser display canvas
+  --pre-keyboard-wait-ms MS
+                     Wait after --keyboard-after-text is observed before
+                     typing --keyboard-text
   --post-keyboard-wait-ms MS
                      Wait after successful marker detection before capturing
                      final display evidence when --keyboard-text is used
@@ -136,6 +139,7 @@ function parseArgs(argv) {
     kernel: null,
     keyboardAfterText: "",
     keyboardText: "",
+    preKeyboardWaitMs: 0,
     postKeyboardWaitMs: 0,
     kernelAppend: null,
     machine: "microvm,acpi=off",
@@ -226,6 +230,9 @@ function parseArgs(argv) {
     } else if (arg === "--keyboard-text") {
       options.keyboardText = argv[++i];
       explicit.add("keyboardText");
+    } else if (arg === "--pre-keyboard-wait-ms") {
+      options.preKeyboardWaitMs = Number(argv[++i]);
+      explicit.add("preKeyboardWaitMs");
     } else if (arg === "--post-keyboard-wait-ms") {
       options.postKeyboardWaitMs = Number(argv[++i]);
       explicit.add("postKeyboardWaitMs");
@@ -319,6 +326,7 @@ function parseArgs(argv) {
       "idleTimeoutMs",
       "pageTextTailBytes",
       "port",
+      "preKeyboardWaitMs",
       "postKeyboardWaitMs",
       "progressSampleIntervalMs",
       "progressSampleLimit",
@@ -459,6 +467,14 @@ function parseArgs(argv) {
   }
   if (options.keyboardAfterText !== "" && options.keyboardText === "") {
     console.error("--keyboard-after-text requires --keyboard-text");
+    usage(2);
+  }
+  if (!Number.isInteger(options.preKeyboardWaitMs) || options.preKeyboardWaitMs < 0) {
+    console.error("--pre-keyboard-wait-ms must be a non-negative integer");
+    usage(2);
+  }
+  if (options.preKeyboardWaitMs > 0 && options.keyboardText === "") {
+    console.error("--pre-keyboard-wait-ms requires --keyboard-text");
     usage(2);
   }
   if (!Number.isInteger(options.postKeyboardWaitMs) || options.postKeyboardWaitMs < 0) {
@@ -927,6 +943,7 @@ export function initialSmokeResult(options, browserVersion) {
     harnessSelfTest: Boolean(options.harnessSelfTest),
     keyboardAfterText: options.keyboardAfterText,
     keyboardTextLength: options.keyboardText.length,
+    preKeyboardWaitMs: options.preKeyboardWaitMs,
     postKeyboardWaitMs: options.postKeyboardWaitMs,
     kernelAppend: options.kernelAppend,
     machine: options.machine,
@@ -1156,10 +1173,14 @@ async function typeKeyboardText(page, options, result) {
     options.keyboardAfterText,
     { timeout: options.timeoutMs },
   );
+  if (options.preKeyboardWaitMs > 0) {
+    await page.waitForTimeout(options.preKeyboardWaitMs);
+  }
   await page.locator("#canvas").focus();
   await page.keyboard.type(options.keyboardText);
   result.keyboardInput = {
     afterText: options.keyboardAfterText,
+    preKeyboardWaitMs: options.preKeyboardWaitMs,
     target: "#canvas",
     textLength: options.keyboardText.length,
   };

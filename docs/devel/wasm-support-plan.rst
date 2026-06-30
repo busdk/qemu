@@ -2783,6 +2783,27 @@ Current status:
   typed sequence, so the Bus Engine OS graphics/keyboard acceptance item
   remains open.
 
+  Downstream Bus Engine OS now has a package-level proof hook for the remaining
+  guest-visible input gap.  ``bus-engine-os-gui-config 0.1.0-15.noarch`` ships
+  ``browser-keyboard-proof.service`` gated by
+  ``ConditionKernelCommandLine=bus_engine_os.browser_keyboard_proof=1`` and
+  ``/usr/lib/bus-engine-os/gui/browser-keyboard-proof``.  The service emits
+  serial readiness marker ``bus-engine-os-browser-keyboard-proof: input-ready``,
+  reads Linux ``/dev/input/event*`` key press events inside the guest, and emits
+  ``bus-engine-os-browser-keyboard-proof: input-ok`` after the deterministic
+  ``ab`` sequence.  Package-level validation passed in the downstream
+  ``bus-engine-os`` checkout with
+  ``make package-bus-engine-os-gui-config
+  repro-package-bus-engine-os-gui-config`` and focused virtual-desktop rootfs
+  preflight tests.  The next acceptance run must rebuild a Bus Engine OS
+  ``virtual-desktop`` Browser Lab artifact, boot it in Chromium with
+  ``display=wasm`` and the proof kernel argument, type ``ab`` through the
+  focused browser canvas after the readiness marker, require the ``input-ok``
+  serial marker, and preserve result JSON plus screenshot evidence.
+  ``wasm-browser-smoke-runner.mjs`` also has ``--pre-keyboard-wait-ms`` so that
+  a downstream proof can wait briefly after the serial readiness marker before
+  delivering browser keyboard input, without weakening the serial marker gate.
+
 Non-goals:
   No WebGPU, accelerated 3D, or full desktop support.
 
