@@ -492,9 +492,11 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   browser name, such as ``firefox``, for matrix investigation.  The job is
   optional because the acceptable upstream browser image, browser matrix, and
   runtime cost policy still need maintainer review.
-  A local job-shaped container run using copied wasm artifacts and a
-  pre-populated TuxBoot cache exercised the same helper and browser runner
-  path in that Playwright image and reached ``QEMU_WASM_LINUX_BOOT_OK``.
+  A corrected local Chromium run using copied wasm artifacts and a
+  pre-populated TuxBoot cache exercised the same browser runner path in that
+  Playwright image and reached ``QEMU_WASM_LINUX_BOOT_OK`` through explicit
+  page status.  The full job shape still needs to be rerun after the
+  explicit-status predicate fix.
 
 The preferred product-neutral smoke guest preparation path is::
 
@@ -647,37 +649,45 @@ The underlying command shape is::
   ``Cross-Origin-Embedder-Policy: require-corp``, and
   ``Cross-Origin-Resource-Policy: same-origin`` on each response.
 * ``scripts/ci/wasm-browser-smoke-runner.mjs`` now starts the browser smoke
-  server, launches a Playwright browser, waits for the readiness marker,
-  optionally writes a JSON result containing the browser name, browser version,
-  marker, elapsed time, cross-origin isolation state, and error text, and
-  stops the server.  A disposable
+  server, launches a Playwright browser, waits for the explicit page status
+  ``marker reached: MARKER``, optionally writes a JSON result containing the
+  browser name, browser version, marker, elapsed time, cross-origin isolation
+  state, bounded console diagnostics, request failures, page errors, page text,
+  and error text, and stops the server.  The runner originally searched all
+  page text for the marker; that was a false-positive risk because failure
+  messages can quote the marker.  The corrected runner no longer treats
+  ``timeout waiting for marker: MARKER`` or ``QEMU returned before marker:
+  MARKER`` as success.  A disposable
   ``mcr.microsoft.com/playwright:v1.56.1-noble`` image
   (digest
   ``sha256:f1e7e01021efd65dd1a2c56064be399f3e4de00fd021ac561325f2bfbb2b837a``)
   with ``playwright@1.56.1`` installed in a temporary directory ran the
-  browser harness under headless Chromium ``141.0.7390.37``.  The browser
-  reached ``QEMU_WASM_LINUX_BOOT_OK`` with the same cleaned wasm64 TCI
-  artifact, TuxBoot kernel, and helper-generated initramfs used by the Node.js
-  smoke path.  This is the first browser execution proof for the console-first
-  64-bit TCI boot path.  Browser memory-limit evidence remains separate.
-* The same Playwright image also ran the browser smoke runner under Firefox
-  ``142.0``.  Firefox reached ``QEMU_WASM_LINUX_BOOT_OK`` with the same
-  cleaned wasm64 TCI artifact, TuxBoot kernel, and helper-generated initramfs.
-  This expands the browser boot proof beyond Chromium, but it is not yet wired
-  into GitLab CI.
-* The browser smoke runner's ``--out`` result path was tested under Chromium
-  ``141.0.7390.37``.  The JSON result recorded ``success: true``,
+  browser harness under headless Chromium ``141.0.7390.37``.  With the
+  corrected explicit-status predicate, Chromium reached
+  ``QEMU_WASM_LINUX_BOOT_OK`` with the same cleaned wasm64 TCI artifact,
+  TuxBoot kernel, and helper-generated initramfs used by the Node.js smoke
+  path.  The JSON result recorded ``success: true``,
   ``crossOriginIsolated: true``, the browser version, marker, timeout, user
-  agent, and elapsed time while the page reached ``QEMU_WASM_LINUX_BOOT_OK``.
-  The failure path was tested with the known WebKit timeout and recorded
-  ``success: false`` plus the timeout error text.
+  agent, elapsed time, and a page-text tail containing Linux boot output and
+  the marker.  This is the first corrected browser execution proof for the
+  console-first 64-bit TCI boot path.  Browser memory-limit evidence remains
+  separate.
+* The same Playwright image also ran the browser smoke runner under Firefox
+  ``142.0.1`` after the explicit-status predicate fix.  Firefox did not reach
+  the marker within the 180 second timeout.  The captured page text reached
+  early kernel output from ``extract_kernel`` but did not reach ``/init``.
+  Firefox therefore remains an incomplete browser-boot investigation, even
+  though its separate memory probe accepted the tested wasm64 memory sizes.
 * A WebKit boot-smoke attempt in the same Playwright image did not reach guest
   execution.  The browser console repeatedly reported that the runtime was
   still waiting on the ``wasm-instantiate`` dependency, and the runner timed
-  out after 60 seconds.  This matches the separate WebKit memory-probe
-  evidence that ``address: "i64"`` construction is not available in the tested
-  WebKit runtime.  WebKit remains out of scope for the first proven browser
-  MVP until the wasm64 instantiation issue is understood.
+  out.  The JSON result recorded bounded console diagnostics, ``success:
+  false``, the timeout error, and a page-text stack pointing at
+  ``WebAssembly.Memory`` construction in the generated QEMU launcher.  This
+  matches the separate WebKit memory-probe evidence that ``address: "i64"``
+  construction is not available in the tested WebKit runtime.  WebKit remains
+  out of scope for the first proven browser MVP until the wasm64 instantiation
+  issue is understood.
 
 The browser smoke server can be started with the same prepared guest inputs::
 
@@ -1179,8 +1189,9 @@ Proof:
   kernel, initrd, and firmware files.  The browser smoke server now exposes
   explicit kernel, initramfs, firmware, JavaScript, and WebAssembly artifact
   routes with the required cross-origin isolation headers.  Headless Chromium
-  reached the marker through those routes, proving QEMU opened the browser
-  MEMFS-mounted kernel, initramfs, and firmware inputs.
+  reached the marker through those routes with the corrected explicit-status
+  predicate, proving QEMU opened the browser MEMFS-mounted kernel, initramfs,
+  and firmware inputs.
 
 Non-goals:
   No persistent storage.
@@ -1203,8 +1214,10 @@ Current status:
   ``scripts/ci/wasm-browser-smoke.mjs`` provide the generic harness, and
   ``scripts/ci/wasm-browser-smoke-server.mjs`` serves it with explicit input
   routes and cross-origin isolation headers.  Node syntax checks, local
-  ``curl`` route/header checks, and headless Chromium and Firefox runs through
-  ``scripts/ci/wasm-browser-smoke-runner.mjs`` pass.  WebKit timed out during
+  ``curl`` route/header checks, and a headless Chromium run through
+  ``scripts/ci/wasm-browser-smoke-runner.mjs`` pass with the corrected
+  explicit-status predicate.  Firefox reached early kernel output but timed
+  out before the marker within 180 seconds.  WebKit timed out during
   WebAssembly instantiation and remains unproven for the wasm64 MVP.
 
 Non-goals:
@@ -1239,15 +1252,17 @@ Touches:
 
 Proof:
   The test fails on timeout, kernel panic, missing rootfs, or QEMU startup
-  failure, and passes only when the marker appears.  When ``--out`` is used,
-  the runner writes a compact JSON result for CI artifact collection.
+  failure, and passes only when the page reports explicit ``marker reached``
+  status.  When ``--out`` is used, the runner writes a compact JSON result for
+  CI artifact collection.
 
 Current status:
   ``scripts/ci/wasm-browser-smoke-runner.mjs`` provides the first automated
-  headless-browser readiness-marker test.  It passed locally under Chromium
-  ``141.0.7390.37`` and Firefox ``142.0`` in the Playwright ``v1.56.1`` image.
-  A WebKit attempt timed out before QEMU startup while waiting on
-  ``wasm-instantiate``.
+  headless-browser readiness-marker test.  With the corrected explicit-status
+  predicate, it passed locally under Chromium ``141.0.7390.37`` in the
+  Playwright ``v1.56.1`` image.  Firefox ``142.0.1`` reached early kernel
+  output but timed out before the marker within 180 seconds.  A WebKit attempt
+  timed out before QEMU startup while waiting on ``wasm-instantiate``.
   ``smoke-wasm64-64bit-browser`` wires that path into GitLab as an optional
   job.  A local job-shaped container run passed with copied wasm artifacts and
   a pre-populated TuxBoot cache.  The job still needs real GitLab execution

@@ -176,7 +176,7 @@ async function run() {
     printErr: emit,
   });
   if (!markerSeen) {
-    status.textContent = `QEMU returned before marker: ${config.marker}`;
+    status.textContent = "QEMU started; waiting for marker";
   }
 }
 

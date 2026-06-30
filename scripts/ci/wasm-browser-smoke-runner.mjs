@@ -11,6 +11,9 @@ import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const MAX_DIAGNOSTIC_ENTRIES = 50;
+const MAX_PAGE_TEXT_BYTES = 8192;
+
 function usage(status) {
   const stream = status === 0 ? process.stdout : process.stderr;
   stream.write(`usage: wasm-browser-smoke-runner.mjs --artifact-dir DIR --kernel FILE --initrd FILE [OPTIONS]
@@ -103,6 +106,13 @@ function parseArgs(argv) {
   return options;
 }
 
+function appendBounded(list, entry) {
+  list.push(entry);
+  if (list.length > MAX_DIAGNOSTIC_ENTRIES) {
+    list.shift();
+  }
+}
+
 async function loadPlaywright(browserName) {
   try {
     const require = createRequire(import.meta.url);
@@ -180,6 +190,18 @@ async function writeResult(options, result) {
   await writeFile(options.out, `${JSON.stringify(result, null, 2)}\n`);
 }
 
+async function capturePageText(page, result) {
+  if (!page) {
+    return;
+  }
+  try {
+    const text = await page.evaluate(() => document.body.textContent || "");
+    result.pageTextTail = text.slice(-MAX_PAGE_TEXT_BYTES);
+  } catch (error) {
+    result.pageTextError = error && error.message ? error.message : String(error);
+  }
+}
+
 async function run() {
   const options = parseArgs(process.argv.slice(2));
   const browserType = await loadPlaywright(options.browser);
@@ -193,14 +215,38 @@ async function run() {
     format: 1,
     browser: options.browser,
     browserVersion: browser.version(),
+    maxDiagnosticEntries: MAX_DIAGNOSTIC_ENTRIES,
     marker: options.marker,
     timeoutMs: options.timeoutMs,
     success: false,
+    consoleMessages: [],
+    pageErrors: [],
+    requestFailures: [],
   };
+  let page = null;
   try {
-    const page = await browser.newPage();
+    page = await browser.newPage();
     page.on("console", (message) => {
-      console.log(`browser ${message.type()}: ${message.text()}`);
+      const text = message.text();
+      appendBounded(result.consoleMessages, {
+        type: message.type(),
+        text,
+      });
+      console.log(`browser ${message.type()}: ${text}`);
+    });
+    page.on("pageerror", (error) => {
+      appendBounded(result.pageErrors, {
+        name: error && error.name ? error.name : "Error",
+        message: error && error.message ? error.message : String(error),
+      });
+    });
+    page.on("requestfailed", (request) => {
+      const failure = request.failure();
+      appendBounded(result.requestFailures, {
+        method: request.method(),
+        url: request.url(),
+        failureText: failure && failure.errorText ? failure.errorText : null,
+      });
     });
     await page.goto(`http://${options.host}:${options.port}/`, {
       waitUntil: "domcontentloaded",
@@ -209,18 +255,20 @@ async function run() {
     result.userAgent = await page.evaluate(() => navigator.userAgent);
     result.crossOriginIsolated = await page.evaluate(() => Boolean(globalThis.crossOriginIsolated));
     await page.waitForFunction(
-      (marker) => document.body.textContent.includes(marker),
+      (marker) => document.querySelector("#status")?.textContent === `marker reached: ${marker}`,
       options.marker,
       { timeout: options.timeoutMs },
     );
     result.success = true;
     result.elapsedMs = Date.now() - startTime;
+    await capturePageText(page, result);
     await writeResult(options, result);
     console.log(`wasm-browser-smoke-runner: marker reached: ${options.marker}`);
   } catch (error) {
     result.elapsedMs = Date.now() - startTime;
     result.errorName = error && error.name ? error.name : "Error";
     result.errorMessage = error && error.message ? error.message : String(error);
+    await capturePageText(page, result);
     await writeResult(options, result);
     console.error(error && error.stack ? error.stack : String(error));
     throw error;
