@@ -520,11 +520,14 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``build/wasm-browser-memory-probe.json`` with
   ``scripts/ci/wasm-browser-memory-probe-runner.mjs``, then runs
   ``scripts/ci/wasm-browser-smoke-runner.mjs`` and records
-  ``build/wasm-browser-smoke-result.json``.  The job defaults to
-  ``QEMU_WASM_BROWSER=chromium`` but can be replayed with another Playwright
-  browser name, such as ``firefox``, for matrix investigation.  The job is
-  optional because the acceptable upstream browser image, browser matrix, and
-  runtime cost policy still need maintainer review.
+  ``build/wasm-browser-smoke-result.json``.  The memory probe uses an explicit
+  page-list variable covering 1, 2, 3, 4, 6, 8, 16, and 32 GiB equivalent
+  page counts so CI artifacts keep the same boundary shape as local browser
+  investigations.  The job defaults to ``QEMU_WASM_BROWSER=chromium`` but can
+  be replayed with another Playwright browser name, such as ``firefox``, for
+  matrix investigation.  The job is optional because the acceptable upstream
+  browser image, browser matrix, and runtime cost policy still need maintainer
+  review.
   A corrected local Chromium job-shaped run using copied wasm artifacts and a
   pre-populated TuxBoot cache exercised the same memory-probe, guest-helper,
   and browser-runner path in that Playwright image.  The run wrote
