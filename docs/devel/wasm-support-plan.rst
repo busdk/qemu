@@ -402,6 +402,18 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   the local ``/boot/vmlinuz-7.1.0`` proof input.  The remaining upstream CI
   guest-input decision is the source for the statically linked BusyBox binary
   used to generate the initramfs.
+* The existing x86_64 TuxBoot rootfs asset was also downloaded and verified
+  against the SHA-256 already pinned by
+  ``tests/functional/x86_64/test_tuxrun.py``:
+  ``4b8b2a99117519c5290e1202cb36eb6c7aaba92b357b5160f5970cf5fb78a751``.
+  Extracting ``/bin/busybox`` from that rootfs with ``debugfs`` produced
+  SHA-256
+  ``e64c01b7c461edeb5a1b42cdc5865f2b805a55821413ae9bf7d86ba46ce59e22``.
+  That BusyBox is dynamically linked, with interpreter
+  ``/lib/ld64-uClibc.so.0`` and ``DT_NEEDED`` entries for
+  ``libtirpc.so.3`` and ``libc.so.0``.  Therefore it cannot be used directly
+  with the current static-only initramfs builder.  Reusing it would require a
+  dynamic-library initramfs mode or a separate static BusyBox source.
 
 The preferred Node.js smoke wrapper invocation is::
 
@@ -1222,6 +1234,11 @@ Guest input policy:
   or build-process evidence, the test must follow QEMU's
   ``QEMU_TEST_ALLOW_UNTRUSTED_CODE`` convention.
 
+  The existing TuxBoot x86_64 rootfs asset does not currently satisfy the
+  static BusyBox input requirement because its ``/bin/busybox`` is dynamically
+  linked.  It remains useful as a candidate source only if the smoke initramfs
+  builder grows an explicit dynamic-library bundle mode.
+
 WASM-017a: Prove TuxBoot kernel with generated initramfs
 -------------------------------------------------------
 
@@ -1240,6 +1257,27 @@ Proof:
 Non-goals:
   No Bus Engine OS root filesystem, browser UI, networking, or native
   WebAssembly TCG backend work.
+
+WASM-017b: Choose static or dynamic BusyBox input
+------------------------------------------------
+
+Scope:
+  Resolve the remaining initramfs input source for upstream CI.
+
+Touches:
+  Smoke-test documentation, initramfs builder options, optional asset fetch
+  helper, and CI notes.
+
+Proof:
+  Either a static BusyBox binary with URL, SHA-256, source/build provenance,
+  and license notes is selected, or the initramfs builder gains an explicit
+  dynamic-library bundle mode that can use the existing TuxBoot rootfs
+  BusyBox plus its required uClibc and ``libtirpc`` files.  The selected path
+  reaches ``QEMU_WASM_LINUX_BOOT_OK`` under native QEMU and wasm64 TCI.
+
+Non-goals:
+  No full TuxBoot rootfs boot, package manager, networking, browser UI, or
+  Bus Engine OS artifact work.
 
 WASM-018: Add Bus Engine OS downstream proof recipe
 --------------------------------------------------
