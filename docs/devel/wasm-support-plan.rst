@@ -11,8 +11,12 @@ refine the implementation plan from evidence.
 
 The target MVP is a browser-hosted QEMU system emulator that can boot a
 64-bit Linux guest, including Bus Engine OS, through modern browser APIs.  The
-MVP is console-first and does not require WebGPU, a graphical desktop,
-production networking, or durable browser storage.  The experimental
+downstream Bus Engine acceptance target is a browser-runnable Bus Engine OS
+console/demo that can be embedded on ``busdk.com/engine/`` as a
+screenshot-like or live-preview item.  The QEMU work remains generic and
+product-neutral.  The MVP is console-first and does not require WebGPU, a
+graphical desktop, production networking, or durable browser storage.  The
+experimental
 ``ktock/qemu-wasm`` code is research material only; the upstreamable work must
 be designed as native QEMU support rather than importing the fork wholesale.
 
@@ -458,6 +462,15 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``QEMU_WASM_LINUX_BOOT_OK``.  This gives the Firefox and browser-matrix
   investigation a safe way to add temporary kernel diagnostics such as
   initcall tracing while keeping the default smoke path stable.
+* The Node and browser smoke wrappers now also accept repeated ``--qemu-arg``
+  arguments for QEMU-level diagnostics without editing the canonical smoke
+  command line.  A Node.js ``v24`` proof appended ``-name wasm-smoke`` to the
+  QEMU invocation and reached ``QEMU_WASM_LINUX_BOOT_OK``.  A Chromium
+  ``141.0.7390.37`` browser proof with the same extra QEMU arguments reached
+  the marker after roughly ``80`` seconds, and its result JSON recorded
+  ``qemuArgs`` as ``["-name", "wasm-smoke"]``.  This gives Firefox and future
+  browser-matrix probes a stable way to test QEMU timer, interrupt, tracing,
+  or naming options while leaving the accepted smoke profile unchanged.
 * The browser smoke runner now records the final page status and supports
   ``--page-text-tail-bytes`` so browser failures can preserve a larger bounded
   serial-output tail in JSON without changing the page output cap.  A Chromium
@@ -964,7 +977,9 @@ The MVP is accepted when an upstream-style QEMU build can:
   JavaScript edits.
 
 Bus Engine OS is the downstream proof guest.  The upstream QEMU work should
-not contain Bus-specific code.
+not contain Bus-specific code.  The generic QEMU smoke guest proves the
+upstream emulator and browser harness; it is not the final Bus Engine product
+proof.
 
 Incremental task backlog
 ========================
@@ -1583,6 +1598,12 @@ Proof:
   unknown parameters, so future timer probes must first verify accepted kernel
   parameters.  A ``nosmp maxcpus=1`` probe changed the guest CPU/interrupt
   setup path but still timed out after ``random: crng init done``.
+  A Firefox ``142.0.1`` probe with QEMU arguments ``-icount
+  shift=auto,align=off,sleep=off`` also timed out after ``420000`` ms.  It
+  recorded ``crossOriginIsolated: true`` and no progress-sample errors, but
+  stalled earlier than the baseline at ``x86/fpu: x87 FPU will use FXSAVE``
+  after roughly ``282`` seconds.  That QEMU timer mode is therefore not a
+  Firefox fix for the current wasm64 TCI smoke guest.
 
 Non-goals:
   No requirement to support Firefox in the first accepted MVP if Chromium is
@@ -1782,16 +1803,34 @@ WASM-018: Add Bus Engine OS downstream proof recipe
 
 Scope:
   Document how downstream Bus Engine can provide kernel/rootfs artifacts to
-  the generic QEMU browser harness.
+  the generic QEMU browser harness, then use that recipe as the product proof
+  path for a Bus Engine OS browser preview.
 
 Touches:
-  Downstream documentation only, outside upstream QEMU if implemented.
+  Downstream documentation and Bus Engine OS build/profile configuration only,
+  outside upstream QEMU if implemented.  Upstream QEMU may only receive generic
+  harness improvements that are useful for any 64-bit Linux guest.
 
 Proof:
-  The QEMU side remains product-neutral.
+  The QEMU side remains product-neutral.  Downstream Bus Engine produces a
+  64-bit Bus Engine OS kernel/rootfs or disk image, runs it through the generic
+  browser QEMU harness, reaches a deterministic serial readiness marker, and
+  captures a browser preview suitable for a ``busdk.com/engine/`` screenshot-
+  like or live-preview item.
+
+Current status:
+  Bus Engine OS currently documents ``bus engine os build image`` as the normal
+  full-system build command and ``virtual-server`` as the accepted
+  console-oriented QEMU image profile.  The first downstream proof should
+  consume that x86_64 profile, or a browser-lab derivative with the same
+  console-first boundary, and define the artifact handoff as kernel image,
+  root filesystem or raw disk, firmware inputs, checksums, boot arguments,
+  memory size, CPU model, readiness marker, and expected serial identity text.
 
 Non-goals:
-  No Bus-specific source code in upstream QEMU.
+  No Bus-specific source code in upstream QEMU.  No requirement for WebGPU,
+  graphical desktop, production networking, durable browser storage, or package
+  builds inside the browser.
 
 WASM-019: Design native wasm64 TCG backend
 ------------------------------------------
@@ -2331,6 +2370,8 @@ The downstream integration may use the upstream QEMU browser artifact as:
 * a Browser Lab runtime;
 * a documentation and support reproduction environment;
 * a serial-console test target;
+* the emulator behind a Bus Engine OS product-page preview on
+  ``busdk.com/engine/``;
 * a later graphical or networking research platform.
 
 Non-goals for the MVP

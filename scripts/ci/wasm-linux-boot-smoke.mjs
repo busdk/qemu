@@ -22,6 +22,7 @@ function parseArgs(argv) {
     maxOutputBytes: 60000,
     memory: "512M",
     program: "qemu-system-x86_64.js",
+    qemuArgs: [],
     timeoutMs: 180000,
   };
 
@@ -47,6 +48,8 @@ function parseArgs(argv) {
       options.memory = argv[++i];
     } else if (arg === "--program") {
       options.program = argv[++i];
+    } else if (arg === "--qemu-arg") {
+      options.qemuArgs.push(argv[++i]);
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number(argv[++i]);
     } else if (arg === "--help") {
@@ -92,6 +95,7 @@ Options:
   --max-output-bytes N   Suppress stdout/stderr after N total output bytes
   --memory SIZE          Guest memory size passed to QEMU
   --program FILE         JavaScript launcher inside artifact dir
+  --qemu-arg ARG         Extra QEMU argument appended to the smoke command
   --timeout-ms MS        Timeout in milliseconds
   --help                 Show this help
 `);
@@ -171,6 +175,7 @@ function runSmoke(options) {
     "-L",
     "/firmware",
   );
+  args.push(...options.qemuArgs);
 
   const child = spawn(process.execPath, args, { stdio: "inherit" });
   child.on("exit", (code, signal) => {

@@ -42,6 +42,7 @@ Options:
                      Interval for smoke progress samples in result JSON
   --progress-sample-limit N
                      Maximum smoke progress samples to keep
+  --qemu-arg ARG     Extra QEMU argument appended to the smoke command
   --timeout-ms MS     Timeout in milliseconds
   --help              Show this help
 `);
@@ -67,6 +68,7 @@ function parseArgs(argv) {
     program: "qemu-system-x86_64.js",
     progressSampleIntervalMs: DEFAULT_PROGRESS_SAMPLE_INTERVAL_MS,
     progressSampleLimit: DEFAULT_PROGRESS_SAMPLE_LIMIT,
+    qemuArgs: [],
     timeoutMs: 180000,
   };
 
@@ -106,6 +108,8 @@ function parseArgs(argv) {
       options.progressSampleIntervalMs = Number(argv[++i]);
     } else if (arg === "--progress-sample-limit") {
       options.progressSampleLimit = Number(argv[++i]);
+    } else if (arg === "--qemu-arg") {
+      options.qemuArgs.push(argv[++i]);
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number(argv[++i]);
     } else if (arg === "--help") {
@@ -300,6 +304,7 @@ async function run() {
     pageTextTailBytes: options.pageTextTailBytes,
     progressSampleIntervalMs: options.progressSampleIntervalMs,
     progressSampleLimit: options.progressSampleLimit,
+    qemuArgs: options.qemuArgs,
     success: false,
     consoleMessages: [],
     pageErrors: [],
@@ -339,6 +344,9 @@ async function run() {
     url.searchParams.set("marker", options.marker);
     url.searchParams.set("maxOutputBytes", String(options.maxOutputBytes));
     url.searchParams.set("memory", options.memory);
+    for (const qemuArg of options.qemuArgs) {
+      url.searchParams.append("qemuArg", qemuArg);
+    }
     url.searchParams.set("timeoutMs", String(options.timeoutMs));
     await page.goto(url.href, {
       waitUntil: "domcontentloaded",

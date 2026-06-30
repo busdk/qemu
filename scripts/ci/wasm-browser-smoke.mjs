@@ -11,6 +11,10 @@ function option(name, fallback) {
   return value === null || value === "" ? fallback : value;
 }
 
+function listOption(name) {
+  return new URLSearchParams(window.location.search).getAll(name);
+}
+
 function numberOption(name, fallback) {
   const value = Number(option(name, String(fallback)));
   if (!Number.isInteger(value) || value <= 0) {
@@ -83,6 +87,7 @@ function qemuArgs(config) {
     "-L",
     "/firmware",
   );
+  args.push(...config.qemuArgs);
   return args;
 }
 
@@ -97,6 +102,7 @@ function buildConfig() {
     maxOutputBytes: numberOption("maxOutputBytes", 60000),
     memory: option("memory", "512M"),
     program: option("program", "/artifacts/qemu-system-x86_64.js"),
+    qemuArgs: listOption("qemuArg"),
     qboot: option("qboot", "/firmware/qboot.rom"),
     timeoutMs: numberOption("timeoutMs", 180000),
     wasm: option("wasm", "/artifacts/qemu-system-x86_64.wasm"),
