@@ -647,26 +647,24 @@ The underlying command shape is::
   memory probe through Playwright.  It starts the cross-origin-isolated probe
   server, launches the selected browser engine, applies the requested page
   counts and ``address: "i64"`` setting, prints the JSON result, and can write
-  the result to a CI artifact.
-* A Playwright ``v1.56.1`` Chromium run using HeadlessChrome
-  ``141.0.7390.37`` reported ``crossOriginIsolated: true``.  Default-address
-  shared and unshared memories accepted 4 GiB and rejected 8 GiB.  The
-  ``address: "i64"`` form accepted shared and unshared memories at 4, 8, and
-  16 GiB, then rejected 32 GiB with an upper bound of ``262144``
-  WebAssembly pages.  This is the first browser memory-limit evidence for the
-  Chromium side of the console MVP.
-* A Playwright ``v1.56.1`` Firefox run using Firefox ``142.0`` reported
-  ``crossOriginIsolated: true``.  Default-address shared and unshared memories
-  accepted 4 GiB and rejected 8 GiB.  The ``address: "i64"`` form accepted
-  shared and unshared memories at 4, 8, and 16 GiB in the tested range.
-  Firefox boot-smoke coverage remains a separate task.
-* A Playwright ``v1.56.1`` WebKit run using the Safari-compatible WebKit user
-  agent ``Version/26.0 Safari/605.1.15`` reported ``crossOriginIsolated:
-  true``.  Default-address shared and unshared memories accepted 4 GiB and
-  rejected 8 GiB.  The ``address: "i64"`` constructor form failed with
-  ``TypeError: Conversion from 'BigInt' to 'number' is not allowed.``  WebKit
-  therefore cannot be treated as ready for the wasm64 QEMU browser MVP from
-  this evidence alone.
+  the result to a CI artifact.  The result now records runner metadata,
+  including the selected Playwright browser name, browser version, requested
+  pages, ``--memory64`` setting, and timeout.
+* A Playwright ``v1.56.1`` browser matrix tested 1, 2, 3, 4, 6, 8, 16, and
+  32 GiB equivalent page counts for shared and unshared memories.  All tested
+  browsers reported ``crossOriginIsolated: true``.  HeadlessChrome
+  ``141.0.7390.37`` and Firefox ``142.0.1`` accepted default-address memory
+  through 4 GiB and rejected 6 GiB and larger.  With ``address: "i64"``, both
+  accepted shared and unshared memories through 16 GiB and rejected 32 GiB.
+  Chromium reported an upper bound of ``262144`` WebAssembly pages for the
+  32 GiB ``address: "i64"`` case, while Firefox reported
+  ``RuntimeError: too many memory pages``.
+* The same matrix using the Safari-compatible WebKit ``26.0`` runtime accepted
+  default-address shared and unshared memories through 4 GiB and rejected
+  6 GiB and larger.  Every ``address: "i64"`` constructor failed, including
+  the 1 GiB case, with ``TypeError: Conversion from 'BigInt' to 'number' is
+  not allowed.``  WebKit therefore cannot be treated as ready for the wasm64
+  QEMU browser MVP from this evidence alone.
 * ``scripts/ci/wasm-browser-smoke.html``,
   ``scripts/ci/wasm-browser-smoke.mjs``, and
   ``scripts/ci/wasm-browser-smoke-server.mjs`` now provide a generic browser
@@ -1055,10 +1053,10 @@ Touches:
 
 Proof:
   ``node scripts/ci/wasm-browser-memory-probe-runner.mjs --memory64`` starts
-  the isolated probe server, drives a Playwright browser, prints JSON, and can
-  save the JSON as a CI artifact.  Local Playwright runs recorded Chromium,
-  Firefox, and WebKit behavior for default-address memory and
-  ``address: "i64"`` memory.
+  the isolated probe server, drives a Playwright browser, prints JSON with
+  browser runner metadata, and can save the JSON as a CI artifact.  Local
+  Playwright runs recorded Chromium, Firefox, and WebKit behavior for
+  default-address memory and ``address: "i64"`` memory.
 
 Non-goals:
   No guarantee that constructor success proves QEMU boot success in the same

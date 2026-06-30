@@ -71,6 +71,13 @@ function parseArgs(argv) {
     console.error("--timeout-ms must be a positive integer");
     usage(2);
   }
+  if (options.pages !== null) {
+    const pages = options.pages.split(",").map((item) => Number(item.trim()));
+    if (pages.length === 0 || pages.some((page) => !Number.isInteger(page) || page <= 0)) {
+      console.error("--pages must be a comma-separated list of positive integers");
+      usage(2);
+    }
+  }
 
   return options;
 }
@@ -170,10 +177,18 @@ async function run() {
       { timeout: options.timeoutMs },
     );
     const resultText = await page.textContent("#output");
-    JSON.parse(resultText);
-    console.log(resultText);
+    const result = JSON.parse(resultText);
+    result.runner = {
+      browser: options.browser,
+      browserVersion: browser.version(),
+      memory64: options.memory64,
+      pages: options.pages,
+      timeoutMs: options.timeoutMs,
+    };
+    const output = JSON.stringify(result, null, 2);
+    console.log(output);
     if (options.out !== null) {
-      await writeFile(options.out, `${resultText}\n`);
+      await writeFile(options.out, `${output}\n`);
     }
   } catch (error) {
     console.error(error && error.stack ? error.stack : String(error));
