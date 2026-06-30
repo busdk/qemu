@@ -552,6 +552,12 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   list defaults, expected-text entries, and extra QEMU arguments.  It also
   verifies that bounded diagnostic lists keep the newest entries when the
   configured limit is reached.
+* The Node.js smoke wrapper now fails before importing the generated
+  Emscripten module when the local runtime is too old for the wasm64 smoke
+  path.  On Node.js ``v22.19.0`` it writes structured JSON with
+  ``preflight: "node-version"``, ``requiredNodeMajor: 23``, and the detected
+  ``nodeVersion``.  This turns an otherwise opaque Emscripten launcher error
+  into deterministic runtime evidence.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser

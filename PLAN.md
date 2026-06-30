@@ -11,8 +11,8 @@ browser MVP. Keep Bus Engine product work downstream.
   marker under Node.js.
 - [x] Prove the same generic smoke guest reaches the marker in Chrome or
   Chromium.
-- [x] Keep the browser MVP focused on Chrome/Chromium unless another browser
-  becomes necessary for the accepted Bus Engine OS proof.
+- [x] Keep the browser MVP focused on Chrome/Chromium. Treat Firefox and
+  WebKit as compatibility tracking after the accepted Bus Engine OS proof.
 
 ## MVP Generic QEMU Work
 
@@ -49,6 +49,8 @@ browser MVP. Keep Bus Engine product work downstream.
   generation, including no-network, initrd, rootfs, and extra-argument paths.
 - [x] Add deterministic Node coverage for browser runner terminal-status
   detection so page-level failures are captured promptly.
+- [x] Add Node smoke runtime preflight so unsupported local Node versions fail
+  with structured JSON evidence before importing the generated wasm module.
 - [ ] Continue recording browser/runtime versions, commands, results, and
   failure modes in `docs/devel/wasm-support-plan.rst`.
 
@@ -68,12 +70,12 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Build or consume a minimal x86_64 Bus Engine OS console artifact that can
   boot without networking or graphics.
 - [x] Boot that Bus Engine OS artifact through the generic QEMU/WASM browser
-  harness in Chromium.
+  harness in Chrome or Chromium.
 - [x] Capture serial evidence proving accepted Bus Engine OS kernel identity
   and rootfs init handoff through Chromium/WASM.
 - [x] Add deeper userspace identity evidence that does not depend on network:
-  Chromium/WASM reached the Bus Engine OS userspace welcome marker and observed
-  `systemd 261.1`.
+  Chrome/Chromium WASM reached the Bus Engine OS userspace welcome marker and
+  observed `systemd 261.1`.
 - [x] Capture a screenshot-like browser preview suitable for the
   `busdk.com/engine/` product page.
 - [x] Keep the website preview code and product presentation outside upstream
@@ -81,9 +83,8 @@ browser MVP. Keep Bus Engine product work downstream.
 
 ## Compatibility Tracking
 
-- [ ] Diagnose Firefox boot progress enough to either make it pass or document
-  the concrete Firefox-specific blocker. This is not required for the first
-  MVP if Chrome/Chromium remains the accepted browser proof.
+- [ ] Track Firefox boot progress only after the Chrome/Chromium proof path is
+  accepted, unless maintainers explicitly require a wider browser matrix.
 - [ ] Keep WebKit out of the first MVP unless wasm64 instantiation becomes
   reliable in the tested runtime.
 

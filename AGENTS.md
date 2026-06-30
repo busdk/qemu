@@ -12,6 +12,9 @@ The active target is a 64-bit browser MVP:
 - TCI console boot first.
 - Native WebAssembly TCG later.
 - Browser execution through modern APIs with cross-origin isolation.
+- Chrome or Chromium as the first browser acceptance target. Treat Firefox
+  and WebKit as compatibility tracking unless maintainers explicitly widen
+  the MVP browser matrix.
 
 Bus Engine OS is the downstream proof guest. Do not add Bus Engine product
 logic, branding, release policy, package selection, or website UI to upstream
