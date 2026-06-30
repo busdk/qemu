@@ -451,6 +451,14 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``node:24-alpine`` with the cleaned wasm64 TCI artifact.  This provides the
   reusable command path for ``WASM-017c``.  The remaining ``WASM-017c`` work is
   deciding where to place the GitLab CI job and cache policy.
+* The current local ``qemu/emsdk-wasm64-cross:latest`` image reports Node.js
+  ``v22.16.0``.  That image can build the wasm64 artifact, but it cannot run
+  the generated Emscripten module because the module requires Node.js
+  ``v23.0.0`` or newer.  The passing smoke proof used ``node:24-alpine`` with
+  the built artifacts bind-mounted read-only.  An official CI job therefore
+  needs either a separate Node.js ``v24`` smoke-test image with ``python3``,
+  ``zstd``, and ``debugfs`` available, or an update to the QEMU wasm64 CI
+  image that supplies those runtime tools.
 
 The preferred product-neutral smoke guest preparation path is::
 
@@ -1378,6 +1386,33 @@ Current status:
 Non-goals:
   No new guest binary source, Bus Engine OS artifact, browser UI, networking,
   or native WebAssembly TCG backend work.
+
+WASM-017d: Provide a Node 24+ smoke runtime image
+------------------------------------------------
+
+Scope:
+  Make the GitLab smoke runtime explicit before enabling a wasm Linux boot
+  job.
+
+Touches:
+  The wasm CI container definition or a separate CI smoke job image, plus
+  documentation of required runtime tools.
+
+Proof:
+  The selected CI smoke runtime reports Node.js ``v23.0.0`` or newer and has
+  ``python3``, ``zstd``, and ``debugfs`` available.  It can run
+  ``scripts/ci/wasm-prepare-tuxboot-smoke-guest.py`` and then
+  ``scripts/ci/wasm-linux-boot-smoke.mjs`` against artifacts from
+  ``build-wasm64-64bit``.
+
+Current status:
+  ``qemu/emsdk-wasm64-cross:latest`` reports Node.js ``v22.16.0`` and is not
+  sufficient for the smoke runtime.  ``node:24-alpine`` proved the boot path
+  with bind-mounted artifacts, but that is not yet an upstream QEMU CI image
+  decision.
+
+Non-goals:
+  No browser UI, native WebAssembly TCG backend, networking, or graphics work.
 
 WASM-018: Add Bus Engine OS downstream proof recipe
 --------------------------------------------------
