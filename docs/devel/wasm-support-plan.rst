@@ -476,6 +476,16 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   narrows the Firefox gap to guest execution progress after early kernel CPU
   initialization rather than harness setup, cross-origin isolation, resource
   loading, kernel argument forwarding, or marker detection.
+* A follow-up Firefox ``142.0.1`` diagnostic run with
+  ``--append-extra "mitigations=off pti=off random.trust_cpu=on"`` also timed
+  out after ``420000`` ms.  The result recorded ``pageStatus`` as
+  ``QEMU started; waiting for marker``, ``crossOriginIsolated: true``, and no
+  browser console, page, or request errors.  The guest showed the appended
+  command-line arguments, disabled kernel/user page-table isolation on the
+  command line, reached APIC timer setup, skipped delay-loop calibration, and
+  printed ``random: crng init done``, but still did not reach ``Run /init``.
+  This rules out the broad x86 mitigation and page-table-isolation path as a
+  sufficient explanation for the Firefox-only browser boot gap.
 * ``scripts/ci/wasm-prepare-tuxboot-smoke-guest.py`` now provides that
   CI-shaped guest-preparation path.  It downloads or reuses the existing
   x86_64 TuxBoot kernel and rootfs assets, verifies them against the SHA-256
@@ -1507,7 +1517,9 @@ Proof:
   stall.  Current evidence has already ruled out missing cross-origin
   isolation, failed resource loading, marker predicate mismatch, memory size
   at ``512M`` versus ``256M``, CPU model simplification to ``qemu64``, and
-  kernel argument forwarding.
+  kernel argument forwarding.  A Firefox run with broad x86 mitigations and
+  page-table isolation disabled still timed out before ``Run /init``, so that
+  mitigation path is not sufficient to explain the gap.
 
 Non-goals:
   No requirement to support Firefox in the first accepted MVP if Chromium is
