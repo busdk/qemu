@@ -127,6 +127,18 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   separate ``.worker.js`` file; the generated JavaScript contains the pthread
   worker startup code and loads ``qemu-system-x86_64.wasm`` relative to the
   module URL.
+* The browser graphics investigation verified the SDL build path in the
+  Docker-based Emscripten image.  A tiny SDL probe showed that SDL2 requires
+  ``-sUSE_SDL=2`` for both compile and link; without that flag Emscripten's
+  fake SDL header stops the build.  A copied QEMU tree then configured with
+  ``--enable-sdl --extra-cflags=-sUSE_SDL=2 --extra-ldflags=-sUSE_SDL=2`` and
+  reported ``SDL support: YES 2.32.0``.  A Ninja build of
+  ``qemu-system-x86_64.js`` compiled QEMU's SDL 2D and input sources for the
+  wasm64 host and reached the final link, producing
+  ``qemu-system-x86_64.js`` and ``qemu-system-x86_64.wasm`` before the
+  artifact copy failed because the host ``/tmp`` filesystem was full.  This is
+  build-path evidence for the SDL frontend, not yet browser-visible graphics
+  proof.
 * The captured artifact sizes were approximately ``607 KiB`` for
   ``qemu-system-x86_64.js`` and ``72 MiB`` for
   ``qemu-system-x86_64.wasm``.  The captured SHA-256 values were
@@ -2477,8 +2489,9 @@ WASM-031: Add opt-in browser SDL/canvas harness path
 ----------------------------------------------------
 
 Scope:
-  Add an opt-in browser display mode that exposes a focusable canvas to the
-  Emscripten module while preserving the serial-console boot marker path.
+  Add an opt-in browser display mode and deterministic keyboard sender that
+  expose a focusable canvas to the Emscripten module while preserving the
+  serial-console boot marker path.
 
 Touches:
   ``scripts/ci/wasm-browser-smoke.html``,
@@ -2492,7 +2505,16 @@ Proof:
   uses ``display=none`` with ``-nographic`` and ``-serial mon:stdio``, while
   opt-in ``display=sdl`` removes ``-nographic``, adds
   ``-display sdl,gl=off``, exposes a canvas, and keeps serial output available
-  for the boot marker.
+  for the boot marker.  The runner also accepts ``--keyboard-text`` only with
+  ``display=sdl``, focuses the canvas, types through Playwright, and records
+  non-secret keyboard-input evidence in the result JSON.
+
+Current status:
+  The harness and runner plumbing is implemented.  Emscripten SDL2 was also
+  verified as a viable wasm64 build dependency with ``-sUSE_SDL=2``: QEMU
+  configured with ``SDL support: YES 2.32.0`` and compiled through the SDL 2D
+  and input sources to the final link.  Browser-visible rendering still needs
+  a Chrome/Chromium screenshot proof.
 
 Non-goals:
   No claim that a guest has rendered a frame until a Chrome/Chromium graphics

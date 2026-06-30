@@ -44,6 +44,8 @@ Options:
                      contains this text
   --initrd FILE       Smoke initramfs image
   --kernel FILE       64-bit Linux bzImage
+  --keyboard-text TEXT
+                     Type TEXT into the focused SDL browser display canvas
   --kernel-append TEXT
                      Full Linux kernel arguments, replacing smoke defaults
   --machine MACHINE  QEMU machine name passed with -M
@@ -90,6 +92,7 @@ function parseArgs(argv) {
     idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
     initrd: null,
     kernel: null,
+    keyboardText: "",
     kernelAppend: null,
     machine: "microvm,acpi=off",
     marker: "QEMU_WASM_LINUX_BOOT_OK",
@@ -154,6 +157,9 @@ function parseArgs(argv) {
     } else if (arg === "--kernel") {
       options.kernel = argv[++i];
       explicit.add("kernel");
+    } else if (arg === "--keyboard-text") {
+      options.keyboardText = argv[++i];
+      explicit.add("keyboardText");
     } else if (arg === "--kernel-append") {
       options.kernelAppend = argv[++i];
       explicit.add("kernelAppend");
@@ -248,6 +254,7 @@ function parseArgs(argv) {
       "idleAfterText",
       "initrd",
       "kernel",
+      "keyboardText",
       "kernelAppend",
       "machine",
       "marker",
@@ -308,6 +315,10 @@ function parseArgs(argv) {
   }
   if (!["none", "sdl"].includes(options.display)) {
     console.error("--display must be none or sdl");
+    usage(2);
+  }
+  if (options.keyboardText !== "" && options.display !== "sdl") {
+    console.error("--keyboard-text requires --display sdl");
     usage(2);
   }
   if (!["none", "default"].includes(options.network)) {
@@ -669,6 +680,7 @@ export function initialSmokeResult(options, browserVersion) {
     display: options.display,
     expectText: options.expectText,
     focusDisplay: options.focusDisplay,
+    keyboardTextLength: options.keyboardText.length,
     kernelAppend: options.kernelAppend,
     machine: options.machine,
     maxDiagnosticEntries: MAX_DIAGNOSTIC_ENTRIES,
@@ -832,6 +844,14 @@ async function run() {
     });
     result.userAgent = await page.evaluate(() => navigator.userAgent);
     result.crossOriginIsolated = await page.evaluate(() => Boolean(globalThis.crossOriginIsolated));
+    if (options.keyboardText !== "") {
+      await page.locator("#display").focus();
+      await page.keyboard.type(options.keyboardText);
+      result.keyboardInput = {
+        target: "#display",
+        textLength: options.keyboardText.length,
+      };
+    }
     const sampleAndCheckIdle = async (reason) => {
       await sampleSmokeProgress(
         page,

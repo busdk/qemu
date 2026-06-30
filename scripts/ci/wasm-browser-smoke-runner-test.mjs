@@ -6,6 +6,8 @@
  */
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import {
   appendBoundedLimit,
@@ -22,6 +24,7 @@ import {
 } from "./wasm-browser-smoke-runner.mjs";
 
 const marker = "QEMU_WASM_LINUX_BOOT_OK";
+const runnerPath = fileURLToPath(new URL("./wasm-browser-smoke-runner.mjs", import.meta.url));
 
 for (const status of [
   `marker reached: ${marker}`,
@@ -105,6 +108,7 @@ for (const status of [
     focusDisplay: true,
     host: "127.0.0.1",
     initrd: null,
+    keyboardText: "uname -a\n",
     idleAfterText: "",
     kernelAppend: "console=ttyS0 root=/dev/vda rw",
     idleTimeoutMs: 0,
@@ -150,6 +154,7 @@ for (const status of [
     focusDisplay: false,
     host: "localhost",
     initrd: "/tmp/initramfs.cpio.gz",
+    keyboardText: "",
     kernelAppend: null,
     machine: "microvm,acpi=off",
     marker,
@@ -179,6 +184,7 @@ for (const status of [
     display: "sdl",
     expectText: ["Example Linux"],
     focusDisplay: true,
+    keyboardText: "uname -a\n",
     idleAfterText: "",
     kernelAppend: "console=ttyS0 root=/dev/vda rw",
     idleTimeoutMs: 0,
@@ -201,6 +207,7 @@ for (const status of [
   assert.equal(result.browserVersion, "HeadlessChrome/141.0.7390.37");
   assert.equal(result.display, "sdl");
   assert.equal(result.focusDisplay, true);
+  assert.equal(result.keyboardTextLength, "uname -a\n".length);
   assert.equal(result.network, "none");
   assert.equal(result.idleAfterText, "");
   assert.equal(result.idleTimeoutMs, 0);
@@ -213,6 +220,21 @@ for (const status of [
   assert.deepEqual(result.progressSampleErrors, []);
   assert.deepEqual(result.progressSamples, []);
   assert.deepEqual(result.requestFailures, []);
+}
+
+{
+  const child = spawnSync(process.execPath, [
+    runnerPath,
+    "--artifact-dir", "/tmp/artifacts",
+    "--kernel", "/tmp/kernel",
+    "--initrd", "/tmp/initrd",
+    "--keyboard-text", "uname -a\n",
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+
+  assert.equal(child.status, 2);
 }
 
 {
