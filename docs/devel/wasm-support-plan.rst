@@ -2174,15 +2174,16 @@ Current status:
   promotes the browser state summary into top-level JSON fields including
   ``phase``, ``failurePhase``, ``phases``, ``markerSeen``,
   ``expectedTextSeen``, ``programExitStatus``, ``outputLines``,
-  ``outputBytes``, ``outputSuppressed``, ``lastLine``, and ``qemuCommand`` so
-  CI artifacts can be inspected without parsing the full page text.  ``phase``
-  is the terminal page state, while ``failurePhase`` records the startup phase
-  that was active before a page-level failure.  The remaining proof work is to
-  run the negative cases under Chromium or Chrome and preserve the resulting
-  JSON artifacts.  ``wasm-browser-smoke-runner-test.mjs`` provides
-  deterministic coverage for the terminal page-status predicate that decides
-  when those result artifacts should be captured, and for the result-promotion
-  helper that makes the page state visible at top level in the JSON artifact.
+  ``outputBytes``, ``outputSuppressed``, ``lastLine``, ``qemuCommand``, and
+  ``smokeUrl`` so CI artifacts can be inspected without parsing the full page
+  text.  ``phase`` is the terminal page state, while ``failurePhase`` records
+  the startup phase that was active before a page-level failure.  The
+  remaining proof work is to run the negative cases under Chromium or Chrome
+  and preserve the resulting JSON artifacts.
+  ``wasm-browser-smoke-runner-test.mjs`` provides deterministic coverage for
+  the terminal page-status predicate that decides when those result artifacts
+  should be captured, and for the result-promotion helper that makes the page
+  state visible at top level in the JSON artifact.
 
 Non-goals:
   No product-specific telemetry.

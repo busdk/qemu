@@ -545,6 +545,7 @@ async function run() {
       });
     });
     const url = browserSmokeUrl(options);
+    result.smokeUrl = url.href;
     await page.goto(url.href, {
       waitUntil: "domcontentloaded",
       timeout: options.timeoutMs,
