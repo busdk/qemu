@@ -525,9 +525,11 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   page counts so CI artifacts keep the same boundary shape as local browser
   investigations.  The job defaults to ``QEMU_WASM_BROWSER=chromium`` but can
   be replayed with another Playwright browser name, such as ``firefox``, for
-  matrix investigation.  The job is optional because the acceptable upstream
-  browser image, browser matrix, and runtime cost policy still need maintainer
-  review.
+  matrix investigation.  The smoke result keeps a bounded 60 KiB page-text
+  tail so timeout artifacts preserve enough serial output for guest-progress
+  diagnosis without flooding the job log.  The job is optional because the
+  acceptable upstream browser image, browser matrix, and runtime cost policy
+  still need maintainer review.
   A corrected local Chromium job-shaped run using copied wasm artifacts and a
   pre-populated TuxBoot cache exercised the same memory-probe, guest-helper,
   and browser-runner path in that Playwright image.  The run wrote
