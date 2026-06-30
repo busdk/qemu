@@ -226,6 +226,7 @@ async function capturePageText(page, result, tailBytes) {
   }
   try {
     result.pageStatus = await page.evaluate(() => document.querySelector("#status")?.textContent || "");
+    result.smokeState = await page.evaluate(() => globalThis.qemuWasmSmokeState || null);
     const text = await page.evaluate(() => document.body.textContent || "");
     result.pageTextTail = text.slice(-tailBytes);
   } catch (error) {

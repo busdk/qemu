@@ -466,6 +466,14 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   result JSON recorded ``pageStatus`` as
   ``marker reached: QEMU_WASM_LINUX_BOOT_OK`` and the captured page tail
   contained both kernel command-line records with the appended probe.
+* The browser smoke page now exposes ``qemuWasmSmokeState`` and the runner
+  records it in result JSON.  The state includes emitted serial line count,
+  captured output bytes, whether output was suppressed, whether the marker was
+  seen, and the last emitted line.  A Chromium ``141.0.7390.37`` proof reached
+  the marker after roughly ``79`` seconds and recorded ``170`` emitted lines,
+  ``8601`` captured output bytes, ``outputSuppressed: false``, and
+  ``lastLine`` as ``QEMU_WASM_LINUX_BOOT_OK``.  This gives timeout artifacts a
+  compact progress summary without parsing the full page-text tail.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser

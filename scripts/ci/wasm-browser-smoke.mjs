@@ -109,9 +109,14 @@ async function run() {
   const config = buildConfig();
   const programUrl = new URL(config.program, window.location.href);
   const wasmUrl = new URL(config.wasm, window.location.href);
-  let outputBytes = 0;
-  let outputSuppressed = false;
-  let markerSeen = false;
+  const smokeState = {
+    lines: 0,
+    outputBytes: 0,
+    outputSuppressed: false,
+    markerSeen: false,
+    lastLine: "",
+  };
+  globalThis.qemuWasmSmokeState = smokeState;
   const mounts = [
     { url: config.kernel, path: "/kernel" },
     { url: config.initrd, path: "/initramfs.cpio.gz" },
@@ -127,29 +132,31 @@ async function run() {
   }
 
   const timeout = setTimeout(() => {
-    if (!markerSeen) {
+    if (!smokeState.markerSeen) {
       status.textContent = `timeout waiting for marker: ${config.marker}`;
     }
   }, config.timeoutMs);
 
   const emit = (line) => {
-    if (outputBytes < config.maxOutputBytes) {
+    smokeState.lines += 1;
+    smokeState.lastLine = line;
+    if (smokeState.outputBytes < config.maxOutputBytes) {
       const encoded = new TextEncoder().encode(`${line}\n`);
-      const remaining = config.maxOutputBytes - outputBytes;
+      const remaining = config.maxOutputBytes - smokeState.outputBytes;
       if (encoded.length <= remaining) {
         appendLine(output, line);
-        outputBytes += encoded.length;
+        smokeState.outputBytes += encoded.length;
       } else {
         appendLine(output, new TextDecoder().decode(encoded.slice(0, remaining)));
-        outputBytes += remaining;
+        smokeState.outputBytes += remaining;
       }
     }
-    if (outputBytes >= config.maxOutputBytes && !outputSuppressed) {
-      outputSuppressed = true;
+    if (smokeState.outputBytes >= config.maxOutputBytes && !smokeState.outputSuppressed) {
+      smokeState.outputSuppressed = true;
       appendLine(output, `wasm-browser-smoke: output suppressed after ${config.maxOutputBytes} bytes`);
     }
     if (line.includes(config.marker)) {
-      markerSeen = true;
+      smokeState.markerSeen = true;
       clearTimeout(timeout);
       status.textContent = `marker reached: ${config.marker}`;
     }
@@ -180,7 +187,7 @@ async function run() {
     print: emit,
     printErr: emit,
   });
-  if (!markerSeen) {
+  if (!smokeState.markerSeen) {
     status.textContent = "QEMU started; waiting for marker";
   }
 }
