@@ -3779,7 +3779,12 @@ libqemuutil = static_library('qemuutil',
                              build_by_default: false,
                              sources: util_ss.sources() + stub_ss.sources() + genh,
                              dependencies: [util_ss.dependencies(), libm, threads, glib, socket, malloc, rt, pixman, opengl])
+qemuutil_objects = []
+if host_os == 'emscripten'
+  qemuutil_objects += libqemuutil.extract_objects(emscripten_syscall_sources)
+endif
 qemuutil = declare_dependency(link_with: libqemuutil,
+                              objects: qemuutil_objects,
                               sources: genh + version_res,
                               dependencies: [event_loop_base])
 

@@ -314,6 +314,27 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   This maps the remaining warning to the Emscripten/GLib wakeup path used by
   QEMU's main-loop dependencies rather than to Bus Engine OS, firmware,
   direct QEMU event-notifier calls, or Linux boot state.
+* A QEMU-local Emscripten JavaScript-library shim for ``__syscall_pipe2`` was
+  tested against the same standalone GLib diagnostic and did not suppress the
+  warning.  The effective local fix is a strong C definition of
+  ``__syscall_pipe2`` that overrides Emscripten's weak libc stub and delegates
+  to Emscripten's existing ``__syscall_pipe`` implementation.  The shim treats
+  ``O_CLOEXEC`` as a no-op, matching Emscripten's single-process semantics, and
+  applies ``O_NONBLOCK`` with ``fcntl()`` when requested.
+* Adding that source only to ``libqemuutil.a`` was not sufficient: because no
+  QEMU object referenced the symbol directly, the final static link did not
+  pull the archive member and the generated artifact hashes were unchanged.
+  The working build keeps the source in ``libqemuutil.a`` and also extracts
+  that object into the ``qemuutil`` dependency for Emscripten hosts.
+* The rebuilt wasm64 TCI artifact with the extracted object has
+  ``qemu-system-x86_64.js`` =
+  ``57ea9090acad40b3587c2648df233e1c3560cc20d10d1884b26226c3a23ce3f9`` and
+  ``qemu-system-x86_64.wasm`` =
+  ``10ee623fc6ddb4c49a1b61bb97a0e77d6a06edfccf297d679a8ce1b0ef0287a8``.
+  ``strings`` no longer finds ``unsupported syscall: __syscall_pipe2`` in the
+  wasm module.  A Node.js ``v24`` ``--version`` smoke test passed, and the
+  minimal ``-M none -nodefaults -display none -monitor none -serial none
+  -parallel none -S`` reproducer timed out quietly with no ``pipe2`` warning.
 * ``scripts/ci/wasm-node-smoke.mjs`` now accepts ``--max-output-bytes`` so
   syscall-debug builds and failed boot probes can keep scanning for their
   success marker while suppressing unbounded stdout/stderr after a chosen
@@ -993,11 +1014,10 @@ WASM-016i: Diagnose pthread-worker pipe2 warning
 ------------------------------------------------
 
 Scope:
-  Decide how QEMU should handle the Emscripten/GLib main-context wakeup path
-  that emits ``__syscall_pipe2`` during minimal system-mode startup.  The
-  current evidence shows clean main-thread QEMU ``pipe()`` calls and a
-  standalone GLib main-context diagnostic reproducing the remaining worker
-  warning.
+  Keep QEMU's Emscripten-only strong ``__syscall_pipe2`` override small and
+  maintainable.  The override avoids Emscripten's weak unsupported-syscall
+  warning for GLib main-context wakeups by delegating to Emscripten's existing
+  ``__syscall_pipe`` path and then applying supported ``pipe2`` flags.
 
 Touches:
   Emscripten diagnostic build flags, GLib integration, pthread startup,
@@ -1005,11 +1025,11 @@ Touches:
   diagnostic.
 
 Proof:
-  The branch either includes a targeted Emscripten host fix that avoids the
-  warning without breaking normal POSIX hosts, or documents why the fix belongs
-  in the Emscripten/GLib runtime and records the smallest acceptable upstream
-  patch, workaround, or release-note boundary.  The minimal startup reproducer
-  and standalone GLib diagnostic are both used to verify the chosen path.
+  The standalone GLib diagnostic produces no ``__syscall_pipe2`` warning, the
+  Emscripten configure check passes, the rebuilt wasm64 TCI artifact hashes
+  change, ``strings`` no longer finds the unsupported ``pipe2`` warning in the
+  wasm module, the Node.js ``--version`` smoke passes, and the minimal startup
+  reproducer times out without the previous warning.
 
 Non-goals:
   No guest boot-progress fix, networking, graphics, or browser storage work.

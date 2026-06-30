@@ -1,4 +1,5 @@
 util_ss.add(files('osdep.c', 'cutils.c', 'unicode.c', 'qemu-timer-common.c'))
+emscripten_syscall_sources = []
 util_ss.add(files('thread-context.c'), numa)
 if host_os != 'windows'
   util_ss.add(files('aio-posix.c'))
@@ -10,6 +11,9 @@ if host_os != 'windows'
   util_ss.add(files('event_notifier-posix.c'))
   if host_os != 'emscripten'
     util_ss.add(files('mmap-alloc.c'))
+  else
+    emscripten_syscall_sources = files('emscripten-syscalls.c')
+    util_ss.add(emscripten_syscall_sources)
   endif
   freebsd_dep = []
   if host_os == 'freebsd'
