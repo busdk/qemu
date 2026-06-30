@@ -79,6 +79,8 @@ browser MVP. Keep Bus Engine product work downstream.
   browser harness commit using the same wasm artifacts and guest inputs.
 - [x] Probe the current Chromium stall with reduced guest memory.
 - [x] Probe the current Chromium stall with the simpler `qemu64` CPU model.
+- [x] Probe the current stall under Node.js v24 in both the generic Node image
+  and the pinned QEMU wasm smoke runtime image.
 - [x] Expose browser smoke CI variables for append-extra kernel arguments,
   guest CPU, guest memory, and timeout so Chrome/Chromium diagnostics can be
   replayed without editing CI YAML.
@@ -97,9 +99,9 @@ browser MVP. Keep Bus Engine product work downstream.
   behavior before Playwright launches a browser.
 - [ ] Continue recording browser/runtime versions, commands, results, and
   failure modes in `docs/devel/wasm-support-plan.rst`.
-- [ ] Diagnose the current Chrome/Chromium TCI guest stall where the
-  Playwright container reaches `x86/fpu: x87 FPU will use FXSAVE` and then
-  times out instead of reaching the smoke marker.
+- [ ] Diagnose the current wasm64 TCI guest stall where both Node.js v24 and
+  Chrome/Chromium reach `x86/fpu: x87 FPU will use FXSAVE` and then time out
+  instead of reaching the smoke marker.
 
 ## Bus Engine OS Downstream Proof
 

@@ -646,6 +646,17 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``lastLineChanged: false``.  This means the simpler CPU model that works in
   the Node.js smoke path is not sufficient to make the current Chromium TCI
   browser run progress beyond the FPU line.
+  The same current artifacts were then run through Node.js ``v24.18.0`` in
+  both the cached ``node:24-alpine`` image and the pinned
+  ``/opt/node-qemu-wasm-smoke`` runtime inside
+  ``qemu/emsdk-wasm64-cross:latest``.  Both Node runs timed out at
+  ``240000`` ms with ``107`` serial lines, ``markerSeen: false``, and
+  ``lastLine`` equal to ``x86/fpu: x87 FPU will use FXSAVE``.  This means the
+  current failure is no longer proven to be browser-only; the next diagnostic
+  should compare the current cleaned artifact against an earlier known-good
+  artifact or rebuild from the current source to determine whether the
+  regression is in the artifact, the guest inputs, or the shared wasm64 TCI
+  execution path.
   The browser smoke CI job now exposes
   ``QEMU_WASM_BROWSER_APPEND_EXTRA``, ``QEMU_WASM_BROWSER_CPU``,
   ``QEMU_WASM_BROWSER_MEMORY``, and ``QEMU_WASM_BROWSER_TIMEOUT_MS`` so the
