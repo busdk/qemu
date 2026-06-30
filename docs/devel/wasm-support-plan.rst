@@ -541,7 +541,10 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   run this test.  The same test also verifies the pure result-promotion helper
   that copies browser smoke state into top-level JSON fields such as
   ``phase``, ``failurePhase``, ``qemuCommand``, output counters, marker state,
-  expected-text state, and the last serial line.
+  expected-text state, and the last serial line.  It also covers the runner's
+  URL/query mapping into the browser page, including repeated expected-text
+  and QEMU-argument parameters, rootfs mode, omitted initrd mode, network mode,
+  timeout, and kernel append parameters.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser

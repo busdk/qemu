@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 
 import {
+  browserSmokeUrl,
   isTerminalPageStatus,
   promoteSmokeState,
 } from "./wasm-browser-smoke-runner.mjs";
@@ -75,4 +76,69 @@ for (const status of [
   promoteSmokeState(result, null);
 
   assert.deepEqual(result, { untouched: true });
+}
+
+{
+  const url = browserSmokeUrl({
+    appendExtra: "ignore_loglevel",
+    cpu: "Nehalem",
+    expectText: ["Bus Engine OS", "systemd 261.1"],
+    host: "127.0.0.1",
+    initrd: null,
+    kernelAppend: "console=ttyS0 root=/dev/vda rw",
+    machine: "pc",
+    marker,
+    maxOutputBytes: 60000,
+    memory: "512M",
+    network: "none",
+    port: 8010,
+    qemuArgs: ["-name", "wasm-smoke"],
+    rootfs: "/tmp/rootfs.raw",
+    rootfsDevice: "virtio-pci",
+    timeoutMs: 180000,
+  });
+
+  assert.equal(url.href, "http://127.0.0.1:8010/?" +
+    "appendExtra=ignore_loglevel&" +
+    "cpu=Nehalem&" +
+    "marker=QEMU_WASM_LINUX_BOOT_OK&" +
+    "maxOutputBytes=60000&" +
+    "memory=512M&" +
+    "machine=pc&" +
+    "network=none&" +
+    "rootfsDevice=virtio-pci&" +
+    "kernelAppend=console%3DttyS0+root%3D%2Fdev%2Fvda+rw&" +
+    "expectText=Bus+Engine+OS&" +
+    "expectText=systemd+261.1&" +
+    "initrd=&" +
+    "rootfs=%2Fguest%2Frootfs.raw&" +
+    "qemuArg=-name&" +
+    "qemuArg=wasm-smoke&" +
+    "timeoutMs=180000");
+}
+
+{
+  const url = browserSmokeUrl({
+    appendExtra: "",
+    cpu: "",
+    expectText: [],
+    host: "localhost",
+    initrd: "/tmp/initramfs.cpio.gz",
+    kernelAppend: null,
+    machine: "microvm,acpi=off",
+    marker,
+    maxOutputBytes: 8192,
+    memory: "256M",
+    network: "default",
+    port: 8020,
+    qemuArgs: [],
+    rootfs: null,
+    rootfsDevice: "virtio-mmio",
+    timeoutMs: 30000,
+  });
+
+  assert.equal(url.searchParams.has("initrd"), false);
+  assert.equal(url.searchParams.has("rootfs"), false);
+  assert.equal(url.searchParams.has("kernelAppend"), false);
+  assert.equal(url.searchParams.get("network"), "default");
 }

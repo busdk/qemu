@@ -398,6 +398,35 @@ export function promoteSmokeState(result, smokeState) {
   result.lastLine = smokeState.lastLine;
 }
 
+export function browserSmokeUrl(options) {
+  const url = new URL(`http://${options.host}:${options.port}/`);
+  url.searchParams.set("appendExtra", options.appendExtra);
+  url.searchParams.set("cpu", options.cpu);
+  url.searchParams.set("marker", options.marker);
+  url.searchParams.set("maxOutputBytes", String(options.maxOutputBytes));
+  url.searchParams.set("memory", options.memory);
+  url.searchParams.set("machine", options.machine);
+  url.searchParams.set("network", options.network);
+  url.searchParams.set("rootfsDevice", options.rootfsDevice);
+  if (options.kernelAppend !== null) {
+    url.searchParams.set("kernelAppend", options.kernelAppend);
+  }
+  for (const text of options.expectText) {
+    url.searchParams.append("expectText", text);
+  }
+  if (options.initrd === null) {
+    url.searchParams.set("initrd", "");
+  }
+  if (options.rootfs !== null) {
+    url.searchParams.set("rootfs", "/guest/rootfs.raw");
+  }
+  for (const qemuArg of options.qemuArgs) {
+    url.searchParams.append("qemuArg", qemuArg);
+  }
+  url.searchParams.set("timeoutMs", String(options.timeoutMs));
+  return url;
+}
+
 async function capturePageText(page, result, tailBytes) {
   if (!page) {
     return;
@@ -515,31 +544,7 @@ async function run() {
         failureText: failure && failure.errorText ? failure.errorText : null,
       });
     });
-    const url = new URL(`http://${options.host}:${options.port}/`);
-    url.searchParams.set("appendExtra", options.appendExtra);
-    url.searchParams.set("cpu", options.cpu);
-    url.searchParams.set("marker", options.marker);
-    url.searchParams.set("maxOutputBytes", String(options.maxOutputBytes));
-    url.searchParams.set("memory", options.memory);
-    url.searchParams.set("machine", options.machine);
-    url.searchParams.set("network", options.network);
-    url.searchParams.set("rootfsDevice", options.rootfsDevice);
-    if (options.kernelAppend !== null) {
-      url.searchParams.set("kernelAppend", options.kernelAppend);
-    }
-    for (const text of options.expectText) {
-      url.searchParams.append("expectText", text);
-    }
-    if (options.initrd === null) {
-      url.searchParams.set("initrd", "");
-    }
-    if (options.rootfs !== null) {
-      url.searchParams.set("rootfs", "/guest/rootfs.raw");
-    }
-    for (const qemuArg of options.qemuArgs) {
-      url.searchParams.append("qemuArg", qemuArg);
-    }
-    url.searchParams.set("timeoutMs", String(options.timeoutMs));
+    const url = browserSmokeUrl(options);
     await page.goto(url.href, {
       waitUntil: "domcontentloaded",
       timeout: options.timeoutMs,
