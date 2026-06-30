@@ -866,6 +866,7 @@ smoke-wasm64-64bit-browser:
     paths:
       - ci-runner-env
       - build/wasm-browser-memory-probe.json
+      - build/wasm-browser-smoke.png
       - build/wasm-browser-smoke-result.json
       - build/wasm-browser-smoke-guest/tuxboot-smoke-guest.json
   variables:
@@ -877,6 +878,7 @@ smoke-wasm64-64bit-browser:
     QEMU_WASM_BROWSER_PAGE_TEXT_TAIL_BYTES: 60000
     QEMU_WASM_BROWSER_PROGRESS_SAMPLE_INTERVAL_MS: 10000
     QEMU_WASM_BROWSER_PROGRESS_SAMPLE_LIMIT: 120
+    QEMU_WASM_BROWSER_SCREENSHOT: build/wasm-browser-smoke.png
     QEMU_WASM_BROWSER_TIMEOUT_MS: 180000
     QEMU_WASM_MEMORY_PROBE_PAGES: 16384,32768,49152,65536,98304,131072,262144,524288
   script:
@@ -933,6 +935,7 @@ smoke-wasm64-64bit-browser:
           --page-text-tail-bytes "$QEMU_WASM_BROWSER_PAGE_TEXT_TAIL_BYTES"
           --progress-sample-interval-ms "$QEMU_WASM_BROWSER_PROGRESS_SAMPLE_INTERVAL_MS"
           --progress-sample-limit "$QEMU_WASM_BROWSER_PROGRESS_SAMPLE_LIMIT"
+          --screenshot "$QEMU_WASM_BROWSER_SCREENSHOT"
           --timeout-ms "$QEMU_WASM_BROWSER_TIMEOUT_MS"
     - section_end smoke_browser
 

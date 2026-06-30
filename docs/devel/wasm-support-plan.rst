@@ -637,6 +637,10 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   same Chromium job can replay kernel-argument, CPU-model, memory-size, and
   timeout probes without changing the committed YAML.  The defaults preserve
   the canonical ``Nehalem``/``512M`` smoke shape.
+  The job also requests a default viewport screenshot at
+  ``build/wasm-browser-smoke.png`` and archives it with the JSON artifacts, so
+  both successful and timed-out browser runs preserve the visible terminal
+  page state for review.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser

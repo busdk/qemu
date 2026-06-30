@@ -73,6 +73,9 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Expose browser smoke CI variables for append-extra kernel arguments,
   guest CPU, guest memory, and timeout so Chrome/Chromium diagnostics can be
   replayed without editing CI YAML.
+- [x] Archive a default browser smoke screenshot artifact from CI so every
+  Chrome/Chromium proof or timeout preserves the visible terminal page state
+  next to result JSON.
 - [x] Add Node smoke runtime preflight so unsupported local Node versions fail
   with structured JSON evidence before importing the generated wasm module.
 - [x] Add deterministic Node coverage for the Node smoke runtime preflight
