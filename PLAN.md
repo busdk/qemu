@@ -199,11 +199,11 @@ browser MVP. Keep Bus Engine product work downstream.
   argument generation for `-display wasm`, deterministic Node coverage for the
   new display mode, browser keyboard-event mapping to Linux key codes, and an
   exported QEMU input hook for the focused browser canvas.
-- [ ] Prove the default serial-console regression gate after the `wasm`
+- [x] Prove the default serial-console regression gate after the `wasm`
   display backend lands: DoD is a Chrome/Chromium `display=none` run using the
   rebuilt wasm64 artifact that still reaches the Bus Engine OS serial marker
   and expected `systemd 261.1` text, with result JSON and screenshot evidence.
-- [ ] Add a browser display backend proof for QEMU/WASM: DoD is a generic
+- [x] Add a browser display backend proof for QEMU/WASM: DoD is a generic
   display path that receives QEMU surface updates from the selected emulated
   display device and renders them into a browser canvas or equivalent 2D
   browser surface, with no guest-specific assumptions.
@@ -211,7 +211,7 @@ browser MVP. Keep Bus Engine product work downstream.
   guest test path that produces a known visual frame, captures the browser
   canvas output, and compares stable pixels or a stable image hash while
   preserving the screenshot artifact on failure.
-- [ ] Add browser keyboard input mapping: DoD is a browser-side input bridge
+- [x] Add browser keyboard input mapping: DoD is a browser-side input bridge
   that captures focused keyboard events, maps printable keys, modifiers,
   Enter, Backspace, Tab, Escape, arrows, and function keys to the selected QEMU
   input path, and avoids stealing browser shortcuts that cannot safely be

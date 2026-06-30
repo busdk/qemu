@@ -47,7 +47,7 @@ static void wasm_display_present(int width, int height, const uint8_t *rgba)
         if (!context) {
             return;
         }
-        const src = new Uint8ClampedArray(Module.HEAPU8.buffer, ptr, byteLength);
+        const src = new Uint8ClampedArray(HEAPU8.buffer, ptr, byteLength);
         const pixels = new Uint8ClampedArray(src);
         context.putImageData(new ImageData(pixels, width, height), 0, 0);
         canvas.dataset.qemuWasmDisplayFrames =

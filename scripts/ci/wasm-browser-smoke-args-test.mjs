@@ -12,6 +12,7 @@ import {
   browserRuntimeSnapshot,
   deliverDisplayKeyEvent,
   displayKeyPolicy,
+  emscriptenModuleCanvas,
   installDisplayInputPolicy,
   qemuArgs,
   recordHarnessFailure,
@@ -47,11 +48,15 @@ function valueAfter(args, option) {
 }
 
 class FakeCanvas {
-  constructor() {
+  constructor(ownerDocument = null) {
     this.dataset = {};
+    this.height = 0;
+    this.hidden = false;
+    this.id = "";
     this.listeners = new Map();
-    this.ownerDocument = { activeElement: null };
+    this.ownerDocument = ownerDocument || { activeElement: null };
     this.title = "";
+    this.width = 0;
   }
 
   addEventListener(type, listener) {
@@ -76,6 +81,31 @@ class FakeCanvas {
       this.ownerDocument.activeElement = null;
     }
     this.dispatch("blur");
+  }
+
+  setAttribute(name, value) {
+    this[name] = value;
+  }
+}
+
+class FakeDocument {
+  constructor() {
+    this.activeElement = null;
+    this.elements = new Map();
+    this.body = {
+      appendChild: (element) => {
+        this.elements.set(element.id, element);
+      },
+    };
+  }
+
+  createElement(name) {
+    assert.equal(name, "canvas");
+    return new FakeCanvas(this);
+  }
+
+  getElementById(id) {
+    return this.elements.get(id) || null;
   }
 }
 
@@ -196,6 +226,21 @@ assert.equal(displayKeyPolicy(fakeKeyEvent("Escape")), "release-focus");
 assert.equal(displayKeyPolicy(fakeKeyEvent("l", { ctrlKey: true })), "browser-shortcut");
 assert.equal(displayKeyPolicy(fakeKeyEvent("ArrowUp")), "capture-browser-key");
 assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
+
+{
+  const document = new FakeDocument();
+  const canvas = new FakeCanvas(document);
+  const workerCanvas = emscriptenModuleCanvas("wasm", canvas);
+
+  assert.equal(emscriptenModuleCanvas("sdl", canvas), canvas);
+  assert.notEqual(workerCanvas, canvas);
+  assert.equal(workerCanvas.id, "qemu-wasm-worker-canvas");
+  assert.equal(workerCanvas.hidden, true);
+  assert.equal(workerCanvas.width, 1);
+  assert.equal(workerCanvas.height, 1);
+  assert.equal(emscriptenModuleCanvas("wasm", canvas), workerCanvas);
+  assert.equal(emscriptenModuleCanvas("none", canvas), workerCanvas);
+}
 
 {
   const canvas = new FakeCanvas();

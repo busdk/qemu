@@ -787,7 +787,7 @@ build-wasm64-64bit:
     - job: wasm64-emsdk-cross-container
   variables:
     IMAGE: emsdk-wasm64-cross
-    CONFIGURE_ARGS: --static --cpu=wasm64 --disable-tools --enable-debug
+    CONFIGURE_ARGS: --static --cpu=wasm64 --disable-tools
       --enable-tcg-interpreter --enable-sdl --extra-cflags=-sUSE_SDL=2
       --extra-ldflags=-sUSE_SDL=2
 

@@ -2630,16 +2630,56 @@ Current status:
   ``eb64b63a5e6980df5a66de156a4371ce34931dc6aff7bc04f726798279c7b37a`` for
   ``qemu-system-x86_64.wasm``.
 
-  The rebuilt debug artifact has not yet passed the default serial regression
-  gate.  A Chromium ``149.0.7827.55`` ``display=none`` run against the Bus
-  Engine OS browser-lab inputs wrote
-  ``build/wasm-browser-proof/wasm-display-default-serial-result.json`` and
-  ``build/wasm-browser-proof/wasm-display-default-serial-page.png``.  QEMU
-  started, emitted SeaBIOS output, and stalled at ``Booting from ROM...`` until
-  the 180 second timeout.  It did not reach the ``bus@bus-engine-os`` marker or
-  the expected ``systemd 261.1`` text.  The next accepted proof must therefore
-  restore the default serial marker before the ``display=wasm`` graphics and
-  keyboard proof can be accepted.
+  The optimized rebuilt artifact with the ``display=wasm`` backend preserved
+  the default serial regression gate when run with the accepted Bus Engine OS
+  browser-lab command shape.  The artifact was produced from the current
+  branch in ``/tmp/qemu-wasm-opt-src`` without ``--enable-debug`` and copied
+  to ``build/wasm-artifacts-wasm-display-optimized``.  Its SHA-256 values are
+  ``f0cd3996a1139a697fddc76bd58a90b967e6565ee4e5f3edbd23fdd72b7ecd89`` for
+  ``qemu-system-x86_64.js`` and
+  ``605bb9ebcd71e0febb79864d8f91091673547941265aadb692d1331b2f356287`` for
+  ``qemu-system-x86_64.wasm``.  A Chromium ``141.0.7390.37`` run with
+  ``display=none``, ``--machine pc``, ``--rootfs-device virtio-pci``,
+  ``--kernel-append 'console=ttyS0 root=/dev/vda rw'``, the Bus Engine OS
+  ``bzImage`` SHA-256
+  ``b37cc4f821877ef34d468eeb9504fb6c0738114cff9bb18e030d88a2f4b76943``, and
+  ``rootfs.raw`` SHA-256
+  ``6d2222e0f5c8a1ff2d40808e682ffa5f0995e53c28a0f0af98ed0a96c9d49eae``
+  reached marker ``bus@bus-engine-os`` and the expected ``systemd 261.1`` text
+  in ``148901`` ms.  The run wrote
+  ``build/wasm-browser-proof-current/default-serial-optimized-worker-canvas-result.json``
+  and
+  ``build/wasm-browser-proof-current/default-serial-optimized-worker-canvas-page.png``.
+  It recorded ``crossOriginIsolated: true``, no page errors, no request
+  failures, and ``263`` serial lines.  The screenshot SHA-256 was
+  ``3e4cd507987aea57cf63722daaf20d327333d02304786eebf81f7aa372a11a5f``.
+
+  The same optimized artifact also passed the opt-in browser display proof
+  using ``display=wasm`` and ``-vga std``.  A Chromium ``141.0.7390.37`` run
+  with ``--require-display-output`` reached marker ``bus@bus-engine-os`` and
+  ``systemd 261.1`` in ``154241`` ms.  It wrote
+  ``build/wasm-browser-proof-current/wasm-display-optimized-worker-canvas-result.json``
+  and
+  ``build/wasm-browser-proof-current/wasm-display-optimized-worker-canvas-page.png``.
+  The result recorded an active ``720x400`` 2D browser canvas, backend
+  ``wasm``, ``10599`` display frames, pixel hash ``fnv1a32:fbea30fd``,
+  ``2175`` non-black pixels, ``288000`` non-transparent pixels, no page
+  errors, no request failures, and ``263`` serial lines.  This proves the
+  generic QEMU/WASM canvas backend can receive QEMU display surface updates
+  from an emulated VGA device while the downstream Bus Engine OS serial marker
+  remains reachable.  The screenshot SHA-256 was
+  ``9bb9d7e95195b31016c56949f2b1dba19450b54b5c6c5cae243c19b85d28ac4d``.
+
+  A keyboard-hook proof using the same artifact, ``display=wasm``, ``-vga
+  std``, ``--focus-display``, ``--keyboard-after-text 'systemd 261.1'``, and
+  ``--keyboard-text 'help\n'`` also reached marker ``bus@bus-engine-os``.  It
+  wrote ``build/wasm-browser-proof-current/wasm-display-keyboard-hook-result.json``
+  and ``build/wasm-browser-proof-current/wasm-display-keyboard-hook-page.png``.
+  The result recorded ``12`` delivered key events through the focused browser
+  canvas and exported QEMU input hook, plus ``2157`` non-black display pixels.
+  This proves browser-to-QEMU key delivery metadata.  Deterministic tiny-guest
+  pixel comparison and a guest-visible keyboard response proof remain separate
+  follow-up tasks.
 
 Non-goals:
   No WebGPU, accelerated 3D, or full desktop support.

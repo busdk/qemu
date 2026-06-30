@@ -456,6 +456,27 @@ export function installDisplayInputPolicy(canvas, displayState, inputSink = null
   return policy;
 }
 
+export function emscriptenModuleCanvas(display, canvas) {
+  if (display === "sdl") {
+    return canvas;
+  }
+  if (!["none", "wasm"].includes(display) || !canvas || !canvas.ownerDocument) {
+    return undefined;
+  }
+  const document = canvas.ownerDocument;
+  let workerCanvas = document.getElementById("qemu-wasm-worker-canvas");
+  if (!workerCanvas) {
+    workerCanvas = document.createElement("canvas");
+    workerCanvas.id = "qemu-wasm-worker-canvas";
+    workerCanvas.hidden = true;
+    workerCanvas.width = 1;
+    workerCanvas.height = 1;
+    workerCanvas.setAttribute("aria-hidden", "true");
+    document.body.appendChild(workerCanvas);
+  }
+  return workerCanvas;
+}
+
 function buildConfig() {
   return {
     appendExtra: option("appendExtra", ""),
@@ -676,7 +697,6 @@ async function run() {
   };
   const moduleOptions = {
     arguments: generatedQemuArgs,
-    canvas,
     qemuWasmDisplayCanvas: canvas,
     locateFile(path) {
       if (path === "qemu-system-x86_64.wasm") {
@@ -696,6 +716,10 @@ async function run() {
     print: emit,
     printErr: emit,
   };
+  const moduleCanvas = emscriptenModuleCanvas(config.display, canvas);
+  if (moduleCanvas !== undefined) {
+    moduleOptions.canvas = moduleCanvas;
+  }
   const qemuModule = await moduleFactory(moduleOptions);
   installWasmKeySink(qemuModule);
   if (!smokeState.markerSeen || !allExpectedTextSeen()) {
