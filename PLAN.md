@@ -38,6 +38,10 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Add generic expected serial-text assertions so downstream proofs can
   require OS identity text in addition to a readiness marker.
 - [x] Keep the accepted smoke profile stable while diagnostic arguments vary.
+- [x] Add structured browser smoke phase tracking so result JSON can show
+  whether a failure happened during browser feature validation, guest input
+  loading, QEMU module import, QEMU startup, guest boot, timeout, early QEMU
+  exit, or success.
 - [ ] Continue recording browser/runtime versions, commands, results, and
   failure modes in `docs/devel/wasm-support-plan.rst`.
 

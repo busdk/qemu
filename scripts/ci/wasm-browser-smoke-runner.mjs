@@ -517,7 +517,9 @@ async function run() {
       (marker) => {
         const status = document.querySelector("#status")?.textContent || "";
         return status === `marker reached: ${marker}` ||
-          status.startsWith("program exited before marker:");
+          status.startsWith("program exited before marker:") ||
+          status.startsWith("timeout waiting for ") ||
+          status === "failed";
       },
       options.marker,
       { timeout: options.timeoutMs },

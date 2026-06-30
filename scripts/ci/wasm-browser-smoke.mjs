@@ -165,16 +165,30 @@ async function run() {
   }
   const programUrl = new URL(config.program, window.location.href);
   const wasmUrl = new URL(config.wasm, window.location.href);
+  const startTime = performance.now();
   const smokeState = {
     lines: 0,
     outputBytes: 0,
     outputSuppressed: false,
+    phase: "init",
+    phases: [],
+    startedAtMs: startTime,
     markerSeen: false,
     expectedTextSeen: config.expectText.map((text) => ({ text, seen: false })),
     lastLine: "",
     programExitStatus: null,
   };
   globalThis.qemuWasmSmokeState = smokeState;
+  const setPhase = (phase, message = phase) => {
+    smokeState.phase = phase;
+    smokeState.phases.push({
+      phase,
+      elapsedMs: Math.round(performance.now() - startTime),
+      message,
+    });
+    status.textContent = message;
+  };
+  setPhase("init", "initializing smoke harness");
   const mounts = [
     { url: config.kernel, path: "/kernel" },
     { url: config.qboot, path: "/firmware/qboot.rom" },
@@ -194,6 +208,7 @@ async function run() {
     mounts.push({ url: config.rootfs, path: "/rootfs.raw" });
   }
 
+  setPhase("validate-browser", "validating browser WebAssembly features");
   if (!crossOriginIsolated) {
     throw new Error("cross-origin isolation is required for pthread WebAssembly");
   }
@@ -206,9 +221,9 @@ async function run() {
       const missing = smokeState.expectedTextSeen
         .filter((expected) => !expected.seen)
         .map((expected) => expected.text);
-      status.textContent = missing.length === 0
+      setPhase("timeout", missing.length === 0
         ? `timeout waiting for marker: ${config.marker}`
-        : `timeout waiting for marker or expected text: ${missing.join(", ")}`;
+        : `timeout waiting for marker or expected text: ${missing.join(", ")}`);
     }
   }, config.timeoutMs);
 
@@ -218,7 +233,7 @@ async function run() {
   const maybeComplete = () => {
     if (smokeState.markerSeen && allExpectedTextSeen()) {
       clearTimeout(timeout);
-      status.textContent = `marker reached: ${config.marker}`;
+      setPhase("success", `marker reached: ${config.marker}`);
     }
   };
 
@@ -256,11 +271,11 @@ async function run() {
     ) {
       smokeState.programExitStatus = exitStatus;
       clearTimeout(timeout);
-      status.textContent = `program exited before marker: status ${exitStatus}`;
+      setPhase("program-exit", `program exited before marker: status ${exitStatus}`);
     }
   };
 
-  status.textContent = "loading smoke guest inputs";
+  setPhase("fetch-guest-inputs", "loading smoke guest inputs");
   for (const mount of mounts) {
     mount.data = mount.optional
       ? await fetchOptionalBytes(mount.url)
@@ -268,9 +283,9 @@ async function run() {
   }
   const availableMounts = mounts.filter((mount) => mount.data !== null);
 
-  status.textContent = "loading QEMU WebAssembly module";
+  setPhase("import-qemu-module", "loading QEMU WebAssembly module");
   const moduleFactory = (await import(programUrl.href)).default;
-  status.textContent = "starting QEMU";
+  setPhase("start-qemu", "starting QEMU");
   await moduleFactory({
     arguments: qemuArgs(config),
     locateFile(path) {
@@ -289,11 +304,23 @@ async function run() {
     printErr: emit,
   });
   if (!smokeState.markerSeen || !allExpectedTextSeen()) {
-    status.textContent = "QEMU started; waiting for marker";
+    setPhase("guest-boot", "QEMU started; waiting for marker");
   }
 }
 
 run().catch((error) => {
+  const state = globalThis.qemuWasmSmokeState;
+  if (state) {
+    state.phase = "failed";
+    state.failure = error && error.message ? error.message : String(error);
+    state.phases.push({
+      phase: "failed",
+      elapsedMs: typeof state.startedAtMs === "number"
+        ? Math.round(performance.now() - state.startedAtMs)
+        : 0,
+      message: state.failure,
+    });
+  }
   text("status").textContent = "failed";
   appendLine(text("output"), error && error.stack ? error.stack : String(error));
 });

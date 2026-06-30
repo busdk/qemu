@@ -509,6 +509,17 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``79`` seconds.  Its timeline showed no progress past the FPU line at
   roughly ``40`` and ``50`` seconds, then progress to ``io scheduler kyber
   registered`` by roughly ``60`` seconds, and finally the marker.
+* The browser smoke harness now records a structured phase timeline in
+  ``qemuWasmSmokeState.phases``.  The current phases distinguish browser
+  feature validation, guest input fetches, QEMU module import, QEMU startup,
+  guest boot wait, timeout, early QEMU exit, success, and page-level failure.
+  The Playwright runner treats page-level ``failed`` and
+  ``timeout waiting...`` states as terminal outcomes, so those failures can be
+  captured in result JSON without waiting for the runner's own timeout.  This
+  patch has JavaScript syntax-check evidence in the local development
+  environment; a follow-up Chromium run should record a missing-input
+  negative proof and a success proof with the phase timeline present in
+  ``build/wasm-browser-smoke-result.json``.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
@@ -2128,6 +2139,15 @@ Touches:
 Proof:
   A missing kernel, missing rootfs, unsupported browser feature, and guest
   timeout each produce different messages.
+
+Current status:
+  The browser page now records ``qemuWasmSmokeState.phase`` and a
+  ``qemuWasmSmokeState.phases`` timeline for feature validation, guest input
+  loading, QEMU module import, QEMU startup, guest boot, timeout, early QEMU
+  exit, success, and page-level failure.  The runner now exits promptly when
+  the page reports ``failed`` or ``timeout waiting...``.  The remaining proof
+  work is to run the negative cases under Chromium or Chrome and preserve the
+  resulting JSON artifacts.
 
 Non-goals:
   No product-specific telemetry.
