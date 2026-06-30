@@ -436,6 +436,14 @@ The underlying command shape is::
   and 4 GiB, rejects default-address 8 GiB, and rejects the ``address: "i64"``
   constructor form with ``TypeError: Cannot convert a BigInt value to a
   number``.
+* The same probe under the ``node:24-alpine`` runtime used for the WASM boot
+  smoke tests reported Node.js ``v24.18.0`` with V8
+  ``13.6.233.17-node.50``.  Default-address shared and unshared memories
+  still accepted 1, 2, and 4 GiB and rejected 8 GiB.  The ``address: "i64"``
+  form accepted shared and unshared memories at 1, 2, 4, 8, and 16 GiB, then
+  rejected 32 GiB with an upper bound of ``262144`` WebAssembly pages
+  (16 GiB).  This is useful evidence for the Node.js smoke runtime, but it is
+  not browser compatibility evidence.
 * ``scripts/ci/wasm-browser-memory-probe.html`` and
   ``scripts/ci/wasm-memory-probe-server.mjs`` now provide the matching browser
   probe path.  The server only exposes the probe page and its module, and sets
