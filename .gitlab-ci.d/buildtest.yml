@@ -860,6 +860,8 @@ smoke-wasm64-64bit-browser:
     QEMU_JOB_OPTIONAL: 1
     QEMU_WASM_BROWSER: chromium
     QEMU_WASM_BROWSER_PAGE_TEXT_TAIL_BYTES: 60000
+    QEMU_WASM_BROWSER_PROGRESS_SAMPLE_INTERVAL_MS: 10000
+    QEMU_WASM_BROWSER_PROGRESS_SAMPLE_LIMIT: 120
     QEMU_WASM_MEMORY_PROBE_PAGES: 16384,32768,49152,65536,98304,131072,262144,524288
   script:
     - source scripts/ci/gitlab-ci-section
@@ -900,6 +902,8 @@ smoke-wasm64-64bit-browser:
           --firmware-dir pc-bios
           --out build/wasm-browser-smoke-result.json
           --page-text-tail-bytes "$QEMU_WASM_BROWSER_PAGE_TEXT_TAIL_BYTES"
+          --progress-sample-interval-ms "$QEMU_WASM_BROWSER_PROGRESS_SAMPLE_INTERVAL_MS"
+          --progress-sample-limit "$QEMU_WASM_BROWSER_PROGRESS_SAMPLE_LIMIT"
           --timeout-ms 180000
     - section_end smoke_browser
 
