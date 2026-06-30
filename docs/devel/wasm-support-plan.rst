@@ -682,6 +682,13 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   errors, no request failures, and a viewport screenshot at
   ``/tmp/qemu-wasm-browser-pipe2-final.png`` with SHA-256
   ``c6b0f2f12dcd89facd5e6ac1d4fe4de36a6a9eeb15e434cafff6c06e49fd20b0``.
+  A fresh rerun in the same cached Playwright image with the same artifact
+  hashes reached the marker after ``78781`` ms, again with ``phase:
+  success``, ``170`` serial lines, ``8601`` captured bytes, no page errors,
+  no request failures, ``idleTimeout: null``, result JSON SHA-256
+  ``858a3cd87d753cfbc9700662c73ddaaec8bcd97fe99fbc4246f33d127ce108f2``,
+  and screenshot SHA-256
+  ``c6b0f2f12dcd89facd5e6ac1d4fe4de36a6a9eeb15e434cafff6c06e49fd20b0``.
   Future post-FPU stall investigations should first confirm the artifact
   source and SHA-256 values before changing the browser runner or guest
   command line.
