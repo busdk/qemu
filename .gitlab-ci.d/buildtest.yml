@@ -871,9 +871,13 @@ smoke-wasm64-64bit-browser:
   variables:
     QEMU_JOB_OPTIONAL: 1
     QEMU_WASM_BROWSER: chromium
+    QEMU_WASM_BROWSER_APPEND_EXTRA: ""
+    QEMU_WASM_BROWSER_CPU: Nehalem
+    QEMU_WASM_BROWSER_MEMORY: 512M
     QEMU_WASM_BROWSER_PAGE_TEXT_TAIL_BYTES: 60000
     QEMU_WASM_BROWSER_PROGRESS_SAMPLE_INTERVAL_MS: 10000
     QEMU_WASM_BROWSER_PROGRESS_SAMPLE_LIMIT: 120
+    QEMU_WASM_BROWSER_TIMEOUT_MS: 180000
     QEMU_WASM_MEMORY_PROBE_PAGES: 16384,32768,49152,65536,98304,131072,262144,524288
   script:
     - source scripts/ci/gitlab-ci-section
@@ -918,15 +922,18 @@ smoke-wasm64-64bit-browser:
     - section_start smoke_browser "Running WASM browser boot smoke"
     - node scripts/ci/wasm-browser-smoke-runner.mjs
           --browser "$QEMU_WASM_BROWSER"
+          --append-extra "$QEMU_WASM_BROWSER_APPEND_EXTRA"
           --artifact-dir build
+          --cpu "$QEMU_WASM_BROWSER_CPU"
           --kernel wasm-smoke-cache/tuxboot-x86_64-bzImage
           --initrd build/wasm-browser-smoke-guest/tuxboot-smoke-initramfs.cpio.gz
           --firmware-dir pc-bios
+          --memory "$QEMU_WASM_BROWSER_MEMORY"
           --out build/wasm-browser-smoke-result.json
           --page-text-tail-bytes "$QEMU_WASM_BROWSER_PAGE_TEXT_TAIL_BYTES"
           --progress-sample-interval-ms "$QEMU_WASM_BROWSER_PROGRESS_SAMPLE_INTERVAL_MS"
           --progress-sample-limit "$QEMU_WASM_BROWSER_PROGRESS_SAMPLE_LIMIT"
-          --timeout-ms 180000
+          --timeout-ms "$QEMU_WASM_BROWSER_TIMEOUT_MS"
     - section_end smoke_browser
 
 build-wasm64-32bit:

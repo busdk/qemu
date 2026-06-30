@@ -70,6 +70,9 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Compare the current Chromium stall against the older known-passing
   browser harness commit using the same wasm artifacts and guest inputs.
 - [x] Probe the current Chromium stall with reduced guest memory.
+- [x] Expose browser smoke CI variables for append-extra kernel arguments,
+  guest CPU, guest memory, and timeout so Chrome/Chromium diagnostics can be
+  replayed without editing CI YAML.
 - [x] Add Node smoke runtime preflight so unsupported local Node versions fail
   with structured JSON evidence before importing the generated wasm module.
 - [x] Add deterministic Node coverage for the Node smoke runtime preflight

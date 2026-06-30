@@ -631,6 +631,12 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   simple 512 MiB guest-memory size pressure and confirms that the failure is a
   quiet guest-execution stall after the FPU line in the tested browser
   runtime.
+  The browser smoke CI job now exposes
+  ``QEMU_WASM_BROWSER_APPEND_EXTRA``, ``QEMU_WASM_BROWSER_CPU``,
+  ``QEMU_WASM_BROWSER_MEMORY``, and ``QEMU_WASM_BROWSER_TIMEOUT_MS`` so the
+  same Chromium job can replay kernel-argument, CPU-model, memory-size, and
+  timeout probes without changing the committed YAML.  The defaults preserve
+  the canonical ``Nehalem``/``512M`` smoke shape.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
