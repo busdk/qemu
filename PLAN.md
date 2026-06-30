@@ -237,6 +237,10 @@ browser MVP. Keep Bus Engine product work downstream.
   visible graphical or framebuffer-backed state, accepts a deterministic
   keyboard sequence, preserves serial and screenshot evidence, and records any
   limitations separately from the already accepted serial-console proof.
+  Current partial evidence: Bus Engine OS reaches a visible browser canvas and
+  QEMU reports focused-canvas key events as received, drained, and sent. The
+  remaining acceptance gap is a guest-visible response to the deterministic
+  keyboard sequence.
 - [ ] Update the browser MVP acceptance definition after graphics/input proof:
   DoD is that the MVP is no longer described as serial-console-only; it
   requires 64-bit QEMU/WASM boot, visible graphics output, keyboard input,

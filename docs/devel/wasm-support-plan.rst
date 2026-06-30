@@ -2727,6 +2727,34 @@ Current status:
   ``build/wasm-browser-proof-current/default-serial-qkbd-result.json`` and
   ``build/wasm-browser-proof-current/default-serial-qkbd-page.png``.
 
+  A downstream Bus Engine OS browser run with the same rebuilt artifact passed
+  the visible display and QEMU-side keyboard delivery gates.  The accepted
+  Bus Engine OS artifacts were recovered from Docker volume
+  ``bus-engine-os-x86_64-minimal-qemu-20260629T051004Z-4062057`` with the
+  previously recorded SHA-256 values: ``bzImage``
+  ``b37cc4f821877ef34d468eeb9504fb6c0738114cff9bb18e030d88a2f4b76943`` and
+  ``rootfs.raw``
+  ``6d2222e0f5c8a1ff2d40808e682ffa5f0995e53c28a0f0af98ed0a96c9d49eae``.
+  Chromium ``149.0.7827.55`` ran ``display=wasm`` with ``-vga std``,
+  ``--rootfs-device virtio-pci``, ``--kernel-append 'console=ttyS0
+  root=/dev/vda rw'``, ``--keyboard-after-text 'systemd 261.1'``, and
+  ``--keyboard-text 'help\n'``.  The run reached marker
+  ``Bus Engine OS 0.1.0`` in ``143831`` ms and observed expected serial text
+  ``systemd 261.1``.  It wrote
+  ``build/wasm-browser-proof-current/bus-engine-os-display-keyboard-qkbd-result.json``
+  and
+  ``build/wasm-browser-proof-current/bus-engine-os-display-keyboard-qkbd-page.png``.
+  The screenshot SHA-256 was
+  ``3794ff2f92c64c2209a793544f7c16faba5aed5ca48b944a898e33079e9da20c``.
+  The result recorded a focused ``720x400`` 2D canvas, backend ``wasm``,
+  ``9977`` frames, pixel hash ``fnv1a32:fbea30fd``, ``2175`` non-black pixels,
+  ten delivered browser key events, and QEMU key counters
+  ``received=10``, ``dropped=0``, ``drained=10``, and ``sent=10``.  This proves
+  the downstream Bus Engine OS browser-visible graphics path and QEMU-side
+  input delivery.  It still does not prove a guest-visible response to the
+  typed sequence, so the Bus Engine OS graphics/keyboard acceptance item
+  remains open.
+
 Non-goals:
   No WebGPU, accelerated 3D, or full desktop support.
 
