@@ -103,6 +103,7 @@ for (const status of [
     expectText: ["Bus Engine OS", "systemd 261.1"],
     host: "127.0.0.1",
     initrd: null,
+    idleAfterText: "",
     kernelAppend: "console=ttyS0 root=/dev/vda rw",
     idleTimeoutMs: 0,
     machine: "pc",
@@ -168,6 +169,7 @@ for (const status of [
     browser: "chromium",
     cpu: "Nehalem",
     expectText: ["Bus Engine OS"],
+    idleAfterText: "",
     kernelAppend: "console=ttyS0 root=/dev/vda rw",
     idleTimeoutMs: 0,
     machine: "pc",
@@ -188,6 +190,7 @@ for (const status of [
   assert.equal(result.browser, "chromium");
   assert.equal(result.browserVersion, "HeadlessChrome/141.0.7390.37");
   assert.equal(result.network, "none");
+  assert.equal(result.idleAfterText, "");
   assert.equal(result.idleTimeoutMs, 0);
   assert.equal(result.rootfsDevice, "virtio-pci");
   assert.equal(result.maxDiagnosticEntries, 50);
@@ -359,8 +362,10 @@ for (const status of [
     },
   ];
   assert.equal(serialIdleDiagnostic(samples, 25000), null);
+  assert.equal(serialIdleDiagnostic(samples, 20000, "Run /init"), null);
   assert.deepEqual(serialIdleDiagnostic(samples, 20000), {
     idle: true,
+    idleAfterText: "",
     idleMs: 20000,
     idleSinceElapsedMs: 10000,
     idleTimeoutMs: 20000,
@@ -368,6 +373,19 @@ for (const status of [
     outputBytes: 5000,
     outputLines: 100,
   });
+  assert.deepEqual(
+    serialIdleDiagnostic(samples, 20000, "x87 FPU will use FXSAVE"),
+    {
+      idle: true,
+      idleAfterText: "x87 FPU will use FXSAVE",
+      idleMs: 20000,
+      idleSinceElapsedMs: 10000,
+      idleTimeoutMs: 20000,
+      lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+      outputBytes: 5000,
+      outputLines: 100,
+    },
+  );
   assert.equal(serialIdleDiagnostic([
     ...samples,
     {
@@ -390,6 +408,7 @@ for (const status of [
     outputLines: 107,
     idleTimeout: {
       idle: true,
+      idleAfterText: "x87 FPU will use FXSAVE",
       idleMs: 20000,
       idleSinceElapsedMs: 220000,
       idleTimeoutMs: 20000,
@@ -454,6 +473,7 @@ for (const status of [
     firstRequestFailure: null,
     idleTimeout: {
       idle: true,
+      idleAfterText: "x87 FPU will use FXSAVE",
       idleMs: 20000,
       idleSinceElapsedMs: 220000,
       idleTimeoutMs: 20000,

@@ -37,6 +37,9 @@ Options:
   --idle-timeout-ms MS
                      Fail when serial output is idle for this long
                      after guest output has started (default: disabled)
+  --idle-after-text TEXT
+                     Only apply --idle-timeout-ms while the last serial line
+                     contains this text
   --initrd FILE       Smoke initramfs image
   --kernel FILE       64-bit Linux bzImage
   --kernel-append TEXT
@@ -79,6 +82,7 @@ function parseArgs(argv) {
     firmwareDir: "pc-bios",
     guestManifest: null,
     host: "127.0.0.1",
+    idleAfterText: "",
     idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
     initrd: null,
     kernel: null,
@@ -131,6 +135,9 @@ function parseArgs(argv) {
     } else if (arg === "--idle-timeout-ms") {
       options.idleTimeoutMs = Number(argv[++i]);
       explicit.add("idleTimeoutMs");
+    } else if (arg === "--idle-after-text") {
+      options.idleAfterText = argv[++i];
+      explicit.add("idleAfterText");
     } else if (arg === "--initrd") {
       options.initrd = argv[++i];
       explicit.add("initrd");
@@ -227,6 +234,7 @@ function parseArgs(argv) {
       "cpu",
       "firmwareDir",
       "host",
+      "idleAfterText",
       "initrd",
       "kernel",
       "kernelAppend",
@@ -385,13 +393,19 @@ function sameSerialProgress(left, right) {
     left.lastLine === right.lastLine;
 }
 
-export function serialIdleDiagnostic(samples, idleTimeoutMs) {
+export function serialIdleDiagnostic(samples, idleTimeoutMs, idleAfterText = "") {
   if (!Number.isInteger(idleTimeoutMs) || idleTimeoutMs <= 0) {
     return null;
   }
   const current = lastEntry(samples);
   const currentSignature = serialProgressSignature(current);
   if (current === null || currentSignature === null) {
+    return null;
+  }
+  if (
+    idleAfterText !== "" &&
+    !currentSignature.lastLine.includes(idleAfterText)
+  ) {
     return null;
   }
 
@@ -411,6 +425,7 @@ export function serialIdleDiagnostic(samples, idleTimeoutMs) {
   }
   return {
     idle: true,
+    idleAfterText,
     idleMs,
     idleSinceElapsedMs,
     idleTimeoutMs,
@@ -641,6 +656,7 @@ export function initialSmokeResult(options, browserVersion) {
     marker: options.marker,
     memory: options.memory,
     network: options.network,
+    idleAfterText: options.idleAfterText,
     idleTimeoutMs: options.idleTimeoutMs,
     timeoutMs: options.timeoutMs,
     pageTextTailBytes: options.pageTextTailBytes,
@@ -808,6 +824,7 @@ async function run() {
       const idle = serialIdleDiagnostic(
         result.progressSamples,
         options.idleTimeoutMs,
+        options.idleAfterText,
       );
       if (idle !== null) {
         result.idleTimeout = idle;

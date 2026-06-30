@@ -81,15 +81,20 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Probe the current Chromium stall with the simpler `qemu64` CPU model.
 - [x] Probe the current stall under Node.js v24 in both the generic Node image
   and the pinned QEMU wasm smoke runtime image.
+- [x] Compare the post-FPU stall artifact against later saved wasm64 TCI
+  artifacts and confirm that `optimized` and `pipe2-final` boot the same
+  64-bit smoke guest under Node.js v24.
+- [x] Re-run Chrome/Chromium with the accepted `pipe2-final` artifact and
+  confirm the browser proof still reaches `QEMU_WASM_LINUX_BOOT_OK`.
 - [x] Expose browser smoke CI variables for append-extra kernel arguments,
   guest CPU, guest memory, and timeout so Chrome/Chromium diagnostics can be
   replayed without editing CI YAML.
 - [x] Archive a default browser smoke screenshot artifact from CI so every
   Chrome/Chromium proof or timeout preserves the visible terminal page state
   next to result JSON.
-- [x] Add an optional browser smoke serial-idle watchdog so Chrome/Chromium
-  stall probes can fail with explicit no-progress evidence before the full
-  marker timeout.
+- [x] Add an optional browser smoke serial-idle watchdog, with optional
+  last-line text gating, so Chrome/Chromium stall probes can fail with
+  explicit no-progress evidence before the full marker timeout.
 - [x] Add Node smoke runtime preflight so unsupported local Node versions fail
   with structured JSON evidence before importing the generated wasm module.
 - [x] Add deterministic Node coverage for the Node smoke runtime preflight
@@ -102,7 +107,7 @@ browser MVP. Keep Bus Engine product work downstream.
   behavior before Playwright launches a browser.
 - [ ] Continue recording browser/runtime versions, commands, results, and
   failure modes in `docs/devel/wasm-support-plan.rst`.
-- [ ] Diagnose the current wasm64 TCI guest stall where both Node.js v24 and
+- [x] Diagnose the wasm64 TCI guest stall where both Node.js v24 and
   Chrome/Chromium reach `x86/fpu: x87 FPU will use FXSAVE` and then time out
   instead of reaching the smoke marker.
 

@@ -651,12 +651,40 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``/opt/node-qemu-wasm-smoke`` runtime inside
   ``qemu/emsdk-wasm64-cross:latest``.  Both Node runs timed out at
   ``240000`` ms with ``107`` serial lines, ``markerSeen: false``, and
-  ``lastLine`` equal to ``x86/fpu: x87 FPU will use FXSAVE``.  This means the
-  current failure is no longer proven to be browser-only; the next diagnostic
-  should compare the current cleaned artifact against an earlier known-good
+  ``lastLine`` equal to ``x86/fpu: x87 FPU will use FXSAVE``.  This meant the
+  failure was no longer proven to be browser-only; the next diagnostic was to
+  compare that cleaned artifact against an earlier known-good
   artifact or rebuild from the current source to determine whether the
   regression is in the artifact, the guest inputs, or the shared wasm64 TCI
   execution path.
+  That comparison resolved the stall as artifact-specific rather than a
+  current harness or guest-input failure.  The failing artifact set was
+  ``/tmp/qemu-wasm64-tci-artifacts-after-syscall-cleanup`` with
+  ``qemu-system-x86_64.js`` SHA-256
+  ``a072f5c3280a7d832dd7511c8ef7a961a43a2ce009f0658702965553298ba697`` and
+  ``qemu-system-x86_64.wasm`` SHA-256
+  ``7666234b6325366b4ff9fc0e0bb91f08d1ad71803e5ee12da4531022017f2a33``.
+  Running the same TuxBoot kernel, helper initramfs, firmware directory,
+  ``Nehalem`` CPU model, and Node.js ``v24.18.0`` runtime with
+  ``/tmp/qemu-wasm64-tci-artifacts-optimized`` reached
+  ``QEMU_WASM_LINUX_BOOT_OK`` after ``80088`` ms.  Running the same command
+  with ``/tmp/qemu-wasm64-tci-artifacts-pipe2-final`` reached the marker after
+  ``76632`` ms.  The ``pipe2-final`` artifact hashes were
+  ``57ea9090acad40b3587c2648df233e1c3560cc20d10d1884b26226c3a23ce3f9`` for
+  ``qemu-system-x86_64.js`` and
+  ``10ee623fc6ddb4c49a1b61bb97a0e77d6a06edfccf297d679a8ce1b0ef0287a8`` for
+  ``qemu-system-x86_64.wasm``.
+  A headless Chromium proof in the Playwright ``v1.56.1`` Noble image with
+  Chromium ``141.0.7390.37`` also reached
+  ``QEMU_WASM_LINUX_BOOT_OK`` with the ``pipe2-final`` artifact after
+  ``83625`` ms.  The browser result recorded ``crossOriginIsolated: true``,
+  ``phase: success``, ``170`` serial lines, ``8601`` captured bytes, no page
+  errors, no request failures, and a viewport screenshot at
+  ``/tmp/qemu-wasm-browser-pipe2-final.png`` with SHA-256
+  ``c6b0f2f12dcd89facd5e6ac1d4fe4de36a6a9eeb15e434cafff6c06e49fd20b0``.
+  Future post-FPU stall investigations should first confirm the artifact
+  source and SHA-256 values before changing the browser runner or guest
+  command line.
   The browser smoke CI job now exposes
   ``QEMU_WASM_BROWSER_APPEND_EXTRA``, ``QEMU_WASM_BROWSER_CPU``,
   ``QEMU_WASM_BROWSER_MEMORY``, and ``QEMU_WASM_BROWSER_TIMEOUT_MS`` so the
@@ -672,8 +700,12 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   The default is ``0`` so canonical smoke behavior is unchanged.  When a
   diagnostic run enables it, repeated progress samples with unchanged serial
   output produce an ``idleTimeout`` result summary containing the idle
-  duration, the last serial line, output byte count, and line count.  This is
-  intended for Chrome/Chromium probes of the current post-FPU stall.
+  duration, the last serial line, output byte count, and line count.
+  ``--idle-after-text`` and ``QEMU_WASM_BROWSER_IDLE_AFTER_TEXT`` can further
+  restrict the watchdog to samples whose current last serial line contains a
+  chosen diagnostic string, such as ``x87 FPU will use FXSAVE``.  This lets
+  Chrome/Chromium stall probes target a known stop point without changing
+  canonical smoke behavior.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
