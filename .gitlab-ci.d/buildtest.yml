@@ -820,6 +820,10 @@ smoke-wasm64-64bit-linux:
     - cp /proc/meminfo ci-runner-env/meminfo.txt
     - export PATH="/opt/node-qemu-wasm-smoke/bin:$PATH"
     - node --version
+    - section_start smoke_args "Checking WASM browser smoke helpers"
+    - node scripts/ci/wasm-browser-smoke-args-test.mjs
+    - node scripts/ci/wasm-browser-smoke-runner-test.mjs
+    - section_end smoke_args
     - section_start smoke_guest "Preparing WASM smoke guest"
     - python3 scripts/ci/wasm-prepare-tuxboot-smoke-guest.py
           --cache-dir wasm-smoke-cache

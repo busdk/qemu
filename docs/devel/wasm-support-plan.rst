@@ -529,15 +529,16 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   smoke QEMU argument builder and verifies the deterministic command shape for
   initrd boot, default no-network mode, rootfs boot through ``virtio-mmio``,
   rootfs boot through ``virtio-pci``, appended kernel arguments, and extra
-  trailing QEMU arguments.  The browser CI job runs this test before the
-  memory probe and boot smoke so command-line regressions fail before the
-  expensive Chromium path starts.
+  trailing QEMU arguments.  The Node Linux smoke job and the browser CI job
+  run this test before the boot smoke so command-line regressions fail before
+  the expensive guest boot or Chromium paths start.
 * ``scripts/ci/wasm-browser-smoke-runner-test.mjs`` now verifies the browser
   runner's terminal page-status predicate.  It covers success, early QEMU
   exit, timeout, page-level failure, active startup phases, and marker
   mismatches.  The runner injects the same helper into the Playwright page
   before navigation, so the browser wait condition and the deterministic Node
-  test share one predicate.
+  test share one predicate.  The Node Linux smoke job and browser CI job both
+  run this test.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
