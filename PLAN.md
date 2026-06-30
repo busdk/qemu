@@ -2,6 +2,9 @@
 
 This branch tracks upstreamable QEMU WebAssembly host support for the 64-bit
 browser MVP. Keep Bus Engine product work downstream.
+Finish the unchecked `PLAN.md` items first. Only when the active plan is empty
+or blocked on a concrete external dependency should the next highest-value
+item be moved from `FUTURE_WORK.md` into this file and then implemented.
 
 ## Current Direction
 
@@ -43,6 +46,20 @@ App Server remain downstream proof payloads.
   structured health request, the guest returns a structured response, and the
   result JSON records bridge readiness, request id, response status, timeout,
   serial context, and screenshot.
+- [ ] Add generic browser power-control plumbing: DoD is a browser API and
+  harness path for graceful shutdown, graceful reboot, and clearly separated
+  forced power-off/reset operations; the implementation prefers guest-visible
+  ACPI or selected control-channel requests where available; result JSON
+  records requested operation, delivery path, guest acknowledgement when
+  available, QEMU exit/reset state, timeout, and screenshot evidence; and the
+  default serial/display smoke path remains unchanged unless a power operation
+  is explicitly requested.
+- [ ] Add generic suspend/resume planning for browser-hosted QEMU state:
+  DoD is a developer note describing which QEMU state can be saved in the
+  browser runtime, which browser storage APIs are candidates, which manifest
+  fields must match before restore, how incompatible state is rejected, and why
+  native QEMU managed save remains the first acceptance target before browser
+  persistence claims.
 - [ ] Add downstream handoff documentation for Bus Engine OS service proofs:
   DoD is documentation explaining how a downstream guest such as Bus Engine OS
   can expose an in-guest agent/service runtime through the generic bridge,
@@ -150,7 +167,7 @@ App Server remain downstream proof payloads.
 
 - [x] Treat Bus Engine OS as the downstream proof guest, not as upstream QEMU
   test data.
-- [x] Define the Bus Engine OS browser-lab guest artifact contract:
+- [x] Define the Bus Engine OS browser-hosted guest artifact contract:
   kernel, initramfs or rootfs/disk image, firmware inputs, checksums, memory
   size, CPU model, boot arguments, readiness marker, and expected serial text.
 - [x] Use the existing Bus Engine OS `virtual-server` profile as the first
@@ -213,7 +230,7 @@ App Server remain downstream proof payloads.
   variables, both browser runners use it, and deterministic Node coverage
   verifies package loading and executable selection.
 - [x] Capture the first downstream SDL/browser blocker against the existing
-  Bus Engine browser-lab artifacts: DoD is Chrome/Chromium result JSON and a
+  Bus Engine browser-hosted artifacts: DoD is Chrome/Chromium result JSON and a
   screenshot showing that `display=sdl` plus `stdvga` starts the browser path
   but fails before the serial marker with an Emscripten WebGL context error,
   and the documented next build fix is OffscreenCanvas support for pthreaded

@@ -2208,7 +2208,7 @@ Current status:
   Bus Engine OS currently documents ``bus engine os build image`` as the normal
   full-system build command and ``virtual-server`` as the accepted
   console-oriented QEMU image profile.  The first downstream proof should
-  consume that x86_64 profile, or a browser-lab derivative with the same
+  consume that x86_64 profile, or a browser-hosted derivative with the same
   console-first boundary, and define the artifact handoff as kernel image,
   root filesystem or raw disk, firmware inputs, checksums, boot arguments,
   memory size, CPU model, readiness marker, and expected serial identity text.
@@ -2219,7 +2219,7 @@ Current status:
   manifest only as generic guest input metadata.
   The expected downstream build command is
   ``bus engine os build image --profile virtual-server``.  Bus Engine OS
-  selects the host architecture by default, so x86_64 browser-lab artifacts do
+  selects the host architecture by default, so x86_64 browser-hosted artifacts do
   not require an explicit ``--target-arch`` on an x86_64 build host.  The
   downstream artifact export should provide the kernel, raw root filesystem or
   disk image, checksums, kernel arguments, machine model, rootfs device mode,
@@ -2573,7 +2573,7 @@ Current status:
   ``display=none`` smoke path still uses the serial marker as its only success
   oracle.
 
-  A Chrome/Chromium run against the existing Bus Engine browser-lab artifacts
+  A Chrome/Chromium run against the existing Bus Engine browser-hosted artifacts
   was captured in ``build/wasm-browser-proof/stdvga-webgl-sampler-result.json``
   with ``--display sdl --display-device stdvga --require-display-output``.
   That run reached QEMU startup and created the SDL canvas, but it did not
@@ -2594,7 +2594,7 @@ Current status:
   for ``qemu-system-x86_64.wasm``.  The configure summary reported
   ``SDL support: YES 2.0.10`` and the link flags included
   ``-sOFFSCREENCANVAS_SUPPORT=1`` and ``-sOFFSCREEN_FRAMEBUFFER=1``.  Running
-  that artifact in Chromium ``149.0.0.0`` against the Bus Engine OS browser-lab
+  that artifact in Chromium ``149.0.0.0`` against the Bus Engine OS browser-hosted
   inputs wrote ``build/wasm-browser-proof/display-current-result.json`` and
   ``build/wasm-browser-proof/display-current-page.png``.  It reached QEMU
   startup and created the focused SDL canvas, but the page reported
@@ -2633,7 +2633,7 @@ Current status:
 
   The optimized rebuilt artifact with the ``display=wasm`` backend preserved
   the default serial regression gate when run with the accepted Bus Engine OS
-  browser-lab command shape.  The artifact was produced from the current
+  browser-hosted command shape.  The artifact was produced from the current
   branch in ``/tmp/qemu-wasm-opt-src`` without ``--enable-debug`` and copied
   to ``build/wasm-artifacts-wasm-display-optimized``.  Its SHA-256 values are
   ``f0cd3996a1139a697fddc76bd58a90b967e6565ee4e5f3edbd23fdd72b7ecd89`` for
@@ -2867,7 +2867,7 @@ Proof:
   browser harness, tests, native TCG backend, QMP, networking, and graphics.
 
 Non-goals:
-  No monolithic Browser Lab patch.
+  No monolithic browser-hosted Engine OS patch.
 
 WASM-035: Keep downstream integration separate
 ----------------------------------------------
@@ -3065,7 +3065,7 @@ Work items:
   * Keep QMP out of the first boot proof unless the serial path requires it.
   * Design a JavaScript-accessible QMP bridge after the serial boot proof.
   * Preserve QMP JSON semantics; do not describe QMP as REST.
-  * Avoid downstream QMP extensions for Browser Lab unless a generic QEMU
+  * Avoid downstream QMP extensions for browser-hosted Engine OS unless a generic QEMU
     extension is accepted.
 
 Acceptance:
@@ -3158,7 +3158,7 @@ The following work belongs outside upstream QEMU:
 
 The downstream integration may use the upstream QEMU browser artifact as:
 
-* a Browser Lab runtime;
+* a browser-hosted Engine OS runtime;
 * a documentation and support reproduction environment;
 * a serial-console test target;
 * the emulator behind a Bus Engine OS product-page preview on
@@ -3195,7 +3195,7 @@ Open decisions
 Current browser input invariant
 ===============================
 
-The Browser Lab harness must not use browser modal dialogs as an input path.
+The browser-hosted Engine OS harness must not use browser modal dialogs as an input path.
 Emscripten's generated fallback can call ``window.prompt("Input: ")`` when
 stdin is read in a browser, and some abort paths can request an
 abort/retry/ignore decision through ``window.prompt``.  The harness now passes
@@ -3210,5 +3210,5 @@ Current browser startup indication invariant
 The browser harness must draw an explicit startup frame on the display canvas
 before guest graphics or serial output become visible.  The current harness
 shows status frames while guest files load, the QEMU WebAssembly runtime loads,
-and QEMU starts.  This keeps Browser Lab iframe users from seeing a blank black
+and QEMU starts.  This keeps browser-hosted Engine OS iframe users from seeing a blank black
 display during large WASM/rootfs fetches and early emulator startup.
