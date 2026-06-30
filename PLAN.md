@@ -14,6 +14,41 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Keep the browser MVP focused on Chrome/Chromium. Treat Firefox and
   WebKit as compatibility tracking after the accepted Bus Engine OS proof.
 
+## Active Browser Service Bridge Work
+
+The next active QEMU/WASM goal is a generic browser-to-guest service bridge
+that lets a browser frontend communicate with services running inside the
+emulated guest. Keep this generic QEMU infrastructure; Bus Engine OS and Codex
+App Server remain downstream proof payloads.
+
+- [ ] Define the browser-to-guest service bridge design: DoD is a developer
+  note comparing serial console messages, QMP, virtio-console, virtio-vsock,
+  9p/virtfs request files, browser networking, and worker `postMessage` for
+  structured browser/frontend-to-guest service calls; selects the MVP channel;
+  documents why no arbitrary host networking is promised; and records the
+  security and origin-isolation assumptions for Chrome/Chromium.
+- [ ] Extend the browser harness manifest for service bridge metadata: DoD is
+  generic manifest fields for bridge kind, request/response channel names,
+  readiness marker, health request, timeout, maximum payload size, and whether
+  the bridge is interactive-only or suitable for automated smoke tests, with
+  deterministic Node coverage for parsing and validation.
+- [ ] Implement the selected generic service bridge in the browser harness:
+  DoD is a browser-side API that frontend code can call through a constrained
+  JavaScript interface or iframe `postMessage`, worker-to-QEMU plumbing for
+  the selected guest channel, structured request/response correlation,
+  timeout/error reporting, and no product-specific service names in QEMU code.
+- [ ] Prove the service bridge with a tiny generic guest service: DoD is a
+  Chrome/Chromium smoke run where a minimal 64-bit guest starts a small
+  echo/health service on the selected guest channel, the browser sends a
+  structured health request, the guest returns a structured response, and the
+  result JSON records bridge readiness, request id, response status, timeout,
+  serial context, and screenshot.
+- [ ] Add downstream handoff documentation for Bus Engine OS service proofs:
+  DoD is documentation explaining how a downstream guest such as Bus Engine OS
+  can expose an in-guest agent/service runtime through the generic bridge,
+  which fields belong in the guest manifest, how frontend applications should
+  discover the bridge, and which claims remain downstream responsibilities.
+
 ## MVP Generic QEMU Work
 
 - [x] Add artifact capture for `qemu-system-x86_64.js` and

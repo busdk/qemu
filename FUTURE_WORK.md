@@ -73,8 +73,10 @@ active goal.
 
 ## Browser Control And Runtime Research
 
-- [ ] Add QMP or structured browser-control integration after the interactive
-  graphics and keyboard MVP is stable.
+- [ ] Evaluate richer QMP integration after the active browser service bridge
+  proves the first structured guest-service path. DoD is a decision on whether
+  QMP remains only VM control plumbing or becomes part of the public browser
+  controller surface, without replacing the accepted guest-service bridge.
 - [ ] Add networking support after the no-network MVP is accepted.
 - [ ] Add browser persistence after the no-persistence MVP is accepted.
 - [ ] Evaluate WebGPU and accelerated 3D after the 2D browser display path is
