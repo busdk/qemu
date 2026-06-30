@@ -344,6 +344,51 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   state alive after QEMU exits.  The smoke helper therefore waits for an
   expected output marker and then exits explicitly.  Long-running boot tests
   need their own shutdown path instead of assuming Node will exit naturally.
+* The first post-``pipe2`` Linux boot probes confirmed that the original
+  ``-M microvm`` command reached Linux early console and ``VFS: Finished
+  mounting rootfs on nullfs`` but timed out before the initramfs marker.  A
+  qboot probe using ``-M microvm,acpi=off`` plus ``noapic nolapic`` moved
+  farther through kernel initialization, but a native control showed that
+  those ``noapic`` flags are a bad smoke baseline: native QEMU reached
+  ``Run /init as init process`` but did not print the marker, even with an
+  initramfs that echoes before mounting ``proc`` or ``sysfs``.
+* The canonical 64-bit TCI smoke path is now ``-M microvm,acpi=off`` with
+  APIC left enabled, ``qboot.rom`` and ``linuxboot_dma.bin`` mounted in
+  ``/firmware``, explicit ``-serial mon:stdio``, and the kernel arguments
+  ``console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off
+  hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1``.
+  Native QEMU with that profile reached ``QEMU_WASM_LINUX_BOOT_OK``.
+* The same APIC-enabled qboot profile booted the cleaned wasm64 TCI artifact
+  under Node.js ``v24`` in Docker.  The run reached Linux, unpacked the
+  initramfs, registered ``ttyS0``, ran ``/init``, and printed
+  ``QEMU_WASM_LINUX_BOOT_OK`` before the 180 second timeout.  No
+  ``__syscall_pipe2`` warning appeared.  The passing run used the artifact set
+  ``/tmp/qemu-wasm64-tci-artifacts-pipe2-final`` with the hashes recorded
+  above.
+
+The current passing Node.js smoke command shape is::
+
+  docker run --rm \
+    -v "$PWD:/qemu:ro" \
+    -v /tmp/qemu-wasm64-tci-artifacts-pipe2-final:/artifacts:ro \
+    -v /boot:/host-boot:ro \
+    -v /tmp/qemu-wasm-guest:/guest:ro \
+    -w /qemu node:24-alpine \
+    node scripts/ci/wasm-node-smoke.mjs \
+      --artifact-dir /artifacts \
+      --max-output-bytes 60000 \
+      --timeout-ms 180000 \
+      --marker QEMU_WASM_LINUX_BOOT_OK \
+      --mount-file /host-boot/vmlinuz-7.1.0:/kernel \
+      --mount-file /guest/initramfs.cpio.gz:/initramfs.cpio.gz \
+      --mount-file pc-bios/qboot.rom:/firmware/qboot.rom \
+      --mount-file pc-bios/linuxboot_dma.bin:/firmware/linuxboot_dma.bin \
+      -- -M microvm,acpi=off -m 512M -accel tcg,thread=single \
+        -nographic -serial mon:stdio -monitor none \
+        -kernel /kernel -initrd /initramfs.cpio.gz \
+        -append 'console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1' \
+        -L /firmware
+
 * A local Node.js ``v22.19.0`` memory-constructor probe accepted shared and
   unshared ``WebAssembly.Memory`` at ``32768`` pages and ``65536`` pages, then
   rejected ``131072`` pages with ``RangeError: WebAssembly.Memory(): Property
@@ -1045,9 +1090,10 @@ Touches:
   Test harness documentation, boot-test command construction, and CI notes.
 
 Proof:
-  The documented command line uses ``-serial mon:stdio`` for marker capture,
-  an optimized TCI build for runtime tests, and explicit timer/calibration
-  arguments when the smoke guest needs them.
+  The documented command line uses ``-M microvm,acpi=off`` with APIC enabled,
+  ``-serial mon:stdio`` for marker capture, an optimized TCI build for
+  runtime tests, mounted ``qboot.rom`` and ``linuxboot_dma.bin`` firmware, and
+  explicit timer/calibration arguments when the smoke guest needs them.
 
 Non-goals:
   No product-specific Bus Engine OS arguments in upstream QEMU.
@@ -1064,9 +1110,10 @@ Touches:
   capture, and optional smoke guest changes.
 
 Proof:
-  A run either reaches ``QEMU_WASM_LINUX_BOOT_OK`` or narrows the remaining
-  stall to a specific timer, interrupt, device, initramfs, or kernel
-  configuration phase.
+  The passing run reaches ``QEMU_WASM_LINUX_BOOT_OK`` under Node.js ``v24``
+  with the cleaned wasm64 TCI artifact.  The failed ``noapic nolapic`` probe
+  is documented as an invalid smoke baseline because native QEMU with the same
+  profile also reaches ``Run /init`` without printing the marker.
 
 Non-goals:
   No native WebAssembly TCG backend implementation.
