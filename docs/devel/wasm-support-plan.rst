@@ -492,11 +492,18 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   browser name, such as ``firefox``, for matrix investigation.  The job is
   optional because the acceptable upstream browser image, browser matrix, and
   runtime cost policy still need maintainer review.
-  A corrected local Chromium run using copied wasm artifacts and a
-  pre-populated TuxBoot cache exercised the same browser runner path in that
-  Playwright image and reached ``QEMU_WASM_LINUX_BOOT_OK`` through explicit
-  page status.  The full job shape still needs to be rerun after the
-  explicit-status predicate fix.
+  A corrected local Chromium job-shaped run using copied wasm artifacts and a
+  pre-populated TuxBoot cache exercised the same memory-probe, guest-helper,
+  and browser-runner path in that Playwright image.  The run wrote
+  ``build/wasm-browser-memory-probe.json``,
+  ``build/wasm-browser-smoke-guest/tuxboot-smoke-guest.json``, and
+  ``build/wasm-browser-smoke-result.json``.  Chromium ``141.0.7390.37``
+  reported ``crossOriginIsolated: true``; the memory probe had ``14`` accepted
+  memory cases and ``2`` expected default-address 8 GiB failures; the smoke
+  result recorded ``success: true`` after roughly ``78`` seconds and the page
+  text tail ended with ``Run /init as init process`` followed by
+  ``QEMU_WASM_LINUX_BOOT_OK``.  The proof used the pinned TuxBoot kernel and
+  rootfs SHA-256 values already recorded in the guest manifest.
 
 The preferred product-neutral smoke guest preparation path is::
 
@@ -1192,6 +1199,11 @@ Proof:
   reached the marker through those routes with the corrected explicit-status
   predicate, proving QEMU opened the browser MEMFS-mounted kernel, initramfs,
   and firmware inputs.
+  The corrected job-shaped Chromium run also wrote the smoke guest manifest
+  with pinned TuxBoot kernel SHA-256
+  ``f57bfc6553bcd6e0a54aab86095bf642b33b5571d14e3af1731b18c87ed5aef8`` and
+  rootfs SHA-256
+  ``4b8b2a99117519c5290e1202cb36eb6c7aaba92b357b5160f5970cf5fb78a751``.
 
 Non-goals:
   No persistent storage.
@@ -1264,10 +1276,11 @@ Current status:
   output but timed out before the marker within 180 seconds.  A WebKit attempt
   timed out before QEMU startup while waiting on ``wasm-instantiate``.
   ``smoke-wasm64-64bit-browser`` wires that path into GitLab as an optional
-  job.  A local job-shaped container run passed with copied wasm artifacts and
-  a pre-populated TuxBoot cache.  The job still needs real GitLab execution
-  evidence and maintainer review of the external browser image and runtime
-  cost.
+  job.  A corrected local job-shaped Chromium container run passed with copied
+  wasm artifacts and a pre-populated TuxBoot cache, writing the memory probe,
+  smoke guest manifest, and smoke result artifacts.  The job still needs real
+  GitLab execution evidence and maintainer review of the external browser
+  image and runtime cost.
 
 Non-goals:
   No full distribution test suite.
