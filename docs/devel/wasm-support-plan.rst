@@ -79,7 +79,7 @@ not assume QEMU has no WebAssembly support.
 Build and runtime evidence
 ==========================
 
-Evidence collected on 2026-06-29 from the local QEMU branch:
+Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
 
 * Local ``emcc`` was not installed, so development used QEMU's Docker-based
   Emscripten image.
@@ -370,6 +370,17 @@ Evidence collected on 2026-06-29 from the local QEMU branch:
   inputs, then delegates to ``wasm-node-smoke.mjs`` with the APIC-enabled
   qboot command line.  Running the wrapper under ``node:24-alpine`` with the
   same artifact set reached ``QEMU_WASM_LINUX_BOOT_OK``.
+* ``scripts/ci/wasm-build-smoke-initramfs.py`` now builds the tiny smoke
+  initramfs deterministically from an explicit statically linked BusyBox
+  binary.  It writes a fixed-metadata ``newc`` archive compressed with gzip
+  ``mtime=0``.  Two local builds using ``/usr/bin/busybox`` produced identical
+  bytes with SHA-256
+  ``2b666d118642bb24da2019f88b4019387fedc3e402803f84c06ebaa1c1ef2544``.
+  Native QEMU and the Node.js ``v24`` wasm64 TCI wrapper both booted that
+  generated initramfs to ``QEMU_WASM_LINUX_BOOT_OK``.  This resolves the
+  initramfs construction part of ``WASM-017``; the remaining guest-input
+  decision is a declared upstream source for the 64-bit Linux kernel and the
+  statically linked BusyBox binary or package used by CI.
 
 The preferred Node.js smoke wrapper invocation is::
 
@@ -378,6 +389,12 @@ The preferred Node.js smoke wrapper invocation is::
     --kernel /host-boot/vmlinuz-7.1.0 \
     --initrd /guest/initramfs.cpio.gz \
     --firmware-dir pc-bios
+
+The tiny initramfs can be generated with::
+
+  python3 scripts/ci/wasm-build-smoke-initramfs.py \
+    --busybox /usr/bin/busybox \
+    --output /tmp/qemu-wasm-smoke-initramfs.cpio.gz
 
 The underlying command shape is::
 
@@ -1143,7 +1160,12 @@ Touches:
   Test documentation and optional artifact builder.
 
 Proof:
-  Licensing, size, download, and runtime constraints are documented.
+  The initramfs builder produces deterministic output from an explicit
+  statically linked BusyBox input, and the generated archive reaches the
+  readiness marker under native QEMU and wasm64 TCI.  The remaining proof is a
+  documented source and license policy for the 64-bit Linux kernel and BusyBox
+  input used by upstream CI, including size, download, caching, and update
+  constraints.
 
 Non-goals:
   Bus Engine OS is not bundled into upstream QEMU tests.
