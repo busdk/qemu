@@ -41,6 +41,7 @@ Options:
   --max-output-bytes N
                      Maximum browser page output bytes to keep
   --memory SIZE       Guest memory size passed to QEMU
+  --network MODE      Network mode: none or default (default: none)
   --out FILE          Write smoke result JSON to FILE
   --page-text-tail-bytes N
                      Maximum page text tail bytes to keep in result JSON
@@ -80,6 +81,7 @@ function parseArgs(argv) {
     marker: "QEMU_WASM_LINUX_BOOT_OK",
     maxOutputBytes: 60000,
     memory: "512M",
+    network: "none",
     out: null,
     pageTextTailBytes: DEFAULT_PAGE_TEXT_TAIL_BYTES,
     port: 8010,
@@ -141,6 +143,9 @@ function parseArgs(argv) {
     } else if (arg === "--memory") {
       options.memory = argv[++i];
       explicit.add("memory");
+    } else if (arg === "--network") {
+      options.network = argv[++i];
+      explicit.add("network");
     } else if (arg === "--out") {
       options.out = argv[++i];
       explicit.add("out");
@@ -218,6 +223,7 @@ function parseArgs(argv) {
       "machine",
       "marker",
       "memory",
+      "network",
       "out",
       "program",
       "rootfs",
@@ -265,6 +271,10 @@ function parseArgs(argv) {
   }
   if (!["virtio-mmio", "virtio-pci"].includes(options.rootfsDevice)) {
     console.error("--rootfs-device must be virtio-mmio or virtio-pci");
+    usage(2);
+  }
+  if (!["none", "default"].includes(options.network)) {
+    console.error("--network must be none or default");
     usage(2);
   }
 
@@ -446,6 +456,7 @@ async function run() {
     maxDiagnosticEntries: MAX_DIAGNOSTIC_ENTRIES,
     marker: options.marker,
     memory: options.memory,
+    network: options.network,
     timeoutMs: options.timeoutMs,
     pageTextTailBytes: options.pageTextTailBytes,
     progressSampleIntervalMs: options.progressSampleIntervalMs,
@@ -493,6 +504,7 @@ async function run() {
     url.searchParams.set("maxOutputBytes", String(options.maxOutputBytes));
     url.searchParams.set("memory", options.memory);
     url.searchParams.set("machine", options.machine);
+    url.searchParams.set("network", options.network);
     url.searchParams.set("rootfsDevice", options.rootfsDevice);
     if (options.kernelAppend !== null) {
       url.searchParams.set("kernelAppend", options.kernelAppend);

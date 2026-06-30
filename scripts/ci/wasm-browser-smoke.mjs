@@ -128,6 +128,9 @@ function qemuArgs(config) {
       args.push("-drive", "file=/rootfs.raw,format=raw,if=virtio");
     }
   }
+  if (config.network === "none") {
+    args.push("-nic", "none");
+  }
   args.push("-L", "/firmware");
   args.push(...config.qemuArgs);
   return args;
@@ -146,6 +149,7 @@ function buildConfig() {
     marker: option("marker", DEFAULT_MARKER),
     maxOutputBytes: numberOption("maxOutputBytes", 60000),
     memory: option("memory", "512M"),
+    network: option("network", "none"),
     program: option("program", "/artifacts/qemu-system-x86_64.js"),
     qemuArgs: listOption("qemuArg"),
     qboot: option("qboot", "/firmware/qboot.rom"),
@@ -162,6 +166,9 @@ async function run() {
   const config = buildConfig();
   if (!["virtio-mmio", "virtio-pci"].includes(config.rootfsDevice)) {
     throw new Error("rootfsDevice must be virtio-mmio or virtio-pci");
+  }
+  if (!["none", "default"].includes(config.network)) {
+    throw new Error("network must be none or default");
   }
   const programUrl = new URL(config.program, window.location.href);
   const wasmUrl = new URL(config.wasm, window.location.href);

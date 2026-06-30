@@ -42,6 +42,8 @@ browser MVP. Keep Bus Engine product work downstream.
   whether a failure happened during browser feature validation, guest input
   loading, QEMU module import, QEMU startup, guest boot, timeout, early QEMU
   exit, or success.
+- [x] Make browser smoke tests explicit about the no-network MVP boundary by
+  defaulting to `-nic none`, with an opt-in mode for later networking probes.
 - [ ] Continue recording browser/runtime versions, commands, results, and
   failure modes in `docs/devel/wasm-support-plan.rst`.
 

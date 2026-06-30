@@ -520,6 +520,11 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   environment; a follow-up Chromium run should record a missing-input
   negative proof and a success proof with the phase timeline present in
   ``build/wasm-browser-smoke-result.json``.
+* The browser smoke harness now makes the MVP no-network boundary explicit.
+  The page and Playwright runner default to ``network=none``, which appends
+  ``-nic none`` to the generated QEMU command line.  Future networking
+  diagnostics can opt into ``--network default`` without changing the MVP
+  smoke default.  The setting is recorded in the runner result JSON.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
@@ -2197,10 +2202,19 @@ Scope:
   State that the initial browser target runs with networking disabled.
 
 Touches:
-  Documentation only.
+  Browser smoke harness, runner, manifest-compatible options, and
+  documentation.
 
 Proof:
   MVP examples omit network devices unless explicitly testing networking.
+
+Current status:
+  The browser smoke page and Playwright runner default to ``network=none`` and
+  append ``-nic none`` to the generated QEMU command line.  The runner exposes
+  ``--network none|default`` for later networking probes and records the
+  selected mode in result JSON.  A follow-up Chromium or Chrome run should
+  preserve a result artifact proving the default no-network command line still
+  reaches the expected serial marker.
 
 Non-goals:
   No TAP, slirp, arbitrary TCP, or UDP support.
