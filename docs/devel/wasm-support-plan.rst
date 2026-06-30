@@ -655,6 +655,18 @@ The underlying command shape is::
   artifact, TuxBoot kernel, and helper-generated initramfs used by the Node.js
   smoke path.  This is the first browser execution proof for the console-first
   64-bit TCI boot path.  Browser memory-limit evidence remains separate.
+* The same Playwright image also ran the browser smoke runner under Firefox
+  ``142.0``.  Firefox reached ``QEMU_WASM_LINUX_BOOT_OK`` with the same
+  cleaned wasm64 TCI artifact, TuxBoot kernel, and helper-generated initramfs.
+  This expands the browser boot proof beyond Chromium, but it is not yet wired
+  into GitLab CI.
+* A WebKit boot-smoke attempt in the same Playwright image did not reach guest
+  execution.  The browser console repeatedly reported that the runtime was
+  still waiting on the ``wasm-instantiate`` dependency, and the runner timed
+  out after 60 seconds.  This matches the separate WebKit memory-probe
+  evidence that ``address: "i64"`` construction is not available in the tested
+  WebKit runtime.  WebKit remains out of scope for the first proven browser
+  MVP until the wasm64 instantiation issue is understood.
 
 The browser smoke server can be started with the same prepared guest inputs::
 
@@ -1180,9 +1192,9 @@ Current status:
   ``scripts/ci/wasm-browser-smoke.mjs`` provide the generic harness, and
   ``scripts/ci/wasm-browser-smoke-server.mjs`` serves it with explicit input
   routes and cross-origin isolation headers.  Node syntax checks, local
-  ``curl`` route/header checks, and a headless Chromium run through
-  ``scripts/ci/wasm-browser-smoke-runner.mjs`` pass.  The broader browser
-  matrix still needs Firefox and additional host/browser memory evidence.
+  ``curl`` route/header checks, and headless Chromium and Firefox runs through
+  ``scripts/ci/wasm-browser-smoke-runner.mjs`` pass.  WebKit timed out during
+  WebAssembly instantiation and remains unproven for the wasm64 MVP.
 
 Non-goals:
   No branded UI, no WebGPU, no graphical desktop.
@@ -1221,7 +1233,9 @@ Proof:
 Current status:
   ``scripts/ci/wasm-browser-smoke-runner.mjs`` provides the first automated
   headless-browser readiness-marker test.  It passed locally under Chromium
-  ``141.0.7390.37`` in the Playwright ``v1.56.1`` image.
+  ``141.0.7390.37`` and Firefox ``142.0`` in the Playwright ``v1.56.1`` image.
+  A WebKit attempt timed out before QEMU startup while waiting on
+  ``wasm-instantiate``.
   ``smoke-wasm64-64bit-browser`` wires that path into GitLab as an optional
   job.  A local job-shaped container run passed with copied wasm artifacts and
   a pre-populated TuxBoot cache.  The job still needs real GitLab execution
