@@ -11,6 +11,8 @@ import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { applyGuestManifest } from "./wasm-guest-manifest.mjs";
+
 const MAX_DIAGNOSTIC_ENTRIES = 50;
 const DEFAULT_PAGE_TEXT_TAIL_BYTES = 8192;
 const DEFAULT_PROGRESS_SAMPLE_INTERVAL_MS = 10000;
@@ -26,6 +28,8 @@ Options:
   --browser NAME      Browser engine to launch (default: chromium)
   --cpu MODEL         Guest CPU model passed to QEMU
   --firmware-dir DIR  Directory containing qboot.rom and linuxboot_dma.bin
+  --guest-manifest FILE
+                     JSON file with guest and runner defaults
   --host HOST         Bind address for the local smoke server
   --initrd FILE       Smoke initramfs image
   --kernel FILE       64-bit Linux bzImage
@@ -60,6 +64,7 @@ function parseArgs(argv) {
     browser: "chromium",
     cpu: "Nehalem",
     firmwareDir: "pc-bios",
+    guestManifest: null,
     host: "127.0.0.1",
     initrd: null,
     kernel: null,
@@ -78,53 +83,78 @@ function parseArgs(argv) {
     screenshotFullPage: false,
     timeoutMs: 180000,
   };
+  const explicit = new Set();
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--append-extra") {
       options.appendExtra = argv[++i];
+      explicit.add("appendExtra");
     } else if (arg === "--artifact-dir") {
       options.artifactDir = argv[++i];
+      explicit.add("artifactDir");
     } else if (arg === "--browser") {
       options.browser = argv[++i];
+      explicit.add("browser");
     } else if (arg === "--cpu") {
       options.cpu = argv[++i];
+      explicit.add("cpu");
     } else if (arg === "--firmware-dir") {
       options.firmwareDir = argv[++i];
+      explicit.add("firmwareDir");
+    } else if (arg === "--guest-manifest") {
+      options.guestManifest = argv[++i];
     } else if (arg === "--host") {
       options.host = argv[++i];
+      explicit.add("host");
     } else if (arg === "--initrd") {
       options.initrd = argv[++i];
+      explicit.add("initrd");
     } else if (arg === "--kernel") {
       options.kernel = argv[++i];
+      explicit.add("kernel");
     } else if (arg === "--marker") {
       options.marker = argv[++i];
+      explicit.add("marker");
     } else if (arg === "--max-output-bytes") {
       options.maxOutputBytes = Number(argv[++i]);
+      explicit.add("maxOutputBytes");
     } else if (arg === "--memory") {
       options.memory = argv[++i];
+      explicit.add("memory");
     } else if (arg === "--out") {
       options.out = argv[++i];
+      explicit.add("out");
     } else if (arg === "--page-text-tail-bytes") {
       options.pageTextTailBytes = Number(argv[++i]);
+      explicit.add("pageTextTailBytes");
     } else if (arg === "--port") {
       options.port = Number(argv[++i]);
+      explicit.add("port");
     } else if (arg === "--program") {
       options.program = argv[++i];
+      explicit.add("program");
     } else if (arg === "--progress-sample-interval-ms") {
       options.progressSampleIntervalMs = Number(argv[++i]);
+      explicit.add("progressSampleIntervalMs");
     } else if (arg === "--progress-sample-limit") {
       options.progressSampleLimit = Number(argv[++i]);
+      explicit.add("progressSampleLimit");
     } else if (arg === "--qemu-arg") {
       options.qemuArgs.push(argv[++i]);
+      explicit.add("qemuArgs");
     } else if (arg === "--rootfs") {
       options.rootfs = argv[++i];
+      explicit.add("rootfs");
     } else if (arg === "--screenshot") {
       options.screenshot = argv[++i];
+      explicit.add("screenshot");
     } else if (arg === "--screenshot-full-page") {
       options.screenshotFullPage = true;
+      explicit.add("screenshotFullPage");
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number(argv[++i]);
+      explicit.add("timeoutMs");
     } else if (arg === "--help") {
       usage(0);
     } else {
@@ -132,6 +162,35 @@ function parseArgs(argv) {
       usage(2);
     }
   }
+
+  applyGuestManifest(options, explicit, {
+    booleanFields: ["screenshotFullPage"],
+    integerFields: [
+      "maxOutputBytes",
+      "pageTextTailBytes",
+      "port",
+      "progressSampleIntervalMs",
+      "progressSampleLimit",
+      "timeoutMs",
+    ],
+    stringFields: [
+      "appendExtra",
+      "artifactDir",
+      "browser",
+      "cpu",
+      "firmwareDir",
+      "host",
+      "initrd",
+      "kernel",
+      "marker",
+      "memory",
+      "out",
+      "program",
+      "rootfs",
+      "screenshot",
+    ],
+    stringListFields: ["qemuArgs"],
+  });
 
   if (options.artifactDir === null) {
     console.error("--artifact-dir is required");

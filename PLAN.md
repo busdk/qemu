@@ -32,6 +32,9 @@ browser MVP. Keep Bus Engine product work downstream.
   raw ext4 root filesystem as `/dev/vda`.
 - [x] Add optional browser harness support for a raw rootfs/disk image after a
   suitably small proof image is available.
+- [x] Add a generic guest manifest so downstream systems can hand off kernel,
+  initrd or rootfs, firmware, memory, marker, and diagnostic defaults without
+  product-specific QEMU code.
 - [ ] Keep the accepted smoke profile stable while diagnostic arguments vary.
 - [ ] Continue recording browser/runtime versions, commands, results, and
   failure modes in `docs/devel/wasm-support-plan.rst`.
@@ -40,7 +43,7 @@ browser MVP. Keep Bus Engine product work downstream.
 
 - [ ] Treat Bus Engine OS as the downstream proof guest, not as upstream QEMU
   test data.
-- [ ] Define the Bus Engine OS browser-lab guest artifact contract:
+- [x] Define the Bus Engine OS browser-lab guest artifact contract:
   kernel, initramfs or rootfs/disk image, firmware inputs, checksums, memory
   size, CPU model, boot arguments, readiness marker, and expected serial text.
 - [ ] Use the existing Bus Engine OS `virtual-server` profile as the first

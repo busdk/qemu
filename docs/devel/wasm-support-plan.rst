@@ -1360,6 +1360,36 @@ Proof:
   rootfs, and a Chromium ``141.0.7390.37`` browser proof reached the marker
   after roughly ``74`` seconds with ``crossOriginIsolated: true``, no request
   failures, ``174`` emitted serial lines, and a ``1280x720`` screenshot.
+  ``scripts/ci/wasm-linux-boot-smoke.mjs`` and
+  ``scripts/ci/wasm-browser-smoke-runner.mjs`` now also accept
+  ``--guest-manifest FILE``.  The manifest is a generic JSON object with flat
+  fields such as ``kernel``, ``initrd`` or ``rootfs``, ``firmwareDir``,
+  ``cpu``, ``memory``, ``marker``, ``appendExtra``, ``qemuArgs``, and timeout
+  or capture settings.  Explicit command-line options override manifest
+  values, and repeated command-line ``--qemu-arg`` values are appended after
+  manifest ``qemuArgs``.  A Node.js ``v24`` rootfs proof and a Chromium
+  ``141.0.7390.37`` browser proof both reached ``QEMU_WASM_LINUX_BOOT_OK``
+  using the manifest for guest inputs; the Chromium run again recorded
+  ``crossOriginIsolated: true``, no request failures, ``174`` serial lines, and
+  a ``1280x720`` screenshot.  This manifest is the generic handoff shape that
+  downstream Bus Engine OS can populate without adding Bus-specific code to
+  upstream QEMU.
+
+  Example generic manifest shape for a root-disk proof::
+
+    {
+      "format": 1,
+      "artifactDir": "/artifacts",
+      "kernel": "/kernel",
+      "rootfs": "/rootfs.ext4",
+      "firmwareDir": "pc-bios",
+      "cpu": "Nehalem",
+      "memory": "512M",
+      "marker": "QEMU_WASM_LINUX_BOOT_OK",
+      "maxOutputBytes": 90000,
+      "pageTextTailBytes": 120000,
+      "timeoutMs": 180000
+    }
 
 Non-goals:
   No persistent storage.
@@ -1857,6 +1887,11 @@ Current status:
   console-first boundary, and define the artifact handoff as kernel image,
   root filesystem or raw disk, firmware inputs, checksums, boot arguments,
   memory size, CPU model, readiness marker, and expected serial identity text.
+  The QEMU-side generic handoff format is now ``--guest-manifest FILE`` for
+  the Node and browser smoke runners.  Bus Engine OS should generate or export
+  such a manifest with product-owned artifacts and a Bus Engine OS readiness
+  marker; QEMU should keep validating the manifest only as generic guest input
+  metadata.
 
 Non-goals:
   No Bus-specific source code in upstream QEMU.  No requirement for WebGPU,

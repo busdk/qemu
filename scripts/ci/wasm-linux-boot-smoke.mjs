@@ -10,12 +10,15 @@ import { accessSync, constants } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { applyGuestManifest } from "./wasm-guest-manifest.mjs";
+
 function parseArgs(argv) {
   const options = {
     appendExtra: "",
     artifactDir: ".",
     cpu: null,
     firmwareDir: "pc-bios",
+    guestManifest: null,
     initrd: null,
     kernel: null,
     marker: "QEMU_WASM_LINUX_BOOT_OK",
@@ -26,35 +29,51 @@ function parseArgs(argv) {
     rootfs: null,
     timeoutMs: 180000,
   };
+  const explicit = new Set();
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--append-extra") {
       options.appendExtra = argv[++i];
+      explicit.add("appendExtra");
     } else if (arg === "--artifact-dir") {
       options.artifactDir = argv[++i];
+      explicit.add("artifactDir");
     } else if (arg === "--cpu") {
       options.cpu = argv[++i];
+      explicit.add("cpu");
     } else if (arg === "--firmware-dir") {
       options.firmwareDir = argv[++i];
+      explicit.add("firmwareDir");
+    } else if (arg === "--guest-manifest") {
+      options.guestManifest = argv[++i];
     } else if (arg === "--initrd") {
       options.initrd = argv[++i];
+      explicit.add("initrd");
     } else if (arg === "--kernel") {
       options.kernel = argv[++i];
+      explicit.add("kernel");
     } else if (arg === "--marker") {
       options.marker = argv[++i];
+      explicit.add("marker");
     } else if (arg === "--max-output-bytes") {
       options.maxOutputBytes = Number(argv[++i]);
+      explicit.add("maxOutputBytes");
     } else if (arg === "--memory") {
       options.memory = argv[++i];
+      explicit.add("memory");
     } else if (arg === "--program") {
       options.program = argv[++i];
+      explicit.add("program");
     } else if (arg === "--qemu-arg") {
       options.qemuArgs.push(argv[++i]);
+      explicit.add("qemuArgs");
     } else if (arg === "--rootfs") {
       options.rootfs = argv[++i];
+      explicit.add("rootfs");
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number(argv[++i]);
+      explicit.add("timeoutMs");
     } else if (arg === "--help") {
       usage(0);
     } else {
@@ -62,6 +81,23 @@ function parseArgs(argv) {
       usage(2);
     }
   }
+
+  applyGuestManifest(options, explicit, {
+    integerFields: ["maxOutputBytes", "timeoutMs"],
+    stringFields: [
+      "appendExtra",
+      "artifactDir",
+      "cpu",
+      "firmwareDir",
+      "initrd",
+      "kernel",
+      "marker",
+      "memory",
+      "program",
+      "rootfs",
+    ],
+    stringListFields: ["qemuArgs"],
+  });
 
   if (options.kernel === null) {
     console.error("--kernel is required");
@@ -92,6 +128,7 @@ Options:
   --artifact-dir DIR     Directory containing qemu-system-*.js/.wasm artifacts
   --cpu MODEL            Optional guest CPU model passed to QEMU
   --firmware-dir DIR     Directory containing qboot.rom and linuxboot_dma.bin
+  --guest-manifest FILE  JSON file with guest input defaults
   --initrd FILE          Initramfs image that prints the expected marker
   --kernel FILE          64-bit Linux bzImage
   --marker TEXT          Output text required for success
