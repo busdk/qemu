@@ -35,7 +35,7 @@ App Server remain downstream proof payloads.
   readiness marker, health request, timeout, maximum payload size, and whether
   the bridge is interactive-only or suitable for automated smoke tests, with
   deterministic Node coverage for parsing and validation.
-- [ ] Implement the selected generic service bridge in the browser harness:
+- [x] Implement the selected generic service bridge in the browser harness:
   DoD is a browser-side API that frontend code can call through a constrained
   JavaScript interface or iframe `postMessage`, worker-to-QEMU plumbing for
   the selected guest channel, structured request/response correlation,

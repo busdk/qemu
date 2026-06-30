@@ -134,6 +134,206 @@ function programExitStatus(line) {
   return match === null ? null : Number(match[1]);
 }
 
+function serviceBridgeResponseStatus(response) {
+  if (typeof response.status === "string" && response.status !== "") {
+    return response.status;
+  }
+  if (typeof response.error === "string" && response.error !== "") {
+    return "error";
+  }
+  return "ok";
+}
+
+function serviceBridgeRequestId(request, sequence) {
+  if (typeof request.id === "string" && request.id !== "") {
+    return request.id;
+  }
+  return `request-${sequence}`;
+}
+
+function serviceBridgeError(state, error) {
+  const message = error && error.message ? error.message : String(error);
+  state.errors += 1;
+  state.lastError = message;
+  return message;
+}
+
+export function createServiceBridge(config, smokeState, scope = globalThis) {
+  const bridgeConfig = config.serviceBridge;
+  if (bridgeConfig === null) {
+    return null;
+  }
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const pending = new Map();
+  let module = null;
+  let responseBuffer = "";
+  let sequence = 0;
+  const state = {
+    kind: bridgeConfig.kind,
+    requestChannel: bridgeConfig.requestChannel,
+    responseChannel: bridgeConfig.responseChannel,
+    readinessMarker: bridgeConfig.readinessMarker,
+    timeoutMs: bridgeConfig.timeoutMs,
+    maxPayloadBytes: bridgeConfig.maxPayloadBytes,
+    interactiveOnly: bridgeConfig.interactiveOnly,
+    moduleAttached: false,
+    ready: false,
+    readySource: null,
+    sent: 0,
+    received: 0,
+    resolved: 0,
+    timedOut: 0,
+    errors: 0,
+    pending: 0,
+    lastRequestId: null,
+    lastResponseId: null,
+    lastResponseStatus: null,
+    lastError: null,
+  };
+  smokeState.serviceBridge = state;
+
+  const markReady = (source) => {
+    state.ready = true;
+    state.readySource = source;
+  };
+
+  const attachModule = (nextModule) => {
+    module = nextModule;
+    state.moduleAttached = Boolean(module);
+  };
+
+  const sendFrame = (frame) => {
+    if (!module || typeof module._qemu_wasm_chardev_write_pending !== "function") {
+      throw new Error("QEMU WebAssembly service chardev is not available");
+    }
+    const text = `${JSON.stringify(frame)}\n`;
+    const payloadBytes = encoder.encode(text).length;
+    if (payloadBytes > bridgeConfig.maxPayloadBytes) {
+      throw new Error("service bridge request exceeds maxPayloadBytes");
+    }
+    module.qemuWasmChardevPendingChannel = bridgeConfig.requestChannel;
+    module.qemuWasmChardevPendingText = text;
+    const status = Number(module._qemu_wasm_chardev_write_pending());
+    if (!Number.isInteger(status) || status < 0) {
+      throw new Error(`service bridge write failed: ${status}`);
+    }
+    state.sent += 1;
+    state.lastRequestId = String(frame.id);
+    return status;
+  };
+
+  const request = (requestFrame, options = {}) => {
+    if (requestFrame === null || typeof requestFrame !== "object" || Array.isArray(requestFrame)) {
+      return Promise.reject(new Error("service bridge request must be an object"));
+    }
+    const id = serviceBridgeRequestId(requestFrame, ++sequence);
+    const frame = { ...requestFrame, id };
+    const timeoutMs = Number.isInteger(options.timeoutMs) && options.timeoutMs > 0
+      ? options.timeoutMs
+      : bridgeConfig.timeoutMs;
+    return new Promise((resolve, reject) => {
+      let timeout = null;
+      pending.set(id, {
+        resolve,
+        reject,
+        timer: null,
+      });
+      state.pending = pending.size;
+      timeout = setTimeout(() => {
+        if (!pending.has(id)) {
+          return;
+        }
+        pending.delete(id);
+        state.pending = pending.size;
+        state.timedOut += 1;
+        reject(new Error(`service bridge request timed out: ${id}`));
+      }, timeoutMs);
+      pending.get(id).timer = timeout;
+      try {
+        sendFrame(frame);
+      } catch (error) {
+        clearTimeout(timeout);
+        pending.delete(id);
+        state.pending = pending.size;
+        reject(error);
+      }
+    });
+  };
+
+  const handleResponse = (response) => {
+    state.received += 1;
+    state.lastResponseId = typeof response.id === "string" ? response.id : null;
+    state.lastResponseStatus = serviceBridgeResponseStatus(response);
+    if (state.lastResponseId === null || !pending.has(state.lastResponseId)) {
+      return;
+    }
+    const entry = pending.get(state.lastResponseId);
+    pending.delete(state.lastResponseId);
+    clearTimeout(entry.timer);
+    state.pending = pending.size;
+    state.resolved += 1;
+    entry.resolve(response);
+  };
+
+  const receive = (channel, bytes) => {
+    if (channel !== bridgeConfig.responseChannel) {
+      return false;
+    }
+    const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    responseBuffer += decoder.decode(data, { stream: true });
+    const lines = responseBuffer.split("\n");
+    responseBuffer = lines.pop() || "";
+    for (const line of lines) {
+      if (line.trim() === "") {
+        continue;
+      }
+      try {
+        handleResponse(JSON.parse(line));
+      } catch (error) {
+        serviceBridgeError(state, error);
+      }
+    }
+    return true;
+  };
+
+  const bridge = {
+    attachModule,
+    markReady,
+    receive,
+    request,
+    state,
+  };
+
+  scope.qemuWasmChardevReceive = receive;
+  scope.qemuWasmServiceBridge = bridge;
+  if (typeof scope.addEventListener === "function") {
+    scope.addEventListener("message", (event) => {
+      const sameOrigin = !scope.location || event.origin === scope.location.origin;
+      if (!sameOrigin || !event.data || event.data.type !== "qemu-wasm-service-request") {
+        return;
+      }
+      request(event.data.request || {}, event.data.options || {})
+        .then((response) => {
+          event.source?.postMessage({
+            type: "qemu-wasm-service-response",
+            id: event.data.id || null,
+            response,
+          }, event.origin);
+        })
+        .catch((error) => {
+          event.source?.postMessage({
+            type: "qemu-wasm-service-response",
+            id: event.data.id || null,
+            error: serviceBridgeError(state, error),
+          }, event.origin);
+        });
+    });
+  }
+
+  return bridge;
+}
+
 export function qemuArgs(config) {
   const defaultKernelAppend = config.initrd
     ? "console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1"
@@ -193,6 +393,23 @@ export function qemuArgs(config) {
     } else {
       args.push("-drive", "file=/rootfs.raw,format=raw,if=virtio");
     }
+  }
+  if (config.serviceBridge) {
+    const requestChardev = "qemu-wasm-service-request";
+    const responseChardev = "qemu-wasm-service-response";
+    const maxPayload = Number(config.serviceBridge.maxPayloadBytes) || 4096;
+    args.push(
+      "-chardev",
+      `wasm,id=${requestChardev},channel=${config.serviceBridge.requestChannel},max-payload=${maxPayload}`,
+      "-chardev",
+      `wasm,id=${responseChardev},channel=${config.serviceBridge.responseChannel},max-payload=${maxPayload}`,
+      "-device",
+      "virtio-serial-pci",
+      "-device",
+      `virtserialport,chardev=${requestChardev},name=${config.serviceBridge.requestChannel}`,
+      "-device",
+      `virtserialport,chardev=${responseChardev},name=${config.serviceBridge.responseChannel}`,
+    );
   }
   if (config.network === "none") {
     args.push("-nic", "none");
@@ -714,10 +931,10 @@ async function run() {
     expectedTextSeen: config.expectText.map((text) => ({ text, seen: false })),
     lastLine: "",
     programExitStatus: null,
-    serviceBridge: config.serviceBridge,
   };
   globalThis.qemuWasmSmokeState = smokeState;
   installBrowserDialogSuppression(globalThis, smokeState);
+  const serviceBridge = createServiceBridge(config, smokeState, globalThis);
   let qemuKeySink = null;
   let qemuModule = null;
   const setPhase = (phase, message = phase) => {
@@ -866,6 +1083,9 @@ async function run() {
     if (line.includes(config.marker)) {
       smokeState.markerSeen = true;
     }
+    if (serviceBridge && line.includes(config.serviceBridge.readinessMarker)) {
+      serviceBridge.markReady("serial");
+    }
     for (const expected of smokeState.expectedTextSeen) {
       if (!expected.seen && line.includes(expected.text)) {
         expected.seen = true;
@@ -945,6 +1165,9 @@ async function run() {
   }
   qemuModule = await moduleFactory(moduleOptions);
   installWasmKeySink(qemuModule);
+  if (serviceBridge) {
+    serviceBridge.attachModule(qemuModule);
+  }
   if (config.display === "wasm") {
     setInterval(() => {
       updateWasmDisplayKeyStats(qemuModule, smokeState.display);

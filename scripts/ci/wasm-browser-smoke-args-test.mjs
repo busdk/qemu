@@ -11,6 +11,7 @@ import {
   browserKeyLinuxCode,
   browserNonInteractiveStdin,
   browserRuntimeSnapshot,
+  createServiceBridge,
   deliverDisplayKeyEvent,
   displayKeyPolicy,
   drawBrowserStatusFrame,
@@ -38,6 +39,7 @@ function baseConfig(overrides = {}) {
     qemuArgs: [],
     rootfs: "",
     rootfsDevice: "virtio-mmio",
+    serviceBridge: null,
     visualMarker: "",
     ...overrides,
   };
@@ -155,6 +157,22 @@ function fakePasteEvent(text) {
     preventDefault() {
       this.prevented = true;
     },
+  };
+}
+
+function serviceBridgeConfig(overrides = {}) {
+  return {
+    kind: "virtio-serial-jsonl",
+    requestChannel: "org.qemu.wasm.service.request",
+    responseChannel: "org.qemu.wasm.service.response",
+    readinessMarker: "QEMU_WASM_SERVICE_READY",
+    healthRequest: {
+      operation: "health",
+    },
+    timeoutMs: 5000,
+    maxPayloadBytes: 4096,
+    interactiveOnly: false,
+    ...overrides,
   };
 }
 
@@ -396,6 +414,92 @@ assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
   assert.equal(valueAfter(args, "-drive"), "file=/rootfs.raw,format=raw,if=virtio");
   assert.ok(valueAfter(args, "-append").endsWith("ignore_loglevel"));
   assert.deepEqual(args.slice(-2), ["-name", "wasm-smoke"]);
+}
+
+{
+  const bridge = serviceBridgeConfig();
+  const args = qemuArgs(baseConfig({
+    serviceBridge: bridge,
+  }));
+
+  assert.deepEqual(args.filter((arg) => arg === "-chardev"), ["-chardev", "-chardev"]);
+  assert.ok(args.includes(`wasm,id=qemu-wasm-service-request,channel=${bridge.requestChannel},max-payload=4096`));
+  assert.ok(args.includes(`wasm,id=qemu-wasm-service-response,channel=${bridge.responseChannel},max-payload=4096`));
+  assert.ok(args.includes("virtio-serial-pci"));
+  assert.ok(args.includes(`virtserialport,chardev=qemu-wasm-service-request,name=${bridge.requestChannel}`));
+  assert.ok(args.includes(`virtserialport,chardev=qemu-wasm-service-response,name=${bridge.responseChannel}`));
+}
+
+{
+  const posted = [];
+  const listeners = [];
+  const scope = {
+    location: { origin: "https://example.invalid" },
+    addEventListener(type, listener) {
+      if (type === "message") {
+        listeners.push(listener);
+      }
+    },
+  };
+  const smokeState = {};
+  const bridge = createServiceBridge(
+    baseConfig({ serviceBridge: serviceBridgeConfig() }),
+    smokeState,
+    scope,
+  );
+  const written = [];
+  bridge.attachModule({
+    _qemu_wasm_chardev_write_pending() {
+      written.push({
+        channel: this.qemuWasmChardevPendingChannel,
+        text: this.qemuWasmChardevPendingText,
+      });
+      return this.qemuWasmChardevPendingText.length;
+    },
+  });
+  bridge.markReady("serial");
+  const promise = bridge.request({ operation: "health" });
+  const frame = JSON.parse(written[0].text);
+
+  assert.equal(written[0].channel, "org.qemu.wasm.service.request");
+  assert.equal(frame.operation, "health");
+  assert.equal(smokeState.serviceBridge.ready, true);
+  assert.equal(smokeState.serviceBridge.readySource, "serial");
+  assert.equal(smokeState.serviceBridge.sent, 1);
+
+  bridge.receive(
+    "org.qemu.wasm.service.response",
+    new TextEncoder().encode(`${JSON.stringify({ id: frame.id, status: "ok" })}\n`),
+  );
+  assert.deepEqual(await promise, { id: frame.id, status: "ok" });
+  assert.equal(smokeState.serviceBridge.received, 1);
+  assert.equal(smokeState.serviceBridge.resolved, 1);
+  assert.equal(smokeState.serviceBridge.lastResponseStatus, "ok");
+
+  listeners[0]({
+    origin: "https://example.invalid",
+    data: {
+      type: "qemu-wasm-service-request",
+      id: "outer-1",
+      request: { id: "posted-1", operation: "health" },
+    },
+    source: {
+      postMessage(message, origin) {
+        posted.push({ message, origin });
+      },
+    },
+  });
+  const postedFrame = JSON.parse(written[1].text);
+  bridge.receive(
+    "org.qemu.wasm.service.response",
+    new TextEncoder().encode(`${JSON.stringify({ id: postedFrame.id, status: "ok" })}\n`),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(posted[0].origin, "https://example.invalid");
+  assert.equal(posted[0].message.type, "qemu-wasm-service-response");
+  assert.equal(posted[0].message.id, "outer-1");
+  assert.equal(posted[0].message.response.status, "ok");
 }
 
 {

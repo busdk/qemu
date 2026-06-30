@@ -488,6 +488,24 @@
   'base': 'ChardevCommon' }
 
 ##
+# @ChardevWasm:
+#
+# Configuration info for browser WebAssembly character devices.
+#
+# @channel: browser-visible channel name.  Defaults to the chardev ID.
+#
+# @max-payload: maximum payload bytes accepted from either side
+#     (default: 4096).
+#
+# Since: 11.0
+##
+{ 'struct': 'ChardevWasm',
+  'data': { '*channel': 'str',
+            '*max-payload': 'int' },
+  'base': 'ChardevCommon',
+  'if': 'CONFIG_EMSCRIPTEN' }
+
+##
 # @ChardevBackendKind:
 #
 # @file: regular files
@@ -536,6 +554,8 @@
 #
 # @memory: synonym for @ringbuf (since 1.5)
 #
+# @wasm: browser WebAssembly character device (since 11.0)
+#
 # Features:
 #
 # @deprecated: Member @memory is deprecated.  Use @ringbuf instead.
@@ -565,7 +585,8 @@
             { 'name': 'dbus', 'if': 'CONFIG_DBUS_DISPLAY' },
             'vc',
             'ringbuf',
-            { 'name': 'memory', 'features': [ 'deprecated' ] } ] }
+            { 'name': 'memory', 'features': [ 'deprecated' ] },
+            { 'name': 'wasm', 'if': 'CONFIG_EMSCRIPTEN' } ] }
 
 ##
 # @ChardevFileWrapper:
@@ -722,6 +743,17 @@
   'data': { 'data': 'ChardevPty' } }
 
 ##
+# @ChardevWasmWrapper:
+#
+# @data: Configuration info for browser WebAssembly chardevs
+#
+# Since: 11.0
+##
+{ 'struct': 'ChardevWasmWrapper',
+  'data': { 'data': 'ChardevWasm' },
+  'if': 'CONFIG_EMSCRIPTEN' }
+
+##
 # @ChardevBackend:
 #
 # Configuration info for the new chardev backend.
@@ -763,7 +795,9 @@
                       'if': 'CONFIG_DBUS_DISPLAY' },
             'vc': 'ChardevVCWrapper',
             'ringbuf': 'ChardevRingbufWrapper',
-            'memory': 'ChardevRingbufWrapper' } }
+            'memory': 'ChardevRingbufWrapper',
+            'wasm': { 'type': 'ChardevWasmWrapper',
+                      'if': 'CONFIG_EMSCRIPTEN' } } }
 
 ##
 # @ChardevReturn:

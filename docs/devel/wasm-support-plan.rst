@@ -3347,6 +3347,44 @@ The supported metadata fields are:
   checks.  ``true`` reserves the bridge for manual interaction until a
   deterministic proof exists.
 
+Browser harness integration
+---------------------------
+
+When ``serviceBridge`` metadata is present, the browser smoke harness exposes a
+generic ``qemuWasmServiceBridge`` object.  Same-page callers can use
+``qemuWasmServiceBridge.request(object)``.  Iframe callers can send a
+same-origin ``postMessage`` with type ``qemu-wasm-service-request`` and receive
+a ``qemu-wasm-service-response`` message.  Cross-origin messages are ignored by
+default.
+
+Requests are encoded as newline-delimited JSON frames with generated request
+IDs when the caller does not supply one.  The harness tracks pending requests,
+applies the manifest timeout, rejects payloads larger than ``maxPayloadBytes``,
+and resolves responses by matching response ``id`` fields.  The smoke state
+records bridge kind, channels, readiness, request and response counters,
+timeouts, IDs, and status strings.  It does not record request or response
+payloads by default.
+
+QEMU WebAssembly chardev backend
+--------------------------------
+
+The browser bridge uses an Emscripten-only QEMU chardev backend:
+
+.. code-block:: text
+
+   -chardev wasm,id=qemu-wasm-service-request,channel=...
+   -chardev wasm,id=qemu-wasm-service-response,channel=...
+   -device virtio-serial-pci
+   -device virtserialport,chardev=qemu-wasm-service-request,name=...
+   -device virtserialport,chardev=qemu-wasm-service-response,name=...
+
+The browser side writes a pending JSON frame into the request channel through
+the exported ``qemu_wasm_chardev_write_pending`` function.  Guest output from
+the response channel is copied back into the browser and delivered to
+``qemuWasmChardevReceive``.  The backend is generic QEMU infrastructure; guest
+policy, service names, credentials, and product-specific adapters remain
+downstream responsibilities.
+
 First proof shape
 -----------------
 
