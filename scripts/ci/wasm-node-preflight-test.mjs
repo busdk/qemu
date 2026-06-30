@@ -42,3 +42,5 @@ assert.deepEqual(nodeVersionPreflight("v24.18.0"), {
   nodeVersion: "v24.18.0",
   requiredNodeMajor: 23,
 });
+
+assert.equal(nodeVersionPreflight().nodeVersion, process.version);
