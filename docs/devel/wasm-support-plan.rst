@@ -459,6 +459,21 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   needs either a separate Node.js ``v24`` smoke-test image with ``python3``,
   ``zstd``, and ``debugfs`` available, or an update to the QEMU wasm64 CI
   image that supplies those runtime tools.
+* The wasm64 CI image path was updated locally to include a checksum-verified
+  Node.js ``v24.18.0`` runtime at ``/opt/node-qemu-wasm-smoke`` and ``zstd``.
+  The normal image ``PATH`` still resolves ``node`` to Emscripten's bundled
+  Node.js ``v22.16.0`` for build compatibility.  Rebuilding
+  ``docker-image-emsdk-wasm64-cross`` produced local image
+  ``e42ced33233a26fa977ca7805569c9627fb9ce1ec16c29749fe68269027e62fb``.
+  Inside that image, ``/opt/node-qemu-wasm-smoke/bin/node --version`` reports
+  ``v24.18.0``, ``zstd`` and ``debugfs`` are available, and the full helper
+  plus ``wasm-linux-boot-smoke.mjs`` flow reaches
+  ``QEMU_WASM_LINUX_BOOT_OK`` with the cleaned wasm64 TCI artifact.
+* ``.gitlab-ci.d/buildtest.yml`` now contains an optional
+  ``smoke-wasm64-64bit-linux`` test job.  It depends on
+  ``build-wasm64-64bit`` artifacts, adds ``/opt/node-qemu-wasm-smoke/bin`` to
+  ``PATH``, prepares the pinned TuxBoot smoke guest, caches the downloaded
+  TuxBoot inputs under ``wasm-smoke-cache``, and runs the Linux boot wrapper.
 
 The preferred product-neutral smoke guest preparation path is::
 
@@ -1379,9 +1394,10 @@ Proof:
 
 Current status:
   ``scripts/ci/wasm-prepare-tuxboot-smoke-guest.py`` provides the reusable
-  command path and has reached the readiness marker under ``node:24-alpine``.
-  The remaining task is to decide and wire the actual GitLab CI job placement,
-  artifact dependency, and cache policy.
+  command path.  ``smoke-wasm64-64bit-linux`` wires it into an optional
+  GitLab test job that consumes ``build-wasm64-64bit`` artifacts.  The job
+  shape was locally reproduced in the rebuilt wasm64 CI image and reached the
+  readiness marker.
 
 Non-goals:
   No new guest binary source, Bus Engine OS artifact, browser UI, networking,
@@ -1406,10 +1422,11 @@ Proof:
   ``build-wasm64-64bit``.
 
 Current status:
-  ``qemu/emsdk-wasm64-cross:latest`` reports Node.js ``v22.16.0`` and is not
-  sufficient for the smoke runtime.  ``node:24-alpine`` proved the boot path
-  with bind-mounted artifacts, but that is not yet an upstream QEMU CI image
-  decision.
+  The wasm64 CI image now carries a checksum-verified Node.js ``v24.18.0``
+  runtime at ``/opt/node-qemu-wasm-smoke`` plus ``zstd``.  The default
+  Emscripten Node.js remains first on the image ``PATH`` until a smoke job
+  explicitly exports the Node.js ``v24`` runtime.  A local rebuild and smoke
+  run proved the helper and Linux boot wrapper in that image.
 
 Non-goals:
   No browser UI, native WebAssembly TCG backend, networking, or graphics work.
