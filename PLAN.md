@@ -60,9 +60,16 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Add a compact browser smoke result summary so Chromium timeout artifacts
   expose the primary error, page-error count, request-failure count, final
   progress sample, and last serial line without manual JSON correlation.
+- [x] Record a page-level browser runtime snapshot in browser smoke result JSON
+  so Chrome/Chromium runs preserve cross-origin isolation, SharedArrayBuffer,
+  WebAssembly, memory64 constructor, user-agent, concurrency, device-memory,
+  and heap-limit evidence next to guest progress.
 - [x] Preserve browser harness failure name and stack in `qemuWasmSmokeState`.
 - [x] Add progress-sample deltas so Chromium stall runs show whether serial
   output advanced between samples.
+- [x] Compare the current Chromium stall against the older known-passing
+  browser harness commit using the same wasm artifacts and guest inputs.
+- [x] Probe the current Chromium stall with reduced guest memory.
 - [x] Add Node smoke runtime preflight so unsupported local Node versions fail
   with structured JSON evidence before importing the generated wasm module.
 - [x] Add deterministic Node coverage for the Node smoke runtime preflight

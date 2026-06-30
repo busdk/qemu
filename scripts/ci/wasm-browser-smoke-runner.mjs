@@ -523,6 +523,7 @@ export function promoteSmokeState(result, smokeState) {
   result.outputLines = smokeState.lines;
   result.outputBytes = smokeState.outputBytes;
   result.lastLine = smokeState.lastLine;
+  result.browserRuntime = smokeState.runtime || null;
 }
 
 export function browserSmokeUrl(options) {

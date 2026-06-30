@@ -155,6 +155,50 @@ export function recordHarnessFailure(state, error, elapsedMs) {
   return state;
 }
 
+function wasmMemory64Probe(wasm) {
+  if (!wasm || typeof wasm.Memory !== "function") {
+    return {
+      supported: false,
+      errorName: "Error",
+      errorMessage: "WebAssembly.Memory is not available",
+    };
+  }
+  try {
+    new wasm.Memory({ initial: 1, maximum: 1, address: "i64" });
+    return {
+      supported: true,
+      errorName: null,
+      errorMessage: null,
+    };
+  } catch (error) {
+    return {
+      supported: false,
+      errorName: error && error.name ? error.name : "Error",
+      errorMessage: error && error.message ? error.message : String(error),
+    };
+  }
+}
+
+export function browserRuntimeSnapshot(scope = globalThis) {
+  const nav = scope.navigator || {};
+  const perf = scope.performance || {};
+  const memory = perf.memory || {};
+  return {
+    crossOriginIsolated: Boolean(scope.crossOriginIsolated),
+    sharedArrayBuffer: typeof scope.SharedArrayBuffer !== "undefined",
+    webAssembly: typeof scope.WebAssembly !== "undefined",
+    wasmMemory64: wasmMemory64Probe(scope.WebAssembly),
+    userAgent: typeof nav.userAgent === "string" ? nav.userAgent : null,
+    hardwareConcurrency: Number.isInteger(nav.hardwareConcurrency)
+      ? nav.hardwareConcurrency
+      : null,
+    deviceMemory: typeof nav.deviceMemory === "number" ? nav.deviceMemory : null,
+    jsHeapSizeLimit: Number.isFinite(memory.jsHeapSizeLimit)
+      ? memory.jsHeapSizeLimit
+      : null,
+  };
+}
+
 function buildConfig() {
   return {
     appendExtra: option("appendExtra", ""),
@@ -201,6 +245,7 @@ async function run() {
     phases: [],
     startedAtMs: startTime,
     qemuArgs: generatedQemuArgs,
+    runtime: browserRuntimeSnapshot(globalThis),
     markerSeen: false,
     expectedTextSeen: config.expectText.map((text) => ({ text, seen: false })),
     lastLine: "",

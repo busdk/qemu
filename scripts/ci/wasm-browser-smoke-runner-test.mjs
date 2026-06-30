@@ -63,6 +63,11 @@ for (const status of [
     ],
     programExitStatus: null,
     qemuArgs: ["-M", "microvm,acpi=off", "-nic", "none"],
+    runtime: {
+      crossOriginIsolated: true,
+      sharedArrayBuffer: true,
+      webAssembly: true,
+    },
   });
 
   assert.equal(result.phase, "failed");
@@ -75,6 +80,11 @@ for (const status of [
   assert.equal(result.lastLine, "last serial line");
   assert.deepEqual(result.expectedTextSeen, [{ text: "Bus Engine OS", seen: true }]);
   assert.deepEqual(result.qemuCommand, ["-M", "microvm,acpi=off", "-nic", "none"]);
+  assert.deepEqual(result.browserRuntime, {
+    crossOriginIsolated: true,
+    sharedArrayBuffer: true,
+    webAssembly: true,
+  });
   assert.equal(result.phases[1].failedDuring, "fetch-guest-inputs");
 }
 

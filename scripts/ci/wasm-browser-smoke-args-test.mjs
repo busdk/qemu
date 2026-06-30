@@ -7,7 +7,11 @@
 
 import assert from "node:assert/strict";
 
-import { qemuArgs, recordHarnessFailure } from "./wasm-browser-smoke.mjs";
+import {
+  browserRuntimeSnapshot,
+  qemuArgs,
+  recordHarnessFailure,
+} from "./wasm-browser-smoke.mjs";
 
 function baseConfig(overrides = {}) {
   return {
@@ -106,3 +110,66 @@ function valueAfter(args, option) {
 }
 
 assert.equal(recordHarnessFailure(null, new Error("ignored"), 1), null);
+
+{
+  class Memory {
+    constructor(descriptor) {
+      this.descriptor = descriptor;
+    }
+  }
+  assert.deepEqual(browserRuntimeSnapshot({
+    crossOriginIsolated: true,
+    SharedArrayBuffer: class SharedArrayBuffer {},
+    WebAssembly: { Memory },
+    navigator: {
+      userAgent: "HeadlessChrome/141.0.7390.37",
+      hardwareConcurrency: 20,
+      deviceMemory: 8,
+    },
+    performance: {
+      memory: {
+        jsHeapSizeLimit: 4294705152,
+      },
+    },
+  }), {
+    crossOriginIsolated: true,
+    sharedArrayBuffer: true,
+    webAssembly: true,
+    wasmMemory64: {
+      supported: true,
+      errorName: null,
+      errorMessage: null,
+    },
+    userAgent: "HeadlessChrome/141.0.7390.37",
+    hardwareConcurrency: 20,
+    deviceMemory: 8,
+    jsHeapSizeLimit: 4294705152,
+  });
+}
+
+{
+  class Memory {
+    constructor() {
+      throw new TypeError("Cannot convert a BigInt value to a number");
+    }
+  }
+  assert.deepEqual(browserRuntimeSnapshot({
+    crossOriginIsolated: false,
+    WebAssembly: { Memory },
+    navigator: {},
+    performance: {},
+  }), {
+    crossOriginIsolated: false,
+    sharedArrayBuffer: false,
+    webAssembly: true,
+    wasmMemory64: {
+      supported: false,
+      errorName: "TypeError",
+      errorMessage: "Cannot convert a BigInt value to a number",
+    },
+    userAgent: null,
+    hardwareConcurrency: null,
+    deviceMemory: null,
+    jsHeapSizeLimit: null,
+  });
+}

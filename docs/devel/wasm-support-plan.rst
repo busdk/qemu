@@ -607,6 +607,30 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   page-error count, request-failure count, and final progress sample.  The
   deterministic helper test covers the current Chromium timeout shape so the
   next run can be triaged from the summary before inspecting the full arrays.
+  The browser page now also records a ``browserRuntime`` snapshot in the smoke
+  state and result JSON.  It includes cross-origin isolation, SharedArrayBuffer
+  and WebAssembly availability, a tiny ``address: "i64"``
+  ``WebAssembly.Memory`` constructor probe, user-agent, hardware concurrency,
+  device memory when reported, and JavaScript heap limit when exposed by the
+  runtime.  This is per-run context for smoke artifacts, not a replacement for
+  the separate browser memory-probe matrix.
+  A detached old-harness comparison using commit ``ae212bc74a`` with the same
+  cleaned wasm64 TCI artifacts, TuxBoot kernel, helper initramfs, Playwright
+  ``v1.56.1`` Noble container, and Chromium ``141.0.7390.37`` also timed out
+  after ``240152`` ms.  It passed browser setup and cross-origin isolation,
+  recorded no page errors or request failures, and its final samples stayed at
+  ``107`` serial lines with ``lastLine`` equal to
+  ``x86/fpu: x87 FPU will use FXSAVE``.  This rules out the recent browser
+  runner diagnostic changes, result-promotion changes, and explicit
+  no-network default as the sole cause of the current stall.
+  A current-harness Chromium probe with reduced guest memory
+  ``--memory 256M`` also timed out after ``240158`` ms at the same final
+  serial line, with no page errors or request failures.  The new progress
+  deltas showed ``lineDelta: 0``, ``outputByteDelta: 0``, and
+  ``lastLineChanged: false`` for the final repeated samples.  This rules out
+  simple 512 MiB guest-memory size pressure and confirms that the failure is a
+  quiet guest-execution stall after the FPU line in the tested browser
+  runtime.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
