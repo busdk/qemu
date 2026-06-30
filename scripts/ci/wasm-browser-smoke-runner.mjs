@@ -372,6 +372,7 @@ async function capturePageText(page, result, tailBytes) {
     result.smokeState = await page.evaluate(() => globalThis.qemuWasmSmokeState || null);
     if (result.smokeState !== null) {
       result.phase = result.smokeState.phase || null;
+      result.failurePhase = result.smokeState.failurePhase || null;
       result.phases = result.smokeState.phases || [];
       result.markerSeen = Boolean(result.smokeState.markerSeen);
       result.expectedTextSeen = result.smokeState.expectedTextSeen || [];

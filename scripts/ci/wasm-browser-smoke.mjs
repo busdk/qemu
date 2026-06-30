@@ -311,6 +311,7 @@ async function run() {
 run().catch((error) => {
   const state = globalThis.qemuWasmSmokeState;
   if (state) {
+    state.failurePhase = state.phase;
     state.phase = "failed";
     state.failure = error && error.message ? error.message : String(error);
     state.phases.push({
@@ -318,6 +319,7 @@ run().catch((error) => {
       elapsedMs: typeof state.startedAtMs === "number"
         ? Math.round(performance.now() - state.startedAtMs)
         : 0,
+      failedDuring: state.failurePhase,
       message: state.failure,
     });
   }

@@ -2147,10 +2147,12 @@ Current status:
   exit, success, and page-level failure.  The runner now exits promptly when
   the page reports ``failed`` or ``timeout waiting...``.  The runner also
   promotes the browser state summary into top-level JSON fields including
-  ``phase``, ``phases``, ``markerSeen``, ``expectedTextSeen``,
-  ``programExitStatus``, ``outputLines``, ``outputBytes``,
-  ``outputSuppressed``, and ``lastLine`` so CI artifacts can be inspected
-  without parsing the full page text.  The remaining proof work is to run the
+  ``phase``, ``failurePhase``, ``phases``, ``markerSeen``,
+  ``expectedTextSeen``, ``programExitStatus``, ``outputLines``,
+  ``outputBytes``, ``outputSuppressed``, and ``lastLine`` so CI artifacts can
+  be inspected without parsing the full page text.  ``phase`` is the terminal
+  page state, while ``failurePhase`` records the startup phase that was active
+  before a page-level failure.  The remaining proof work is to run the
   negative cases under Chromium or Chrome and preserve the resulting JSON
   artifacts.
 
