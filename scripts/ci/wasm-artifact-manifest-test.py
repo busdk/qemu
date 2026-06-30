@@ -13,6 +13,7 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).with_name("wasm-artifact-manifest.py")
+CHECK_SCRIPT = Path(__file__).with_name("wasm-artifact-manifest-check.py")
 
 
 def sha256(data: bytes) -> str:
@@ -28,6 +29,23 @@ def run_manifest(root: Path, output: Path) -> subprocess.CompletedProcess:
             str(root),
             "--output",
             str(output),
+        ],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
+def run_check(manifest: Path, target: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(CHECK_SCRIPT),
+            "--manifest",
+            str(manifest),
+            "--target",
+            target,
         ],
         check=False,
         stdout=subprocess.PIPE,
@@ -80,6 +98,10 @@ def test_manifest() -> None:
             ],
         }
 
+        check = run_check(output, "x86_64")
+        assert check.returncode == 0, check.stderr
+        assert "verified QEMU WebAssembly target x86_64" in check.stdout
+
 
 def test_incomplete_target_pair() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -102,6 +124,30 @@ def test_incomplete_target_pair() -> None:
             },
         ]
 
+        check = run_check(output, "riscv64")
+        assert check.returncode == 1
+        assert "artifact manifest target riscv64 is incomplete" in check.stderr
+
+
+def test_missing_target_pair_file() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        js_data = b"console.log('qemu wasm');\n"
+        wasm_data = b"\0asmqemu"
+
+        (root / "qemu-system-x86_64.js").write_bytes(js_data)
+        wasm = root / "qemu-system-x86_64.wasm"
+        wasm.write_bytes(wasm_data)
+
+        output = root / "manifest.json"
+        result = run_manifest(root, output)
+        assert result.returncode == 0, result.stderr
+        wasm.unlink()
+
+        check = run_check(output, "x86_64")
+        assert check.returncode == 1
+        assert "WebAssembly module does not exist" in check.stderr
+
 
 def test_missing_artifacts() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -117,6 +163,7 @@ def test_missing_artifacts() -> None:
 def main() -> int:
     test_manifest()
     test_incomplete_target_pair()
+    test_missing_target_pair_file()
     test_missing_artifacts()
     return 0
 

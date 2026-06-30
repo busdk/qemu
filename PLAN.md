@@ -22,6 +22,9 @@ browser MVP. Keep Bus Engine product work downstream.
 - [x] Add target-pair metadata to the WebAssembly artifact manifest so smoke
   jobs and downstream replay tooling can verify the `qemu-system-$target`
   JavaScript launcher and WebAssembly module pair before browser startup.
+- [x] Add a manifest handoff checker and run it in both wasm64 smoke jobs so
+  missing or incomplete `x86_64` JavaScript/WebAssembly artifact pairs fail
+  before guest preparation or browser launch.
 - [x] Add deterministic test coverage for WebAssembly build artifact manifests.
 - [x] Add a generic Node.js serial boot smoke harness.
 - [x] Add a generic browser smoke harness with cross-origin isolation.
