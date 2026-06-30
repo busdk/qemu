@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 function parseArgs(argv) {
   const options = {
     artifactDir: ".",
+    cpu: null,
     firmwareDir: "pc-bios",
     initrd: null,
     kernel: null,
@@ -27,6 +28,8 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (arg === "--artifact-dir") {
       options.artifactDir = argv[++i];
+    } else if (arg === "--cpu") {
+      options.cpu = argv[++i];
     } else if (arg === "--firmware-dir") {
       options.firmwareDir = argv[++i];
     } else if (arg === "--initrd") {
@@ -77,6 +80,7 @@ function usage(status) {
 
 Options:
   --artifact-dir DIR     Directory containing qemu-system-*.js/.wasm artifacts
+  --cpu MODEL            Optional guest CPU model passed to QEMU
   --firmware-dir DIR     Directory containing qboot.rom and linuxboot_dma.bin
   --initrd FILE          Initramfs image that prints the expected marker
   --kernel FILE          64-bit Linux bzImage
@@ -137,6 +141,11 @@ function runSmoke(options) {
     "microvm,acpi=off",
     "-m",
     options.memory,
+  ];
+  if (options.cpu !== null) {
+    args.push("-cpu", options.cpu);
+  }
+  args.push(
     "-accel",
     "tcg,thread=single",
     "-nographic",
@@ -152,7 +161,7 @@ function runSmoke(options) {
     "console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1",
     "-L",
     "/firmware",
-  ];
+  );
 
   const child = spawn(process.execPath, args, { stdio: "inherit" });
   child.on("exit", (code, signal) => {

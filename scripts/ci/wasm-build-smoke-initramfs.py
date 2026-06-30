@@ -21,7 +21,21 @@ def parse_args():
     parser.add_argument(
         "--busybox",
         required=True,
-        help="path to a statically linked BusyBox binary for the guest architecture",
+        help="path to a BusyBox binary for the guest architecture",
+    )
+    parser.add_argument(
+        "--extra-file",
+        action="append",
+        default=[],
+        metavar="HOST:GUEST",
+        help="copy host file HOST to absolute guest path GUEST",
+    )
+    parser.add_argument(
+        "--extra-symlink",
+        action="append",
+        default=[],
+        metavar="GUEST:TARGET",
+        help="create absolute guest symlink GUEST pointing to TARGET",
     )
     parser.add_argument(
         "--output",
@@ -36,6 +50,26 @@ def parse_args():
     return parser.parse_args()
 
 
+def parse_guest_mapping(value, option):
+    separator = value.find(":")
+    if separator < 1:
+        raise SystemExit(f"{option} must use LEFT:RIGHT")
+    left = value[:separator]
+    right = value[separator + 1:]
+    if not left or not right:
+        raise SystemExit(f"{option} must use non-empty LEFT:RIGHT")
+    return left, right
+
+
+def archive_name(path):
+    if not path.startswith("/"):
+        raise SystemExit(f"guest path must be absolute: {path}")
+    name = path.strip("/")
+    if not name or any(part in {"", ".", ".."} for part in name.split("/")):
+        raise SystemExit(f"guest path is not valid: {path}")
+    return name
+
+
 def align4(value):
     return (value + 3) & ~3
 
@@ -44,14 +78,27 @@ class NewcWriter:
     def __init__(self, stream):
         self.stream = stream
         self.ino = 1
+        self.dirs = set()
 
     def add_dir(self, name, mode=0o755):
+        if name in self.dirs:
+            return
         self._add_entry(name, stat.S_IFDIR | mode, 2, b"")
+        self.dirs.add(name)
+
+    def add_parent_dirs(self, name):
+        parts = name.split("/")[:-1]
+        current = ""
+        for part in parts:
+            current = part if not current else f"{current}/{part}"
+            self.add_dir(current)
 
     def add_file(self, name, data, mode=0o755):
+        self.add_parent_dirs(name)
         self._add_entry(name, stat.S_IFREG | mode, 1, data)
 
     def add_symlink(self, name, target):
+        self.add_parent_dirs(name)
         self._add_entry(name, stat.S_IFLNK | 0o777, 1, target.encode("utf-8"))
 
     def finish(self):
@@ -103,6 +150,19 @@ def main():
     with open(args.busybox, "rb") as busybox_file:
         busybox = busybox_file.read()
 
+    extra_files = []
+    for spec in args.extra_file:
+        host_path, guest_path = parse_guest_mapping(spec, "--extra-file")
+        with open(host_path, "rb") as extra_file:
+            data = extra_file.read()
+        mode = os.stat(host_path).st_mode & 0o777
+        extra_files.append((archive_name(guest_path), data, mode))
+
+    extra_symlinks = []
+    for spec in args.extra_symlink:
+        guest_path, target = parse_guest_mapping(spec, "--extra-symlink")
+        extra_symlinks.append((archive_name(guest_path), target))
+
     output_dir = os.path.dirname(os.path.abspath(args.output))
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
@@ -117,6 +177,10 @@ def main():
             archive.add_file("init", build_init(args.marker))
             archive.add_file("bin/busybox", busybox)
             archive.add_symlink("bin/sh", "busybox")
+            for name, data, mode in sorted(extra_files):
+                archive.add_file(name, data, mode)
+            for name, target in sorted(extra_symlinks):
+                archive.add_symlink(name, target)
             archive.finish()
 
     return 0
