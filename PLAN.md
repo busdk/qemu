@@ -51,6 +51,8 @@ browser MVP. Keep Bus Engine product work downstream.
   detection so page-level failures are captured promptly.
 - [x] Add Node smoke runtime preflight so unsupported local Node versions fail
   with structured JSON evidence before importing the generated wasm module.
+- [x] Add deterministic Node coverage for the Node smoke runtime preflight
+  using synthetic runtime versions.
 - [ ] Continue recording browser/runtime versions, commands, results, and
   failure modes in `docs/devel/wasm-support-plan.rst`.
 

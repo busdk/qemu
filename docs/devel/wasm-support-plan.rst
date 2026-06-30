@@ -558,6 +558,9 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``preflight: "node-version"``, ``requiredNodeMajor: 23``, and the detected
   ``nodeVersion``.  This turns an otherwise opaque Emscripten launcher error
   into deterministic runtime evidence.
+  ``scripts/ci/wasm-node-preflight-test.mjs`` covers the version parser and
+  both pass and fail preflight result shapes with synthetic Node.js versions,
+  so CI keeps the JSON contract stable even on newer smoke runners.
 * A Firefox ``142.0.1`` diagnostic run with
   ``--append-extra "initcall_debug ignore_loglevel"`` timed out after
   ``420000`` ms.  The result had ``crossOriginIsolated: true`` and no browser
