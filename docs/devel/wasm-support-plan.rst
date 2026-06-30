@@ -393,6 +393,15 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   already referenced by QEMU tests.  It still needs a direct proof with the
   generated initramfs and the ``wasm-linux-boot-smoke.mjs`` command line before
   it can replace the local ``/boot/vmlinuz-7.1.0`` proof.
+* The TuxBoot x86_64 kernel candidate was downloaded to ``/tmp`` and verified
+  against its existing QEMU SHA-256.  Native QEMU with the canonical qboot
+  command line and the generated initramfs reached
+  ``QEMU_WASM_LINUX_BOOT_OK``.  The Node.js ``v24`` wasm64 TCI wrapper also
+  reached ``QEMU_WASM_LINUX_BOOT_OK`` with the same kernel and initramfs.
+  This proves the kernel side of ``WASM-017a`` and removes the dependency on
+  the local ``/boot/vmlinuz-7.1.0`` proof input.  The remaining upstream CI
+  guest-input decision is the source for the statically linked BusyBox binary
+  used to generate the initramfs.
 
 The preferred Node.js smoke wrapper invocation is::
 
@@ -1182,10 +1191,11 @@ Touches:
 Proof:
   The initramfs builder produces deterministic output from an explicit
   statically linked BusyBox input, and the generated archive reaches the
-  readiness marker under native QEMU and wasm64 TCI.  The remaining proof is a
-  documented source and license policy for the 64-bit Linux kernel and BusyBox
-  input used by upstream CI, including size, download, caching, and update
-  constraints.
+  readiness marker under native QEMU and wasm64 TCI.  The pinned x86_64
+  TuxBoot kernel already used by QEMU functional tests also reaches the
+  marker under native QEMU and wasm64 TCI.  The remaining proof is a
+  documented source and license policy for the BusyBox input used by upstream
+  CI, including size, download, caching, and update constraints.
 
 Non-goals:
   Bus Engine OS is not bundled into upstream QEMU tests.
@@ -1223,7 +1233,7 @@ Touches:
   Smoke-test documentation, optional fetch helper, and CI notes.
 
 Proof:
-  Native QEMU and the Node.js ``v24`` wasm64 TCI wrapper both reach
+  Native QEMU and the Node.js ``v24`` wasm64 TCI wrapper both reached
   ``QEMU_WASM_LINUX_BOOT_OK`` using the TuxBoot ``bzImage`` and the generated
   initramfs.
 
