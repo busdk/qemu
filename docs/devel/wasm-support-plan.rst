@@ -2514,10 +2514,15 @@ Proof:
   for the boot marker.  The runner also accepts ``--keyboard-text`` only with
   ``display=sdl``, can wait for guest serial output using
   ``--keyboard-after-text``, focuses the canvas, types through Playwright, and
-  records non-secret keyboard-input evidence in the result JSON.  The same
-  display and keyboard fields are accepted through the generic guest manifest
-  schema, so downstream proofs can declare their input gate without
-  product-specific QEMU code.
+  records non-secret keyboard-input evidence in the result JSON.  The generic
+  guest manifest also accepts display/input metadata for the same opt-in path:
+  ``display``, ``displayDevice``, ``expectedResolution``, ``keyboardText``,
+  ``keyboardAfterText``, ``visualMarker``, ``screenshot``,
+  ``screenshotFullPage``, ``requireDisplayOutput``,
+  ``displayMinNonblackPixels``, ``focusDisplay``, and
+  ``allowSerialFallback``.  Downstream proofs can therefore declare their
+  graphics/input gate without product-specific QEMU code, and CLI arguments
+  can still override manifest defaults for one-off diagnostics.
 
 Current status:
   The harness and runner plumbing is implemented.  Emscripten SDL2 was also

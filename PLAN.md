@@ -193,7 +193,7 @@ browser MVP. Keep Bus Engine product work downstream.
   browser UI policy for focus, blur, keyboard capture, paste handling, pointer
   lock if used, and visible input state, with accessibility-safe escape
   behavior so the browser tab remains controllable.
-- [ ] Extend the generic guest manifest for graphics/input requirements: DoD is
+- [x] Extend the generic guest manifest for graphics/input requirements: DoD is
   manifest metadata for display mode, preferred device, expected resolution,
   keyboard test sequence, expected visual marker, screenshot output, and
   whether serial-only fallback is acceptable for that run.
