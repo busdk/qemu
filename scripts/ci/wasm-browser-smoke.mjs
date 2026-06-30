@@ -240,6 +240,104 @@ export function browserRuntimeSnapshot(scope = globalThis) {
   };
 }
 
+const BROWSER_SHORTCUT_KEYS = new Set([
+  "l",
+  "n",
+  "p",
+  "r",
+  "t",
+  "w",
+]);
+const CAPTURED_BROWSER_KEYS = new Set([
+  " ",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "Backspace",
+  "PageDown",
+  "PageUp",
+  "Tab",
+]);
+
+export function displayKeyPolicy(event) {
+  if (event.key === "Escape") {
+    return "release-focus";
+  }
+  const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
+  if (event.metaKey || event.altKey || (event.ctrlKey && BROWSER_SHORTCUT_KEYS.has(key))) {
+    return "browser-shortcut";
+  }
+  if (CAPTURED_BROWSER_KEYS.has(event.key)) {
+    return "capture-browser-key";
+  }
+  return "pass-through";
+}
+
+export function installDisplayInputPolicy(canvas, displayState) {
+  if (!canvas || !displayState) {
+    return null;
+  }
+  const policy = {
+    browserShortcutsReserved: true,
+    escapeReleasesFocus: true,
+    paste: "capture-metadata",
+    pointerFocus: "focus-on-pointer-down",
+    pointerLock: false,
+    capturedKeys: [...CAPTURED_BROWSER_KEYS].sort(),
+  };
+  displayState.inputPolicy = policy;
+  displayState.focusEvents = 0;
+  displayState.blurEvents = 0;
+  displayState.pointerFocusEvents = 0;
+  displayState.escapeReleaseEvents = 0;
+  displayState.browserShortcutEvents = 0;
+  displayState.capturedBrowserKeyEvents = 0;
+  displayState.pasteEvents = 0;
+  displayState.lastPasteLength = 0;
+  canvas.dataset.inputActive = canvas.ownerDocument && canvas.ownerDocument.activeElement === canvas
+    ? "true"
+    : "false";
+  canvas.title = "QEMU display. Escape releases keyboard focus.";
+  canvas.addEventListener("focus", () => {
+    displayState.focused = true;
+    displayState.focusEvents += 1;
+    canvas.dataset.inputActive = "true";
+  });
+  canvas.addEventListener("blur", () => {
+    displayState.focused = false;
+    displayState.blurEvents += 1;
+    canvas.dataset.inputActive = "false";
+  });
+  canvas.addEventListener("pointerdown", () => {
+    displayState.pointerFocusEvents += 1;
+    canvas.focus();
+  });
+  canvas.addEventListener("keydown", (event) => {
+    const action = displayKeyPolicy(event);
+    if (action === "release-focus") {
+      displayState.escapeReleaseEvents += 1;
+      event.preventDefault();
+      canvas.blur();
+    } else if (action === "browser-shortcut") {
+      displayState.browserShortcutEvents += 1;
+    } else if (action === "capture-browser-key") {
+      displayState.capturedBrowserKeyEvents += 1;
+      event.preventDefault();
+    }
+  });
+  canvas.addEventListener("paste", (event) => {
+    const data = event.clipboardData;
+    const text = data && typeof data.getData === "function"
+      ? data.getData("text/plain")
+      : "";
+    displayState.pasteEvents += 1;
+    displayState.lastPasteLength = text.length;
+    event.preventDefault();
+  });
+  return policy;
+}
+
 function buildConfig() {
   return {
     appendExtra: option("appendExtra", ""),
@@ -332,6 +430,7 @@ async function run() {
   if (config.display === "sdl") {
     canvas.hidden = false;
     canvas.setAttribute("aria-hidden", "false");
+    installDisplayInputPolicy(canvas, smokeState.display);
     if (expectedResolution !== null) {
       canvas.width = expectedResolution.width;
       canvas.height = expectedResolution.height;

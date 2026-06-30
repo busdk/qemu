@@ -2524,6 +2524,15 @@ Proof:
   graphics/input gate without product-specific QEMU code, and CLI arguments
   can still override manifest defaults for one-off diagnostics.
 
+  The browser display surface has a minimal input policy for the opt-in SDL
+  path.  Pointer-down focuses the canvas, focus and blur update smoke-state
+  evidence, Escape releases focus back to the browser, common browser
+  shortcuts such as Ctrl-L and Cmd-L are left to the browser, and navigation
+  keys that normally scroll or move focus are prevented from escaping the
+  focused canvas while still being delivered to SDL.  Paste events are captured
+  as metadata and not silently treated as proven guest input.  Pointer lock is
+  deliberately disabled for the MVP path.
+
 Current status:
   The harness and runner plumbing is implemented.  Emscripten SDL2 was also
   verified as a viable wasm64 build dependency with ``-sUSE_SDL=2``: QEMU

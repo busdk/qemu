@@ -9,6 +9,8 @@ import assert from "node:assert/strict";
 
 import {
   browserRuntimeSnapshot,
+  displayKeyPolicy,
+  installDisplayInputPolicy,
   qemuArgs,
   recordHarnessFailure,
 } from "./wasm-browser-smoke.mjs";
@@ -40,6 +42,66 @@ function valueAfter(args, option) {
   assert.notEqual(index, -1, `${option} should be present`);
   assert.ok(index + 1 < args.length, `${option} should have a value`);
   return args[index + 1];
+}
+
+class FakeCanvas {
+  constructor() {
+    this.dataset = {};
+    this.listeners = new Map();
+    this.ownerDocument = { activeElement: null };
+    this.title = "";
+  }
+
+  addEventListener(type, listener) {
+    const listeners = this.listeners.get(type) || [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  dispatch(type, event = {}) {
+    for (const listener of this.listeners.get(type) || []) {
+      listener(event);
+    }
+  }
+
+  focus() {
+    this.ownerDocument.activeElement = this;
+    this.dispatch("focus");
+  }
+
+  blur() {
+    if (this.ownerDocument.activeElement === this) {
+      this.ownerDocument.activeElement = null;
+    }
+    this.dispatch("blur");
+  }
+}
+
+function fakeKeyEvent(key, modifiers = {}) {
+  return {
+    key,
+    altKey: Boolean(modifiers.altKey),
+    ctrlKey: Boolean(modifiers.ctrlKey),
+    metaKey: Boolean(modifiers.metaKey),
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    },
+  };
+}
+
+function fakePasteEvent(text) {
+  return {
+    clipboardData: {
+      getData(kind) {
+        return kind === "text/plain" ? text : "";
+      },
+    },
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    },
+  };
 }
 
 {
@@ -100,6 +162,53 @@ assert.throws(
   () => qemuArgs(baseConfig({ displayDevice: "stdvga" })),
   /displayDevice requires display=sdl/,
 );
+
+assert.equal(displayKeyPolicy(fakeKeyEvent("Escape")), "release-focus");
+assert.equal(displayKeyPolicy(fakeKeyEvent("l", { ctrlKey: true })), "browser-shortcut");
+assert.equal(displayKeyPolicy(fakeKeyEvent("ArrowUp")), "capture-browser-key");
+assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
+
+{
+  const canvas = new FakeCanvas();
+  const displayState = { focused: false };
+  const policy = installDisplayInputPolicy(canvas, displayState);
+
+  assert.equal(policy.escapeReleasesFocus, true);
+  assert.equal(policy.pointerFocus, "focus-on-pointer-down");
+  assert.equal(policy.pointerLock, false);
+  assert.equal(canvas.dataset.inputActive, "false");
+  assert.equal(canvas.title, "QEMU display. Escape releases keyboard focus.");
+
+  canvas.dispatch("pointerdown");
+  assert.equal(displayState.pointerFocusEvents, 1);
+  assert.equal(displayState.focusEvents, 1);
+  assert.equal(displayState.focused, true);
+  assert.equal(canvas.dataset.inputActive, "true");
+
+  const tab = fakeKeyEvent("Tab");
+  canvas.dispatch("keydown", tab);
+  assert.equal(tab.prevented, true);
+  assert.equal(displayState.capturedBrowserKeyEvents, 1);
+
+  const browserShortcut = fakeKeyEvent("l", { ctrlKey: true });
+  canvas.dispatch("keydown", browserShortcut);
+  assert.equal(browserShortcut.prevented, false);
+  assert.equal(displayState.browserShortcutEvents, 1);
+
+  const paste = fakePasteEvent("uname -a\n");
+  canvas.dispatch("paste", paste);
+  assert.equal(paste.prevented, true);
+  assert.equal(displayState.pasteEvents, 1);
+  assert.equal(displayState.lastPasteLength, "uname -a\n".length);
+
+  const escape = fakeKeyEvent("Escape");
+  canvas.dispatch("keydown", escape);
+  assert.equal(escape.prevented, true);
+  assert.equal(displayState.escapeReleaseEvents, 1);
+  assert.equal(displayState.blurEvents, 1);
+  assert.equal(displayState.focused, false);
+  assert.equal(canvas.dataset.inputActive, "false");
+}
 
 {
   const args = qemuArgs(baseConfig({ network: "default" }));

@@ -902,6 +902,7 @@ async function captureDisplayEvidence(page, result) {
         canvas.width > 0 &&
         canvas.height > 0;
       const evidence = {
+        active: canvas.dataset.inputActive === "true",
         present: true,
         focused: document.activeElement === canvas,
         height: canvas.height,

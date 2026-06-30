@@ -189,7 +189,7 @@ browser MVP. Keep Bus Engine product work downstream.
   focuses the emulator surface, sends a known key sequence through Playwright
   or an equivalent runner, and observes the expected guest-visible response
   through serial output, display output, or a structured test hook.
-- [ ] Add pointer/focus policy for the interactive surface: DoD is a minimal
+- [x] Add pointer/focus policy for the interactive surface: DoD is a minimal
   browser UI policy for focus, blur, keyboard capture, paste handling, pointer
   lock if used, and visible input state, with accessibility-safe escape
   behavior so the browser tab remains controllable.
