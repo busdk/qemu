@@ -1,0 +1,36 @@
+<!doctype html>
+<!--
+  Browser harness for QEMU WebAssembly smoke tests.
+
+  SPDX-License-Identifier: GPL-2.0-or-later
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>QEMU WebAssembly smoke test</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 2rem;
+      }
+      #status {
+        font-weight: 600;
+      }
+      #output {
+        background: #111;
+        color: #eee;
+        min-height: 24rem;
+        overflow: auto;
+        padding: 1rem;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>QEMU WebAssembly smoke test</h1>
+    <p id="status">initializing</p>
+    <pre id="output" aria-live="polite"></pre>
+    <script type="module" src="./wasm-browser-smoke.mjs"></script>
+  </body>
+</html>

@@ -584,6 +584,42 @@ The underlying command shape is::
   the local host during this pass.  Browser memory-limit evidence remains a
   separate required matrix item; the current evidence is limited to Node.js/V8
   constructor behavior and primary browser/runtime documentation.
+* ``scripts/ci/wasm-browser-smoke.html``,
+  ``scripts/ci/wasm-browser-smoke.mjs``, and
+  ``scripts/ci/wasm-browser-smoke-server.mjs`` now provide a generic browser
+  boot harness for the same 64-bit TuxBoot smoke guest used by the Node.js
+  wrapper.  The harness imports the generated Emscripten module, verifies that
+  the page is cross-origin isolated and has ``SharedArrayBuffer``, fetches the
+  kernel, initramfs, and qboot firmware inputs before module startup, mounts
+  them into Emscripten MEMFS during synchronous ``preRun``, uses
+  ``locateFile`` for ``qemu-system-x86_64.wasm``, sets
+  ``mainScriptUrlOrBlob`` for pthread workers, and routes QEMU stdout/stderr
+  into the page.
+* The browser smoke server maps explicit local inputs to
+  ``/artifacts/qemu-system-x86_64.js``,
+  ``/artifacts/qemu-system-x86_64.wasm``, ``/guest/kernel``,
+  ``/guest/initramfs.cpio.gz``, ``/firmware/qboot.rom``, and
+  ``/firmware/linuxboot_dma.bin``.  A local server route check confirmed
+  ``200`` responses for the page, JavaScript module, WebAssembly artifact,
+  kernel, and initramfs routes, with
+  ``Cross-Origin-Opener-Policy: same-origin``,
+  ``Cross-Origin-Embedder-Policy: require-corp``, and
+  ``Cross-Origin-Resource-Policy: same-origin`` on each response.  No browser
+  executed the page during this pass, so this is route/header proof rather
+  than browser boot proof.
+
+The browser smoke server can be started with the same prepared guest inputs::
+
+  scripts/ci/wasm-browser-smoke-server.mjs \
+    --artifact-dir /tmp/qemu-wasm64-tci-artifacts-pipe2-final \
+    --kernel /tmp/qemu-wasm-tuxboot-x86_64-bzImage \
+    --initrd /tmp/qemu-wasm-tuxboot-smoke-helper-proof3/tuxboot-smoke-initramfs.cpio.gz \
+    --firmware-dir pc-bios \
+    --port 8010
+
+Open the printed URL in a browser with SharedArrayBuffer support available
+under cross-origin isolation.  The page is successful only when it reaches
+``QEMU_WASM_LINUX_BOOT_OK``.
 
 The local artifact proof used this source-copy build shape from the QEMU
 source root::
@@ -1038,8 +1074,11 @@ Touches:
 Proof:
   QEMU opens the kernel and raw rootfs using documented in-browser paths.
   The Node smoke helper has proven the first part of this for MEMFS-hosted
-  kernel, initrd, and firmware files.  Browser packaging still needs a
-  dedicated harness or file-packaging path.
+  kernel, initrd, and firmware files.  The browser smoke server now exposes
+  explicit kernel, initramfs, firmware, JavaScript, and WebAssembly artifact
+  routes with the required cross-origin isolation headers.  A local route
+  check proved the browser can request those paths, but no browser execution
+  has proved QEMU opens them yet.
 
 Non-goals:
   No persistent storage.
@@ -1056,6 +1095,15 @@ Touches:
 
 Proof:
   The harness boots the smoke guest without product-specific code.
+
+Current status:
+  ``scripts/ci/wasm-browser-smoke.html`` and
+  ``scripts/ci/wasm-browser-smoke.mjs`` provide the generic harness, and
+  ``scripts/ci/wasm-browser-smoke-server.mjs`` serves it with explicit input
+  routes and cross-origin isolation headers.  Node syntax checks and local
+  ``curl`` route/header checks pass.  The acceptance proof still requires
+  running the page in Chromium, Firefox, or another supported browser and
+  observing ``QEMU_WASM_LINUX_BOOT_OK``.
 
 Non-goals:
   No branded UI, no WebGPU, no graphical desktop.
