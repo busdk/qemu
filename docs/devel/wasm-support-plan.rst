@@ -1537,6 +1537,14 @@ Proof:
   ``/tmp/qemu-node-json-proof/wrapper-early-fail.json`` with ``success:
   false``, ``status: 1``, ``markerSeen: false``, first QEMU argument ``-M``,
   two emitted lines, and ``elapsedMs: 1587``.
+  ``scripts/ci/wasm-node-smoke-result.mjs`` now centralizes the result
+  evidence for early QEMU exits, runtime errors, and timeouts.  Node smoke
+  failures record whether the marker is still missing, which expected serial
+  texts are still missing, the QEMU program-exit status when present, and the
+  runtime error stack when module import or startup fails.  The deterministic
+  ``scripts/ci/wasm-node-smoke-result-test.mjs`` helper test covers those
+  shapes without requiring a generated QEMU WebAssembly artifact or a guest
+  boot run.
 
   Example generic manifest shape for a root-disk proof::
 

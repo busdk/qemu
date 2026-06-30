@@ -823,6 +823,7 @@ smoke-wasm64-64bit-linux:
     - section_start smoke_args "Checking WASM browser smoke helpers"
     - python3 scripts/ci/wasm-artifact-manifest-test.py
     - node scripts/ci/wasm-node-preflight-test.mjs
+    - node scripts/ci/wasm-node-smoke-result-test.mjs
     - node scripts/ci/wasm-guest-manifest-test.mjs
     - node scripts/ci/wasm-memory-probe-test.mjs
     - node scripts/ci/wasm-browser-memory-probe-runner-test.mjs
@@ -893,6 +894,7 @@ smoke-wasm64-64bit-browser:
     - section_start smoke_args "Checking WASM browser smoke QEMU arguments"
     - python3 scripts/ci/wasm-artifact-manifest-test.py
     - node scripts/ci/wasm-node-preflight-test.mjs
+    - node scripts/ci/wasm-node-smoke-result-test.mjs
     - node scripts/ci/wasm-guest-manifest-test.mjs
     - node scripts/ci/wasm-memory-probe-test.mjs
     - node scripts/ci/wasm-browser-memory-probe-runner-test.mjs

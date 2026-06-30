@@ -10,6 +10,13 @@ import { dirname, resolve } from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
 
 import { nodeVersionPreflight } from "./wasm-node-preflight.mjs";
+import {
+  describeMissingText,
+  earlyProgramExitEvidence,
+  programExitStatus,
+  runtimeErrorEvidence,
+  timeoutEvidence,
+} from "./wasm-node-smoke-result.mjs";
 
 function parseArgs(argv) {
   const options = {
@@ -180,12 +187,13 @@ function checkNodeVersion() {
   process.exit(1);
 }
 
-function scheduleExit(status) {
+function scheduleExit(status, extra = {}) {
   if (exitScheduled) {
     return;
   }
   exitScheduled = true;
-  writeResult(status);
+  clearTimeout(timeout);
+  writeResult(status, extra);
   setTimeout(() => process.exit(status), 50);
 }
 
@@ -197,17 +205,6 @@ function maybeComplete() {
   if (markerSeen && allExpectedTextSeen()) {
     scheduleExit(0);
   }
-}
-
-function programExitStatus(line) {
-  const match = /^program exited \(with status: ([0-9]+)\)/.exec(line);
-  return match === null ? null : Number(match[1]);
-}
-
-function describeMissingText() {
-  return expectedTextSeen
-    .filter((expected) => !expected.seen)
-    .map((expected) => expected.text);
 }
 
 function emit(line, stream) {
@@ -248,7 +245,10 @@ function emit(line, stream) {
   maybeComplete();
   const status = programExitStatus(line);
   if (status !== null && (!markerSeen || !allExpectedTextSeen())) {
-    scheduleExit(status === 0 ? 1 : status);
+    scheduleExit(
+      status === 0 ? 1 : status,
+      earlyProgramExitEvidence(status, markerSeen, expectedTextSeen),
+    );
   }
 }
 
@@ -291,7 +291,7 @@ const timeout = setTimeout(() => {
   if (!markerSeen) {
     console.error(`timeout waiting for marker: ${options.marker}`);
   }
-  const missingText = describeMissingText();
+  const missingText = describeMissingText(expectedTextSeen);
   if (missingText.length > 0) {
     console.error("timeout waiting for expected text:");
     for (const text of missingText) {
@@ -299,10 +299,7 @@ const timeout = setTimeout(() => {
     }
   }
   dumpFiles();
-  writeResult(124, {
-    missingExpectedText: missingText,
-    timeout: true,
-  });
+  writeResult(124, timeoutEvidence(markerSeen, expectedTextSeen));
   process.exit(124);
 }, options.timeoutMs);
 
@@ -328,10 +325,7 @@ try {
 } catch (error) {
   clearTimeout(timeout);
   console.error(error && error.stack ? error.stack : String(error));
-  writeResult(1, {
-    errorName: error && error.name ? error.name : "Error",
-    errorMessage: error && error.message ? error.message : String(error),
-  });
+  writeResult(1, runtimeErrorEvidence(error, markerSeen, expectedTextSeen));
   process.exit(1);
 }
 
