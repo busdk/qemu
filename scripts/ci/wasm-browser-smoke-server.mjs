@@ -11,6 +11,14 @@ import { readFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const OPTIONAL_FIRMWARE_FILES = [
+  "bios-256k.bin",
+  "kvmvapic.bin",
+  "vgabios.bin",
+  "vgabios-stdvga.bin",
+  "efi-virtio.rom",
+];
+
 function usage(status) {
   const stream = status === 0 ? process.stdout : process.stderr;
   stream.write(`usage: wasm-browser-smoke-server.mjs --artifact-dir DIR --kernel FILE [--initrd FILE | --rootfs FILE] [OPTIONS]
@@ -103,6 +111,15 @@ function requireReadable(path, label) {
   }
 }
 
+function isReadable(path) {
+  try {
+    accessSync(path, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function contentType(path) {
   if (path.endsWith(".html")) {
     return "text/html; charset=utf-8";
@@ -127,6 +144,12 @@ function routeFile(options, scriptDir, pathname) {
     ["/firmware/qboot.rom", join(options.firmwareDir, "qboot.rom")],
     ["/firmware/linuxboot_dma.bin", join(options.firmwareDir, "linuxboot_dma.bin")],
   ]);
+  for (const name of OPTIONAL_FIRMWARE_FILES) {
+    const path = join(options.firmwareDir, name);
+    if (isReadable(path)) {
+      routes.set(`/firmware/${name}`, path);
+    }
+  }
   if (options.initrd !== null) {
     routes.set("/guest/initramfs.cpio.gz", options.initrd);
   }

@@ -5,6 +5,13 @@
  */
 
 const DEFAULT_MARKER = "QEMU_WASM_LINUX_BOOT_OK";
+const OPTIONAL_FIRMWARE_FILES = [
+  "bios-256k.bin",
+  "kvmvapic.bin",
+  "vgabios.bin",
+  "vgabios-stdvga.bin",
+  "efi-virtio.rom",
+];
 
 function option(name, fallback) {
   const value = new URLSearchParams(window.location.search).get(name);
@@ -45,6 +52,17 @@ async function fetchBytes(url) {
   return new Uint8Array(await response.arrayBuffer());
 }
 
+async function fetchOptionalBytes(url) {
+  const response = await fetch(url, { credentials: "same-origin" });
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`failed to fetch ${url}: HTTP ${response.status}`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
 function createParentPaths(module, path) {
   const parts = path.split("/").filter(Boolean).slice(0, -1);
   let current = "/";
@@ -62,15 +80,16 @@ function mountFiles(module, mounts) {
 }
 
 function qemuArgs(config) {
+  const defaultKernelAppend = config.initrd
+    ? "console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1"
+    : "console=ttyS0 earlyprintk=serial,ttyS0,115200 root=/dev/vda rw init=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1";
   const kernelAppend = [
-    config.initrd
-      ? "console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1"
-      : "console=ttyS0 earlyprintk=serial,ttyS0,115200 root=/dev/vda rw init=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1",
+    config.kernelAppend === null ? defaultKernelAppend : config.kernelAppend,
     config.appendExtra,
   ].filter(Boolean).join(" ");
   const args = [
     "-M",
-    "microvm,acpi=off",
+    config.machine,
     "-m",
     config.memory,
   ];
@@ -93,12 +112,16 @@ function qemuArgs(config) {
   }
   args.push("-append", kernelAppend);
   if (config.rootfs) {
-    args.push(
-      "-drive",
-      "file=/rootfs.raw,format=raw,if=none,id=hd0",
-      "-device",
-      "virtio-blk-device,drive=hd0",
-    );
+    if (config.rootfsDevice === "virtio-mmio") {
+      args.push(
+        "-drive",
+        "file=/rootfs.raw,format=raw,if=none,id=hd0",
+        "-device",
+        "virtio-blk-device,drive=hd0",
+      );
+    } else {
+      args.push("-drive", "file=/rootfs.raw,format=raw,if=virtio");
+    }
   }
   args.push("-L", "/firmware");
   args.push(...config.qemuArgs);
@@ -112,7 +135,9 @@ function buildConfig() {
     expectText: listOption("expectText"),
     initrd: pathOption("initrd", "/guest/initramfs.cpio.gz"),
     kernel: option("kernel", "/guest/kernel"),
+    kernelAppend: option("kernelAppend", null),
     linuxboot: option("linuxboot", "/firmware/linuxboot_dma.bin"),
+    machine: option("machine", "microvm,acpi=off"),
     marker: option("marker", DEFAULT_MARKER),
     maxOutputBytes: numberOption("maxOutputBytes", 60000),
     memory: option("memory", "512M"),
@@ -120,6 +145,7 @@ function buildConfig() {
     qemuArgs: listOption("qemuArg"),
     qboot: option("qboot", "/firmware/qboot.rom"),
     rootfs: pathOption("rootfs", ""),
+    rootfsDevice: option("rootfsDevice", "virtio-mmio"),
     timeoutMs: numberOption("timeoutMs", 180000),
     wasm: option("wasm", "/artifacts/qemu-system-x86_64.wasm"),
   };
@@ -129,6 +155,9 @@ async function run() {
   const status = text("status");
   const output = text("output");
   const config = buildConfig();
+  if (!["virtio-mmio", "virtio-pci"].includes(config.rootfsDevice)) {
+    throw new Error("rootfsDevice must be virtio-mmio or virtio-pci");
+  }
   const programUrl = new URL(config.program, window.location.href);
   const wasmUrl = new URL(config.wasm, window.location.href);
   const smokeState = {
@@ -145,6 +174,13 @@ async function run() {
     { url: config.qboot, path: "/firmware/qboot.rom" },
     { url: config.linuxboot, path: "/firmware/linuxboot_dma.bin" },
   ];
+  for (const name of OPTIONAL_FIRMWARE_FILES) {
+    mounts.push({
+      optional: true,
+      path: `/firmware/${name}`,
+      url: `/firmware/${name}`,
+    });
+  }
   if (config.initrd) {
     mounts.push({ url: config.initrd, path: "/initramfs.cpio.gz" });
   }
@@ -211,8 +247,11 @@ async function run() {
 
   status.textContent = "loading smoke guest inputs";
   for (const mount of mounts) {
-    mount.data = await fetchBytes(mount.url);
+    mount.data = mount.optional
+      ? await fetchOptionalBytes(mount.url)
+      : await fetchBytes(mount.url);
   }
+  const availableMounts = mounts.filter((mount) => mount.data !== null);
 
   status.textContent = "loading QEMU WebAssembly module";
   const moduleFactory = (await import(programUrl.href)).default;
@@ -228,7 +267,7 @@ async function run() {
     mainScriptUrlOrBlob: programUrl.href,
     preRun: [
       (module) => {
-        mountFiles(module, mounts);
+        mountFiles(module, availableMounts);
       },
     ],
     print: emit,

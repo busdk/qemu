@@ -34,6 +34,9 @@ Options:
   --host HOST         Bind address for the local smoke server
   --initrd FILE       Smoke initramfs image
   --kernel FILE       64-bit Linux bzImage
+  --kernel-append TEXT
+                     Full Linux kernel arguments, replacing smoke defaults
+  --machine MACHINE  QEMU machine name passed with -M
   --marker TEXT       Output text required for success
   --max-output-bytes N
                      Maximum browser page output bytes to keep
@@ -49,6 +52,8 @@ Options:
                      Maximum smoke progress samples to keep
   --qemu-arg ARG     Extra QEMU argument appended to the smoke command
   --rootfs FILE       Raw root filesystem image exposed as /dev/vda
+  --rootfs-device KIND
+                     Rootfs block device kind: virtio-mmio or virtio-pci
   --screenshot FILE  Save a browser page screenshot to FILE
   --screenshot-full-page
                      Capture the full scrollable page instead of the viewport
@@ -70,6 +75,8 @@ function parseArgs(argv) {
     host: "127.0.0.1",
     initrd: null,
     kernel: null,
+    kernelAppend: null,
+    machine: "microvm,acpi=off",
     marker: "QEMU_WASM_LINUX_BOOT_OK",
     maxOutputBytes: 60000,
     memory: "512M",
@@ -81,6 +88,7 @@ function parseArgs(argv) {
     progressSampleLimit: DEFAULT_PROGRESS_SAMPLE_LIMIT,
     qemuArgs: [],
     rootfs: null,
+    rootfsDevice: "virtio-mmio",
     screenshot: null,
     screenshotFullPage: false,
     timeoutMs: 180000,
@@ -118,6 +126,12 @@ function parseArgs(argv) {
     } else if (arg === "--kernel") {
       options.kernel = argv[++i];
       explicit.add("kernel");
+    } else if (arg === "--kernel-append") {
+      options.kernelAppend = argv[++i];
+      explicit.add("kernelAppend");
+    } else if (arg === "--machine") {
+      options.machine = argv[++i];
+      explicit.add("machine");
     } else if (arg === "--marker") {
       options.marker = argv[++i];
       explicit.add("marker");
@@ -151,6 +165,9 @@ function parseArgs(argv) {
     } else if (arg === "--rootfs") {
       options.rootfs = argv[++i];
       explicit.add("rootfs");
+    } else if (arg === "--rootfs-device") {
+      options.rootfsDevice = argv[++i];
+      explicit.add("rootfsDevice");
     } else if (arg === "--screenshot") {
       options.screenshot = argv[++i];
       explicit.add("screenshot");
@@ -197,11 +214,14 @@ function parseArgs(argv) {
       "host",
       "initrd",
       "kernel",
+      "kernelAppend",
+      "machine",
       "marker",
       "memory",
       "out",
       "program",
       "rootfs",
+      "rootfsDevice",
       "screenshot",
     ],
     stringListFields: ["expectText", "qemuArgs"],
@@ -241,6 +261,10 @@ function parseArgs(argv) {
   }
   if (!Number.isInteger(options.progressSampleLimit) || options.progressSampleLimit <= 0) {
     console.error("--progress-sample-limit must be a positive integer");
+    usage(2);
+  }
+  if (!["virtio-mmio", "virtio-pci"].includes(options.rootfsDevice)) {
+    console.error("--rootfs-device must be virtio-mmio or virtio-pci");
     usage(2);
   }
 
@@ -405,6 +429,8 @@ async function run() {
     browserVersion: browser.version(),
     cpu: options.cpu,
     expectText: options.expectText,
+    kernelAppend: options.kernelAppend,
+    machine: options.machine,
     maxDiagnosticEntries: MAX_DIAGNOSTIC_ENTRIES,
     marker: options.marker,
     memory: options.memory,
@@ -414,6 +440,7 @@ async function run() {
     progressSampleLimit: options.progressSampleLimit,
     qemuArgs: options.qemuArgs,
     rootfs: options.rootfs,
+    rootfsDevice: options.rootfsDevice,
     success: false,
     consoleMessages: [],
     pageErrors: [],
@@ -453,6 +480,11 @@ async function run() {
     url.searchParams.set("marker", options.marker);
     url.searchParams.set("maxOutputBytes", String(options.maxOutputBytes));
     url.searchParams.set("memory", options.memory);
+    url.searchParams.set("machine", options.machine);
+    url.searchParams.set("rootfsDevice", options.rootfsDevice);
+    if (options.kernelAppend !== null) {
+      url.searchParams.set("kernelAppend", options.kernelAppend);
+    }
     for (const text of options.expectText) {
       url.searchParams.append("expectText", text);
     }

@@ -12,6 +12,14 @@ import { fileURLToPath } from "node:url";
 
 import { applyGuestManifest } from "./wasm-guest-manifest.mjs";
 
+const OPTIONAL_FIRMWARE_FILES = [
+  "bios-256k.bin",
+  "kvmvapic.bin",
+  "vgabios.bin",
+  "vgabios-stdvga.bin",
+  "efi-virtio.rom",
+];
+
 function parseArgs(argv) {
   const options = {
     appendExtra: "",
@@ -22,12 +30,15 @@ function parseArgs(argv) {
     guestManifest: null,
     initrd: null,
     kernel: null,
+    kernelAppend: null,
+    machine: "microvm,acpi=off",
     marker: "QEMU_WASM_LINUX_BOOT_OK",
     maxOutputBytes: 60000,
     memory: "512M",
     program: "qemu-system-x86_64.js",
     qemuArgs: [],
     rootfs: null,
+    rootfsDevice: "virtio-mmio",
     timeoutMs: 180000,
   };
   const explicit = new Set();
@@ -57,6 +68,12 @@ function parseArgs(argv) {
     } else if (arg === "--kernel") {
       options.kernel = argv[++i];
       explicit.add("kernel");
+    } else if (arg === "--kernel-append") {
+      options.kernelAppend = argv[++i];
+      explicit.add("kernelAppend");
+    } else if (arg === "--machine") {
+      options.machine = argv[++i];
+      explicit.add("machine");
     } else if (arg === "--marker") {
       options.marker = argv[++i];
       explicit.add("marker");
@@ -75,6 +92,9 @@ function parseArgs(argv) {
     } else if (arg === "--rootfs") {
       options.rootfs = argv[++i];
       explicit.add("rootfs");
+    } else if (arg === "--rootfs-device") {
+      options.rootfsDevice = argv[++i];
+      explicit.add("rootfsDevice");
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number(argv[++i]);
       explicit.add("timeoutMs");
@@ -97,10 +117,13 @@ function parseArgs(argv) {
       "firmwareDir",
       "initrd",
       "kernel",
+      "kernelAppend",
+      "machine",
       "marker",
       "memory",
       "program",
       "rootfs",
+      "rootfsDevice",
     ],
     stringListFields: ["expectText", "qemuArgs"],
   });
@@ -121,6 +144,10 @@ function parseArgs(argv) {
     console.error("--timeout-ms must be a positive integer");
     usage(2);
   }
+  if (!["virtio-mmio", "virtio-pci"].includes(options.rootfsDevice)) {
+    console.error("--rootfs-device must be virtio-mmio or virtio-pci");
+    usage(2);
+  }
 
   return options;
 }
@@ -138,12 +165,15 @@ Options:
   --guest-manifest FILE  JSON file with guest input defaults
   --initrd FILE          Initramfs image that prints the expected marker
   --kernel FILE          64-bit Linux bzImage
+  --kernel-append TEXT   Full Linux kernel arguments, replacing smoke defaults
+  --machine MACHINE      QEMU machine name passed with -M
   --marker TEXT          Output text required for success
   --max-output-bytes N   Suppress stdout/stderr after N total output bytes
   --memory SIZE          Guest memory size passed to QEMU
   --program FILE         JavaScript launcher inside artifact dir
   --qemu-arg ARG         Extra QEMU argument appended to the smoke command
   --rootfs FILE          Raw root filesystem image exposed as /dev/vda
+  --rootfs-device KIND   Rootfs block device kind: virtio-mmio or virtio-pci
   --timeout-ms MS        Timeout in milliseconds
   --help                 Show this help
 `);
@@ -159,11 +189,30 @@ function requireReadable(path, label) {
   }
 }
 
+function isReadable(path) {
+  try {
+    accessSync(path, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function runSmoke(options) {
   const scriptDir = dirname(fileURLToPath(import.meta.url));
   const smoke = resolve(scriptDir, "wasm-node-smoke.mjs");
   const qboot = resolve(options.firmwareDir, "qboot.rom");
   const linuxboot = resolve(options.firmwareDir, "linuxboot_dma.bin");
+  const firmwareMounts = [
+    { hostPath: qboot, wasmPath: "/firmware/qboot.rom" },
+    { hostPath: linuxboot, wasmPath: "/firmware/linuxboot_dma.bin" },
+  ];
+  for (const name of OPTIONAL_FIRMWARE_FILES) {
+    const path = resolve(options.firmwareDir, name);
+    if (isReadable(path)) {
+      firmwareMounts.push({ hostPath: path, wasmPath: `/firmware/${name}` });
+    }
+  }
 
   requireReadable(resolve(options.artifactDir, options.program), "program");
   requireReadable(resolve(options.artifactDir, "qemu-system-x86_64.wasm"), "wasm module");
@@ -191,19 +240,19 @@ function runSmoke(options) {
     options.marker,
     "--mount-file",
     `${options.kernel}:/kernel`,
-    "--mount-file",
-    `${qboot}:/firmware/qboot.rom`,
-    "--mount-file",
-    `${linuxboot}:/firmware/linuxboot_dma.bin`,
   ];
+  for (const mount of firmwareMounts) {
+    args.push("--mount-file", `${mount.hostPath}:${mount.wasmPath}`);
+  }
   for (const text of options.expectText) {
     args.push("--expect-text", text);
   }
 
+  const defaultKernelAppend = options.initrd !== null
+    ? "console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1"
+    : "console=ttyS0 earlyprintk=serial,ttyS0,115200 root=/dev/vda rw init=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1";
   const kernelAppend = [
-    options.initrd !== null
-      ? "console=ttyS0 earlyprintk=serial,ttyS0,115200 rdinit=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1"
-      : "console=ttyS0 earlyprintk=serial,ttyS0,115200 root=/dev/vda rw init=/init acpi=off hpet=disable tsc=unstable lpj=1000000 clocksource=jiffies panic=-1",
+    options.kernelAppend === null ? defaultKernelAppend : options.kernelAppend,
     options.appendExtra,
   ].filter(Boolean).join(" ");
 
@@ -214,7 +263,7 @@ function runSmoke(options) {
     args.push("--mount-file", `${options.rootfs}:/rootfs.raw`);
   }
 
-  args.push("--", "-M", "microvm,acpi=off", "-m", options.memory);
+  args.push("--", "-M", options.machine, "-m", options.memory);
   if (options.cpu !== null) {
     args.push("-cpu", options.cpu);
   }
@@ -235,12 +284,16 @@ function runSmoke(options) {
   }
   args.push("-append", kernelAppend);
   if (options.rootfs !== null) {
-    args.push(
-      "-drive",
-      "file=/rootfs.raw,format=raw,if=none,id=hd0",
-      "-device",
-      "virtio-blk-device,drive=hd0",
-    );
+    if (options.rootfsDevice === "virtio-mmio") {
+      args.push(
+        "-drive",
+        "file=/rootfs.raw,format=raw,if=none,id=hd0",
+        "-device",
+        "virtio-blk-device,drive=hd0",
+      );
+    } else {
+      args.push("-drive", "file=/rootfs.raw,format=raw,if=virtio");
+    }
   }
   args.push("-L", "/firmware");
   args.push(...options.qemuArgs);

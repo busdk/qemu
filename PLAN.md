@@ -54,14 +54,16 @@ browser MVP. Keep Bus Engine product work downstream.
 - [ ] Document the expected downstream build command:
   `bus engine os build image --profile virtual-server`, with the default host
   architecture selected automatically.
-- [ ] Build or consume a minimal x86_64 Bus Engine OS console artifact that can
+- [x] Build or consume a minimal x86_64 Bus Engine OS console artifact that can
   boot without networking or graphics.
-- [ ] Boot that Bus Engine OS artifact through the generic QEMU/WASM browser
+- [x] Boot that Bus Engine OS artifact through the generic QEMU/WASM browser
   harness in Chromium.
-- [ ] Capture serial evidence proving Bus Engine OS identity, for example
-  `/etc/os-release` plus a deterministic `BUS_ENGINE_OS_BROWSER_LAB_OK`
-  marker.
-- [ ] Capture a screenshot-like browser preview suitable for the
+- [x] Capture serial evidence proving accepted Bus Engine OS kernel identity
+  and rootfs init handoff through Chromium/WASM.
+- [ ] Add deeper userspace identity evidence, such as `/etc/os-release` or a
+  deterministic `BUS_ENGINE_OS_BROWSER_LAB_OK` marker, after the downstream
+  image provides a browser-lab readiness path that does not depend on network.
+- [x] Capture a screenshot-like browser preview suitable for the
   `busdk.com/engine/` product page.
 - [ ] Keep the website preview code and product presentation outside upstream
   QEMU.

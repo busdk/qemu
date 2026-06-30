@@ -1367,10 +1367,11 @@ Proof:
   ``scripts/ci/wasm-browser-smoke-runner.mjs`` now also accept
   ``--guest-manifest FILE``.  The manifest is a generic JSON object with flat
   fields such as ``kernel``, ``initrd`` or ``rootfs``, ``firmwareDir``,
-  ``cpu``, ``memory``, ``marker``, ``expectText``, ``appendExtra``,
-  ``qemuArgs``, and timeout or capture settings.  Explicit command-line options
-  override manifest values, and repeated command-line ``--qemu-arg`` values are
-  appended after manifest ``qemuArgs``.  Manifest path fields are resolved
+  ``machine``, ``rootfsDevice``, ``cpu``, ``memory``, ``kernelAppend``,
+  ``marker``, ``expectText``, ``appendExtra``, ``qemuArgs``, and timeout or
+  capture settings.  Explicit command-line options override manifest values,
+  and repeated command-line ``--qemu-arg`` values are appended after manifest
+  ``qemuArgs``.  Manifest path fields are resolved
   relative to the manifest file when they are not absolute, so a downstream
   bundle can carry local artifact paths without requiring the caller's current
   directory to match.  A manifest may also include a ``sha256`` object keyed by
@@ -1395,6 +1396,13 @@ Proof:
   screenshot at ``/tmp/qemu-wasm-rootfs-proof/chromium-expect.png``.  This
   manifest is the generic handoff shape that downstream Bus Engine OS can
   populate without adding Bus-specific code to upstream QEMU.
+  Normal Linux root filesystems can override the smoke-test boot arguments with
+  ``--kernel-append`` or manifest ``kernelAppend``.  The root-disk helper
+  defaults to the qboot ``microvm`` plus ``virtio-mmio`` block-device shape used
+  by the tiny smoke rootfs, and also supports ``--machine`` plus
+  ``--rootfs-device virtio-pci`` for ordinary PC-machine images.  The harness
+  mounts standard PC firmware files such as ``bios-256k.bin`` when present
+  under ``firmwareDir``.
 
   Example generic manifest shape for a root-disk proof::
 
@@ -1404,6 +1412,8 @@ Proof:
       "kernel": "/kernel",
       "rootfs": "/rootfs.ext4",
       "firmwareDir": "pc-bios",
+      "machine": "microvm,acpi=off",
+      "rootfsDevice": "virtio-mmio",
       "cpu": "Nehalem",
       "memory": "512M",
       "marker": "QEMU_WASM_LINUX_BOOT_OK",
@@ -1919,6 +1929,31 @@ Current status:
   such a manifest with product-owned artifacts and a Bus Engine OS readiness
   marker plus expected serial identity text; QEMU should keep validating the
   manifest only as generic guest input metadata.
+  An accepted x86_64 ``virtual-server`` artifact set was consumed from Docker
+  volume ``bus-engine-os-x86_64-minimal-qemu-20260629T051004Z-4062057`` and
+  copied to ``/tmp/bus-engine-os-wasm-proof``.  The copied artifacts were
+  ``bzImage`` SHA-256
+  ``b37cc4f821877ef34d468eeb9504fb6c0738114cff9bb18e030d88a2f4b76943`` and
+  ``rootfs.raw`` SHA-256
+  ``6d2222e0f5c8a1ff2d40808e682ffa5f0995e53c28a0f0af98ed0a96c9d49eae``.
+  The accepted native QEMU metadata for that image used kernel arguments
+  ``console=ttyS0 root=/dev/vda rw`` and the ``virtual-server`` profile with
+  27 existing runtime packages.
+
+  Node.js ``v24`` first proved the artifact could reach the Bus Engine OS
+  kernel identity text under QEMU/WASM.  A second Node run with
+  ``--kernel-append 'console=ttyS0 root=/dev/vda rw'``, ``--machine pc``,
+  ``--rootfs-device virtio-pci``, and ``--qemu-arg -nic --qemu-arg none``
+  reached ``Run /sbin/init as init process`` while requiring
+  ``bus@bus-engine-os`` as expected serial text.  A Chromium ``141.0.7390.37``
+  run with the same artifact and options reached the same init handoff marker
+  in ``130611`` ms, recorded ``crossOriginIsolated: true``, no request
+  failures, no page errors, ``258`` serial lines, and wrote a ``1280x720``
+  screenshot at ``/tmp/bus-engine-os-wasm-proof/chromium-bus-engine-os.png``.
+  This is an accepted browser init-handoff proof for the downstream artifact.
+  It is not yet a full browser multi-user proof or an ``/etc/os-release``
+  proof; that should come from a downstream browser-lab readiness marker that
+  does not depend on networking.
 
 Non-goals:
   No Bus-specific source code in upstream QEMU.  No requirement for WebGPU,
