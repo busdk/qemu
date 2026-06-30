@@ -854,9 +854,11 @@ smoke-wasm64-64bit-browser:
     paths:
       - ci-runner-env
       - build/wasm-browser-memory-probe.json
+      - build/wasm-browser-smoke-result.json
       - build/wasm-browser-smoke-guest/tuxboot-smoke-guest.json
   variables:
     QEMU_JOB_OPTIONAL: 1
+    QEMU_WASM_BROWSER: chromium
   script:
     - source scripts/ci/gitlab-ci-section
     - mkdir -p ci-runner-env
@@ -893,6 +895,7 @@ smoke-wasm64-64bit-browser:
           --kernel wasm-smoke-cache/tuxboot-x86_64-bzImage
           --initrd build/wasm-browser-smoke-guest/tuxboot-smoke-initramfs.cpio.gz
           --firmware-dir pc-bios
+          --out build/wasm-browser-smoke-result.json
           --timeout-ms 180000
     - section_end smoke_browser
 

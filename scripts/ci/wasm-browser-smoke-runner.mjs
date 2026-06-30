@@ -6,6 +6,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,6 +23,7 @@ Options:
   --initrd FILE       Smoke initramfs image
   --kernel FILE       64-bit Linux bzImage
   --marker TEXT       Output text required for success
+  --out FILE          Write smoke result JSON to FILE
   --port PORT         Local smoke server port
   --program FILE      JavaScript launcher inside artifact dir
   --timeout-ms MS     Timeout in milliseconds
@@ -39,6 +41,7 @@ function parseArgs(argv) {
     initrd: null,
     kernel: null,
     marker: "QEMU_WASM_LINUX_BOOT_OK",
+    out: null,
     port: 8010,
     program: "qemu-system-x86_64.js",
     timeoutMs: 180000,
@@ -60,6 +63,8 @@ function parseArgs(argv) {
       options.kernel = argv[++i];
     } else if (arg === "--marker") {
       options.marker = argv[++i];
+    } else if (arg === "--out") {
+      options.out = argv[++i];
     } else if (arg === "--port") {
       options.port = Number(argv[++i]);
     } else if (arg === "--program") {
@@ -168,6 +173,13 @@ async function stopServer(child) {
   });
 }
 
+async function writeResult(options, result) {
+  if (options.out === null) {
+    return;
+  }
+  await writeFile(options.out, `${JSON.stringify(result, null, 2)}\n`);
+}
+
 async function run() {
   const options = parseArgs(process.argv.slice(2));
   const browserType = await loadPlaywright(options.browser);
@@ -176,6 +188,15 @@ async function run() {
     headless: true,
     args: options.browser === "chromium" ? ["--no-sandbox"] : [],
   });
+  const startTime = Date.now();
+  const result = {
+    format: 1,
+    browser: options.browser,
+    browserVersion: browser.version(),
+    marker: options.marker,
+    timeoutMs: options.timeoutMs,
+    success: false,
+  };
   try {
     const page = await browser.newPage();
     page.on("console", (message) => {
@@ -185,13 +206,22 @@ async function run() {
       waitUntil: "domcontentloaded",
       timeout: options.timeoutMs,
     });
+    result.userAgent = await page.evaluate(() => navigator.userAgent);
+    result.crossOriginIsolated = await page.evaluate(() => Boolean(globalThis.crossOriginIsolated));
     await page.waitForFunction(
       (marker) => document.body.textContent.includes(marker),
       options.marker,
       { timeout: options.timeoutMs },
     );
+    result.success = true;
+    result.elapsedMs = Date.now() - startTime;
+    await writeResult(options, result);
     console.log(`wasm-browser-smoke-runner: marker reached: ${options.marker}`);
   } catch (error) {
+    result.elapsedMs = Date.now() - startTime;
+    result.errorName = error && error.name ? error.name : "Error";
+    result.errorMessage = error && error.message ? error.message : String(error);
+    await writeResult(options, result);
     console.error(error && error.stack ? error.stack : String(error));
     throw error;
   } finally {

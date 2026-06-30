@@ -486,7 +486,8 @@ Evidence collected on 2026-06-29 and 2026-06-30 from the local QEMU branch:
   ``zstd`` tool and the matching ``playwright@1.56.1`` Node package, records
   ``build/wasm-browser-memory-probe.json`` with
   ``scripts/ci/wasm-browser-memory-probe-runner.mjs``, then runs
-  ``scripts/ci/wasm-browser-smoke-runner.mjs``.  The job defaults to
+  ``scripts/ci/wasm-browser-smoke-runner.mjs`` and records
+  ``build/wasm-browser-smoke-result.json``.  The job defaults to
   ``QEMU_WASM_BROWSER=chromium`` but can be replayed with another Playwright
   browser name, such as ``firefox``, for matrix investigation.  The job is
   optional because the acceptable upstream browser image, browser matrix, and
@@ -646,7 +647,9 @@ The underlying command shape is::
   ``Cross-Origin-Embedder-Policy: require-corp``, and
   ``Cross-Origin-Resource-Policy: same-origin`` on each response.
 * ``scripts/ci/wasm-browser-smoke-runner.mjs`` now starts the browser smoke
-  server, launches a Playwright browser, waits for the readiness marker, and
+  server, launches a Playwright browser, waits for the readiness marker,
+  optionally writes a JSON result containing the browser name, browser version,
+  marker, elapsed time, cross-origin isolation state, and error text, and
   stops the server.  A disposable
   ``mcr.microsoft.com/playwright:v1.56.1-noble`` image
   (digest
@@ -662,6 +665,12 @@ The underlying command shape is::
   cleaned wasm64 TCI artifact, TuxBoot kernel, and helper-generated initramfs.
   This expands the browser boot proof beyond Chromium, but it is not yet wired
   into GitLab CI.
+* The browser smoke runner's ``--out`` result path was tested under Chromium
+  ``141.0.7390.37``.  The JSON result recorded ``success: true``,
+  ``crossOriginIsolated: true``, the browser version, marker, timeout, user
+  agent, and elapsed time while the page reached ``QEMU_WASM_LINUX_BOOT_OK``.
+  The failure path was tested with the known WebKit timeout and recorded
+  ``success: false`` plus the timeout error text.
 * A WebKit boot-smoke attempt in the same Playwright image did not reach guest
   execution.  The browser console repeatedly reported that the runtime was
   still waiting on the ``wasm-instantiate`` dependency, and the runner timed
@@ -1230,7 +1239,8 @@ Touches:
 
 Proof:
   The test fails on timeout, kernel panic, missing rootfs, or QEMU startup
-  failure, and passes only when the marker appears.
+  failure, and passes only when the marker appears.  When ``--out`` is used,
+  the runner writes a compact JSON result for CI artifact collection.
 
 Current status:
   ``scripts/ci/wasm-browser-smoke-runner.mjs`` provides the first automated
