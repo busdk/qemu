@@ -46,6 +46,8 @@ browser MVP. Keep Bus Engine product work downstream.
   defaulting to `-nic none`, with an opt-in mode for later networking probes.
 - [x] Add deterministic Node coverage for browser smoke QEMU argument
   generation, including no-network, initrd, rootfs, and extra-argument paths.
+- [x] Add deterministic Node coverage for browser runner terminal-status
+  detection so page-level failures are captured promptly.
 - [ ] Continue recording browser/runtime versions, commands, results, and
   failure modes in `docs/devel/wasm-support-plan.rst`.
 

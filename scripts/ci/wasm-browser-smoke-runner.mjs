@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 
 import { applyGuestManifest } from "./wasm-guest-manifest.mjs";
 
+const THIS_FILE = fileURLToPath(import.meta.url);
 const MAX_DIAGNOSTIC_ENTRIES = 50;
 const DEFAULT_PAGE_TEXT_TAIL_BYTES = 8192;
 const DEFAULT_PROGRESS_SAMPLE_INTERVAL_MS = 10000;
@@ -292,6 +293,13 @@ function appendBoundedLimit(list, entry, limit) {
   }
 }
 
+export function isTerminalPageStatus(status, marker) {
+  return status === `marker reached: ${marker}` ||
+    status.startsWith("program exited before marker:") ||
+    status.startsWith("timeout waiting for ") ||
+    status === "failed";
+}
+
 async function loadPlaywright(browserName) {
   try {
     const require = createRequire(import.meta.url);
@@ -476,6 +484,10 @@ async function run() {
   let progressTimer = null;
   try {
     page = await browser.newPage();
+    await page.addInitScript({
+      content: `${isTerminalPageStatus.toString()}\n` +
+        "globalThis.qemuWasmIsTerminalPageStatus = isTerminalPageStatus;\n",
+    });
     page.on("console", (message) => {
       const text = message.text();
       appendBounded(result.consoleMessages, {
@@ -541,10 +553,7 @@ async function run() {
     await page.waitForFunction(
       (marker) => {
         const status = document.querySelector("#status")?.textContent || "";
-        return status === `marker reached: ${marker}` ||
-          status.startsWith("program exited before marker:") ||
-          status.startsWith("timeout waiting for ") ||
-          status === "failed";
+        return globalThis.qemuWasmIsTerminalPageStatus(status, marker);
       },
       options.marker,
       { timeout: options.timeoutMs },
@@ -584,4 +593,6 @@ async function run() {
   }
 }
 
-run().catch(() => process.exit(1));
+if (process.argv[1] === THIS_FILE) {
+  run().catch(() => process.exit(1));
+}

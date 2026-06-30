@@ -883,6 +883,7 @@ smoke-wasm64-64bit-browser:
     - section_end setup
     - section_start smoke_args "Checking WASM browser smoke QEMU arguments"
     - node scripts/ci/wasm-browser-smoke-args-test.mjs
+    - node scripts/ci/wasm-browser-smoke-runner-test.mjs
     - section_end smoke_args
     - section_start memory_probe "Running WASM browser memory probe"
     - node scripts/ci/wasm-browser-memory-probe-runner.mjs
