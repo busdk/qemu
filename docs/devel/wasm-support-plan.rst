@@ -2677,6 +2677,34 @@ Current status:
   canvas and exported QEMU input hook, plus ``2157`` non-black display pixels.
   This proves browser-to-QEMU key delivery metadata.
 
+  A later downstream Bus Engine OS run with the committed ``display=wasm``
+  artifact used ``console=tty0 console=ttyS0 root=/dev/vda rw`` to make the
+  virtual VGA console visible while preserving serial diagnostics.  Chromium
+  ``141.0.7390.37`` ran with ``display=wasm``, ``-vga std``,
+  ``--focus-display``, ``--keyboard-after-text 'bus@bus-engine-os'``, and
+  ``--keyboard-text 'help\n'``.  It reached the configured marker in
+  ``160347`` ms and wrote
+  ``build/wasm-browser-proof-current/bus-engine-os-display-input-tty0-qkbd-result.json``
+  and
+  ``build/wasm-browser-proof-current/bus-engine-os-display-input-tty0-qkbd-page.png``.
+  The screenshot SHA-256 was
+  ``5c8f25f6ead4eda149603fd4e95ddc6f608e379ba65b8ded2a5ede12188aa8ed`` and
+  the result JSON SHA-256 was
+  ``345c41412083d855cf4cab562963a5cf3975b727408fec5cbe40a346d5a9d7c3``.
+  The browser canvas was active and focused at ``720x400`` with pixel hash
+  ``fnv1a32:5ca46c9d`` and ``26161`` non-black pixels.  QEMU reported the
+  focused canvas key sequence as ``received=12``, ``dropped=0``,
+  ``drained=12``, and ``sent=12``.
+
+  That run is still partial downstream evidence.  The string
+  ``bus@bus-engine-os`` appears in the kernel compiler identity, so it is too
+  weak to use as a userspace-readiness marker by itself.  The result did not
+  show guest-visible output from the typed ``help`` sequence.  The current Bus
+  Engine OS browser artifact remains a serial-first runtime; completing the
+  downstream graphics/input proof needs either a VGA/tty getty, a graphical
+  profile, or another guest-visible input test path in the Bus Engine OS
+  artifact.
+
   Deterministic browser harness coverage now exercises the same focusable
   display surface without launching QEMU.  A Chromium ``141.0.7390.37`` run
   used ``--harness-self-test``, ``--display wasm``, ``--keyboard-text

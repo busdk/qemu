@@ -240,7 +240,9 @@ browser MVP. Keep Bus Engine product work downstream.
   Current partial evidence: Bus Engine OS reaches a visible browser canvas and
   QEMU reports focused-canvas key events as received, drained, and sent. The
   remaining acceptance gap is a guest-visible response to the deterministic
-  keyboard sequence.
+  keyboard sequence. Future downstream runs must not use `bus@bus-engine-os`
+  alone as a readiness marker because that string can appear in the kernel
+  compiler identity before userspace is ready.
 - [ ] Update the browser MVP acceptance definition after graphics/input proof:
   DoD is that the MVP is no longer described as serial-console-only; it
   requires 64-bit QEMU/WASM boot, visible graphics output, keyboard input,
