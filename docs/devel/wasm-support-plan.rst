@@ -3757,3 +3757,112 @@ remount message.  This result shows that memory-barrier overhead is measurable
 but too small to satisfy the Bus Engine OS browser boot goal.  The remaining
 required work is a real generated-WASM or equivalent execution acceleration
 path with strict TCI fallback.
+
+Generated WebAssembly Execution Design
+--------------------------------------
+
+The next acceleration lane is to compile selected TCG translation blocks into
+small WebAssembly functions at browser runtime while keeping TCI as the
+correctness baseline.  The generated path must be opt-in until it repeatedly
+proves the generic Linux smoke and the downstream Bus Engine OS boot proof.
+
+The intended execution shape is:
+
+* TCG still translates guest instructions into QEMU TCG IR.
+* The normal TCI bytecode remains available for every translation block.
+* A wasm64 browser acceleration layer inspects a translated block and accepts
+  only a small supported opcode subset.
+* Accepted blocks are emitted as standalone WebAssembly functions.
+* Generated functions receive a compact execution context: register storage,
+  guest RAM access hooks or memory views, helper-call trampolines, and exit
+  metadata.
+* Unsupported opcodes, helper calls, fault-prone memory paths, runtime
+  compilation failure, validation failure, cache mismatch, or disabled
+  acceleration return to the existing TCI bytecode.
+
+The first production acceleration must therefore start with a narrow block
+class rather than a whole backend.  Hot-block evidence points at integer moves,
+loads, stores, arithmetic, branches, extraction, and barriers.  The safe first
+candidate is a pure-register straight-line block or a block whose memory
+accesses can be routed through the same checked QEMU load/store helpers as
+TCI.  Direct guest RAM access may be added only after the cache key and memory
+invalidation rules are explicit.
+
+Generated blocks call back into QEMU only through explicit imports.  Helper
+imports must be typed, bounded, and counted so the browser proof can report
+how many blocks used generated execution and how many fell back to TCI.  The
+generated code must not bypass QEMU's existing exception, interrupt, MMU,
+watchpoint, or device-memory behavior.  If a block cannot preserve those
+semantics, it is not eligible for generated execution.
+
+Guest RAM access has two acceptable early forms:
+
+* checked helper calls that delegate to QEMU's existing TCI load/store helpers;
+* later, a validated fast path for RAM-only pages after the TB cache key tracks
+  page identity, permissions, dirty/invalidation state, and memory-region
+  generation.
+
+Block lookup and invalidation must be conservative.  A generated block cache
+key must include at least target architecture, QEMU build/runtime ABI, TCG
+opcode subset version, guest PC, code segment base, flags, cflags, translated
+size, instruction count, page identity or invalidation generation, and the
+helper/import ABI version.  Any mismatch rejects the generated block and runs
+TCI.  A QEMU TB flush must make matching generated blocks unreachable before
+they can execute again.
+
+The browser APIs required by the first implementation are deliberately small:
+
+* ``WebAssembly.validate`` for rejecting malformed generated modules;
+* ``WebAssembly.compile`` or ``WebAssembly.instantiate`` for compiling a
+  standalone function module;
+* JavaScript ``BigInt`` for ``i64`` parameters and results;
+* later, worker-local caching so module compilation does not block the browser
+  UI thread.
+
+TCI fallback invariant:
+
+* acceleration is disabled unless an explicit option enables it;
+* every TB has a TCI representation before a generated block may be attempted;
+* unsupported IR, validation errors, browser runtime errors, helper ABI
+  mismatches, cache misses, stale invalidation generations, or execution
+  exceptions increment fallback counters and run TCI;
+* generic serial boot, service-bridge smoke, display/input plumbing, and
+  downstream Bus Engine OS proof must keep working with acceleration disabled.
+
+Before wiring generated execution into QEMU, the branch carries a standalone
+prototype that emits and executes tiny generated WebAssembly functions in
+Node.js and Chromium.  That prototype proves browser support, result typing,
+compile latency measurement, and result JSON shape without affecting normal
+guest execution.
+
+The first standalone prototype is
+``scripts/ci/wasm-generated-block-prototype.mjs`` with focused helper tests in
+``scripts/ci/wasm-generated-block-prototype-test.mjs``.  It emits a 68-byte
+WebAssembly module with two exported functions: ``add64(i64, i64) -> i64`` to
+prove JavaScript ``BigInt`` result handling, and ``mix32(i32) -> i32`` to
+exercise a tiny straight-line integer block repeatedly.  This is not yet a
+QEMU execution path; it is the browser/runtime proof that generated modules
+can be produced, validated, compiled, instantiated, measured, and represented
+as machine-readable evidence before TCG integration.
+
+Accepted prototype evidence on 2026-07-01:
+
+* ``node scripts/ci/wasm-generated-block-prototype-test.mjs`` passed.
+* ``node scripts/ci/wasm-generated-block-prototype.mjs --runtime node
+  --iterations 10000 --out
+  /tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-prototype-node.json``
+  passed on Node.js ``v22.19.0``.  The 68-byte module validated, compiled in
+  about 0.60 ms, instantiated in about 0.05 ms, and executed 10,000 ``mix32``
+  calls in about 1.60 ms.
+* ``QEMU_WASM_CHROMIUM_EXECUTABLE=/home/coding-agent/coding-agent/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome
+  node scripts/ci/wasm-generated-block-prototype.mjs --runtime browser
+  --iterations 10000 --timeout-ms 30000 --out
+  /tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-prototype-browser.json``
+  passed in Chromium ``149.0.7827.55``.  The same module validated, compiled
+  in about 1.20 ms, instantiated in about 0.10 ms, and executed 10,000 calls
+  in about 1.30 ms.
+
+The next step is to move from this standalone proof to the first QEMU
+execution hook: a tiny opt-in generated-block path selected from hot-block
+evidence, with counters for generated execution, rejection, and fallback to
+TCI.

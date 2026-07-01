@@ -165,13 +165,13 @@ systemd masks only move the failure from one slow service to the next.
   `099cde6` enables and gates `CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES=y`; `0ebf158`
   fixes Docker package source-cache propagation so the refreshed x86_64 Linux
   package can be rebuilt repeatably.
-- [ ] Define the wasm64 TCG/backend acceleration design before implementation:
+- [x] Define the wasm64 TCG/backend acceleration design before implementation:
   DoD is a developer note that explains how QEMU TCG IR can map to generated
   WebAssembly, how translated blocks call back into QEMU helpers, how guest
   RAM is accessed, how block lookup and invalidation work, which browser APIs
   are required, which part can be implemented first, and why TCI remains the
   correctness fallback for unsupported or disabled paths.
-- [ ] Add a TCI fallback invariant to every generated-WASM execution
+- [x] Add a TCI fallback invariant to every generated-WASM execution
   milestone: DoD is that unsupported opcodes, helper paths, browser/runtime
   failures, validation failures, disabled optimization flags, or cache
   rejection fall back to TCI without removing the already accepted 64-bit
@@ -270,7 +270,7 @@ systemd masks only move the failure from one slow service to the next.
   - [x] Commit and push QEMU ``develop``, then run BusDK
     ``scripts/sync-submodules.sh`` and commit/push the required submodule
     pins.
-- [ ] Add a minimal generated-Wasm block prototype outside the full backend:
+- [x] Add a minimal generated-Wasm block prototype outside the full backend:
   DoD is a tiny QEMU test harness that emits, validates, compiles,
   instantiates, and executes one or more simple generated WebAssembly
   functions in Node.js and Chrome/Chromium without participating in normal
