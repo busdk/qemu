@@ -195,7 +195,7 @@ systemd masks only move the failure from one slow service to the next.
     syntax checks for the browser smoke scripts, browser smoke runner unit
     tests, guest manifest tests, and QEMU ``checkpatch.pl`` on the final
     patch.
-  - [ ] Commit and push QEMU ``develop``, then run BusDK
+  - [x] Commit and push QEMU ``develop``, then run BusDK
     ``scripts/sync-submodules.sh`` and commit/push the required submodule
     pins.
 - [ ] Add a minimal generated-Wasm block prototype outside the full backend:
