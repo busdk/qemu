@@ -40,6 +40,47 @@ performance baseline, artifact rebuild, documentation update, commit, push,
 and BusDK submodule-pin update for this slowness-fix lane must be represented
 by a checkbox in this file before it is treated as accepted work.
 
+## Exact Definition of Done
+
+This goal is done only when all of the following are true:
+
+- [ ] The current browser-hosted Bus Engine OS `virtual-server` boot baseline
+  is recorded with exact QEMU artifact hashes, guest kernel/rootfs hashes,
+  browser version, command line, timeout/readiness state, and final serial
+  marker.
+- [ ] QEMU-side attribution identifies the dominant measured bottleneck for
+  that baseline. The accepted bottleneck must be backed by counters or timing
+  evidence, not by intuition.
+- [ ] The implemented optimization matches the measured bottleneck. CPU work
+  must improve hot translation-block execution while preserving strict TCI
+  fallback. Device or browser API work must sit behind the matching QEMU
+  device/backend boundary.
+- [ ] The optimization is disabled by default or otherwise guarded until it is
+  proven safe for normal smoke usage, and unsupported blocks, runtime errors,
+  validation failures, or disabled flags fall back to the existing TCI path.
+- [ ] Generic Chromium Linux smoke passes with the default path and with the
+  optimized path enabled. The optimized-path result must include nonzero
+  acceleration counters when the optimization is CPU-side.
+- [ ] The Bus Engine OS `virtual-server` Chromium proof is rerun with the same
+  accepted kernel/rootfs fixture and the optimized QEMU artifact.
+- [ ] The Bus Engine OS optimized proof either reaches normal systemd
+  multi-user/service readiness and the downstream `QEMU_WASM_SERVICE_READY`
+  bridge marker, or records a measured and material marker-to-marker
+  improvement plus the next concrete QEMU-side bottleneck promoted into this
+  plan before any closeout.
+- [ ] Result JSON, screenshot, artifact hashes, elapsed timing, fallback or
+  device counters, and baseline comparison are recorded in this file and in
+  `docs/devel/wasm-support-plan.rst`.
+- [ ] The QEMU branch is committed and pushed to `origin/develop`.
+- [ ] `projects/busdk/scripts/sync-submodules.sh` has been run after the QEMU
+  push, and required BusDK/supervisor submodule pins and memos are committed
+  and pushed.
+
+The goal is not done if only the generic Linux smoke passes, if Bus Engine OS
+still times out without a measured next bottleneck, if the optimization works
+only by bypassing normal Bus Engine OS boot, or if downstream product work is
+used to hide a QEMU execution problem.
+
 ## Current Direction
 
 - [x] Use upstream QEMU's existing Emscripten/wasm64 baseline.
