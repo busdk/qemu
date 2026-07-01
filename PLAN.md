@@ -359,6 +359,24 @@ systemd masks only move the failure from one slow service to the next.
   guest-visible device model explicit, use browser APIs only behind the
   matching QEMU device/backend boundary, include deterministic device tests,
   and keep the same smoke gates passing.
+  Current rejected experiment on 2026-07-01: a tiny opt-in EM_JS-generated
+  WebAssembly path for TCI bytecode was built and tested against the generic
+  Chromium Linux smoke. The first straight-line register-only version kept the
+  smoke passing but executed zero generated blocks because hot blocks require
+  `tci_setcond32` and `brcond`. A prefix-return variant that handed branch
+  control back to the interpreter failed the generic smoke with unaligned
+  access traps. Do not continue expanding that shortcut. The next CPU
+  acceleration attempt must either implement a proper translated-block
+  control-flow model with differential tests, or prove a different measured
+  bottleneck before changing direction.
+  - [ ] Define the minimal proper wasm64 generated-block control-flow model:
+    DoD is a design note and tests for branch targets, internal labels,
+    exit-to-dispatch semantics, helper fallback, and why returned internal TCI
+    pointers are not accepted as the execution boundary.
+  - [ ] Implement generated execution only after the control-flow model has
+    deterministic coverage: DoD is a small supported opcode/control-flow
+    subset with differential tests against TCI and a passing generic Chromium
+    smoke with nonzero generated execution counters.
 - [ ] Prove the acceleration improves the real downstream boot path:
   DoD is a Chrome/Chromium Bus Engine OS `virtual-server` browser run with the
   acceleration enabled that reaches normal multi-user/service readiness, or

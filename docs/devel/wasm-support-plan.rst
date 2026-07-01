@@ -4056,3 +4056,45 @@ The next step is to move from this standalone proof to the first QEMU
 execution hook: a tiny opt-in generated-block path selected from hot-block
 evidence, with counters for generated execution, rejection, and fallback to
 TCI.
+
+Rejected tiny TCI bytecode shortcut
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+An initial local experiment tried to avoid a full control-flow model by
+inspecting TCI bytecode from ``tcg/tci.c`` and compiling only tiny hot blocks
+or straight-line prefixes into standalone WebAssembly modules through an
+Emscripten ``EM_JS`` helper.  This was deliberately kept opt-in and was tested
+against the generic Chromium Linux smoke before any Bus Engine OS proof.
+
+The result rejected that shortcut:
+
+* ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-fast-current.json``
+  reached ``QEMU_WASM_LINUX_BOOT_OK`` in Chromium, but generated execution
+  counters stayed at zero.  The top unsupported TCI opcodes were
+  ``tci_setcond32`` followed by ``mb`` and ``tci_movl``.
+* After adding ``tci_setcond32`` decoding, the generic smoke still reached the
+  marker with zero generated execution.  The next unsupported opcode was
+  ``brcond``.
+* A prefix-return variant that executed register-only work and returned an
+  internal TCI pointer for the interpreter to continue was not safe enough.
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-fast-prefix.json``
+  aborted, and
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-fast-prefix-nomem.json``
+  timed out with an unaligned-access trap before the generic marker.
+
+This proves two useful constraints for the next implementation:
+
+* The first useful generated execution path must understand proper
+  translated-block control flow.  Returning arbitrary internal TCI bytecode
+  addresses to the interpreter is not an accepted boundary.
+* Direct host-memory ``ld``/``st`` shortcuts through JavaScript are not part of
+  the first safe slice.  Memory work needs helper-backed semantics or a later
+  validated RAM-only path with explicit alignment, fault, and invalidation
+  handling.
+
+The next CPU acceleration patch should therefore implement a real generated
+block control-flow model with deterministic differential tests before it is
+measured against the generic Chromium smoke again.  If later attribution shows
+a paravirtual device boundary rather than CPU execution as the blocker, the
+optimization should move behind the matching QEMU device/backend instead of
+reopening this EM_JS prefix shortcut.
