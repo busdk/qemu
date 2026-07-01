@@ -126,7 +126,7 @@ systemd masks only move the failure from one slow service to the next.
   failures, validation failures, disabled optimization flags, or cache
   rejection fall back to TCI without removing the already accepted 64-bit
   browser console boot path or the generic service-bridge API.
-- [ ] Add hot-block instrumentation before compiling blocks: DoD is structured
+- [x] Add hot-block instrumentation before compiling blocks: DoD is structured
   evidence from the generic Linux smoke and the Bus Engine OS browser-hosted
   service proof showing translation-block frequency, guest PC ranges, helper
   calls, exit reasons, interpreter hot spots, and candidate instruction
