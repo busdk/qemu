@@ -373,12 +373,18 @@ systemd masks only move the failure from one slow service to the next.
     DoD is a design note and tests for branch targets, internal labels,
     exit-to-dispatch semantics, helper fallback, and why returned internal TCI
     pointers are not accepted as the execution boundary.
-    Accepted evidence: `scripts/ci/wasm-generated-block-prototype.mjs` now
-    exposes `validateGeneratedBlockControlFlow()` with model version 1, and
+    Accepted evidence: `scripts/ci/wasm-generated-block-prototype.mjs` exposes
+    `validateGeneratedBlockControlFlow()` with model version 1, and
     `scripts/ci/wasm-generated-block-prototype-test.mjs` covers accepted
     label/branch/dispatch and helper-fallback shapes plus rejection for
     missing labels, raw/internal TCI pointer returns, helper calls without TCI
-    fallback, and non-dispatch exits.
+    fallback, and non-dispatch exits. The same prototype now emits a 267-byte
+    executable WebAssembly module with branch, loop, dispatch-exit, and
+    helper-fallback paths. Node evidence:
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-control-flow-node.json`
+    passed on Node.js `v22.19.0`; browser evidence:
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-control-flow-browser.json`
+    passed in Chromium `141.0.7390.37`.
   - [ ] Implement generated execution only after the control-flow model has
     deterministic coverage: DoD is a small supported opcode/control-flow
     subset with differential tests against TCI and a passing generic Chromium

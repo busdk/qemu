@@ -4027,13 +4027,16 @@ guest execution.
 
 The first standalone prototype is
 ``scripts/ci/wasm-generated-block-prototype.mjs`` with focused helper tests in
-``scripts/ci/wasm-generated-block-prototype-test.mjs``.  It emits a 68-byte
-WebAssembly module with two exported functions: ``add64(i64, i64) -> i64`` to
-prove JavaScript ``BigInt`` result handling, and ``mix32(i32) -> i32`` to
-exercise a tiny straight-line integer block repeatedly.  This is not yet a
-QEMU execution path; it is the browser/runtime proof that generated modules
-can be produced, validated, compiled, instantiated, measured, and represented
-as machine-readable evidence before TCG integration.
+``scripts/ci/wasm-generated-block-prototype-test.mjs``.  It first emitted a
+68-byte WebAssembly module with two exported functions: ``add64(i64, i64) ->
+i64`` to prove JavaScript ``BigInt`` result handling, and ``mix32(i32) ->
+i32`` to exercise a tiny straight-line integer block repeatedly.  It now emits
+a 267-byte module that adds structured control-flow proofs: conditional exits
+to dispatch, an internal loop with a dispatch exit, and an explicit imported
+helper-fallback path.  This is not yet a QEMU execution path; it is the
+browser/runtime proof that generated modules can be produced, validated,
+compiled, instantiated, measured, and represented as machine-readable evidence
+before TCG integration.
 
 Accepted prototype evidence on 2026-07-01:
 
@@ -4056,6 +4059,29 @@ The next step is to move from this standalone proof to the first QEMU
 execution hook: a tiny opt-in generated-block path selected from hot-block
 evidence, with counters for generated execution, rejection, and fallback to
 TCI.
+
+Accepted control-flow model evidence on 2026-07-01:
+
+* ``node scripts/ci/wasm-generated-block-prototype-test.mjs`` passed with
+  coverage for signed LEB immediates, generated branch exits, loop exits,
+  helper fallback counters, accepted label/branch/dispatch shapes, and
+  rejection of missing labels, raw/internal TCI pointer returns, helper calls
+  without TCI fallback, and non-dispatch exits.
+* ``node scripts/ci/wasm-generated-block-prototype.mjs --runtime node
+  --iterations 10000 --out
+  /tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-control-flow-node.json``
+  passed on Node.js ``v22.19.0``.  The 267-byte module validated, compiled in
+  about 0.77 ms, instantiated in about 0.08 ms, and executed 10,000 ``mix32``
+  calls in about 1.41 ms while also proving ``branchExit``,
+  ``countdownExit``, and ``helperGate`` results.
+* ``QEMU_WASM_CHROMIUM_EXECUTABLE=/home/coding-agent/coding-agent/.cache/ms-playwright/chromium-1194/chrome-linux/chrome
+  NODE_PATH=/tmp/qemu-playwright/node_modules
+  node scripts/ci/wasm-generated-block-prototype.mjs --runtime browser
+  --iterations 10000 --timeout-ms 30000 --out
+  /tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-control-flow-browser.json``
+  passed in Chromium ``141.0.7390.37``.  The same module validated, compiled
+  in about 1.40 ms, instantiated in about 0.10 ms, and executed 10,000 calls
+  in about 2.30 ms.
 
 Rejected tiny TCI bytecode shortcut
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

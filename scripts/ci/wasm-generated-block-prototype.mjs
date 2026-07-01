@@ -102,6 +102,45 @@ export function encodeU32(value) {
   return bytes;
 }
 
+export function encodeS32(value) {
+  if (!Number.isInteger(value) || value < -0x80000000 || value > 0x7fffffff) {
+    throw new Error("encodeS32 expects a signed 32-bit integer");
+  }
+  const bytes = [];
+  let remaining = value | 0;
+  for (;;) {
+    let byte = remaining & 0x7f;
+    const sign = (byte & 0x40) !== 0;
+    remaining >>= 7;
+    const done = (remaining === 0 && !sign) || (remaining === -1 && sign);
+    if (!done) {
+      byte |= 0x80;
+    }
+    bytes.push(byte);
+    if (done) {
+      return bytes;
+    }
+  }
+}
+
+export function encodeS64(value) {
+  let remaining = BigInt(value);
+  const bytes = [];
+  for (;;) {
+    let byte = Number(remaining & 0x7fn);
+    const sign = (byte & 0x40) !== 0;
+    remaining >>= 7n;
+    const done = (remaining === 0n && !sign) || (remaining === -1n && sign);
+    if (!done) {
+      byte |= 0x80;
+    }
+    bytes.push(byte);
+    if (done) {
+      return bytes;
+    }
+  }
+}
+
 function utf8Bytes(text) {
   return Array.from(new TextEncoder().encode(text));
 }
@@ -132,11 +171,11 @@ function localSet(index) {
 }
 
 function i32Const(value) {
-  return [0x41, ...encodeU32(value)];
+  return [0x41, ...encodeS32(value)];
 }
 
 function i64Const(value) {
-  return [0x42, ...encodeU32(value)];
+  return [0x42, ...encodeS64(value)];
 }
 
 function packExit(statusCode, valueCode) {
@@ -282,10 +321,10 @@ export function validatePrototypeResult(result) {
     if (runtime.countdownExit !== "12884901898") {
       throw new Error(`${runtime.runtime} countdownExit result mismatch`);
     }
-    if (runtime.helperGateFast !== "17179869278") {
+    if (runtime.helperGateFast !== "17179869198") {
       throw new Error(`${runtime.runtime} helperGate fast result mismatch`);
     }
-    if (runtime.helperGateFallback !== "425201762323") {
+    if (runtime.helperGateFallback !== "425201762319") {
       throw new Error(`${runtime.runtime} helperGate fallback result mismatch`);
     }
     if (runtime.helperFallbacks !== 1) {
@@ -380,14 +419,14 @@ export async function runGeneratedBlockProbe(iterations, now = performance.now.b
     add64,
     mix32,
     branchExit,
-    countdownExit,
+    countdownExit: runCountdownExit,
     helperGate,
   } = instance.exports;
   const add64Result = add64(19n, 23n);
   const mix32Result = mix32(42);
   const branchExitZero = branchExit(0);
   const branchExitNonzero = branchExit(17);
-  const countdownExit = instance.exports.countdownExit(4);
+  const countdownExitResult = runCountdownExit(4);
   const helperGateFast = helperGate(7, 91);
   const helperGateFallback = helperGate(5, 10);
   let accumulator = 0;
@@ -402,9 +441,9 @@ export async function runGeneratedBlockProbe(iterations, now = performance.now.b
       mix32Result === 472 &&
       branchExitZero === 4294967396n &&
       branchExitNonzero === 8589934626n &&
-      countdownExit === 12884901898n &&
-      helperGateFast === 17179869278n &&
-      helperGateFallback === 425201762323n &&
+      countdownExitResult === 12884901898n &&
+      helperGateFast === 17179869198n &&
+      helperGateFallback === 425201762319n &&
       helperFallbacks === 1,
     moduleBytes: moduleBytes.length,
     validate: WebAssembly.validate(moduleBytes),
@@ -416,7 +455,7 @@ export async function runGeneratedBlockProbe(iterations, now = performance.now.b
     mix32: mix32Result,
     branchExitZero: branchExitZero.toString(),
     branchExitNonzero: branchExitNonzero.toString(),
-    countdownExit: countdownExit.toString(),
+    countdownExit: countdownExitResult.toString(),
     helperGateFast: helperGateFast.toString(),
     helperGateFallback: helperGateFallback.toString(),
     helperFallbacks,
@@ -449,12 +488,18 @@ async function runBrowser(options) {
       {
         source: [
           encodeU32,
+          encodeS32,
+          encodeS64,
           utf8Bytes,
           section,
           vector,
           name,
           functionType,
           localGet,
+          localSet,
+          i32Const,
+          i64Const,
+          packExit,
           functionBody,
           buildGeneratedBlockModule,
           runGeneratedBlockProbe,
