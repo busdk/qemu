@@ -284,6 +284,10 @@ for (const status of [
     memory: "512M",
     network: "none",
     port: 8010,
+    persistentDisk: true,
+    persistentDiskDevice: "virtio-pci",
+    persistentDiskOpfsName: "virtual-server-state.raw",
+    persistentDiskSizeBytes: 33554432,
     powerOperation: "shutdown",
     powerTimeoutMs: 15000,
     qemuArgs: ["-name", "wasm-smoke"],
@@ -308,6 +312,11 @@ for (const status of [
     "memory=512M&" +
     "machine=pc&" +
     "network=none&" +
+    "persistentDisk=1&" +
+    "persistentDiskDevice=virtio-pci&" +
+    "persistentDiskOpfsName=virtual-server-state.raw&" +
+    "persistentDiskSizeBytes=33554432&" +
+    "persistentDiskStorage=opfs&" +
     "powerOperation=shutdown&" +
     "powerTimeoutMs=15000&" +
     "rootfsDevice=virtio-pci&" +
@@ -569,6 +578,10 @@ for (const status of [
     memory: "512M",
     network: "none",
     pageTextTailBytes: 60000,
+    persistentDisk: true,
+    persistentDiskDevice: "virtio-pci",
+    persistentDiskOpfsName: "virtual-server-state.raw",
+    persistentDiskSizeBytes: 33554432,
     preKeyboardWaitMs: 500,
     postKeyboardWaitMs: 250,
     powerOperation: "shutdown",
@@ -615,6 +628,10 @@ for (const status of [
   assert.equal(result.powerOperation, "shutdown");
   assert.equal(result.powerTimeoutMs, 15000);
   assert.equal(result.network, "none");
+  assert.equal(result.persistentDisk, true);
+  assert.equal(result.persistentDiskDevice, "virtio-pci");
+  assert.equal(result.persistentDiskOpfsName, "virtual-server-state.raw");
+  assert.equal(result.persistentDiskSizeBytes, 33554432);
   assert.equal(result.idleAfterText, "");
   assert.equal(result.idleTimeoutMs, 0);
   assert.equal(result.requireDisplayOutput, true);

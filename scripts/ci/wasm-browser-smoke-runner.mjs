@@ -92,6 +92,13 @@ Options:
                      Maximum page text tail bytes to keep in result JSON
   --port PORT         Local smoke server port
   --program FILE      JavaScript launcher inside artifact dir
+  --persistent-disk  Add an OPFS-backed writable virtio disk
+  --persistent-disk-device KIND
+                     Persistent disk device kind: virtio-mmio or virtio-pci
+  --persistent-disk-opfs-name NAME
+                     OPFS file name used by the persistent disk
+  --persistent-disk-size-bytes N
+                     Persistent disk size when no OPFS image exists
   --progress-sample-interval-ms MS
                      Interval for smoke progress samples in result JSON
   --progress-sample-limit N
@@ -182,6 +189,10 @@ function parseArgs(argv) {
     program: "qemu-system-x86_64.js",
     progressSampleIntervalMs: DEFAULT_PROGRESS_SAMPLE_INTERVAL_MS,
     progressSampleLimit: DEFAULT_PROGRESS_SAMPLE_LIMIT,
+    persistentDisk: false,
+    persistentDiskDevice: "virtio-mmio",
+    persistentDiskOpfsName: "qemu-wasm-persistent.raw",
+    persistentDiskSizeBytes: 256 * 1024 * 1024,
     qemuArgs: [],
     requireDisplayOutput: false,
     displayMinNonblackPixels: 1,
@@ -312,6 +323,18 @@ function parseArgs(argv) {
     } else if (arg === "--program") {
       options.program = argv[++i];
       explicit.add("program");
+    } else if (arg === "--persistent-disk") {
+      options.persistentDisk = true;
+      explicit.add("persistentDisk");
+    } else if (arg === "--persistent-disk-device") {
+      options.persistentDiskDevice = argv[++i];
+      explicit.add("persistentDiskDevice");
+    } else if (arg === "--persistent-disk-opfs-name") {
+      options.persistentDiskOpfsName = argv[++i];
+      explicit.add("persistentDiskOpfsName");
+    } else if (arg === "--persistent-disk-size-bytes") {
+      options.persistentDiskSizeBytes = Number(argv[++i]);
+      explicit.add("persistentDiskSizeBytes");
     } else if (arg === "--progress-sample-interval-ms") {
       options.progressSampleIntervalMs = Number(argv[++i]);
       explicit.add("progressSampleIntervalMs");
@@ -538,6 +561,21 @@ function parseArgs(argv) {
   }
   if (!["virtio-mmio", "virtio-pci"].includes(options.rootfsDevice)) {
     console.error("--rootfs-device must be virtio-mmio or virtio-pci");
+    usage(2);
+  }
+  if (!["virtio-mmio", "virtio-pci"].includes(options.persistentDiskDevice)) {
+    console.error("--persistent-disk-device must be virtio-mmio or virtio-pci");
+    usage(2);
+  }
+  if (
+    !Number.isInteger(options.persistentDiskSizeBytes) ||
+    options.persistentDiskSizeBytes <= 0
+  ) {
+    console.error("--persistent-disk-size-bytes must be a positive integer");
+    usage(2);
+  }
+  if (options.persistentDiskOpfsName === "" || /[\\/]/.test(options.persistentDiskOpfsName)) {
+    console.error("--persistent-disk-opfs-name must be a non-empty file name without path separators");
     usage(2);
   }
   if (!["memfs", "opfs-snapshot"].includes(options.rootfsStorage)) {
@@ -1042,6 +1080,13 @@ export function browserSmokeUrl(options) {
   url.searchParams.set("memory", options.memory);
   url.searchParams.set("machine", options.machine);
   url.searchParams.set("network", options.network);
+  if (options.persistentDisk) {
+    url.searchParams.set("persistentDisk", "1");
+    url.searchParams.set("persistentDiskDevice", options.persistentDiskDevice);
+    url.searchParams.set("persistentDiskOpfsName", options.persistentDiskOpfsName);
+    url.searchParams.set("persistentDiskSizeBytes", String(options.persistentDiskSizeBytes));
+    url.searchParams.set("persistentDiskStorage", "opfs");
+  }
   url.searchParams.set("powerOperation", options.powerOperation);
   url.searchParams.set("powerTimeoutMs", String(options.powerTimeoutMs));
   if (tcgHotblocks) {
@@ -1116,6 +1161,10 @@ export function initialSmokeResult(options, browserVersion) {
     pageTextTailBytes: options.pageTextTailBytes,
     progressSampleIntervalMs: options.progressSampleIntervalMs,
     progressSampleLimit: options.progressSampleLimit,
+    persistentDisk: options.persistentDisk,
+    persistentDiskDevice: options.persistentDiskDevice,
+    persistentDiskOpfsName: options.persistentDiskOpfsName,
+    persistentDiskSizeBytes: options.persistentDiskSizeBytes,
     qemuArgs: options.qemuArgs,
     requireDisplayOutput: options.requireDisplayOutput,
     displayMinNonblackPixels: options.displayMinNonblackPixels,

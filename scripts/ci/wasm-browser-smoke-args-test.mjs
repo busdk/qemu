@@ -37,6 +37,9 @@ function baseConfig(overrides = {}) {
     machine: "microvm,acpi=off",
     memory: "512M",
     network: "none",
+    persistentDisk: false,
+    persistentDiskDevice: "virtio-mmio",
+    persistentDiskPath: "/persistent.raw",
     qemuArgs: [],
     rootfs: "",
     rootfsDevice: "virtio-mmio",
@@ -53,6 +56,17 @@ function valueAfter(args, option) {
   assert.notEqual(index, -1, `${option} should be present`);
   assert.ok(index + 1 < args.length, `${option} should have a value`);
   return args[index + 1];
+}
+
+function valuesAfter(args, option) {
+  const values = [];
+  for (let i = 0; i < args.length - 1; i += 1) {
+    if (args[i] === option) {
+      values.push(args[i + 1]);
+    }
+  }
+  assert.notEqual(values.length, 0, `${option} should be present`);
+  return values;
 }
 
 class FakeCanvas {
@@ -417,6 +431,36 @@ assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
   assert.equal(valueAfter(args, "-drive"), "file=/rootfs.raw,format=raw,if=virtio");
   assert.ok(valueAfter(args, "-append").endsWith("ignore_loglevel"));
   assert.deepEqual(args.slice(-2), ["-name", "wasm-smoke"]);
+}
+
+{
+  const args = qemuArgs(baseConfig({
+    initrd: "",
+    persistentDisk: true,
+    persistentDiskDevice: "virtio-mmio",
+    rootfs: "/guest/rootfs.raw",
+    rootfsDevice: "virtio-mmio",
+  }));
+  const drives = valuesAfter(args, "-drive");
+  const devices = valuesAfter(args, "-device");
+
+  assert.ok(drives.includes("file=/persistent.raw,format=raw,if=none,id=persist0"));
+  assert.ok(devices.includes("virtio-blk-device,drive=persist0"));
+}
+
+{
+  const args = qemuArgs(baseConfig({
+    initrd: "",
+    persistentDisk: true,
+    persistentDiskDevice: "virtio-pci",
+    persistentDiskPath: "/guest/persistent.raw",
+    rootfs: "/guest/rootfs.raw",
+    rootfsDevice: "virtio-pci",
+  }));
+  const drives = valuesAfter(args, "-drive");
+
+  assert.ok(drives.includes("file=/rootfs.raw,format=raw,if=virtio"));
+  assert.ok(drives.includes("file=/guest/persistent.raw,format=raw,if=virtio"));
 }
 
 {

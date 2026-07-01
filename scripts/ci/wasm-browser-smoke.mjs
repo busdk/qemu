@@ -27,6 +27,9 @@ const OPTIONAL_FIRMWARE_FILES = [
 ];
 const DEFAULT_ROOTFS_OPFS_NAME = "qemu-wasm-rootfs.raw";
 const OPFS_ROOTFS_DIRECTORY = "qemu-wasm-rootfs";
+const DEFAULT_PERSISTENT_DISK_OPFS_NAME = "qemu-wasm-persistent.raw";
+const DEFAULT_PERSISTENT_DISK_SIZE_BYTES = 256 * 1024 * 1024;
+const OPFS_PERSISTENT_DISK_DIRECTORY = "qemu-wasm-persistent-disk";
 
 function option(name, fallback) {
   const value = new URLSearchParams(window.location.search).get(name);
@@ -144,24 +147,24 @@ function mountFiles(module, mounts) {
   }
 }
 
-function validateOpfsFileName(name) {
+function validateOpfsFileName(name, optionName = "rootfsOpfsName") {
   if (name === "" || /[\\/]/.test(name)) {
-    throw new Error("rootfsOpfsName must be a non-empty file name without path separators");
+    throw new Error(`${optionName} must be a non-empty file name without path separators`);
   }
 }
 
-async function openRootfsOpfsDirectory(create) {
+async function openOpfsDirectory(directoryName, create) {
   if (!navigator.storage || typeof navigator.storage.getDirectory !== "function") {
     throw new Error("OPFS is not available in this browser");
   }
   const root = await navigator.storage.getDirectory();
-  return root.getDirectoryHandle(OPFS_ROOTFS_DIRECTORY, { create });
+  return root.getDirectoryHandle(directoryName, { create });
 }
 
-async function readRootfsOpfsSnapshot(name) {
-  validateOpfsFileName(name);
+async function readOpfsSnapshot(directoryName, name, optionName) {
+  validateOpfsFileName(name, optionName);
   try {
-    const directory = await openRootfsOpfsDirectory(false);
+    const directory = await openOpfsDirectory(directoryName, false);
     const fileHandle = await directory.getFileHandle(name, { create: false });
     const file = await fileHandle.getFile();
     return new Uint8Array(await file.arrayBuffer());
@@ -173,9 +176,9 @@ async function readRootfsOpfsSnapshot(name) {
   }
 }
 
-async function writeRootfsOpfsSnapshot(name, data) {
-  validateOpfsFileName(name);
-  const directory = await openRootfsOpfsDirectory(true);
+async function writeOpfsSnapshot(directoryName, name, optionName, data) {
+  validateOpfsFileName(name, optionName);
+  const directory = await openOpfsDirectory(directoryName, true);
   const fileHandle = await directory.getFileHandle(name, { create: true });
   const writable = await fileHandle.createWritable();
   try {
@@ -184,6 +187,32 @@ async function writeRootfsOpfsSnapshot(name, data) {
   } finally {
     await writable.close();
   }
+}
+
+async function readRootfsOpfsSnapshot(name) {
+  return readOpfsSnapshot(OPFS_ROOTFS_DIRECTORY, name, "rootfsOpfsName");
+}
+
+async function writeRootfsOpfsSnapshot(name, data) {
+  return writeOpfsSnapshot(OPFS_ROOTFS_DIRECTORY, name, "rootfsOpfsName", data);
+}
+
+async function browserStorageSnapshot() {
+  const snapshot = {
+    opfs: Boolean(navigator.storage && navigator.storage.getDirectory),
+    persisted: null,
+    estimate: null,
+  };
+  if (!navigator.storage) {
+    return snapshot;
+  }
+  if (typeof navigator.storage.persisted === "function") {
+    snapshot.persisted = await navigator.storage.persisted();
+  }
+  if (typeof navigator.storage.estimate === "function") {
+    snapshot.estimate = await navigator.storage.estimate();
+  }
+  return snapshot;
 }
 
 async function loadRootfsData(mount, config, storageState) {
@@ -206,6 +235,29 @@ async function loadRootfsData(mount, config, storageState) {
   storageState.loadedBytes = fetched.length;
   storageState.seededFromNetwork = true;
   return fetched;
+}
+
+async function loadPersistentDiskData(config, storageState) {
+  if (!config.persistentDisk) {
+    return null;
+  }
+  if (config.persistentDiskStorage !== "opfs") {
+    throw new Error("persistentDiskStorage must be opfs");
+  }
+  const snapshot = await readOpfsSnapshot(
+    OPFS_PERSISTENT_DISK_DIRECTORY,
+    config.persistentDiskOpfsName,
+    "persistentDiskOpfsName",
+  );
+  if (snapshot !== null) {
+    storageState.loadSource = "opfs";
+    storageState.loadedBytes = snapshot.length;
+    return snapshot;
+  }
+  storageState.loadSource = "empty";
+  storageState.loadedBytes = config.persistentDiskSizeBytes;
+  storageState.seededEmpty = true;
+  return new Uint8Array(config.persistentDiskSizeBytes);
 }
 
 function programExitStatus(line) {
@@ -647,6 +699,18 @@ export function qemuArgs(config) {
       );
     } else {
       args.push("-drive", "file=/rootfs.raw,format=raw,if=virtio");
+    }
+  }
+  if (config.persistentDisk) {
+    if (config.persistentDiskDevice === "virtio-mmio") {
+      args.push(
+        "-drive",
+        `file=${config.persistentDiskPath},format=raw,if=none,id=persist0`,
+        "-device",
+        "virtio-blk-device,drive=persist0",
+      );
+    } else {
+      args.push("-drive", `file=${config.persistentDiskPath},format=raw,if=virtio`);
     }
   }
   if (config.serviceBridge) {
@@ -1098,6 +1162,12 @@ function buildConfig() {
     maxOutputBytes: numberOption("maxOutputBytes", 60000),
     memory: option("memory", "512M"),
     network: option("network", "none"),
+    persistentDisk: boolOption("persistentDisk", false),
+    persistentDiskDevice: option("persistentDiskDevice", "virtio-mmio"),
+    persistentDiskOpfsName: option("persistentDiskOpfsName", DEFAULT_PERSISTENT_DISK_OPFS_NAME),
+    persistentDiskPath: pathOption("persistentDiskPath", "/persistent.raw"),
+    persistentDiskSizeBytes: numberOption("persistentDiskSizeBytes", DEFAULT_PERSISTENT_DISK_SIZE_BYTES),
+    persistentDiskStorage: option("persistentDiskStorage", "opfs"),
     program: option("program", "/artifacts/qemu-system-x86_64.js"),
     qemuArgs: listOption("qemuArg"),
     qboot: option("qboot", "/firmware/qboot.rom"),
@@ -1180,12 +1250,22 @@ async function run() {
   if (!["virtio-mmio", "virtio-pci"].includes(config.rootfsDevice)) {
     throw new Error("rootfsDevice must be virtio-mmio or virtio-pci");
   }
+  if (!["virtio-mmio", "virtio-pci"].includes(config.persistentDiskDevice)) {
+    throw new Error("persistentDiskDevice must be virtio-mmio or virtio-pci");
+  }
   if (!["memfs", "opfs-snapshot"].includes(config.rootfsStorage)) {
     throw new Error("rootfsStorage must be memfs or opfs-snapshot");
   }
   validateOpfsFileName(config.rootfsOpfsName);
+  validateOpfsFileName(config.persistentDiskOpfsName, "persistentDiskOpfsName");
   if (config.rootfsStorage === "opfs-snapshot" && !config.rootfs) {
     throw new Error("rootfsStorage=opfs-snapshot requires rootfs");
+  }
+  if (config.persistentDisk && config.persistentDiskStorage !== "opfs") {
+    throw new Error("persistentDiskStorage must be opfs");
+  }
+  if (config.persistentDisk && !config.persistentDiskPath.startsWith("/")) {
+    throw new Error("persistentDiskPath must be an absolute in-guest path");
   }
   if (!["none", "default"].includes(config.network)) {
     throw new Error("network must be none or default");
@@ -1219,6 +1299,19 @@ async function run() {
     rootfsStorage: {
       mode: config.rootfsStorage,
       opfsName: config.rootfsOpfsName,
+      loadSource: null,
+      loadedBytes: 0,
+      persisted: false,
+      persistedBytes: 0,
+      browserStorage: null,
+    },
+    persistentDisk: {
+      enabled: config.persistentDisk,
+      mode: config.persistentDiskStorage,
+      opfsName: config.persistentDiskOpfsName,
+      path: config.persistentDiskPath,
+      device: config.persistentDiskDevice,
+      sizeBytes: config.persistentDiskSizeBytes,
       loadSource: null,
       loadedBytes: 0,
       persisted: false,
@@ -1319,6 +1412,9 @@ async function run() {
   if (config.rootfs) {
     mounts.push({ url: config.rootfs, path: "/rootfs.raw", rootfs: true });
   }
+  if (config.persistentDisk) {
+    mounts.push({ path: config.persistentDiskPath, persistentDisk: true });
+  }
 
   setPhase("validate-browser", "validating browser WebAssembly features");
   if (!crossOriginIsolated) {
@@ -1390,6 +1486,23 @@ async function run() {
     smokeState.rootfsStorage.persisted = true;
     smokeState.rootfsStorage.persistedBytes = rootfs.length;
   };
+  const persistPersistentDiskSnapshot = async () => {
+    if (!config.persistentDisk) {
+      return;
+    }
+    if (!activeModule || !activeModule.FS) {
+      throw new Error("QEMU module FS is not available for persistent disk OPFS persistence");
+    }
+    const disk = activeModule.FS.readFile(config.persistentDiskPath);
+    await writeOpfsSnapshot(
+      OPFS_PERSISTENT_DISK_DIRECTORY,
+      config.persistentDiskOpfsName,
+      "persistentDiskOpfsName",
+      disk,
+    );
+    smokeState.persistentDisk.persisted = true;
+    smokeState.persistentDisk.persistedBytes = disk.length;
+  };
   const maybeComplete = () => {
     if (smokeState.markerSeen && allExpectedTextSeen()) {
       if (completionStarted) {
@@ -1397,14 +1510,18 @@ async function run() {
       }
       completionStarted = true;
       clearTimeout(timeout);
-      if (config.rootfsStorage !== "opfs-snapshot") {
+      if (config.rootfsStorage !== "opfs-snapshot" && !config.persistentDisk) {
         completeSuccess();
         return;
       }
-      setPhase("persist-rootfs-opfs", "persisting rootfs snapshot to OPFS");
-      persistRootfsSnapshot().then(completeSuccess).catch((error) => {
-        smokeState.rootfsStorage.errorName = error && error.name ? error.name : "Error";
-        smokeState.rootfsStorage.errorMessage =
+      setPhase("persist-browser-storage", "persisting browser disk snapshots to OPFS");
+      Promise.all([
+        persistRootfsSnapshot(),
+        persistPersistentDiskSnapshot(),
+      ]).then(completeSuccess).catch((error) => {
+        const targetState = config.persistentDisk ? smokeState.persistentDisk : smokeState.rootfsStorage;
+        targetState.errorName = error && error.name ? error.name : "Error";
+        targetState.errorMessage =
           error && error.message ? error.message : String(error);
         recordHarnessFailure(
           smokeState,
@@ -1465,9 +1582,14 @@ async function run() {
 
   setPhase("fetch-guest-inputs", "loading smoke guest inputs");
   drawBrowserStatusFrame(canvas, "Loading Bus Engine OS guest...");
+  if (config.persistentDisk) {
+    smokeState.persistentDisk.browserStorage = await browserStorageSnapshot();
+  }
   for (const mount of mounts) {
     if (mount.rootfs) {
       mount.data = await loadRootfsData(mount, config, smokeState.rootfsStorage);
+    } else if (mount.persistentDisk) {
+      mount.data = await loadPersistentDiskData(config, smokeState.persistentDisk);
     } else {
       mount.data = mount.optional
         ? await fetchOptionalBytes(mount.url)
