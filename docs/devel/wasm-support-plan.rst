@@ -4746,6 +4746,47 @@ wall-clock time and the dominant generated fallback remained
 generated memory loads as the current performance solution unless new
 evidence removes this overhead and improves the same-artifact generic smoke.
 
+The next unpromoted variant changed the generated-block ABI from many
+JavaScript ``BigInt`` arguments and result values to direct register-memory
+access.  Generated blocks imported QEMU's shared wasm64 memory and accepted
+``(regsPtr, retPtr) -> i32``.  The goal was to remove the expensive JS
+argument/result array crossing while keeping the opt-in generated path behind
+``QEMU_TCI_WASM_SUBSET=1``.
+
+This ABI was valid but still not fast enough.  The rebuilt artifact
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/direct-reg-memory`` had hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``89e592ef6362274edca161ff27022119de381f6af97b4b5ec74e189c360014e2``
+* ``qemu-system-x86_64.wasm`` =
+  ``9519be1f6e0abb732c28578962d6df80590df01140b55ba9eb2b61bf5e5e7bb1``
+
+Default Chromium ``149.0.7827.55`` smoke reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``95836`` ms.  The opt-in subset smoke reached
+the marker in ``97142`` ms with ``generated_compiled=3``,
+``generated_executed=1528``, ``generated_cache_hits=1525``, and dominant
+generated fallback still at ``ld32u``.  This proved direct register-memory
+access but did not improve wall-clock time, so no Bus Engine OS long proof was
+run.
+
+Extending the same ABI to generated ``ld32u`` and ``st8`` was rejected more
+strongly because it destabilized the default artifact.  The rebuilt artifact
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/direct-reg-memory-ld32u`` had
+hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``23bcb1c1fd1876426a03061404798f499b7e14d878ff65770ed7ad383a92a991``
+* ``qemu-system-x86_64.wasm`` =
+  ``32f57a5aec19db059c42e7f4102473c59511c98303fe7ca117b8a4bdf77af650``
+
+Two default Chromium smoke runs timed out after ``240000`` ms with
+``page.evaluate: Target crashed`` before guest boot milestones were reported.
+Because the default strict-TCI path must remain stable even when generated
+execution is disabled, the ``ld32u``/``st8`` direct-memory patch was removed.
+The next native wasm64 TCG attempt must pass the default generic Chromium gate
+first, then show an opt-in generic speedup before it is measured against the
+downstream Bus Engine OS boot path.
+
 A separate control-flow experiment then tested a narrower generated
 ``brcond`` shape without any JavaScript memory helper.  The unpromoted patch
 accepted only forward branches whose target was an in-block ``exit_tb`` or

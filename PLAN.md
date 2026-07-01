@@ -1015,6 +1015,36 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   preserves strict TCI fallback for unsupported or invalid blocks, and proves
   generic Chromium smoke does not regress before any Bus Engine OS long proof
   is attempted.
+  Rejected evidence on 2026-07-01: an opt-in direct register-memory ABI was
+  tested so generated blocks imported QEMU's shared wasm64 memory and accepted
+  only `(regsPtr, retPtr) -> i32`, avoiding the previous BigInt argument/result
+  array crossing for every generated block. The rebuilt artifact
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/direct-reg-memory` produced
+  `qemu-system-x86_64.js` SHA-256
+  `89e592ef6362274edca161ff27022119de381f6af97b4b5ec74e189c360014e2` and
+  `qemu-system-x86_64.wasm` SHA-256
+  `9519be1f6e0abb732c28578962d6df80590df01140b55ba9eb2b61bf5e5e7bb1`.
+  Default Chromium `149.0.7827.55` smoke reached
+  `QEMU_WASM_LINUX_BOOT_OK` in `95836` ms. The opt-in subset smoke reached the
+  same marker in `97142` ms with `generated_compiled=3`,
+  `generated_executed=1528`, and `generated_cache_hits=1525`; dominant
+  generated fallback was still `ld32u`. This proved the direct register-memory
+  ABI, but it did not improve wall-clock time, so no Bus Engine OS long proof
+  was run.
+  Rejected follow-up evidence on 2026-07-01: extending that direct-memory ABI
+  to generated `ld32u` and `st8` produced artifact
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/direct-reg-memory-ld32u` with
+  `qemu-system-x86_64.js` SHA-256
+  `23bcb1c1fd1876426a03061404798f499b7e14d878ff65770ed7ad383a92a991` and
+  `qemu-system-x86_64.wasm` SHA-256
+  `32f57a5aec19db059c42e7f4102473c59511c98303fe7ca117b8a4bdf77af650`.
+  Two default Chromium smoke runs timed out after `240000` ms with
+  `page.evaluate: Target crashed` before guest boot milestones were reported.
+  Because default execution must remain stable even when the opt-in subset is
+  disabled, the `ld32u`/`st8` patch was rejected and removed. The next native
+  wasm64 TCG attempt must first preserve the default generic Chromium gate,
+  then prove an opt-in speedup on the generic smoke before any downstream Bus
+  Engine OS proof is meaningful.
 
 ## MVP Generic QEMU Work
 
