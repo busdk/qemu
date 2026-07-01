@@ -3400,6 +3400,43 @@ the response channel is copied back into the browser and delivered to
 policy, service names, credentials, and product-specific adapters remain
 downstream responsibilities.
 
+Power-control integration
+-------------------------
+
+The browser harness also exposes a generic ``qemuWasmPowerControl`` object for
+power operations requested by test runners or frontend code.  Power control is
+kept separate from guest service calls:
+
+* ``shutdown`` prefers a guest service-bridge request with
+  ``{ "operation": "power", "action": "shutdown" }`` when a bridge is
+  configured.  Without a service bridge, it falls back to QEMU's guest-visible
+  power button path through ``qemu_system_powerdown_request()``.
+* ``reboot`` is guest-acknowledged only and requires a configured service
+  bridge request with ``{ "operation": "power", "action": "reboot" }``.
+  Forced reset remains a separate operation.
+* ``guest-powerdown`` directly sends QEMU's guest-visible power button request.
+* ``force-reset`` calls QEMU's host reset request.
+* ``force-poweroff`` calls QEMU's host shutdown request.
+
+The wasm-only QEMU export is ``qemu_wasm_power_request(action)``.  It accepts a
+small numeric action selected by the browser harness and maps that action to
+existing QEMU runstate requests.  The JavaScript API keeps stable operation
+names at the browser boundary so downstream products do not need to know the
+numeric action values or QEMU runstate internals.
+
+The browser smoke runner accepts ``--power-operation`` with the values above
+and ``--power-timeout-ms`` for guest-acknowledged operations.  Guest manifests
+may also provide ``powerOperation`` and ``powerTimeoutMs``.  The default is an
+empty operation, so existing boot, display, keyboard, and service-bridge smoke
+runs are unchanged unless a power operation is explicitly requested.
+
+Runner result JSON records ``powerControlState`` and, when a power operation
+was requested, a top-level ``powerOperation`` object.  The state includes the
+stable operation name, delivery path, guest acknowledgement when available,
+QEMU action/status for direct QEMU requests, timeout, completion flag, and
+non-secret error text.  It does not expose monitor commands, raw transport
+frames, guest filesystem paths, or product-specific service names.
+
 First proof shape
 -----------------
 

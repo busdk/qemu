@@ -81,6 +81,16 @@ function manifestObject(manifest, name) {
   return value;
 }
 
+function normalizePowerOperation(value) {
+  if (value === null) {
+    return null;
+  }
+  if (!["", "shutdown", "reboot", "guest-powerdown", "force-reset", "force-poweroff"].includes(value)) {
+    fail("guest manifest field powerOperation must be shutdown, reboot, guest-powerdown, force-reset, force-poweroff, or empty");
+  }
+  return value;
+}
+
 function serviceBridgeString(bridge, name) {
   const value = bridge[name];
   if (typeof value !== "string" || value === "") {
@@ -171,9 +181,11 @@ export function applyGuestManifest(options, explicit, schema) {
   for (const field of schema.stringFields || []) {
     const value = manifestString(manifest, field);
     if (value !== null && !explicit.has(field)) {
-      options[field] = pathFields.has(field)
-        ? resolveManifestPath(manifestDir, value)
-        : value;
+      options[field] = field === "powerOperation"
+        ? normalizePowerOperation(value)
+        : pathFields.has(field)
+          ? resolveManifestPath(manifestDir, value)
+          : value;
       applied.add(field);
     }
   }

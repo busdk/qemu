@@ -39,10 +39,11 @@ function manifestSchema() {
       "keyboardAfterText",
       "keyboardText",
       "marker",
+      "powerOperation",
       "screenshot",
       "visualMarker",
     ],
-    integerFields: ["displayMinNonblackPixels", "timeoutMs"],
+    integerFields: ["displayMinNonblackPixels", "powerTimeoutMs", "timeoutMs"],
     booleanFields: [
       "allowSerialFallback",
       "focusDisplay",
@@ -76,6 +77,8 @@ function manifestSchema() {
     keyboardAfterText: "login:",
     keyboardText: "uname -a\n",
     marker: "manifest-marker",
+    powerOperation: "shutdown",
+    powerTimeoutMs: 15000,
     requireDisplayOutput: true,
     screenshot: "display.png",
     screenshotFullPage: true,
@@ -116,6 +119,8 @@ function manifestSchema() {
     keyboardAfterText: "",
     keyboardText: "",
     marker: "cli-marker",
+    powerOperation: "",
+    powerTimeoutMs: 30000,
     requireDisplayOutput: false,
     screenshot: null,
     screenshotFullPage: false,
@@ -140,6 +145,8 @@ function manifestSchema() {
   assert.equal(options.keyboardAfterText, "login:");
   assert.equal(options.keyboardText, "uname -a\n");
   assert.equal(options.marker, "cli-marker");
+  assert.equal(options.powerOperation, "shutdown");
+  assert.equal(options.powerTimeoutMs, 15000);
   assert.equal(options.requireDisplayOutput, true);
   assert.equal(options.screenshot, join(dir, "display.png"));
   assert.equal(options.screenshotFullPage, true);
@@ -254,4 +261,42 @@ function manifestSchema() {
   }
 
   assert.match(errors.join("\n"), /serviceBridge.kind must be serial-jsonl, virtio-console-jsonl, or virtio-serial-jsonl/);
+}
+
+{
+  const dir = mkdtempSync(join(tmpdir(), "qemu-wasm-guest-manifest-power-bad-"));
+  const manifestPath = join(dir, "guest.json");
+  writeJson(manifestPath, {
+    powerOperation: "hibernate",
+  });
+
+  const originalExit = process.exit;
+  const originalError = console.error;
+  const errors = [];
+  process.exit = (status) => {
+    throw new ProcessExit(status);
+  };
+  console.error = (message) => {
+    errors.push(String(message));
+  };
+  try {
+    assert.throws(
+      () => applyGuestManifest(
+        {
+          guestManifest: manifestPath,
+          powerOperation: "",
+        },
+        new Set(),
+        {
+          stringFields: ["powerOperation"],
+        },
+      ),
+      (error) => error instanceof ProcessExit && error.status === 2,
+    );
+  } finally {
+    process.exit = originalExit;
+    console.error = originalError;
+  }
+
+  assert.match(errors.join("\n"), /powerOperation must be shutdown, reboot, guest-powerdown, force-reset, force-poweroff, or empty/);
 }

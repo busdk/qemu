@@ -11,6 +11,7 @@ import {
   browserKeyLinuxCode,
   browserNonInteractiveStdin,
   browserRuntimeSnapshot,
+  createPowerControl,
   createServiceBridge,
   deliverDisplayKeyEvent,
   displayKeyPolicy,
@@ -39,6 +40,8 @@ function baseConfig(overrides = {}) {
     qemuArgs: [],
     rootfs: "",
     rootfsDevice: "virtio-mmio",
+    powerOperation: "",
+    powerTimeoutMs: 30000,
     serviceBridge: null,
     visualMarker: "",
     ...overrides,
@@ -572,6 +575,71 @@ assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
   assert.equal(smokeState.serviceBridge.healthError, null);
   assert.equal(smokeState.serviceBridge.received, 1);
   assert.equal(smokeState.serviceBridge.resolved, 1);
+}
+
+{
+  const smokeState = {};
+  const powerControl = createPowerControl(
+    baseConfig({ powerOperation: "guest-powerdown" }),
+    smokeState,
+    null,
+  );
+  const calls = [];
+  powerControl.attachModule({
+    _qemu_wasm_power_request(action) {
+      calls.push(action);
+      return 0;
+    },
+  });
+
+  await powerControl.request();
+
+  assert.deepEqual(calls, [1]);
+  assert.equal(smokeState.powerControl.operation, "guest-powerdown");
+  assert.equal(smokeState.powerControl.deliveryPath, "qemu-guest-powerdown");
+  assert.equal(smokeState.powerControl.qemuAction, "guest-powerdown");
+  assert.equal(smokeState.powerControl.qemuStatus, 0);
+  assert.equal(smokeState.powerControl.completed, true);
+}
+
+{
+  const smokeState = {};
+  const requests = [];
+  const bridge = {
+    async request(frame, options) {
+      requests.push({ frame, options });
+      return { id: "power-1", status: "ok" };
+    },
+  };
+  const powerControl = createPowerControl(
+    baseConfig({ powerTimeoutMs: 1234 }),
+    smokeState,
+    bridge,
+  );
+
+  await powerControl.request("reboot");
+
+  assert.deepEqual(requests, [{
+    frame: { operation: "power", action: "reboot" },
+    options: { timeoutMs: 1234 },
+  }]);
+  assert.equal(smokeState.powerControl.operation, "reboot");
+  assert.equal(smokeState.powerControl.deliveryPath, "service-bridge");
+  assert.equal(smokeState.powerControl.guestAcknowledged, true);
+  assert.equal(smokeState.powerControl.responseStatus, "ok");
+  assert.equal(smokeState.powerControl.completed, true);
+}
+
+{
+  const smokeState = {};
+  const powerControl = createPowerControl(baseConfig(), smokeState, null);
+
+  await assert.rejects(
+    () => powerControl.request("reboot"),
+    /graceful reboot requires a configured service bridge/,
+  );
+  assert.equal(smokeState.powerControl.operation, "reboot");
+  assert.equal(smokeState.powerControl.errors, 1);
 }
 
 {

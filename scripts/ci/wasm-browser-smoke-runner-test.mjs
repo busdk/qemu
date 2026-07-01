@@ -21,6 +21,7 @@ import {
   progressSampleDiagnostic,
   promoteSmokeState,
   requestFailureDiagnostic,
+  requestPowerOperation,
   serialIdleDiagnostic,
   smokeResultSummary,
 } from "./wasm-browser-smoke-runner.mjs";
@@ -80,6 +81,12 @@ for (const status of [
       healthRequestId: "health-1",
       healthStatus: "ok",
     },
+    powerControl: {
+      requested: true,
+      operation: "shutdown",
+      deliveryPath: "qemu-guest-powerdown",
+      completed: true,
+    },
   });
 
   assert.equal(result.phase, "failed");
@@ -102,6 +109,12 @@ for (const status of [
     healthRequested: true,
     healthRequestId: "health-1",
     healthStatus: "ok",
+  });
+  assert.deepEqual(result.powerControlState, {
+    requested: true,
+    operation: "shutdown",
+    deliveryPath: "qemu-guest-powerdown",
+    completed: true,
   });
   assert.equal(result.phases[1].failedDuring, "fetch-guest-inputs");
 }
@@ -190,6 +203,8 @@ for (const status of [
     memory: "512M",
     network: "none",
     port: 8010,
+    powerOperation: "shutdown",
+    powerTimeoutMs: 15000,
     qemuArgs: ["-name", "wasm-smoke"],
     rootfs: "/tmp/rootfs.raw",
     rootfsDevice: "virtio-pci",
@@ -210,6 +225,8 @@ for (const status of [
     "memory=512M&" +
     "machine=pc&" +
     "network=none&" +
+    "powerOperation=shutdown&" +
+    "powerTimeoutMs=15000&" +
     "rootfsDevice=virtio-pci&" +
     "kernelAppend=console%3DttyS0+root%3D%2Fdev%2Fvda+rw&" +
     "expectText=Example+Linux&" +
@@ -243,6 +260,8 @@ for (const status of [
     memory: "256M",
     network: "default",
     port: 8020,
+    powerOperation: "",
+    powerTimeoutMs: 30000,
     qemuArgs: [],
     rootfs: null,
     rootfsDevice: "virtio-mmio",
@@ -258,6 +277,8 @@ for (const status of [
   assert.equal(url.searchParams.get("expectedResolution"), "");
   assert.equal(url.searchParams.get("focusDisplay"), "0");
   assert.equal(url.searchParams.get("network"), "default");
+  assert.equal(url.searchParams.get("powerOperation"), "");
+  assert.equal(url.searchParams.get("powerTimeoutMs"), "30000");
   assert.equal(url.searchParams.get("allowSerialFallback"), "1");
 }
 
@@ -285,6 +306,8 @@ for (const status of [
     memory: "512M",
     network: "none",
     port: 8010,
+    powerOperation: "",
+    powerTimeoutMs: 30000,
     qemuArgs: [],
     rootfs: null,
     rootfsDevice: "virtio-mmio",
@@ -334,6 +357,8 @@ for (const status of [
     memory: "512M",
     network: "none",
     port: 8010,
+    powerOperation: "",
+    powerTimeoutMs: 30000,
     qemuArgs: [],
     rootfs: null,
     rootfsDevice: "virtio-mmio",
@@ -343,6 +368,51 @@ for (const status of [
   });
 
   assert.deepEqual(JSON.parse(url.searchParams.get("serviceBridge")), serviceBridge);
+}
+
+{
+  const result = {};
+  const page = {
+    async evaluate(callback, payload) {
+      assert.deepEqual(payload, {
+        operation: "force-reset",
+        timeoutMs: 3210,
+      });
+      globalThis.qemuWasmPowerControl = {
+        state: {
+          requested: true,
+          operation: "force-reset",
+          deliveryPath: "qemu-forced",
+          completed: true,
+        },
+        async request(operation, options) {
+          assert.equal(operation, "force-reset");
+          assert.deepEqual(options, { timeoutMs: 3210 });
+        },
+      };
+      try {
+        return await callback(payload);
+      } finally {
+        delete globalThis.qemuWasmPowerControl;
+      }
+    },
+  };
+
+  await requestPowerOperation(
+    page,
+    { powerOperation: "force-reset", powerTimeoutMs: 3210 },
+    result,
+  );
+
+  assert.deepEqual(result.powerOperation, {
+    operation: "force-reset",
+    state: {
+      requested: true,
+      operation: "force-reset",
+      deliveryPath: "qemu-forced",
+      completed: true,
+    },
+  });
 }
 
 {
@@ -371,6 +441,8 @@ for (const status of [
     pageTextTailBytes: 60000,
     preKeyboardWaitMs: 500,
     postKeyboardWaitMs: 250,
+    powerOperation: "shutdown",
+    powerTimeoutMs: 15000,
     progressSampleIntervalMs: 10000,
     progressSampleLimit: 120,
     qemuArgs: ["-name", "wasm-smoke"],
@@ -410,6 +482,8 @@ for (const status of [
   assert.equal(result.keyboardTextLength, "uname -a\n".length);
   assert.equal(result.preKeyboardWaitMs, 500);
   assert.equal(result.postKeyboardWaitMs, 250);
+  assert.equal(result.powerOperation, "shutdown");
+  assert.equal(result.powerTimeoutMs, 15000);
   assert.equal(result.network, "none");
   assert.equal(result.idleAfterText, "");
   assert.equal(result.idleTimeoutMs, 0);

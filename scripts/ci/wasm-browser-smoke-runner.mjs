@@ -70,6 +70,12 @@ Options:
   --post-keyboard-wait-ms MS
                      Wait after successful marker detection before capturing
                      final display evidence when --keyboard-text is used
+  --power-operation OP
+                     Request a power operation after the marker gate:
+                     shutdown, reboot, guest-powerdown, force-reset, or
+                     force-poweroff
+  --power-timeout-ms MS
+                     Timeout for guest-acknowledged power operations
   --kernel-append TEXT
                      Full Linux kernel arguments, replacing smoke defaults
   --machine MACHINE  QEMU machine name passed with -M
@@ -141,6 +147,8 @@ function parseArgs(argv) {
     keyboardText: "",
     preKeyboardWaitMs: 0,
     postKeyboardWaitMs: 0,
+    powerOperation: "",
+    powerTimeoutMs: 30000,
     kernelAppend: null,
     machine: "microvm,acpi=off",
     marker: "QEMU_WASM_LINUX_BOOT_OK",
@@ -237,6 +245,12 @@ function parseArgs(argv) {
     } else if (arg === "--post-keyboard-wait-ms") {
       options.postKeyboardWaitMs = Number(argv[++i]);
       explicit.add("postKeyboardWaitMs");
+    } else if (arg === "--power-operation") {
+      options.powerOperation = argv[++i];
+      explicit.add("powerOperation");
+    } else if (arg === "--power-timeout-ms") {
+      options.powerTimeoutMs = Number(argv[++i]);
+      explicit.add("powerTimeoutMs");
     } else if (arg === "--kernel-append") {
       options.kernelAppend = argv[++i];
       explicit.add("kernelAppend");
@@ -329,6 +343,7 @@ function parseArgs(argv) {
       "port",
       "preKeyboardWaitMs",
       "postKeyboardWaitMs",
+      "powerTimeoutMs",
       "progressSampleIntervalMs",
       "progressSampleLimit",
       "timeoutMs",
@@ -364,6 +379,7 @@ function parseArgs(argv) {
       "memory",
       "network",
       "out",
+      "powerOperation",
       "program",
       "rootfs",
       "rootfsDevice",
@@ -497,6 +513,14 @@ function parseArgs(argv) {
   }
   if (!["none", "default"].includes(options.network)) {
     console.error("--network must be none or default");
+    usage(2);
+  }
+  if (!["", "shutdown", "reboot", "guest-powerdown", "force-reset", "force-poweroff"].includes(options.powerOperation)) {
+    console.error("--power-operation must be shutdown, reboot, guest-powerdown, force-reset, force-poweroff, or empty");
+    usage(2);
+  }
+  if (!Number.isInteger(options.powerTimeoutMs) || options.powerTimeoutMs <= 0) {
+    console.error("--power-timeout-ms must be a positive integer");
     usage(2);
   }
 
@@ -886,6 +910,7 @@ export function promoteSmokeState(result, smokeState) {
   result.lastLine = smokeState.lastLine;
   result.browserRuntime = smokeState.runtime || null;
   result.displayState = smokeState.display || null;
+  result.powerControlState = smokeState.powerControl || null;
   result.serviceBridgeState = smokeState.serviceBridge || null;
 }
 
@@ -907,6 +932,8 @@ export function browserSmokeUrl(options) {
   url.searchParams.set("memory", options.memory);
   url.searchParams.set("machine", options.machine);
   url.searchParams.set("network", options.network);
+  url.searchParams.set("powerOperation", options.powerOperation);
+  url.searchParams.set("powerTimeoutMs", String(options.powerTimeoutMs));
   url.searchParams.set("rootfsDevice", options.rootfsDevice);
   if (options.kernelAppend !== null) {
     url.searchParams.set("kernelAppend", options.kernelAppend);
@@ -951,6 +978,8 @@ export function initialSmokeResult(options, browserVersion) {
     keyboardTextLength: options.keyboardText.length,
     preKeyboardWaitMs: options.preKeyboardWaitMs,
     postKeyboardWaitMs: options.postKeyboardWaitMs,
+    powerOperation: options.powerOperation,
+    powerTimeoutMs: options.powerTimeoutMs,
     kernelAppend: options.kernelAppend,
     machine: options.machine,
     maxDiagnosticEntries: MAX_DIAGNOSTIC_ENTRIES,
@@ -1204,6 +1233,27 @@ async function currentSmokeState(page) {
   }
 }
 
+export async function requestPowerOperation(page, options, result) {
+  if (options.powerOperation === "") {
+    return;
+  }
+  const state = await page.evaluate(async ({ operation, timeoutMs }) => {
+    if (!globalThis.qemuWasmPowerControl ||
+        typeof globalThis.qemuWasmPowerControl.request !== "function") {
+      throw new Error("QEMU WebAssembly power control is not available");
+    }
+    await globalThis.qemuWasmPowerControl.request(operation, { timeoutMs });
+    return globalThis.qemuWasmPowerControl.state;
+  }, {
+    operation: options.powerOperation,
+    timeoutMs: options.powerTimeoutMs,
+  });
+  result.powerOperation = {
+    operation: options.powerOperation,
+    state,
+  };
+}
+
 async function run() {
   const options = parseArgs(process.argv.slice(2));
   const browserType = await loadPlaywright(options.browser);
@@ -1325,6 +1375,7 @@ async function run() {
         options.progressSampleLimit,
       );
     }
+    await requestPowerOperation(page, options, result);
     if (progressTimer !== null) {
       clearInterval(progressTimer);
       progressTimer = null;

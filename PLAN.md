@@ -58,7 +58,7 @@ App Server remain downstream proof payloads.
   structured health request, the guest returns a structured response, and the
   result JSON records bridge readiness, request id, response status, timeout,
   serial context, and screenshot.
-- [ ] Add generic browser power-control plumbing: DoD is a browser API and
+- [x] Add generic browser power-control plumbing: DoD is a browser API and
   harness path for graceful shutdown, graceful reboot, and clearly separated
   forced power-off/reset operations; the implementation prefers guest-visible
   ACPI or selected control-channel requests where available; result JSON

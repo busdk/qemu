@@ -5,6 +5,19 @@
  */
 
 const DEFAULT_MARKER = "QEMU_WASM_LINUX_BOOT_OK";
+const POWER_OPERATIONS = new Set([
+  "",
+  "shutdown",
+  "reboot",
+  "guest-powerdown",
+  "force-reset",
+  "force-poweroff",
+]);
+const QEMU_WASM_POWER_ACTIONS = {
+  "guest-powerdown": 1,
+  "force-reset": 2,
+  "force-poweroff": 3,
+};
 const OPTIONAL_FIRMWARE_FILES = [
   "bios-256k.bin",
   "kvmvapic.bin",
@@ -358,6 +371,120 @@ export function createServiceBridge(config, smokeState, scope = globalThis) {
   }
 
   return bridge;
+}
+
+function powerOperationError(state, error) {
+  const message = error && error.message ? error.message : String(error);
+  state.errors += 1;
+  state.lastError = message;
+  return message;
+}
+
+function qemuPowerAction(operation) {
+  return QEMU_WASM_POWER_ACTIONS[operation] || 0;
+}
+
+export function createPowerControl(config, smokeState, serviceBridge = null) {
+  let module = null;
+  const state = {
+    requested: false,
+    operation: "",
+    deliveryPath: null,
+    guestAcknowledged: false,
+    qemuAction: null,
+    qemuStatus: null,
+    responseStatus: null,
+    timeoutMs: config.powerTimeoutMs,
+    errors: 0,
+    lastError: null,
+    completed: false,
+  };
+  smokeState.powerControl = state;
+
+  const request = async (operation = config.powerOperation || "", options = {}) => {
+    if (!POWER_OPERATIONS.has(operation)) {
+      throw new Error("unsupported power operation");
+    }
+    if (operation === "") {
+      return state;
+    }
+    if (state.requested && !state.completed) {
+      throw new Error("power operation already pending");
+    }
+    state.requested = true;
+    state.operation = operation;
+    state.timeoutMs = Number.isInteger(options.timeoutMs) && options.timeoutMs > 0
+      ? options.timeoutMs
+      : config.powerTimeoutMs;
+    state.deliveryPath = null;
+    state.guestAcknowledged = false;
+    state.qemuAction = null;
+    state.qemuStatus = null;
+    state.responseStatus = null;
+    state.lastError = null;
+    state.completed = false;
+
+    try {
+      if (operation === "shutdown" && serviceBridge !== null) {
+        state.deliveryPath = "service-bridge";
+        const response = await serviceBridge.request(
+          { operation: "power", action: "shutdown" },
+          { timeoutMs: state.timeoutMs },
+        );
+        state.responseStatus = serviceBridgeResponseStatus(response);
+        state.guestAcknowledged = state.responseStatus !== "error";
+        state.completed = true;
+        return state;
+      }
+      if (operation === "reboot") {
+        if (serviceBridge === null) {
+          throw new Error("graceful reboot requires a configured service bridge");
+        }
+        state.deliveryPath = "service-bridge";
+        const response = await serviceBridge.request(
+          { operation: "power", action: "reboot" },
+          { timeoutMs: state.timeoutMs },
+        );
+        state.responseStatus = serviceBridgeResponseStatus(response);
+        state.guestAcknowledged = state.responseStatus !== "error";
+        state.completed = true;
+        return state;
+      }
+
+      const qemuOperation = operation === "shutdown" ? "guest-powerdown" : operation;
+      const action = qemuPowerAction(qemuOperation);
+      if (action === 0) {
+        throw new Error("unsupported QEMU power operation");
+      }
+      if (!module || typeof module._qemu_wasm_power_request !== "function") {
+        throw new Error("QEMU WebAssembly power control is not available");
+      }
+      state.deliveryPath = qemuOperation === "guest-powerdown"
+        ? "qemu-guest-powerdown"
+        : "qemu-forced";
+      state.qemuAction = qemuOperation;
+      state.qemuStatus = Number(module._qemu_wasm_power_request(action));
+      if (!Number.isInteger(state.qemuStatus) || state.qemuStatus < 0) {
+        throw new Error(`QEMU WebAssembly power request failed: ${state.qemuStatus}`);
+      }
+      state.completed = true;
+      return state;
+    } catch (error) {
+      powerOperationError(state, error);
+      throw error;
+    }
+  };
+
+  const powerControl = {
+    attachModule(nextModule) {
+      module = nextModule;
+    },
+    request,
+    state,
+  };
+
+  globalThis.qemuWasmPowerControl = powerControl;
+  return powerControl;
 }
 
 export function qemuArgs(config) {
@@ -874,6 +1001,8 @@ function buildConfig() {
     qboot: option("qboot", "/firmware/qboot.rom"),
     rootfs: pathOption("rootfs", ""),
     rootfsDevice: option("rootfsDevice", "virtio-mmio"),
+    powerOperation: option("powerOperation", ""),
+    powerTimeoutMs: numberOption("powerTimeoutMs", 30000),
     serviceBridge: jsonObjectOption("serviceBridge", null),
     timeoutMs: numberOption("timeoutMs", 180000),
     visualMarker: option("visualMarker", ""),
@@ -944,6 +1073,9 @@ async function run() {
   if (!["none", "default"].includes(config.network)) {
     throw new Error("network must be none or default");
   }
+  if (!POWER_OPERATIONS.has(config.powerOperation)) {
+    throw new Error("powerOperation must be shutdown, reboot, guest-powerdown, force-reset, force-poweroff, or empty");
+  }
   const programUrl = new URL(config.program, window.location.href);
   const wasmUrl = new URL(config.wasm, window.location.href);
   const generatedQemuArgs = qemuArgs(config);
@@ -975,6 +1107,7 @@ async function run() {
   globalThis.qemuWasmSmokeState = smokeState;
   installBrowserDialogSuppression(globalThis, smokeState);
   const serviceBridge = createServiceBridge(config, smokeState, globalThis);
+  const powerControl = createPowerControl(config, smokeState, serviceBridge);
   let qemuKeySink = null;
   let qemuModule = null;
   const setPhase = (phase, message = phase) => {
@@ -1204,6 +1337,7 @@ async function run() {
     moduleOptions.canvas = moduleCanvas;
   }
   qemuModule = await moduleFactory(moduleOptions);
+  powerControl.attachModule(qemuModule);
   installWasmKeySink(qemuModule);
   if (serviceBridge) {
     serviceBridge.attachModule(qemuModule);
