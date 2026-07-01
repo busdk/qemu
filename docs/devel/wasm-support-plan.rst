@@ -5063,3 +5063,49 @@ emulated guest is still executing, but it must not reset the boot-progress
 idle timer.  A guest stuck at a mount unit such as ``/sys/fs/bpf`` should
 still fail quickly with that mount line as the final non-heartbeat progress
 marker.
+
+C-side generated-block prevalidation
+====================================
+
+On 2026-07-01 the opt-in generated TCI subset path gained C-side
+prevalidation before entering the JavaScript ``EM_JS`` helper.  The
+prevalidation computes a content-aware signature for the TCI bytecode pointer,
+clears stale generated-unsupported decisions when the same pointer receives
+different contents, rejects unsupported generated opcodes in C, and preserves
+strict TCI fallback.
+
+The rebuilt artifact was produced with
+``scripts/ci/wasm-build-artifacts-local.py`` and wrote:
+
+* ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-prevalidate/qemu-system-x86_64.js``
+* ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-prevalidate/qemu-system-x86_64.wasm``
+
+The artifact hashes were:
+
+* ``qemu-system-x86_64.js`` =
+  ``14cdafd3e03999d458b64c8afa5200d656fd512f26741e2b09058b2bc6581ef1``
+* ``qemu-system-x86_64.wasm`` =
+  ``74128a37de5ff666f95fc0413fd5fdae47c66f91f47348c68cb0b89be80ce450``
+
+Generic Chromium ``141.0.7390.37`` smoke with the default path reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``81611`` ms:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-generated-prevalidate-default.json``
+* screenshot:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-generated-prevalidate-default.png``
+
+The same smoke with ``--tci-wasm-subset`` reached the marker in ``90736`` ms:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-generated-prevalidate-subset.json``
+* screenshot:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-generated-prevalidate-subset.png``
+* final counters: ``generated_compiled=4``, ``generated_executed=16774``,
+  ``generated_cache_hits=16770``, ``generated_compile_failed=0``
+* remaining generated fallbacks: ``ld32u=2431`` and ``st8=1``
+
+This patch is accepted as safe instrumentation and fallback cleanup, but it is
+rejected as a performance solution.  The opt-in generated path remained slower
+than the default path on the generic smoke gate, so no Bus Engine OS long proof
+was run from this artifact.

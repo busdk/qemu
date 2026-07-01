@@ -56,8 +56,10 @@ static uint64_t tci_wasm_subset_interval;
 typedef struct TCIWasmSubsetEntry {
     const uint32_t *tb_ptr;
     uint64_t hits;
+    uint64_t generated_signature;
     bool validated;
     bool unsupported;
+    bool generated_signature_valid;
     bool generated_unsupported;
 } TCIWasmSubsetEntry;
 
@@ -539,6 +541,85 @@ static bool tci_wasm_subset_compare32(uint32_t lhs, uint32_t rhs,
     }
 }
 
+static uint64_t tci_wasm_generated_signature(const uint32_t *tb_start)
+{
+    uint64_t max_ops = MIN(tci_wasm_subset_max_ops, 512);
+    uint64_t hash = 0xcbf29ce484222325ULL;
+
+    for (uint64_t index = 0; index < max_ops; index++) {
+        const uint32_t *insn_ptr = tb_start + index;
+        const uint32_t *tb_ptr = insn_ptr + 1;
+        uint32_t insn = *insn_ptr;
+        TCGOpcode opc = extract32(insn, 0, 8);
+
+        hash ^= insn;
+        hash *= 0x100000001b3ULL;
+
+        if (opc == INDEX_op_exit_tb || opc == INDEX_op_goto_tb) {
+            void *ptr;
+
+            tci_args_l(insn, tb_ptr, &ptr);
+            hash ^= (uintptr_t)ptr;
+            hash *= 0x100000001b3ULL;
+            break;
+        }
+    }
+
+    return hash;
+}
+
+static bool tci_wasm_generated_mark_unsupported(TCIWasmSubsetEntry *entry,
+                                                TCGOpcode opc)
+{
+    entry->generated_unsupported = true;
+    tci_wasm_generated_fallback_unsupported++;
+    if (opc < NB_OPS) {
+        tci_wasm_generated_unsupported_ops[opc]++;
+    }
+    return false;
+}
+
+static bool tci_wasm_generated_opcode_supported(TCGOpcode opc)
+{
+    switch (opc) {
+    case INDEX_op_mov:
+    case INDEX_op_tci_movi:
+    case INDEX_op_tci_movl:
+    case INDEX_op_add:
+    case INDEX_op_sub:
+    case INDEX_op_mul:
+    case INDEX_op_and:
+    case INDEX_op_or:
+    case INDEX_op_xor:
+    case INDEX_op_exit_tb:
+    case INDEX_op_goto_tb:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool tci_wasm_generated_prevalidate(TCIWasmSubsetEntry *entry,
+                                           const uint32_t *tb_start)
+{
+    uint64_t max_ops = MIN(tci_wasm_subset_max_ops, 512);
+
+    for (uint64_t index = 0; index < max_ops; index++) {
+        const uint32_t *insn_ptr = tb_start + index;
+        uint32_t insn = *insn_ptr;
+        TCGOpcode opc = extract32(insn, 0, 8);
+
+        if (!tci_wasm_generated_opcode_supported(opc)) {
+            return tci_wasm_generated_mark_unsupported(entry, opc);
+        }
+        if (opc == INDEX_op_exit_tb || opc == INDEX_op_goto_tb) {
+            return true;
+        }
+    }
+
+    return tci_wasm_generated_mark_unsupported(entry, NB_OPS);
+}
+
 EM_JS(int, tci_wasm_generated_try_exec_js,
       (uintptr_t tb_arg, uintptr_t regs_arg, uintptr_t ret_arg,
        uint64_t max_ops_arg, int op_mov, int op_movi, int op_movl,
@@ -913,8 +994,10 @@ static TCIWasmSubsetEntry *tci_wasm_subset_entry(const uint32_t *tb_ptr)
     if (entry->tb_ptr != tb_ptr) {
         entry->tb_ptr = tb_ptr;
         entry->hits = 0;
+        entry->generated_signature = 0;
         entry->validated = false;
         entry->unsupported = false;
+        entry->generated_signature_valid = false;
         entry->generated_unsupported = false;
     }
 
@@ -1097,13 +1180,23 @@ static TCIWasmSubsetStatus
 tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
                             tcg_target_ulong *regs, uintptr_t *ret)
 {
+    uint64_t signature = tci_wasm_generated_signature(tb_start);
     int status;
 
+    if (!entry->generated_signature_valid ||
+        entry->generated_signature != signature) {
+        entry->generated_signature = signature;
+        entry->generated_signature_valid = true;
+        entry->generated_unsupported = false;
+    }
     if (entry->generated_unsupported) {
         return TCI_WASM_SUBSET_UNSUPPORTED;
     }
 
     tci_wasm_generated_attempts++;
+    if (!tci_wasm_generated_prevalidate(entry, tb_start)) {
+        return TCI_WASM_SUBSET_UNSUPPORTED;
+    }
     status = tci_wasm_generated_try_exec_js(
         (uintptr_t)tb_start, (uintptr_t)regs, (uintptr_t)ret,
         tci_wasm_subset_max_ops, INDEX_op_mov, INDEX_op_tci_movi,
@@ -1114,16 +1207,11 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
     if (status >= 1000) {
         TCGOpcode opc = status - 1000;
 
-        entry->generated_unsupported = true;
-        tci_wasm_generated_fallback_unsupported++;
-        if (opc < NB_OPS) {
-            tci_wasm_generated_unsupported_ops[opc]++;
-        }
+        tci_wasm_generated_mark_unsupported(entry, opc);
         return TCI_WASM_SUBSET_UNSUPPORTED;
     }
     if (status == 0) {
-        entry->generated_unsupported = true;
-        tci_wasm_generated_fallback_unsupported++;
+        tci_wasm_generated_mark_unsupported(entry, NB_OPS);
         return TCI_WASM_SUBSET_UNSUPPORTED;
     }
     if (status < 0) {

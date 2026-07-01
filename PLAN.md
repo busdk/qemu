@@ -1015,6 +1015,33 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   preserves strict TCI fallback for unsupported or invalid blocks, and proves
   generic Chromium smoke does not regress before any Bus Engine OS long proof
   is attempted.
+  - [x] Add C-side generated-block prevalidation before entering JavaScript:
+    DoD is a content-aware TB signature for the opt-in generated path, stale
+    unsupported decisions cleared when the same TCI bytecode pointer receives
+    different contents, unsupported generated opcodes rejected in C before
+    `EM_JS` module compilation/execution, strict TCI fallback preserved, a
+    successful wasm64 `x86_64-softmmu` build, and generic Chromium default plus
+    opt-in smoke evidence showing whether the reduced JavaScript crossing
+    improves or regresses the measured boot marker.
+    Rejected performance evidence on 2026-07-01: the implementation compiled
+    and linked through `scripts/ci/wasm-build-artifacts-local.py` into
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-prevalidate`.
+    Artifact SHA-256 values were
+    `qemu-system-x86_64.js=14cdafd3e03999d458b64c8afa5200d656fd512f26741e2b09058b2bc6581ef1`
+    and
+    `qemu-system-x86_64.wasm=74128a37de5ff666f95fc0413fd5fdae47c66f91f47348c68cb0b89be80ce450`.
+    Generic Chromium `141.0.7390.37` smoke with the default path reached
+    `QEMU_WASM_LINUX_BOOT_OK` in `81611` ms
+    (`generic-browser-smoke-generated-prevalidate-default.json`). The same
+    smoke with `--tci-wasm-subset` reached the marker in `90736` ms
+    (`generic-browser-smoke-generated-prevalidate-subset.json`) with
+    `generated_compiled=4`, `generated_executed=16774`,
+    `generated_cache_hits=16770`, `generated_compile_failed=0`, and remaining
+    generated fallbacks `ld32u=2431` plus `st8=1`. This proves the C-side
+    prevalidation is safe and observable, but it is slower than default and is
+    not the Bus Engine OS performance solution. Do not run a Bus Engine OS long
+    proof from this patch unless a later generic gate first shows an actual
+    speedup.
   Accepted prototype evidence on 2026-07-01: the standalone generated-block
   prototype now includes a context-pointer ABI modeled on a native TB
   function boundary. The generated module imports linear memory, accepts one
