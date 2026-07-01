@@ -129,6 +129,28 @@ performance, not by generic bridge API shape. These items were promoted from
 `FUTURE_WORK.md` after Chromium evidence showed that long timeouts and
 systemd masks only move the failure from one slow service to the next.
 
+Current exact implementation goal: make the opt-in wasm64 TCI subset path
+execute accepted complete blocks during the normal generic Chromium Linux
+smoke, without requiring `-d nochain`, while keeping the default TCI path
+unchanged. The immediate blocker is `goto_tb`/TB-dispatch handling. DoD for
+this narrow goal is:
+
+- [ ] Document the precise `goto_tb` semantics needed by the subset path,
+  including how TCI reads `jmp_target_addr`, how `exit_tb` encodes TB pointer
+  plus exit index, and why the selected boundary is equivalent to normal TCI.
+- [ ] Implement the smallest safe `goto_tb` or dispatch-exit handling needed
+  for the opt-in subset path, with unsupported shapes falling back to TCI.
+- [ ] Keep `QEMU_TCI_WASM_SUBSET` disabled by default and prove the default
+  generic Chromium smoke still reaches `QEMU_WASM_LINUX_BOOT_OK`.
+- [ ] Prove normal generic Chromium smoke with `--tci-wasm-subset` reaches
+  `QEMU_WASM_LINUX_BOOT_OK` and reports `executed > 0` without `-d nochain`.
+- [ ] Record result JSON, screenshot, artifact hashes, subset counters, and
+  remaining top fallback opcodes in this plan and
+  `docs/devel/wasm-support-plan.rst`.
+- [ ] Only after the normal generic smoke has `executed > 0`, run the Bus
+  Engine OS `virtual-server` browser proof and compare marker-to-marker timing
+  against the current baseline.
+
 - [x] Capture the current slowness baseline before changing execution:
   DoD is a Chrome/Chromium Bus Engine OS browser run with the current
   `x86_64-softmmu` wasm64 TCI artifact, result JSON, screenshot, timeout or
