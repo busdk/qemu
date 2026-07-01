@@ -3892,6 +3892,22 @@ comparison from the branch-to-terminal experiment reached the marker in
 Therefore O3/no-LTO compiler flags are rejected as the current performance
 solution and do not justify a long Bus Engine OS proof run.
 
+An O3/LTO/no-debug-info artifact was then measured to verify whether the
+earlier O3/LTO generic result could be combined with the supported no-debug
+artifact shape.  The build used Meson ``-Doptimization=3``, ``--enable-lto``,
+``--disable-debug-info``, and ``--disable-qom-cast-debug``.  It produced
+``qemu-system-x86_64.js`` SHA-256
+``ba64e96e2b1422a38e5c03142995e1896217b1ec33b0cb0cb7fa1327af67ec4a`` and
+``qemu-system-x86_64.wasm`` SHA-256
+``a5e36ff9cd8d831bee410b1d9e504956553a541e9662480b597ca982f630bb84``.
+Generic Chromium ``149.0.7827.55`` smoke wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-o3-lto-nodebug.json``
+and reached ``QEMU_WASM_LINUX_BOOT_OK`` in ``101664`` ms.  This is slower than
+the current strict-TCI generic baseline around ``81626`` ms, so this
+compiler-flag shape is rejected and no long Bus Engine OS proof was run.
+Compiler-flag tuning is no longer a useful path for this goal unless new
+profiling evidence identifies a specific compiler or runtime bottleneck.
+
 Acceleration work must remain evidence-backed.  Two classes of work are valid
 for this goal:
 

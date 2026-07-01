@@ -928,7 +928,7 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   `900218` ms sample. This proves the current fixture does not merely boot
   later than 420 seconds; it fails to reach multi-user within 15 minutes and
   needs a guest-phase diagnostic before more opcode-coverage work.
-- [ ] Diagnose the post-journald guest stall under strict TCI:
+- [x] Diagnose the post-journald guest stall under strict TCI:
   DoD is a Chromium run using the same accepted Bus Engine OS fixture with
   strict TCI, systemd/kernel console diagnostics enabled through guest command
   line only, and a bounded guest-idle timeout after systemd starts. The result
@@ -956,6 +956,29 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   OS boot profile that prebuilds or disables unnecessary one-shot preparation
   services, or implement a QEMU CPU execution improvement with evidence that
   it beats strict TCI on these milestones.
+- [x] Build and measure an O3/LTO/no-debug-info wasm64 TCI artifact:
+  DoD is a wasm64 `x86_64-softmmu` artifact built with the previously
+  fastest measured compiler shape, Meson `-Doptimization=3` plus LTO where
+  Emscripten accepts it, while keeping the accepted no-debug-info and QOM
+  cast-debug-off settings. Generic Chromium smoke must pass and beat the
+  current strict-TCI generic baseline before a long Bus Engine OS proof is run.
+  If generic smoke regresses or only matches strict TCI, record the rejection
+  and return to proper generated-block execution work instead of spending a
+  10-15 minute downstream proof on a weak compiler-flag result.
+
+  Rejected evidence on 2026-07-01: the artifact built successfully with
+  Meson `-Doptimization=3`, `--enable-lto`, `--disable-debug-info`, and
+  `--disable-qom-cast-debug`. It produced `qemu-system-x86_64.js` SHA-256
+  `ba64e96e2b1422a38e5c03142995e1896217b1ec33b0cb0cb7fa1327af67ec4a`
+  and `qemu-system-x86_64.wasm` SHA-256
+  `a5e36ff9cd8d831bee410b1d9e504956553a541e9662480b597ca982f630bb84`.
+  Generic Chromium `149.0.7827.55` smoke wrote
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-o3-lto-nodebug.json`
+  and reached `QEMU_WASM_LINUX_BOOT_OK` in `101664` ms, which is slower than
+  the current strict-TCI generic baseline around `81626` ms. No Bus Engine OS
+  long proof was run because the cheap gate regressed. Compiler flag tuning is
+  rejected for this goal unless new profiling evidence identifies a specific
+  compiler/runtime bottleneck.
 - [ ] Add a translation-block cache design and tests once the first generated
   blocks exist: DoD is a documented cache key, invalidation rule,
   memory-pressure behavior, browser-module lifetime policy, and deterministic
