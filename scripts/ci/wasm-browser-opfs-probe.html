@@ -1,0 +1,128 @@
+<!doctype html>
+<!--
+  Probe browser OPFS behavior required by QEMU WASM block storage.
+
+  SPDX-License-Identifier: GPL-2.0-or-later
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>QEMU WASM browser OPFS probe</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body {
+        color: #202124;
+        font: 16px/1.5 system-ui, sans-serif;
+        margin: 2rem;
+        max-width: 72rem;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      label {
+        display: block;
+        margin: 1rem 0;
+      }
+
+      input {
+        box-sizing: border-box;
+        display: block;
+        margin-top: 0.25rem;
+        max-width: 32rem;
+        width: 100%;
+      }
+
+      pre {
+        background: #f6f8fa;
+        overflow: auto;
+        padding: 1rem;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>QEMU WASM browser OPFS probe</h1>
+    <p>
+      This page records browser-visible Origin Private File System behavior
+      needed by a QEMU WebAssembly virtio-blk backend. Serve it with the
+      companion Node server so the worker receives cross-origin isolation
+      headers.
+    </p>
+
+    <label>
+      Storage name
+      <input id="storageName" value="qemu-wasm-opfs-probe.bin">
+    </label>
+
+    <label>
+      Payload
+      <input id="payload" value="QEMU_WASM_OPFS_PROBE">
+    </label>
+
+    <button id="run" type="button">Write and read</button>
+    <button id="verify" type="button">Verify existing</button>
+
+    <pre id="output" aria-live="polite">Waiting to run.</pre>
+
+    <script type="module">
+      const output = document.querySelector("#output");
+
+      function workerProbe(command) {
+        const worker = new Worker("./wasm-opfs-probe-worker.mjs", {
+          type: "module",
+        });
+        const id = `${Date.now()}-${Math.random()}`;
+        const storageName = document.querySelector("#storageName").value;
+        const payload = document.querySelector("#payload").value;
+
+        return new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            worker.terminate();
+            reject(new Error("OPFS worker probe timed out"));
+          }, 30000);
+
+          worker.addEventListener("message", (event) => {
+            if (!event.data || event.data.id !== id) {
+              return;
+            }
+            clearTimeout(timeout);
+            worker.terminate();
+            resolve(event.data.result);
+          });
+          worker.addEventListener("error", (event) => {
+            clearTimeout(timeout);
+            worker.terminate();
+            reject(event.error || new Error(event.message));
+          });
+          worker.postMessage({
+            id,
+            command,
+            storageName,
+            payload,
+          });
+        });
+      }
+
+      async function run(command) {
+        output.textContent = "Running.";
+        try {
+          const result = await workerProbe(command);
+          output.textContent = JSON.stringify(result, null, 2);
+        } catch (error) {
+          output.textContent = JSON.stringify({
+            format: 1,
+            ok: false,
+            errorName: error && error.name ? error.name : "Error",
+            errorMessage: error && error.message ? error.message : String(error),
+          }, null, 2);
+        }
+      }
+
+      document.querySelector("#run").addEventListener("click", () => run("write-read"));
+      document.querySelector("#verify").addEventListener("click", () => run("read-existing"));
+    </script>
+  </body>
+</html>
