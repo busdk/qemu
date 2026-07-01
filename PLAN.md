@@ -412,6 +412,34 @@ systemd masks only move the failure from one slow service to the next.
     for this item: wire a matching opt-in subset into QEMU guest execution and
     prove generic Chromium Linux smoke with nonzero generated execution
     counters.
+    Current QEMU-hook evidence on 2026-07-01: the branch has an opt-in
+    `QEMU_TCI_WASM_SUBSET=1` proof path in `tcg/tci.c` plus browser smoke
+    runner flags/result parsing. The hook is threshold-gated, disabled by
+    default, prevalidates the accepted TCI block shape before executing
+    side-effectful helper-backed memory operations, and reports
+    `qemu-tci-wasm-subset` counters. A rebuilt wasm64 `x86_64-softmmu`
+    artifact with hashes
+    `qemu-system-x86_64.js=b9c1b4294196c2666ebe415b0034b230ad0cb3f49f74585e13d3217fe3bd7807`
+    and
+    `qemu-system-x86_64.wasm=b105c4af963b90b85a1bf3af39185faaa53ba2d074f4af3fba5e30e521d760f3`
+    passed the generic Chromium smoke with the subset disabled and with the
+    subset enabled. Evidence files:
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-subset-default-regression.json`
+    and
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-current-full.json`.
+    This is not yet accepted acceleration: even with threshold `1`, the
+    latest enabled run reached `QEMU_WASM_LINUX_BOOT_OK` but reported
+    `executed=0`, `fallback_unsupported=339999`, and top blockers
+    `goto_tb`, `call`, and `brcond`. The next implementation work must prove
+    safe `goto_tb`/dispatch-exit semantics or another complete-block boundary
+    before adding more side-effectful helpers or claiming performance value.
+    Diagnostic evidence with direct TB chaining disabled:
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-nochain.json`
+    reached `QEMU_WASM_LINUX_BOOT_OK` and reported `executed=12787`, proving
+    the prevalidated subset can execute complete blocks when `goto_tb` is not
+    the terminal boundary. It was slower than the normal smoke path, so
+    `-d nochain` is not the performance solution; it is evidence that the next
+    useful implementation target is correct `goto_tb`/TB-dispatch handling.
 - [ ] Prove the acceleration improves the real downstream boot path:
   DoD is a Chrome/Chromium Bus Engine OS `virtual-server` browser run with the
   acceleration enabled that reaches normal multi-user/service readiness, or

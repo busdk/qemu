@@ -4113,6 +4113,42 @@ is to wire a matching opt-in subset into QEMU's wasm64 browser execution path
 and prove the generic Chromium Linux smoke with nonzero generated execution
 counters before using it for Bus Engine OS evidence.
 
+Current QEMU hook evidence on 2026-07-01:
+
+* The branch contains an opt-in ``QEMU_TCI_WASM_SUBSET=1`` proof path in
+  ``tcg/tci.c`` with matching browser smoke runner flags and result parsing.
+  It is disabled by default, threshold-gated, and reports
+  ``qemu-tci-wasm-subset`` summary lines.
+* The hook prevalidates the accepted TCI block shape before executing
+  side-effectful helper-backed memory operations.  Unsupported blocks still
+  fall back to normal TCI.
+* A rebuilt wasm64 ``x86_64-softmmu`` artifact produced hashes
+  ``b9c1b4294196c2666ebe415b0034b230ad0cb3f49f74585e13d3217fe3bd7807``
+  for ``qemu-system-x86_64.js`` and
+  ``b105c4af963b90b85a1bf3af39185faaa53ba2d074f4af3fba5e30e521d760f3``
+  for ``qemu-system-x86_64.wasm``.
+* The default disabled-path regression smoke reached
+  ``QEMU_WASM_LINUX_BOOT_OK``:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-subset-default-regression.json``.
+* The enabled subset smoke also reached ``QEMU_WASM_LINUX_BOOT_OK``:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-current-full.json``.
+  It is not accepted acceleration yet.  With threshold ``1`` it reported
+  ``executed=0``, ``fallback_unsupported=339999``, and top unsupported
+  blockers ``goto_tb``, ``call``, and ``brcond``.
+* A diagnostic run with direct TB chaining disabled reached the marker and
+  finally executed accepted complete blocks:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-nochain.json``
+  reported ``executed=12787``.  That run was slower than the normal smoke
+  path, so ``-d nochain`` is not a product performance fix.  It proves the
+  current subset machinery can execute complete blocks and that normal
+  execution is blocked first by ``goto_tb``/TB-dispatch semantics.
+
+The next QEMU execution step must therefore prove safe ``goto_tb`` or
+dispatch-exit semantics, or another complete-block boundary, before claiming
+generated or subset execution value.  Adding more side-effectful memory or
+helper operations without that boundary would only expand fallback risk rather
+than solve the boot-performance problem.
+
 Rejected tiny TCI bytecode shortcut
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

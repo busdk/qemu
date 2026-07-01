@@ -30,6 +30,8 @@ import {
   perfAttributionSummary,
   recordHotBlockSummary,
   recordPerfAttributionSummary,
+  recordTciWasmSubsetSummary,
+  tciWasmSubsetSummary,
 } from "./wasm-browser-smoke.mjs";
 
 const marker = "QEMU_WASM_LINUX_BOOT_OK";
@@ -295,6 +297,50 @@ for (const status of [
 }
 
 {
+  const line = "qemu-tci-wasm-subset: " + JSON.stringify({
+    format: 1,
+    event: "summary",
+    reason: "interval",
+    attempts: 1000,
+    executed: 12,
+    fallback_cold: 900,
+    fallback_unsupported: 88,
+    max_ops_rejected: 1,
+  });
+  const parsed = tciWasmSubsetSummary(line);
+  assert.equal(parsed.event, "summary");
+  assert.equal(parsed.executed, 12);
+  assert.equal(parsed.fallback_unsupported, 88);
+  assert.equal(tciWasmSubsetSummary("ordinary serial line"), null);
+  assert.equal(tciWasmSubsetSummary("qemu-tci-wasm-subset: not-json"), null);
+}
+
+{
+  const state = {
+    tci: {
+      wasmSubset: {
+        enabled: true,
+        maxSummaries: 2,
+        summaryCount: 0,
+        summaries: [],
+        lastSummary: null,
+      },
+    },
+  };
+  for (const value of [1, 2, 3]) {
+    recordTciWasmSubsetSummary(
+      state,
+      `qemu-tci-wasm-subset: {"format":1,"event":"summary","executed":${value}}`,
+      value * 10,
+    );
+  }
+  assert.equal(state.tci.wasmSubset.summaryCount, 3);
+  assert.equal(state.tci.wasmSubset.summaries.length, 2);
+  assert.equal(state.tci.wasmSubset.summaries[0].executed, 2);
+  assert.equal(state.tci.wasmSubset.lastSummary.elapsedMs, 30);
+}
+
+{
   const result = { untouched: true };
   promoteSmokeState(result, null);
 
@@ -537,6 +583,46 @@ for (const status of [
     maxOutputBytes: 8192,
     memory: "256M",
     network: "none",
+    port: 8020,
+    powerOperation: "",
+    powerTimeoutMs: 30000,
+    qemuArgs: [],
+    rootfs: null,
+    rootfsDevice: "virtio-mmio",
+    tciWasmSubset: true,
+    tciWasmSubsetInterval: 10000,
+    tciWasmSubsetMaxOps: 64,
+    tciWasmSubsetThreshold: 4,
+    timeoutMs: 30000,
+    visualMarker: "",
+  });
+
+  assert.equal(url.searchParams.get("tciWasmSubset"), "1");
+  assert.equal(url.searchParams.get("tciWasmSubsetInterval"), "10000");
+  assert.equal(url.searchParams.get("tciWasmSubsetMaxOps"), "64");
+  assert.equal(url.searchParams.get("tciWasmSubsetThreshold"), "4");
+}
+
+{
+  const url = browserSmokeUrl({
+    allowSerialFallback: true,
+    appendExtra: "",
+    cpu: "Nehalem",
+    display: "none",
+    displayDevice: "default",
+    expectedResolution: "",
+    expectText: [],
+    focusDisplay: false,
+    host: "localhost",
+    initrd: "/tmp/initramfs.cpio.gz",
+    keyboardAfterText: "",
+    keyboardText: "",
+    kernelAppend: null,
+    machine: "microvm,acpi=off",
+    marker,
+    maxOutputBytes: 8192,
+    memory: "256M",
+    network: "none",
     performanceAttribution: true,
     performanceAttributionInterval: 25,
     port: 8020,
@@ -741,6 +827,10 @@ for (const status of [
       interactiveOnly: false,
     },
     timeoutMs: 180000,
+    tciWasmSubset: true,
+    tciWasmSubsetInterval: 10000,
+    tciWasmSubsetMaxOps: 64,
+    tciWasmSubsetThreshold: 4,
     userDataDir: "/tmp/qemu-wasm-profile",
     visualMarker: "login",
   }, "HeadlessChrome/141.0.7390.37");
@@ -776,6 +866,10 @@ for (const status of [
   assert.equal(result.requireDisplayOutput, true);
   assert.equal(result.displayMinNonblackPixels, 4);
   assert.equal(result.rootfsDevice, "virtio-pci");
+  assert.equal(result.tciWasmSubset, true);
+  assert.equal(result.tciWasmSubsetInterval, 10000);
+  assert.equal(result.tciWasmSubsetMaxOps, 64);
+  assert.equal(result.tciWasmSubsetThreshold, 4);
   assert.equal(result.userDataDir, "/tmp/qemu-wasm-profile");
   assert.equal(result.visualMarker, "login");
   assert.deepEqual(result.serviceBridge, {

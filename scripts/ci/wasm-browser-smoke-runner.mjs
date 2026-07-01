@@ -144,6 +144,17 @@ Options:
                      Maximum hotspot entries per summary (default: 12)
   --tci-relaxed-mb  Enable the Emscripten/TCI-only relaxed memory-barrier
                     experiment; default QEMU execution remains strict
+  --tci-wasm-subset
+                    Enable the opt-in wasm64 TCI subset execution proof
+  --tci-wasm-subset-threshold N
+                    TB executions before the subset path is attempted
+                    (default: 1024)
+  --tci-wasm-subset-max-ops N
+                    Maximum TCI ops accepted by the subset path
+                    (default: 64)
+  --tci-wasm-subset-interval N
+                    Attempt interval between subset summaries
+                    (default: 100000)
   --user-data-dir DIR
                     Browser profile directory reused for OPFS restart proofs
   --visual-marker TEXT
@@ -224,6 +235,10 @@ function parseArgs(argv) {
     tcgHotblocksOpSample: 1,
     tcgHotblocksTop: 12,
     tciRelaxedMb: false,
+    tciWasmSubset: false,
+    tciWasmSubsetInterval: 100000,
+    tciWasmSubsetMaxOps: 64,
+    tciWasmSubsetThreshold: 1024,
     timeoutMs: 180000,
     userDataDir: null,
     visualMarker: "",
@@ -417,6 +432,18 @@ function parseArgs(argv) {
     } else if (arg === "--tci-relaxed-mb") {
       options.tciRelaxedMb = true;
       explicit.add("tciRelaxedMb");
+    } else if (arg === "--tci-wasm-subset") {
+      options.tciWasmSubset = true;
+      explicit.add("tciWasmSubset");
+    } else if (arg === "--tci-wasm-subset-interval") {
+      options.tciWasmSubsetInterval = Number(argv[++i]);
+      explicit.add("tciWasmSubsetInterval");
+    } else if (arg === "--tci-wasm-subset-max-ops") {
+      options.tciWasmSubsetMaxOps = Number(argv[++i]);
+      explicit.add("tciWasmSubsetMaxOps");
+    } else if (arg === "--tci-wasm-subset-threshold") {
+      options.tciWasmSubsetThreshold = Number(argv[++i]);
+      explicit.add("tciWasmSubsetThreshold");
     } else if (arg === "--user-data-dir") {
       options.userDataDir = argv[++i];
       explicit.add("userDataDir");
@@ -442,6 +469,7 @@ function parseArgs(argv) {
       "screenshotFullPage",
       "tcgHotblocks",
       "tciRelaxedMb",
+      "tciWasmSubset",
     ],
     checksumFields: ["kernel", "initrd", "rootfs"],
     integerFields: [
@@ -462,6 +490,9 @@ function parseArgs(argv) {
       "tcgHotblocksOpLimit",
       "tcgHotblocksOpSample",
       "tcgHotblocksTop",
+      "tciWasmSubsetInterval",
+      "tciWasmSubsetMaxOps",
+      "tciWasmSubsetThreshold",
       "timeoutMs",
     ],
     pathFields: [
@@ -570,6 +601,21 @@ function parseArgs(argv) {
     options.tcgHotblocksTop > 64
   ) {
     console.error("--tcg-hotblocks-top must be an integer from 1 to 64");
+    usage(2);
+  }
+  if (!Number.isInteger(options.tciWasmSubsetInterval) ||
+      options.tciWasmSubsetInterval <= 0) {
+    console.error("--tci-wasm-subset-interval must be a positive integer");
+    usage(2);
+  }
+  if (!Number.isInteger(options.tciWasmSubsetMaxOps) ||
+      options.tciWasmSubsetMaxOps <= 0) {
+    console.error("--tci-wasm-subset-max-ops must be a positive integer");
+    usage(2);
+  }
+  if (!Number.isInteger(options.tciWasmSubsetThreshold) ||
+      options.tciWasmSubsetThreshold <= 0) {
+    console.error("--tci-wasm-subset-threshold must be a positive integer");
     usage(2);
   }
   if (!Number.isInteger(options.maxOutputBytes) || options.maxOutputBytes <= 0) {
@@ -1165,6 +1211,21 @@ export function browserSmokeUrl(options) {
   if (options.tciRelaxedMb) {
     url.searchParams.set("tciRelaxedMb", "1");
   }
+  if (options.tciWasmSubset) {
+    url.searchParams.set("tciWasmSubset", "1");
+    url.searchParams.set(
+      "tciWasmSubsetInterval",
+      String(options.tciWasmSubsetInterval),
+    );
+    url.searchParams.set(
+      "tciWasmSubsetMaxOps",
+      String(options.tciWasmSubsetMaxOps),
+    );
+    url.searchParams.set(
+      "tciWasmSubsetThreshold",
+      String(options.tciWasmSubsetThreshold),
+    );
+  }
   url.searchParams.set("rootfsDevice", options.rootfsDevice);
   if (rootfsStorage !== "memfs") {
     url.searchParams.set("rootfsStorage", rootfsStorage);
@@ -1258,6 +1319,16 @@ export function initialSmokeResult(options, browserVersion) {
       ? options.tcgHotblocksTop
       : 12,
     tciRelaxedMb: Boolean(options.tciRelaxedMb),
+    tciWasmSubset: Boolean(options.tciWasmSubset),
+    tciWasmSubsetInterval: Number.isInteger(options.tciWasmSubsetInterval)
+      ? options.tciWasmSubsetInterval
+      : 100000,
+    tciWasmSubsetMaxOps: Number.isInteger(options.tciWasmSubsetMaxOps)
+      ? options.tciWasmSubsetMaxOps
+      : 64,
+    tciWasmSubsetThreshold: Number.isInteger(options.tciWasmSubsetThreshold)
+      ? options.tciWasmSubsetThreshold
+      : 1024,
     userDataDir: options.userDataDir,
     visualMarker: options.visualMarker,
     success: false,

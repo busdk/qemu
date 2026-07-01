@@ -44,8 +44,29 @@ __thread uintptr_t tci_tb_ptr;
 
 #ifdef CONFIG_EMSCRIPTEN
 #define TCI_WASM_ENV_FILE "/qemu-tci-env"
+#define TCI_WASM_SUBSET_CACHE_SIZE 4096
 
 static bool tci_relaxed_mb;
+static bool tci_wasm_subset;
+static uint64_t tci_wasm_subset_threshold;
+static uint64_t tci_wasm_subset_max_ops;
+static uint64_t tci_wasm_subset_interval;
+
+typedef struct TCIWasmSubsetEntry {
+    const uint32_t *tb_ptr;
+    uint64_t hits;
+    bool validated;
+    bool unsupported;
+} TCIWasmSubsetEntry;
+
+static TCIWasmSubsetEntry tci_wasm_subset_cache[TCI_WASM_SUBSET_CACHE_SIZE];
+static uint64_t tci_wasm_subset_attempts;
+static uint64_t tci_wasm_subset_executed;
+static uint64_t tci_wasm_subset_fallback_cold;
+static uint64_t tci_wasm_subset_fallback_unsupported;
+static uint64_t tci_wasm_subset_max_ops_rejected;
+static uint64_t tci_wasm_subset_next_report;
+static uint64_t tci_wasm_subset_unsupported_ops[NB_OPS];
 
 EM_JS(char *, tci_wasm_getenv, (const char *name), {
     const key = UTF8ToString(Number(name));
@@ -124,6 +145,25 @@ static bool tci_parse_bool_env(const char *raw)
     return true;
 }
 
+static uint64_t tci_parse_u64_env(const char *name, uint64_t fallback)
+{
+    char *owned;
+    const char *raw = tci_getenv(name, &owned);
+    uint64_t value = fallback;
+
+    if (raw != NULL && raw[0] != '\0') {
+        char *endptr = NULL;
+        unsigned long long parsed = g_ascii_strtoull(raw, &endptr, 10);
+
+        if (endptr != raw && *endptr == '\0') {
+            value = parsed;
+        }
+    }
+    free(owned);
+
+    return value;
+}
+
 static bool tci_relaxed_mb_enabled(void)
 {
     static gsize initialized;
@@ -138,6 +178,29 @@ static bool tci_relaxed_mb_enabled(void)
     }
 
     return tci_relaxed_mb;
+}
+
+static bool tci_wasm_subset_enabled(void)
+{
+    static gsize initialized;
+
+    if (unlikely(g_once_init_enter(&initialized))) {
+        char *owned;
+        const char *raw = tci_getenv("QEMU_TCI_WASM_SUBSET", &owned);
+
+        tci_wasm_subset = tci_parse_bool_env(raw);
+        free(owned);
+        tci_wasm_subset_threshold =
+            tci_parse_u64_env("QEMU_TCI_WASM_SUBSET_THRESHOLD", 1024);
+        tci_wasm_subset_max_ops =
+            tci_parse_u64_env("QEMU_TCI_WASM_SUBSET_MAX_OPS", 64);
+        tci_wasm_subset_interval =
+            tci_parse_u64_env("QEMU_TCI_WASM_SUBSET_INTERVAL", 100000);
+        tci_wasm_subset_next_report = tci_wasm_subset_interval;
+        g_once_init_leave(&initialized, 1);
+    }
+
+    return tci_wasm_subset;
 }
 
 static inline void tci_mb(void)
@@ -430,6 +493,538 @@ static void tci_qemu_st(CPUArchState *env, uint64_t taddr, uint64_t val,
     }
 }
 
+#ifdef CONFIG_EMSCRIPTEN
+static bool tci_wasm_subset_target_ok(const uint32_t *base,
+                                      const uint32_t *target)
+{
+    uintptr_t base_addr = (uintptr_t)base;
+    uintptr_t target_addr = (uintptr_t)target;
+    uintptr_t limit_addr = base_addr + tci_wasm_subset_max_ops * sizeof(*base);
+
+    return target_addr >= base_addr && target_addr < limit_addr &&
+           (target_addr - base_addr) % sizeof(*base) == 0;
+}
+
+static bool tci_wasm_subset_compare32(uint32_t lhs, uint32_t rhs,
+                                      TCGCond condition)
+{
+    switch (condition) {
+    case TCG_COND_NEVER:
+        return false;
+    case TCG_COND_ALWAYS:
+        return true;
+    default:
+        return tci_compare32(lhs, rhs, condition);
+    }
+}
+
+static void tci_wasm_subset_report(const char *reason)
+{
+    TCGOpcode top_ops[8] = { 0 };
+
+    for (TCGOpcode opc = 0; opc < NB_OPS; opc++) {
+        uint64_t count = tci_wasm_subset_unsupported_ops[opc];
+
+        if (count == 0) {
+            continue;
+        }
+        for (size_t i = 0; i < ARRAY_SIZE(top_ops); i++) {
+            if (tci_wasm_subset_unsupported_ops[top_ops[i]] < count) {
+                memmove(&top_ops[i + 1], &top_ops[i],
+                        (ARRAY_SIZE(top_ops) - i - 1) * sizeof(top_ops[0]));
+                top_ops[i] = opc;
+                break;
+            }
+        }
+    }
+
+    fprintf(stderr,
+            "qemu-tci-wasm-subset: {\"format\":1,\"event\":\"summary\","
+            "\"reason\":\"%s\",\"attempts\":%" PRIu64 ","
+            "\"executed\":%" PRIu64 ",\"fallback_cold\":%" PRIu64 ","
+            "\"fallback_unsupported\":%" PRIu64 ","
+            "\"max_ops_rejected\":%" PRIu64 ",\"top_unsupported_ops\":[",
+            reason, tci_wasm_subset_attempts, tci_wasm_subset_executed,
+            tci_wasm_subset_fallback_cold,
+            tci_wasm_subset_fallback_unsupported,
+            tci_wasm_subset_max_ops_rejected);
+    for (size_t i = 0; i < ARRAY_SIZE(top_ops); i++) {
+        TCGOpcode opc = top_ops[i];
+        uint64_t count = tci_wasm_subset_unsupported_ops[opc];
+
+        if (count == 0) {
+            break;
+        }
+        fprintf(stderr, "%s{\"op\":%u,\"name\":\"%s\",\"count\":%" PRIu64 "}",
+                i == 0 ? "" : ",", opc,
+                opc < tcg_op_defs_max ? tcg_op_defs[opc].name : "unknown",
+                count);
+    }
+    fprintf(stderr, "]}\n");
+}
+
+static TCIWasmSubsetEntry *tci_wasm_subset_entry(const uint32_t *tb_ptr)
+{
+    uintptr_t hash = (uintptr_t)tb_ptr >> 4;
+    TCIWasmSubsetEntry *entry =
+        &tci_wasm_subset_cache[hash % TCI_WASM_SUBSET_CACHE_SIZE];
+
+    if (entry->tb_ptr != tb_ptr) {
+        entry->tb_ptr = tb_ptr;
+        entry->hits = 0;
+        entry->validated = false;
+        entry->unsupported = false;
+    }
+
+    return entry;
+}
+
+static bool tci_wasm_subset_unsupported(TCIWasmSubsetEntry *entry,
+                                        TCGOpcode opc)
+{
+    entry->unsupported = true;
+    tci_wasm_subset_fallback_unsupported++;
+    if (opc < NB_OPS) {
+        tci_wasm_subset_unsupported_ops[opc]++;
+    }
+    return false;
+}
+
+static bool tci_wasm_subset_opcode_supported(TCGOpcode opc)
+{
+    switch (opc) {
+    case INDEX_op_br:
+    case INDEX_op_setcond:
+    case INDEX_op_movcond:
+    case INDEX_op_mov:
+    case INDEX_op_tci_movi:
+    case INDEX_op_tci_movl:
+    case INDEX_op_ld8u:
+    case INDEX_op_ld8s:
+    case INDEX_op_ld16u:
+    case INDEX_op_ld16s:
+    case INDEX_op_ld:
+    case INDEX_op_st8:
+    case INDEX_op_st16:
+    case INDEX_op_st:
+    case INDEX_op_add:
+    case INDEX_op_sub:
+    case INDEX_op_mul:
+    case INDEX_op_and:
+    case INDEX_op_or:
+    case INDEX_op_xor:
+    case INDEX_op_andc:
+    case INDEX_op_orc:
+    case INDEX_op_eqv:
+    case INDEX_op_nand:
+    case INDEX_op_nor:
+    case INDEX_op_neg:
+    case INDEX_op_not:
+    case INDEX_op_tci_setcond32:
+    case INDEX_op_shl:
+    case INDEX_op_shr:
+    case INDEX_op_sar:
+    case INDEX_op_deposit:
+    case INDEX_op_extract:
+    case INDEX_op_sextract:
+    case INDEX_op_brcond:
+    case INDEX_op_bswap16:
+    case INDEX_op_bswap32:
+    case INDEX_op_ld32u:
+    case INDEX_op_ld32s:
+    case INDEX_op_st32:
+    case INDEX_op_ext_i32_i64:
+    case INDEX_op_extu_i32_i64:
+    case INDEX_op_bswap64:
+    case INDEX_op_mb:
+    case INDEX_op_qemu_ld:
+    case INDEX_op_tci_qemu_ld_rrr:
+    case INDEX_op_qemu_st:
+    case INDEX_op_tci_qemu_st_rrr:
+    case INDEX_op_exit_tb:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool tci_wasm_subset_validate(const uint32_t *tb_start,
+                                     TCIWasmSubsetEntry *entry)
+{
+    uint64_t max_ops = MIN(tci_wasm_subset_max_ops, 512);
+    g_autofree bool *seen = g_new0(bool, max_ops);
+    g_autofree uint64_t *work = g_new(uint64_t, max_ops);
+    uint64_t work_count = 0;
+    bool has_exit = false;
+
+    work[work_count++] = 0;
+    while (work_count > 0) {
+        uint64_t index = work[--work_count];
+
+        while (index < max_ops) {
+            const uint32_t *insn_ptr = tb_start + index;
+            const uint32_t *tb_ptr = insn_ptr + 1;
+            uint32_t insn = *insn_ptr;
+            TCGOpcode opc = extract32(insn, 0, 8);
+            void *ptr;
+
+            if (seen[index]) {
+                break;
+            }
+            seen[index] = true;
+            if (!tci_wasm_subset_opcode_supported(opc)) {
+                return tci_wasm_subset_unsupported(entry, opc);
+            }
+            switch (opc) {
+            case INDEX_op_br:
+                tci_args_l(insn, tb_ptr, &ptr);
+                if (ptr == NULL ||
+                    !tci_wasm_subset_target_ok(tb_start, ptr) ||
+                    (const uint32_t *)ptr <= insn_ptr ||
+                    (uint64_t)((const uint32_t *)ptr - tb_start) >= max_ops) {
+                    return tci_wasm_subset_unsupported(entry, opc);
+                }
+                index = (const uint32_t *)ptr - tb_start;
+                continue;
+            case INDEX_op_brcond:
+                {
+                    TCGReg ignored;
+                    uint64_t target_index;
+
+                    tci_args_rl(insn, tb_ptr, &ignored, &ptr);
+                    if (ptr == NULL ||
+                        !tci_wasm_subset_target_ok(tb_start, ptr) ||
+                        (const uint32_t *)ptr <= insn_ptr ||
+                        (uint64_t)((const uint32_t *)ptr - tb_start) >=
+                        max_ops) {
+                        return tci_wasm_subset_unsupported(entry, opc);
+                    }
+                    target_index = (const uint32_t *)ptr - tb_start;
+                    if (work_count == max_ops) {
+                        return tci_wasm_subset_unsupported(entry, opc);
+                    }
+                    work[work_count++] = target_index;
+                    index++;
+                }
+                break;
+            case INDEX_op_exit_tb:
+                has_exit = true;
+                goto next_path;
+            default:
+                index++;
+                break;
+            }
+        }
+    next_path:
+        continue;
+    }
+
+    if (!has_exit) {
+        tci_wasm_subset_max_ops_rejected++;
+        return tci_wasm_subset_unsupported(entry, NB_OPS);
+    }
+    entry->validated = true;
+    return true;
+}
+
+static bool tci_wasm_subset_try_exec(const uint32_t *tb_start,
+                                     tcg_target_ulong *regs,
+                                     uintptr_t *ret)
+{
+    TCIWasmSubsetEntry *entry;
+    tcg_target_ulong tmp[TCG_TARGET_NB_REGS];
+    const uint32_t *tb_ptr = tb_start;
+    uint64_t ops;
+
+    if (unlikely(!tci_wasm_subset_enabled())) {
+        return false;
+    }
+
+    tci_wasm_subset_attempts++;
+    if (tci_wasm_subset_interval != 0 &&
+        tci_wasm_subset_attempts >= tci_wasm_subset_next_report) {
+        tci_wasm_subset_report("interval");
+        tci_wasm_subset_next_report =
+            tci_wasm_subset_attempts + tci_wasm_subset_interval;
+    }
+
+    entry = tci_wasm_subset_entry(tb_start);
+    entry->hits++;
+    if (entry->hits < tci_wasm_subset_threshold) {
+        tci_wasm_subset_fallback_cold++;
+        return false;
+    }
+    if (entry->unsupported) {
+        tci_wasm_subset_fallback_unsupported++;
+        return false;
+    }
+    if (!entry->validated &&
+        !tci_wasm_subset_validate(tb_start, entry)) {
+        return false;
+    }
+
+    memcpy(tmp, regs, sizeof(tmp));
+    for (ops = 0; ops < tci_wasm_subset_max_ops; ops++) {
+        uint32_t insn = *tb_ptr++;
+        TCGOpcode opc = extract32(insn, 0, 8);
+        TCGReg r0, r1, r2;
+        TCGCond condition;
+        tcg_target_ulong imm;
+        uint32_t tmp32;
+        uint64_t taddr;
+        uint8_t pos, len;
+        MemOpIdx oi;
+        int32_t ofs;
+        void *ptr;
+
+        switch (opc) {
+        case INDEX_op_br:
+            tci_args_l(insn, tb_ptr, &ptr);
+            tb_ptr = ptr;
+            break;
+        case INDEX_op_setcond:
+            tci_args_rrrc(insn, &r0, &r1, &r2, &condition);
+            tmp[r0] = tci_compare64(tmp[r1], tmp[r2], condition);
+            break;
+        case INDEX_op_movcond:
+            {
+                TCGReg r3, r4;
+
+                tci_args_rrrrrc(insn, &r0, &r1, &r2, &r3, &r4, &condition);
+                tmp32 = tci_compare64(tmp[r1], tmp[r2], condition);
+                tmp[r0] = tmp[tmp32 ? r3 : r4];
+            }
+            break;
+        case INDEX_op_brcond:
+            tci_args_rl(insn, tb_ptr, &r0, &ptr);
+            if (tmp[r0]) {
+                tb_ptr = ptr;
+            }
+            break;
+        case INDEX_op_mov:
+            tci_args_rr(insn, &r0, &r1);
+            tmp[r0] = tmp[r1];
+            break;
+        case INDEX_op_tci_movi:
+            tci_args_ri(insn, &r0, &imm);
+            tmp[r0] = imm;
+            break;
+        case INDEX_op_tci_movl:
+            tci_args_rl(insn, tb_ptr, &r0, &ptr);
+            tmp[r0] = *(tcg_target_ulong *)ptr;
+            break;
+        case INDEX_op_ld8u:
+            tci_args_rrs(insn, &r0, &r1, &ofs);
+            ptr = (void *)(tmp[r1] + ofs);
+            tmp[r0] = *(uint8_t *)ptr;
+            break;
+        case INDEX_op_ld8s:
+            tci_args_rrs(insn, &r0, &r1, &ofs);
+            ptr = (void *)(tmp[r1] + ofs);
+            tmp[r0] = *(int8_t *)ptr;
+            break;
+        case INDEX_op_ld16u:
+            tci_args_rrs(insn, &r0, &r1, &ofs);
+            ptr = (void *)(tmp[r1] + ofs);
+            tmp[r0] = *(uint16_t *)ptr;
+            break;
+        case INDEX_op_ld16s:
+            tci_args_rrs(insn, &r0, &r1, &ofs);
+            ptr = (void *)(tmp[r1] + ofs);
+            tmp[r0] = *(int16_t *)ptr;
+            break;
+        case INDEX_op_ld:
+            tci_args_rrs(insn, &r0, &r1, &ofs);
+            ptr = (void *)(tmp[r1] + ofs);
+            tmp[r0] = *(tcg_target_ulong *)ptr;
+            break;
+        case INDEX_op_st8:
+            tci_args_rrs(insn, &r0, &r1, &ofs);
+            ptr = (void *)(tmp[r1] + ofs);
+            *(uint8_t *)ptr = tmp[r0];
+            break;
+        case INDEX_op_st16:
+            tci_args_rrs(insn, &r0, &r1, &ofs);
+            ptr = (void *)(tmp[r1] + ofs);
+            *(uint16_t *)ptr = tmp[r0];
+            break;
+        case INDEX_op_st:
+            tci_args_rrs(insn, &r0, &r1, &ofs);
+            ptr = (void *)(tmp[r1] + ofs);
+            *(tcg_target_ulong *)ptr = tmp[r0];
+            break;
+        case INDEX_op_add:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = tmp[r1] + tmp[r2];
+            break;
+        case INDEX_op_sub:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = tmp[r1] - tmp[r2];
+            break;
+        case INDEX_op_mul:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = tmp[r1] * tmp[r2];
+            break;
+        case INDEX_op_and:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = tmp[r1] & tmp[r2];
+            break;
+        case INDEX_op_or:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = tmp[r1] | tmp[r2];
+            break;
+        case INDEX_op_xor:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = tmp[r1] ^ tmp[r2];
+            break;
+        case INDEX_op_andc:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = tmp[r1] & ~tmp[r2];
+            break;
+        case INDEX_op_orc:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = tmp[r1] | ~tmp[r2];
+            break;
+        case INDEX_op_eqv:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = ~(tmp[r1] ^ tmp[r2]);
+            break;
+        case INDEX_op_nand:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = ~(tmp[r1] & tmp[r2]);
+            break;
+        case INDEX_op_nor:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = ~(tmp[r1] | tmp[r2]);
+            break;
+        case INDEX_op_neg:
+            tci_args_rr(insn, &r0, &r1);
+            tmp[r0] = -tmp[r1];
+            break;
+        case INDEX_op_not:
+            tci_args_rr(insn, &r0, &r1);
+            tmp[r0] = ~tmp[r1];
+            break;
+        case INDEX_op_ext_i32_i64:
+            tci_args_rr(insn, &r0, &r1);
+            tmp[r0] = (int32_t)tmp[r1];
+            break;
+        case INDEX_op_extu_i32_i64:
+            tci_args_rr(insn, &r0, &r1);
+            tmp[r0] = (uint32_t)tmp[r1];
+            break;
+        case INDEX_op_ld32u:
+            tci_args_rrs(insn, &r0, &r1, &ofs);
+            ptr = (void *)(tmp[r1] + ofs);
+            tmp[r0] = *(uint32_t *)ptr;
+            break;
+        case INDEX_op_ld32s:
+            tci_args_rrs(insn, &r0, &r1, &ofs);
+            ptr = (void *)(tmp[r1] + ofs);
+            tmp[r0] = *(int32_t *)ptr;
+            break;
+        case INDEX_op_st32:
+            tci_args_rrs(insn, &r0, &r1, &ofs);
+            ptr = (void *)(tmp[r1] + ofs);
+            *(uint32_t *)ptr = tmp[r0];
+            break;
+        case INDEX_op_tci_setcond32:
+            tci_args_rrrc(insn, &r0, &r1, &r2, &condition);
+            tmp[r0] = tci_wasm_subset_compare32(tmp[r1], tmp[r2], condition);
+            break;
+        case INDEX_op_shl:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = tmp[r1] << (tmp[r2] % TCG_TARGET_REG_BITS);
+            break;
+        case INDEX_op_shr:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = tmp[r1] >> (tmp[r2] % TCG_TARGET_REG_BITS);
+            break;
+        case INDEX_op_sar:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = (tcg_target_long)tmp[r1] >>
+                      (tmp[r2] % TCG_TARGET_REG_BITS);
+            break;
+        case INDEX_op_deposit:
+            tci_args_rrrbb(insn, &r0, &r1, &r2, &pos, &len);
+            tmp[r0] = deposit64(tmp[r1], pos, len, tmp[r2]);
+            break;
+        case INDEX_op_extract:
+            tci_args_rrbb(insn, &r0, &r1, &pos, &len);
+            tmp[r0] = extract64(tmp[r1], pos, len);
+            break;
+        case INDEX_op_sextract:
+            tci_args_rrbb(insn, &r0, &r1, &pos, &len);
+            tmp[r0] = sextract64(tmp[r1], pos, len);
+            break;
+        case INDEX_op_bswap16:
+            tci_args_rr(insn, &r0, &r1);
+            tmp[r0] = bswap16(tmp[r1]);
+            break;
+        case INDEX_op_bswap32:
+            tci_args_rr(insn, &r0, &r1);
+            tmp[r0] = bswap32(tmp[r1]);
+            break;
+        case INDEX_op_bswap64:
+            tci_args_rr(insn, &r0, &r1);
+            tmp[r0] = bswap64(tmp[r1]);
+            break;
+        case INDEX_op_mb:
+            tci_mb();
+            break;
+        case INDEX_op_qemu_ld:
+            tci_args_rrm(insn, &r0, &r1, &oi);
+            taddr = tmp[r1];
+            tmp[r0] = tci_qemu_ld((CPUArchState *)tmp[TCG_AREG0],
+                                  taddr, oi, tb_ptr);
+            break;
+        case INDEX_op_tci_qemu_ld_rrr:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            taddr = tmp[r1];
+            oi = tmp[r2];
+            tmp[r0] = tci_qemu_ld((CPUArchState *)tmp[TCG_AREG0],
+                                  taddr, oi, tb_ptr);
+            break;
+        case INDEX_op_qemu_st:
+            tci_args_rrm(insn, &r0, &r1, &oi);
+            taddr = tmp[r1];
+            tci_qemu_st((CPUArchState *)tmp[TCG_AREG0],
+                        taddr, tmp[r0], oi, tb_ptr);
+            break;
+        case INDEX_op_tci_qemu_st_rrr:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            taddr = tmp[r1];
+            oi = tmp[r2];
+            tci_qemu_st((CPUArchState *)tmp[TCG_AREG0],
+                        taddr, tmp[r0], oi, tb_ptr);
+            break;
+        case INDEX_op_exit_tb:
+            tci_args_l(insn, tb_ptr, &ptr);
+            memcpy(regs, tmp, sizeof(tmp));
+            *ret = (uintptr_t)ptr;
+            tci_wasm_subset_executed++;
+            return true;
+        default:
+            return tci_wasm_subset_unsupported(entry, opc);
+        }
+    }
+
+    tci_wasm_subset_max_ops_rejected++;
+    return tci_wasm_subset_unsupported(entry, NB_OPS);
+}
+#else
+static bool tci_wasm_subset_try_exec(const uint32_t *tb_start,
+                                     tcg_target_ulong *regs,
+                                     uintptr_t *ret)
+{
+    (void)tb_start;
+    (void)regs;
+    (void)ret;
+
+    return false;
+}
+#endif
+
 /* Interpret pseudo code in tb. */
 /*
  * Disable CFI checks.
@@ -443,11 +1038,15 @@ uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
     tcg_target_ulong regs[TCG_TARGET_NB_REGS];
     uint64_t stack[(TCG_STATIC_CALL_ARGS_SIZE + TCG_STATIC_FRAME_SIZE)
                    / sizeof(uint64_t)];
+    uintptr_t subset_ret;
     bool carry = false;
 
     regs[TCG_AREG0] = (tcg_target_ulong)env;
     regs[TCG_REG_CALL_STACK] = (uintptr_t)stack;
     tci_assert(tb_ptr);
+    if (tci_wasm_subset_try_exec(tb_ptr, regs, &subset_ret)) {
+        return subset_ret;
+    }
 
     for (;;) {
         uint32_t insn;

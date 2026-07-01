@@ -299,6 +299,23 @@ export function perfAttributionSummary(line) {
   }
 }
 
+export function tciWasmSubsetSummary(line) {
+  const prefix = "qemu-tci-wasm-subset: ";
+
+  if (!line.startsWith(prefix)) {
+    return null;
+  }
+  try {
+    const summary = JSON.parse(line.slice(prefix.length));
+    if (summary === null || typeof summary !== "object" || Array.isArray(summary)) {
+      return null;
+    }
+    return summary;
+  } catch {
+    return null;
+  }
+}
+
 export function recordHotBlockSummary(state, line, elapsedMs) {
   if (!state || !state.hotBlocks || !state.hotBlocks.enabled) {
     return;
@@ -315,6 +332,27 @@ export function recordHotBlockSummary(state, line, elapsedMs) {
   state.hotBlocks.summaries.push(state.hotBlocks.lastSummary);
   if (state.hotBlocks.summaries.length > state.hotBlocks.maxSummaries) {
     state.hotBlocks.summaries.shift();
+  }
+}
+
+export function recordTciWasmSubsetSummary(state, line, elapsedMs) {
+  if (!state || !state.tci || !state.tci.wasmSubset ||
+      !state.tci.wasmSubset.enabled) {
+    return;
+  }
+  const summary = tciWasmSubsetSummary(line);
+  if (summary === null) {
+    return;
+  }
+  state.tci.wasmSubset.summaryCount += 1;
+  state.tci.wasmSubset.lastSummary = {
+    elapsedMs,
+    ...summary,
+  };
+  state.tci.wasmSubset.summaries.push(state.tci.wasmSubset.lastSummary);
+  if (state.tci.wasmSubset.summaries.length >
+      state.tci.wasmSubset.maxSummaries) {
+    state.tci.wasmSubset.summaries.shift();
   }
 }
 
@@ -1226,6 +1264,10 @@ function buildConfig() {
     tcgHotblocksOpSample: numberOption("tcgHotblocksOpSample", 1),
     tcgHotblocksTop: numberOption("tcgHotblocksTop", 12),
     tciRelaxedMb: boolOption("tciRelaxedMb", false),
+    tciWasmSubset: boolOption("tciWasmSubset", false),
+    tciWasmSubsetInterval: numberOption("tciWasmSubsetInterval", 100000),
+    tciWasmSubsetMaxOps: numberOption("tciWasmSubsetMaxOps", 64),
+    tciWasmSubsetThreshold: numberOption("tciWasmSubsetThreshold", 1024),
     timeoutMs: numberOption("timeoutMs", 180000),
     visualMarker: option("visualMarker", ""),
     wasm: option("wasm", "/artifacts/qemu-system-x86_64.wasm"),
@@ -1386,8 +1428,24 @@ async function run() {
     },
     tci: {
       relaxedMb: Boolean(config.tciRelaxedMb),
-      env: config.tciRelaxedMb ? {
-        QEMU_TCI_RELAXED_MB: "1",
+      wasmSubset: {
+        enabled: Boolean(config.tciWasmSubset),
+        interval: config.tciWasmSubsetInterval,
+        maxOps: config.tciWasmSubsetMaxOps,
+        threshold: config.tciWasmSubsetThreshold,
+        maxSummaries: 16,
+        summaryCount: 0,
+        summaries: [],
+        lastSummary: null,
+      },
+      env: (config.tciRelaxedMb || config.tciWasmSubset) ? {
+        ...(config.tciRelaxedMb ? { QEMU_TCI_RELAXED_MB: "1" } : {}),
+        ...(config.tciWasmSubset ? {
+          QEMU_TCI_WASM_SUBSET: "1",
+          QEMU_TCI_WASM_SUBSET_INTERVAL: String(config.tciWasmSubsetInterval),
+          QEMU_TCI_WASM_SUBSET_MAX_OPS: String(config.tciWasmSubsetMaxOps),
+          QEMU_TCI_WASM_SUBSET_THRESHOLD: String(config.tciWasmSubsetThreshold),
+        } : {}),
       } : null,
     },
     markerSeen: false,
@@ -1600,6 +1658,11 @@ async function run() {
       line,
       Math.round(performance.now() - startTime),
     );
+    recordTciWasmSubsetSummary(
+      smokeState,
+      line,
+      Math.round(performance.now() - startTime),
+    );
     if (smokeState.outputBytes < config.maxOutputBytes) {
       const encoded = new TextEncoder().encode(`${line}\n`);
       const remaining = config.maxOutputBytes - smokeState.outputBytes;
@@ -1672,9 +1735,15 @@ async function run() {
     QEMU_WASM_PERF_ATTRIBUTION: "1",
     QEMU_WASM_PERF_ATTRIBUTION_INTERVAL: String(config.performanceAttributionInterval),
   } : {};
-  const tciEnv = config.tciRelaxedMb ? {
-    QEMU_TCI_RELAXED_MB: "1",
-  } : {};
+  const tciEnv = {
+    ...(config.tciRelaxedMb ? { QEMU_TCI_RELAXED_MB: "1" } : {}),
+    ...(config.tciWasmSubset ? {
+      QEMU_TCI_WASM_SUBSET: "1",
+      QEMU_TCI_WASM_SUBSET_INTERVAL: String(config.tciWasmSubsetInterval),
+      QEMU_TCI_WASM_SUBSET_MAX_OPS: String(config.tciWasmSubsetMaxOps),
+      QEMU_TCI_WASM_SUBSET_THRESHOLD: String(config.tciWasmSubsetThreshold),
+    } : {}),
+  };
   const installWasmKeySink = (module) => {
     if (config.display === "wasm" && typeof module._qemu_wasm_display_key_event === "function") {
       qemuKeySink = (linuxKey, down) => {
@@ -1725,7 +1794,7 @@ async function run() {
             .join("\n") + "\n";
           module.FS.writeFile("/qemu-wasm-perf-attrib-env", lines);
         }
-        if (config.tciRelaxedMb) {
+        if (config.tciRelaxedMb || config.tciWasmSubset) {
           const lines = Object.entries(tciEnv)
             .map(([key, value]) => `${key}=${value}`)
             .join("\n") + "\n";
