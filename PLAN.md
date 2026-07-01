@@ -870,7 +870,7 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   validation ahead of the generic initrd/rootfs requirement so bad storage
   arguments fail with the actionable OPFS rootfs error before long browser
   proof setup.
-- [ ] Add marker-to-marker Bus Engine OS boot timing before another
+- [x] Add marker-to-marker Bus Engine OS boot timing before another
   acceleration patch:
   DoD is browser smoke harness support that records first-seen elapsed times
   for guest boot milestones even when the run times out, including kernel
@@ -880,6 +880,82 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   both ordered milestone entries and lookup-by-id data. The next Bus Engine OS
   proof must compare these milestones against the current 420 second timeout
   baseline before accepting any speedup or regression claim.
+  Accepted evidence on 2026-07-01: the milestone harness wrote first-seen
+  entries under `bootMilestones.entries` plus lookup data under
+  `bootMilestones.byId`. Three Chromium `149.0.7827.55` runs used artifact
+  hashes `qemu-system-x86_64.js=d2f298574e0b504cb497582121c660a1180247b6f74ba2b675ad5e3731bc2cb3`
+  and
+  `qemu-system-x86_64.wasm=9753379b4acc70b597a2ba8e893993a9b1eea0450792a1fd1dae51cd1a31d750`.
+  The strict TCI/no-subset run
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-milestones-nosubset-20260701.json`
+  timed out after `420212` ms, reached kernel at `50379` ms,
+  `/dev/vda` at `73455` ms, rootfs mount at `91960` ms, init at `93323` ms,
+  hostname at `104290` ms, udev socket at `341751` ms, and journald start at
+  `392463` ms. The opt-in subset run
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-milestones-20260701.json`
+  timed out after `420218` ms and reached the same milestones later:
+  kernel `51991` ms, `/dev/vda` `78095` ms, rootfs `99131` ms, init
+  `100719` ms, hostname `112798` ms, udev `368029` ms, and journald
+  `419497` ms. The threshold-`1` subset run
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-milestones-threshold1-20260701.json`
+  was worse, reaching only hostname by `181391` ms and ending at
+  `systemd[1]: Freezing execution.` before timeout. Current conclusion:
+  the opt-in generated/subset path is useful instrumentation but is not an
+  accepted performance fix. The real boot delay is between systemd hostname
+  setup and early udev/journald progress, and strict TCI remains the fastest
+  measured execution path for this Bus Engine OS fixture.
+- [x] Measure the full strict-TCI Bus Engine OS readiness time before another
+  acceleration patch:
+  DoD is a long Chromium run using the same accepted Bus Engine OS
+  `virtual-server` microvm kernel/rootfs fixture with the TCI wasm subset
+  disabled, a timeout high enough to determine whether the guest reaches
+  `Reached target Multi-User System.` or `QEMU_WASM_SERVICE_READY`, and
+  result JSON plus screenshot recording milestone timings, final serial
+  marker, elapsed readiness time or the next observed blocker. This measurement
+  defines the concrete speed target for the next QEMU performance patch. If
+  strict TCI still fails to reach readiness within the extended run, the next
+  plan item must be a root-cause diagnostic for the last guest phase rather
+  than another generated-opcode coverage experiment.
+  Accepted evidence on 2026-07-01: strict TCI long-run proof
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-strict-tci-long-20260701.json`
+  timed out after `900211` ms in Chromium `149.0.7827.55` with no
+  `Reached target Multi-User System.` and no `QEMU_WASM_SERVICE_READY`.
+  Milestones were kernel `50102` ms, `/dev/vda` `74689` ms, rootfs mount
+  `94953` ms, init `96404` ms, hostname `108319` ms, udev socket `348413` ms,
+  and journald start `397506` ms. The final guest line was
+  `systemd-journald[75]: Received client request to flush runtime journal.`
+  and progress samples showed no further guest output through the final
+  `900218` ms sample. This proves the current fixture does not merely boot
+  later than 420 seconds; it fails to reach multi-user within 15 minutes and
+  needs a guest-phase diagnostic before more opcode-coverage work.
+- [ ] Diagnose the post-journald guest stall under strict TCI:
+  DoD is a Chromium run using the same accepted Bus Engine OS fixture with
+  strict TCI, systemd/kernel console diagnostics enabled through guest command
+  line only, and a bounded guest-idle timeout after systemd starts. The result
+  must identify the last active unit, mount, service, syscall-visible phase, or
+  timer/clock symptom after `systemd-journald` flushes the runtime journal. If
+  the diagnostic still cannot name the guest phase, add the smallest QEMU
+  generic trace point or harness extraction needed to distinguish CPU-bound
+  progress from a missing interrupt, timer, block, serial, or virtio event.
+  Current evidence on 2026-07-01: broad systemd console-debug arguments were
+  rejected as a diagnostic shape because they changed behavior and the guest
+  idled immediately after `Run /sbin/init as init process`. A focused strict
+  TCI run that masked only `systemd-journal-flush.service` wrote
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-strict-tci-mask-journal-flush-20260701.json`
+  and timed out after `600217` ms; it got past the previous journal-flush
+  final line and ended at
+  `systemd[1]: systemd-hwdb-update.service: Consumed 15.668s CPU time over 1min 27.096s wall clock time, 1.3M memory peak.`
+  A second strict TCI run masking both `systemd-journal-flush.service` and
+  `systemd-hwdb-update.service` wrote
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-strict-tci-mask-journal-hwdb-20260701.json`
+  and still timed out after `600197` ms, ending at
+  `systemd[1]: Listening on System Extension Image Management.`. This points
+  to normal guest boot workload under very slow browser-hosted TCI, with
+  journal flush, hwdb update, and sysext-related startup as visible milestones.
+  The next accepted work should either add a downstream browser-hosted Engine
+  OS boot profile that prebuilds or disables unnecessary one-shot preparation
+  services, or implement a QEMU CPU execution improvement with evidence that
+  it beats strict TCI on these milestones.
 - [ ] Add a translation-block cache design and tests once the first generated
   blocks exist: DoD is a documented cache key, invalidation rule,
   memory-pressure behavior, browser-module lifetime policy, and deterministic

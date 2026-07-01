@@ -4791,6 +4791,76 @@ is not reached.  Any future QEMU execution optimization must compare these
 milestones against the accepted 420 second timeout baseline before claiming a
 speedup or regression.
 
+The first milestone comparison used Chromium ``149.0.7827.55`` with
+``qemu-system-x86_64.js`` SHA-256
+``d2f298574e0b504cb497582121c660a1180247b6f74ba2b675ad5e3731bc2cb3``
+and ``qemu-system-x86_64.wasm`` SHA-256
+``9753379b4acc70b597a2ba8e893993a9b1eea0450792a1fd1dae51cd1a31d750``.
+The strict TCI run
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-milestones-nosubset-20260701.json``
+timed out after ``420212`` ms, but reached the Linux kernel line at
+``50379`` ms, the ``/dev/vda`` root block device at ``73455`` ms, rootfs
+mount at ``91960`` ms, init at ``93323`` ms, systemd hostname setup at
+``104290`` ms, the udev control socket at ``341751`` ms, and journald start
+at ``392463`` ms.
+
+The same fixture with the opt-in TCI wasm subset enabled wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-milestones-20260701.json``
+and timed out after ``420218`` ms.  It reached the kernel at ``51991`` ms,
+``/dev/vda`` at ``78095`` ms, rootfs mount at ``99131`` ms, init at
+``100719`` ms, hostname setup at ``112798`` ms, the udev socket at
+``368029`` ms, and journald start at ``419497`` ms.  Forcing threshold ``1``
+in
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-milestones-threshold1-20260701.json``
+was worse: it reached only hostname setup by ``181391`` ms and the last
+guest line was ``systemd[1]: Freezing execution.``.  The current subset and
+generated-block path is therefore diagnostic infrastructure, not an accepted
+performance fix.  The fastest measured path for this Bus Engine OS fixture is
+still strict TCI, and the largest measured delay is between systemd hostname
+setup and early udev/journald progress.
+
+An extended strict-TCI run then wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-strict-tci-long-20260701.json``
+and timed out after ``900211`` ms in Chromium ``149.0.7827.55``.  It still did
+not reach ``Reached target Multi-User System.`` or
+``QEMU_WASM_SERVICE_READY``.  The milestones were stable relative to the
+shorter strict-TCI run: kernel at ``50102`` ms, ``/dev/vda`` at ``74689`` ms,
+rootfs mount at ``94953`` ms, init at ``96404`` ms, hostname at ``108319`` ms,
+udev socket at ``348413`` ms, and journald start at ``397506`` ms.  The final
+guest line was ``systemd-journald[75]: Received client request to flush
+runtime journal.`` and progress samples showed no further guest-origin output
+through the final ``900218`` ms sample.  This changes the next investigation:
+the current fixture is not merely slightly slower than the five-minute target;
+it fails to reach multi-user within 15 minutes.  The next proof needs more
+guest-phase visibility after journald, before another opcode-coverage
+experiment is justified.
+
+A broad systemd console-debug run was rejected as a diagnostic shape because
+it changed the guest behavior: with
+``systemd.log_level=debug systemd.log_target=console`` and related console
+logging arguments, the guest idled immediately after ``Run /sbin/init as init
+process`` and never reached the normal hostname milestone.  More focused
+unit-masking diagnostics were more useful.
+
+Masking only ``systemd-journal-flush.service`` wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-strict-tci-mask-journal-flush-20260701.json``
+and timed out after ``600217`` ms.  That run got past the previous final
+journald flush line and ended at ``systemd[1]:
+systemd-hwdb-update.service: Consumed 15.668s CPU time over 1min 27.096s
+wall clock time, 1.3M memory peak.``.  Masking both
+``systemd-journal-flush.service`` and ``systemd-hwdb-update.service`` wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-strict-tci-mask-journal-hwdb-20260701.json``
+and still timed out after ``600197`` ms, ending at ``systemd[1]: Listening on
+System Extension Image Management.``.
+
+These diagnostics point at ordinary guest boot workload under slow
+browser-hosted TCI rather than a single stuck root filesystem mount.  Journal
+flush, hwdb update, and sysext-related startup are visible expensive phases.
+The next useful work should either define a downstream browser-hosted Bus
+Engine OS boot profile that prebuilds or disables unnecessary one-shot
+preparation services, or produce a QEMU CPU execution improvement that beats
+strict TCI on the same marker-to-marker measurements.
+
 Guest-progress idle diagnostic
 ==============================
 
