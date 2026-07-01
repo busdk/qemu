@@ -13,6 +13,8 @@ import {
   encodeS64,
   encodeU32,
   GENERATED_BLOCK_CONTROL_FLOW_MODEL_VERSION,
+  interpretGeneratedSubset,
+  packDispatchResult,
   parseArgs,
   runGeneratedBlockProbe,
   validateGeneratedBlockControlFlow,
@@ -29,6 +31,10 @@ assert.deepEqual(encodeS32(64), [192, 0]);
 assert.deepEqual(encodeS32(100), [228, 0]);
 assert.deepEqual(encodeS32(-1), [127]);
 assert.deepEqual(encodeS64(32n), [32]);
+assert.equal(packDispatchResult(1, 100), "4294967396");
+assert.equal(packDispatchResult(2, 82), "8589934674");
+assert.equal(interpretGeneratedSubset(1, 2), "8589934678");
+assert.equal(interpretGeneratedSubset(-1, 1), "4294967396");
 
 for (const value of [-1, 1.5, 0x100000000]) {
   assert.throws(() => encodeU32(value), /unsigned 32-bit/);
@@ -65,6 +71,12 @@ assert.equal(probe.countdownExit, "12884901898");
 assert.equal(probe.helperGateFast, "17179869198");
 assert.equal(probe.helperGateFallback, "425201762319");
 assert.equal(probe.helperFallbacks, 1);
+assert.equal(probe.subsetDifferentialMismatches, 0);
+assert.equal(probe.subsetDifferentialCases.length, 5);
+for (const entry of probe.subsetDifferentialCases) {
+  assert.equal(entry.generated, entry.expected);
+  assert.equal(entry.ok, true);
+}
 assert.equal(probe.iterations, 8);
 assert.equal(probe.compileMs, 1);
 assert.equal(probe.instantiateMs, 1);
@@ -85,6 +97,34 @@ assert.equal(
         helperGateFast: "17179869198",
         helperGateFallback: "425201762319",
         helperFallbacks: 1,
+        subsetDifferentialCases: [
+          {
+            generated: "8589934678",
+            expected: "8589934678",
+            ok: true,
+          },
+          {
+            generated: "4294967396",
+            expected: "4294967396",
+            ok: true,
+          },
+          {
+            generated: "8589934677",
+            expected: "8589934677",
+            ok: true,
+          },
+          {
+            generated: "8589934637",
+            expected: "8589934637",
+            ok: true,
+          },
+          {
+            generated: "8589934677",
+            expected: "8589934677",
+            ok: true,
+          },
+        ],
+        subsetDifferentialMismatches: 0,
         compileMs: 0,
         executeMs: 0,
       },

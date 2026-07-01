@@ -389,6 +389,29 @@ systemd masks only move the failure from one slow service to the next.
     deterministic coverage: DoD is a small supported opcode/control-flow
     subset with differential tests against TCI and a passing generic Chromium
     smoke with nonzero generated execution counters.
+    Current prerequisite evidence: the standalone generated-block prototype
+    now includes `subsetBlock(arg0, arg1)`, an independent
+    `interpretGeneratedSubset(arg0, arg1)` oracle, and five differential cases
+    covering normal, zero-sum, byte wraparound, larger inputs, and signed
+    overflow. Node evidence:
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-differential-node.json`
+    passed with zero mismatches; Chromium evidence:
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-differential-browser.json`
+    passed with zero mismatches. This remains prototype evidence only; the
+    item is unchecked until QEMU execution is opt-in wired and generic
+    Chromium smoke passes with nonzero generated execution counters.
+    Current evidence on 2026-07-01: the standalone prototype now includes a
+    generated `subsetBlock` covering `i32.add`, `i32.eqz`, `brcond`-like
+    dispatch selection, `i32.xor`, `i32.and`, and a helper fallback import.
+    The generated result is compared with `interpretGeneratedSubset()` for
+    five signed/wrapping input cases. Node evidence:
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-subset-differential-node.json`
+    passed with zero mismatches on Node.js `v22.19.0`; browser evidence:
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-subset-differential-browser.json`
+    passed with zero mismatches in Chromium `141.0.7390.37`. Remaining work
+    for this item: wire a matching opt-in subset into QEMU guest execution and
+    prove generic Chromium Linux smoke with nonzero generated execution
+    counters.
 - [ ] Prove the acceleration improves the real downstream boot path:
   DoD is a Chrome/Chromium Bus Engine OS `virtual-server` browser run with the
   acceleration enabled that reaches normal multi-user/service readiness, or

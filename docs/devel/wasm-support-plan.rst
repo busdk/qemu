@@ -4083,6 +4083,36 @@ Accepted control-flow model evidence on 2026-07-01:
   in about 1.40 ms, instantiated in about 0.10 ms, and executed 10,000 calls
   in about 2.30 ms.
 
+Accepted subset differential evidence on 2026-07-01:
+
+* The prototype now exports ``subsetBlock(i32, i32) -> i64``.  It covers a
+  small generated opcode/control-flow subset: ``i32.add``, ``i32.eqz``,
+  dispatch-style conditional exit selection, ``i32.xor``, ``i32.and``, and the
+  same explicit helper fallback import model used by ``helperGate``.
+* The JavaScript reference path ``interpretGeneratedSubset()`` computes the
+  same packed dispatch result as a TCI-like interpreter for five signed and
+  wrapping input cases, including ``-1 + 1`` and ``0x7fffffff + 1``.
+* ``node scripts/ci/wasm-generated-block-prototype.mjs --runtime node
+  --iterations 10000 --out
+  /tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-subset-differential-node.json``
+  passed on Node.js ``v22.19.0`` with ``subsetDifferentialMismatches=0``.
+  The 328-byte module validated, compiled in about 0.78 ms, instantiated in
+  about 0.08 ms, and executed 10,000 ``mix32`` calls in about 1.34 ms.
+* ``QEMU_WASM_CHROMIUM_EXECUTABLE=/home/coding-agent/coding-agent/.cache/ms-playwright/chromium-1194/chrome-linux/chrome
+  NODE_PATH=/tmp/qemu-playwright/node_modules
+  node scripts/ci/wasm-generated-block-prototype.mjs --runtime browser
+  --iterations 10000 --timeout-ms 30000 --out
+  /tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-subset-differential-browser.json``
+  passed in Chromium ``141.0.7390.37`` with
+  ``subsetDifferentialMismatches=0``.  The same module validated, compiled in
+  about 0.80 ms, instantiated in about 0.10 ms, and executed 10,000 calls in
+  about 1.00 ms.
+
+This still is not a QEMU guest execution hook.  The next implementation step
+is to wire a matching opt-in subset into QEMU's wasm64 browser execution path
+and prove the generic Chromium Linux smoke with nonzero generated execution
+counters before using it for Bus Engine OS evidence.
+
 Rejected tiny TCI bytecode shortcut
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -4162,3 +4192,46 @@ The accepted local validation command is::
   node scripts/ci/wasm-generated-block-prototype-test.mjs
 
 Both commands passed on 2026-07-01 after the model gate was added.
+
+Differential subset proof
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The next prerequisite before wiring generated execution into QEMU is a small
+differential subset that compares a generated WebAssembly block against an
+independent JavaScript oracle.  This keeps the proof outside live QEMU
+execution while exercising the control-flow shape that the rejected shortcut
+did not have.
+
+The prototype now exports ``packDispatchResult(status, value)`` and
+``interpretGeneratedSubset(arg0, arg1)``.  The generated WebAssembly module
+exports ``subsetBlock(arg0, arg1)`` with the same behavior:
+
+* add two signed 32-bit inputs with i32 wraparound;
+* if the sum is zero, return dispatch status ``1`` with value ``100``;
+* otherwise return dispatch status ``2`` with the low byte of
+  ``sum ^ 0x55``;
+* encode dispatch status and value in the same 64-bit packed result shape as
+  the rest of the prototype.
+
+The focused test covers five cases: normal positive inputs, a zero-sum path,
+byte wraparound, larger inputs, and signed overflow.  The accepted local
+validation commands are::
+
+  node --check scripts/ci/wasm-generated-block-prototype.mjs
+  node scripts/ci/wasm-generated-block-prototype-test.mjs
+  node scripts/ci/wasm-generated-block-prototype.mjs --runtime node \
+    --iterations 10000 --out \
+    /tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-differential-node.json
+  NODE_PATH=/tmp/qemu-playwright/node_modules \
+  QEMU_WASM_CHROMIUM_EXECUTABLE=/home/coding-agent/coding-agent/.cache/ms-playwright/chromium-1194/chrome-linux/chrome \
+  node scripts/ci/wasm-generated-block-prototype.mjs --runtime browser \
+    --iterations 10000 --timeout-ms 30000 --out \
+    /tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-differential-browser.json
+
+Both runtime probes passed on 2026-07-01 with
+``subsetDifferentialMismatches=0``.  Node.js ``v22.19.0`` compiled the
+328-byte module in about 0.89 ms and Chromium ``141.0.7390.37`` compiled it
+in about 1.10 ms.  This is not yet live QEMU acceleration.  It is the
+deterministic differential gate that the next opt-in QEMU execution hook must
+preserve before the generic Chromium Linux smoke can be used as the runtime
+regression gate.

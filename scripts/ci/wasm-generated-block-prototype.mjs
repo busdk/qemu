@@ -170,6 +170,10 @@ function localSet(index) {
   return [0x21, ...encodeU32(index)];
 }
 
+function localTee(index) {
+  return [0x22, ...encodeU32(index)];
+}
+
 function i32Const(value) {
   return [0x41, ...encodeS32(value)];
 }
@@ -188,6 +192,18 @@ function packExit(statusCode, valueCode) {
     0xad,          /* i64.extend_i32_u */
     0x84,          /* i64.or */
   ];
+}
+
+export function packDispatchResult(status, value) {
+  return ((BigInt(status >>> 0) << 32n) | BigInt(value >>> 0)).toString();
+}
+
+export function interpretGeneratedSubset(arg0, arg1) {
+  const sum = (arg0 + arg1) | 0;
+  if (sum === 0) {
+    return packDispatchResult(1, 100);
+  }
+  return packDispatchResult(2, (sum ^ 0x55) & 0xff);
 }
 
 function functionBody(instructions, locals = []) {
@@ -220,6 +236,7 @@ export function buildGeneratedBlockModule() {
       [0x02],
       [0x02],
       [0x03],
+      [0x03],
     ])),
     ...section(7, vector([
       [...name("add64"), 0x00, ...encodeU32(1)],
@@ -227,6 +244,7 @@ export function buildGeneratedBlockModule() {
       [...name("branchExit"), 0x00, ...encodeU32(3)],
       [...name("countdownExit"), 0x00, ...encodeU32(4)],
       [...name("helperGate"), 0x00, ...encodeU32(5)],
+      [...name("subsetBlock"), 0x00, ...encodeU32(6)],
     ])),
     ...section(10, vector([
       functionBody([
@@ -292,6 +310,27 @@ export function buildGeneratedBlockModule() {
           0x10, ...encodeU32(0), /* call h.fallback */
         0x0b,                  /* end */
       ]),
+      functionBody([
+        ...localGet(0),
+        ...localGet(1),
+        0x6a,                  /* i32.add */
+        ...localTee(2),
+        0x45,                  /* i32.eqz */
+        0x04, valueI64,        /* if result i64 */
+          ...packExit(i32Const(1), i32Const(100)),
+        0x05,                  /* else */
+          ...packExit(
+            i32Const(2),
+            [
+              ...localGet(2),
+              ...i32Const(0x55),
+              0x73,            /* i32.xor */
+              ...i32Const(0xff),
+              0x71,            /* i32.and */
+            ],
+          ),
+        0x0b,                  /* end */
+      ], [{ count: 1, type: valueI32 }]),
     ])),
   ];
 
@@ -329,6 +368,13 @@ export function validatePrototypeResult(result) {
     }
     if (runtime.helperFallbacks !== 1) {
       throw new Error(`${runtime.runtime} helper fallback count mismatch`);
+    }
+    if (runtime.subsetDifferentialMismatches !== 0) {
+      throw new Error(`${runtime.runtime} subset differential mismatch`);
+    }
+    if (!Array.isArray(runtime.subsetDifferentialCases) ||
+        runtime.subsetDifferentialCases.length < 5) {
+      throw new Error(`${runtime.runtime} subset differential coverage missing`);
     }
     if (!Number.isFinite(runtime.compileMs) || runtime.compileMs < 0) {
       throw new Error(`${runtime.runtime} compileMs must be non-negative`);
@@ -421,6 +467,7 @@ export async function runGeneratedBlockProbe(iterations, now = performance.now.b
     branchExit,
     countdownExit: runCountdownExit,
     helperGate,
+    subsetBlock,
   } = instance.exports;
   const add64Result = add64(19n, 23n);
   const mix32Result = mix32(42);
@@ -429,6 +476,26 @@ export async function runGeneratedBlockProbe(iterations, now = performance.now.b
   const countdownExitResult = runCountdownExit(4);
   const helperGateFast = helperGate(7, 91);
   const helperGateFallback = helperGate(5, 10);
+  const subsetInputs = [
+    [1, 2],
+    [-1, 1],
+    [255, 1],
+    [1234, 5678],
+    [0x7fffffff, 1],
+  ];
+  const subsetDifferentialCases = subsetInputs.map(([arg0, arg1]) => {
+    const generated = subsetBlock(arg0, arg1).toString();
+    const expected = interpretGeneratedSubset(arg0, arg1);
+    return {
+      arg0,
+      arg1,
+      generated,
+      expected,
+      ok: generated === expected,
+    };
+  });
+  const subsetDifferentialMismatches =
+    subsetDifferentialCases.filter((entry) => !entry.ok).length;
   let accumulator = 0;
   const executeStart = now();
   for (let i = 0; i < iterations; i++) {
@@ -444,7 +511,8 @@ export async function runGeneratedBlockProbe(iterations, now = performance.now.b
       countdownExitResult === 12884901898n &&
       helperGateFast === 17179869198n &&
       helperGateFallback === 425201762319n &&
-      helperFallbacks === 1,
+      helperFallbacks === 1 &&
+      subsetDifferentialMismatches === 0,
     moduleBytes: moduleBytes.length,
     validate: WebAssembly.validate(moduleBytes),
     compileMs,
@@ -459,6 +527,8 @@ export async function runGeneratedBlockProbe(iterations, now = performance.now.b
     helperGateFast: helperGateFast.toString(),
     helperGateFallback: helperGateFallback.toString(),
     helperFallbacks,
+    subsetDifferentialCases,
+    subsetDifferentialMismatches,
     accumulator,
   };
 }
@@ -497,9 +567,12 @@ async function runBrowser(options) {
           functionType,
           localGet,
           localSet,
+          localTee,
           i32Const,
           i64Const,
           packExit,
+          packDispatchResult,
+          interpretGeneratedSubset,
           functionBody,
           buildGeneratedBlockModule,
           runGeneratedBlockProbe,
