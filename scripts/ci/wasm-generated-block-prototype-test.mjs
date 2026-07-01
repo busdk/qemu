@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 
 import {
   buildGeneratedBlockModule,
+  createGeneratedBlockCache,
   encodeS32,
   encodeS64,
   encodeU32,
@@ -36,12 +37,55 @@ assert.equal(packDispatchResult(2, 82), "8589934674");
 assert.equal(interpretGeneratedSubset(1, 2), "8589934678");
 assert.equal(interpretGeneratedSubset(-1, 1), "4294967396");
 
+const generatedCache = createGeneratedBlockCache({ maxEntries: 2 });
+let cacheCompiles = 0;
+assert.equal(
+  generatedCache.getOrCompile("tb:1", "sig:a", () => `compiled:${++cacheCompiles}`),
+  "compiled:1",
+);
+assert.equal(
+  generatedCache.getOrCompile("tb:1", "sig:a", () => `compiled:${++cacheCompiles}`),
+  "compiled:1",
+);
+assert.equal(
+  generatedCache.getOrCompile("tb:1", "sig:b", () => `compiled:${++cacheCompiles}`),
+  "compiled:2",
+);
+assert.equal(
+  generatedCache.getOrCompile("tb:2", "sig:c", () => `compiled:${++cacheCompiles}`),
+  "compiled:3",
+);
+assert.equal(
+  generatedCache.getOrCompile("tb:3", "sig:d", () => `compiled:${++cacheCompiles}`),
+  "compiled:4",
+);
+assert.equal(generatedCache.size, 2);
+assert.deepEqual(generatedCache.stats(), {
+  hits: 1,
+  misses: 3,
+  stale: 1,
+  evictions: 1,
+});
+
 for (const value of [-1, 1.5, 0x100000000]) {
   assert.throws(() => encodeU32(value), /unsigned 32-bit/);
 }
 for (const value of [-0x80000001, 0x80000000, 1.5]) {
   assert.throws(() => encodeS32(value), /signed 32-bit/);
 }
+assert.throws(() => createGeneratedBlockCache({ maxEntries: 0 }), /positive/);
+assert.throws(
+  () => generatedCache.getOrCompile("", "sig", () => undefined),
+  /non-empty/,
+);
+assert.throws(
+  () => generatedCache.getOrCompile("tb", "", () => undefined),
+  /non-empty/,
+);
+assert.throws(
+  () => generatedCache.getOrCompile("tb", "sig"),
+  /compile callback/,
+);
 
 assert.equal(WebAssembly.validate(buildGeneratedBlockModule()), true);
 

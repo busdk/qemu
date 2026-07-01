@@ -979,23 +979,42 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   long proof was run because the cheap gate regressed. Compiler flag tuning is
   rejected for this goal unless new profiling evidence identifies a specific
   compiler/runtime bottleneck.
-- [ ] Add a translation-block cache design and tests once the first generated
+- [x] Add a translation-block cache design and tests once the first generated
   blocks exist: DoD is a documented cache key, invalidation rule,
   memory-pressure behavior, browser-module lifetime policy, and deterministic
   tests for cache hit, miss, flush, stale-block rejection, and fallback to TCI.
 
-- [ ] Add a generic browser OPFS-backed `virtio-blk` storage backend for
-  QEMU/WASM: DoD is upstreamable QEMU-side support that exposes a block device
-  to the guest while storing writable disk contents in browser Origin Private
-  File System; keeps Bus Engine product policy out of QEMU; performs hot block
-  I/O in a worker using synchronous OPFS access handles when available; defines
-  metadata, quota, resize, flush, clean shutdown, and corruption/error
-  behavior; supports an immutable fetched base image plus a writable persistent
-  disk or overlay path; records browser compatibility and cross-origin
-  isolation requirements; has deterministic Node/browser harness coverage for
-  read/write/flush/reload persistence; and provides downstream handoff fields
-  that Bus Engine OS can use to mount persistent user/workspace state for
-  `virtual-server` and `virtual-desktop`.
+  Accepted evidence on 2026-07-01: the opt-in generated-block path now keys
+  generated module entries by TCI bytecode pointer plus a 64-bit signature of
+  the current bytecode and terminal target, bounds browser module lifetime with
+  a 4096-entry FIFO eviction cap, recompiles stale pointer/signature entries,
+  and reports `generated_cache_hits` plus `generated_cache_stale` in the
+  existing subset summary. Deterministic Node tests in
+  `scripts/ci/wasm-generated-block-prototype-test.mjs` cover cache hit, miss,
+  stale replacement, eviction, invalid keys, invalid signatures, and missing
+  compile callbacks. The rebuilt wasm64 artifact
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/cache-signature` produced
+  `qemu-system-x86_64.js` SHA-256
+  `14cdafd3e03999d458b64c8afa5200d656fd512f26741e2b09058b2bc6581ef1`
+  and `qemu-system-x86_64.wasm` SHA-256
+  `4810087084f0d1ad3fa32752675deb4d871e03344b9caa2e359bfc16e2af66e0`.
+  Generic Chromium `149.0.7827.55` default smoke reached
+  `QEMU_WASM_LINUX_BOOT_OK` in `94207` ms
+  (`generic-browser-smoke-cache-signature-default.json`). The opt-in subset
+  smoke reached the same marker in `96794` ms
+  (`generic-browser-smoke-cache-signature-subset.json`) with
+  `generated_compiled=3`, `generated_executed=2394`,
+  `generated_cache_hits=2391`, `generated_cache_stale=0`, and dominant
+  generated fallback still `ld32u`. This is accepted as cache correctness and
+  observability foundation, not as the performance fix; no Bus Engine OS long
+  proof was run because the generic opt-in gate remained slower than default.
+- [ ] Start the proper native wasm64 TCG prototype with direct block return
+  semantics: DoD is a small opt-in generated-block path that avoids the
+  per-operation JavaScript helper model, compiles only a documented integer
+  ALU plus terminal branch subset, records compile/execute/fallback counters,
+  preserves strict TCI fallback for unsupported or invalid blocks, and proves
+  generic Chromium smoke does not regress before any Bus Engine OS long proof
+  is attempted.
 
 ## MVP Generic QEMU Work
 

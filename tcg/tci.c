@@ -83,6 +83,8 @@ static uint64_t tci_wasm_generated_compiled;
 static uint64_t tci_wasm_generated_executed;
 static uint64_t tci_wasm_generated_fallback_unsupported;
 static uint64_t tci_wasm_generated_compile_failed;
+static uint64_t tci_wasm_generated_cache_hits;
+static uint64_t tci_wasm_generated_cache_stale;
 static uint64_t tci_wasm_generated_unsupported_ops[NB_OPS];
 
 EM_JS(char *, tci_wasm_getenv, (const char *name), {
@@ -639,7 +641,30 @@ EM_JS(int, tci_wasm_generated_try_exec_js,
         return HEAPU64[Number(address) >> 3];
     }
 
-    function compileEntry() {
+    function fingerprintEntry() {
+        let hash = 0xcbf29ce484222325n;
+
+        for (let index = 0; index < maxOps; index++) {
+            const insnPtr = tb + index * 4;
+            const tbPtr = insnPtr + 4;
+            const insn = HEAPU32[insnPtr >> 2];
+            const opc = bits(insn, 0, 8);
+
+            hash ^= BigInt(insn >>> 0);
+            hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+
+            if (opc === op_exit_tb || opc === op_goto_tb) {
+                const target = BigInt(tbPtr + sextract(insn, 12, 20));
+                hash ^= BigInt.asUintN(64, target);
+                hash = BigInt.asUintN(64, hash * 0x100000001b3n);
+                break;
+            }
+        }
+
+        return hash.toString(16);
+    }
+
+    function compileEntry(signature) {
         const instructions = [];
         let terminal = null;
 
@@ -685,12 +710,12 @@ EM_JS(int, tci_wasm_generated_try_exec_js,
                 };
                 break;
             } else {
-                return { unsupported: true, opcode: opc };
+                return { unsupported: true, opcode: opc, signature };
             }
         }
 
         if (terminal === null) {
-            return { unsupported: true, opcode: 0 };
+            return { unsupported: true, opcode: 0, signature };
         }
 
         instructions.push(...i64Const(terminal.status));
@@ -715,16 +740,31 @@ EM_JS(int, tci_wasm_generated_try_exec_js,
         return {
             fn: instance.exports.run,
             retKind: terminal.kind,
+            signature,
             fresh: true,
         };
     }
 
     let entry = cache.get(key);
+    let statusOffset = 20;
+    const signature = fingerprintEntry();
     if (entry === undefined) {
+        statusOffset = 10;
         try {
-            entry = compileEntry();
+            entry = compileEntry(signature);
         } catch (error) {
-            entry = { unsupported: true, compileFailed: true };
+            entry = { unsupported: true, compileFailed: true, signature };
+        }
+        cache.set(key, entry);
+        if (cache.size > 4096) {
+            cache.delete(cache.keys().next().value);
+        }
+    } else if (entry.signature !== signature) {
+        statusOffset = 30;
+        try {
+            entry = compileEntry(signature);
+        } catch (error) {
+            entry = { unsupported: true, compileFailed: true, signature };
         }
         cache.set(key, entry);
     }
@@ -763,9 +803,8 @@ EM_JS(int, tci_wasm_generated_try_exec_js,
 
     if (entry.fresh) {
         entry.fresh = false;
-        status += 10;
     }
-    return status;
+    return status + statusOffset;
 });
 
 static void tci_wasm_subset_report(const char *reason)
@@ -820,6 +859,8 @@ static void tci_wasm_subset_report(const char *reason)
             "\"generated_executed\":%" PRIu64 ","
             "\"generated_fallback_unsupported\":%" PRIu64 ","
             "\"generated_compile_failed\":%" PRIu64 ","
+            "\"generated_cache_hits\":%" PRIu64 ","
+            "\"generated_cache_stale\":%" PRIu64 ","
             "\"top_unsupported_ops\":[",
             reason, tci_wasm_subset_attempts, tci_wasm_subset_executed,
             tci_wasm_subset_fallback_cold,
@@ -832,7 +873,9 @@ static void tci_wasm_subset_report(const char *reason)
             tci_wasm_generated_compiled,
             tci_wasm_generated_executed,
             tci_wasm_generated_fallback_unsupported,
-            tci_wasm_generated_compile_failed);
+            tci_wasm_generated_compile_failed,
+            tci_wasm_generated_cache_hits,
+            tci_wasm_generated_cache_stale);
     for (size_t i = 0; i < ARRAY_SIZE(top_ops); i++) {
         TCGOpcode opc = top_ops[i];
         uint64_t count = tci_wasm_subset_unsupported_ops[opc];
@@ -1088,7 +1131,14 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
         tci_wasm_generated_compile_failed++;
         return TCI_WASM_SUBSET_UNSUPPORTED;
     }
-    if (status >= 10) {
+    if (status >= 30) {
+        tci_wasm_generated_cache_stale++;
+        tci_wasm_generated_compiled++;
+        status -= 30;
+    } else if (status >= 20) {
+        tci_wasm_generated_cache_hits++;
+        status -= 20;
+    } else if (status >= 10) {
         tci_wasm_generated_compiled++;
         status -= 10;
     }

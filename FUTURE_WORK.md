@@ -52,6 +52,18 @@ active goal.
   proves the first structured guest-service path. DoD is a decision on whether
   QMP remains only VM control plumbing or becomes part of the public browser
   controller surface, without replacing the accepted guest-service bridge.
+- [ ] Add a generic browser OPFS-backed `virtio-blk` storage backend for
+  QEMU/WASM after the active CPU performance proof is accepted. DoD is
+  upstreamable QEMU-side support that exposes a block device to the guest while
+  storing writable disk contents in browser Origin Private File System; keeps
+  product policy out of QEMU; performs hot block I/O in a worker using
+  synchronous OPFS access handles when available; defines metadata, quota,
+  resize, flush, clean shutdown, and corruption/error behavior; supports an
+  immutable fetched base image plus a writable persistent disk or overlay
+  path; records browser compatibility and cross-origin isolation requirements;
+  has deterministic Node/browser harness coverage for read/write/flush/reload
+  persistence; and provides downstream handoff fields for future virtual
+  server and virtual desktop use.
 - [ ] Add networking support after the no-network MVP is accepted.
 - [ ] Add browser persistence after the no-persistence MVP is accepted.
 - [ ] Evaluate WebGPU and accelerated 3D after the 2D browser display path is

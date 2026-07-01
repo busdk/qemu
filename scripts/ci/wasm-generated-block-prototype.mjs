@@ -206,6 +206,65 @@ export function interpretGeneratedSubset(arg0, arg1) {
   return packDispatchResult(2, (sum ^ 0x55) & 0xff);
 }
 
+export function createGeneratedBlockCache({ maxEntries = 4096 } = {}) {
+  if (!Number.isInteger(maxEntries) || maxEntries <= 0) {
+    throw new Error("maxEntries must be a positive integer");
+  }
+
+  const entries = new Map();
+  const counters = {
+    hits: 0,
+    misses: 0,
+    stale: 0,
+    evictions: 0,
+  };
+
+  return {
+    get size() {
+      return entries.size;
+    },
+
+    stats() {
+      return { ...counters };
+    },
+
+    getOrCompile(key, signature, compile) {
+      if (typeof key !== "string" || key.length === 0) {
+        throw new Error("cache key must be a non-empty string");
+      }
+      if (typeof signature !== "string" || signature.length === 0) {
+        throw new Error("cache signature must be a non-empty string");
+      }
+      if (typeof compile !== "function") {
+        throw new Error("cache compile callback must be a function");
+      }
+
+      const current = entries.get(key);
+      if (current && current.signature === signature) {
+        counters.hits++;
+        return current.value;
+      }
+
+      if (current) {
+        counters.stale++;
+      } else {
+        counters.misses++;
+      }
+
+      const value = compile();
+      entries.set(key, { signature, value });
+
+      if (entries.size > maxEntries) {
+        const evictedKey = entries.keys().next().value;
+        entries.delete(evictedKey);
+        counters.evictions++;
+      }
+
+      return value;
+    },
+  };
+}
+
 function functionBody(instructions, locals = []) {
   const body = [
     ...vector(locals.map(({ count, type }) => [encodeU32(count), [type]].flat())),

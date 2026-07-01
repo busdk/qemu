@@ -3908,6 +3908,40 @@ compiler-flag shape is rejected and no long Bus Engine OS proof was run.
 Compiler-flag tuning is no longer a useful path for this goal unless new
 profiling evidence identifies a specific compiler or runtime bottleneck.
 
+Generated-block cache safety and observability
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+After the generated-memory and branch experiments, the opt-in generated-block
+path still needed a safer cache boundary before larger native wasm64 TCG work.
+The live generated path now keys entries by the TCI bytecode pointer plus a
+64-bit signature of the current bytecode and terminal target, caps the browser
+module cache at 4096 entries with FIFO eviction, recompiles stale
+pointer/signature entries, and reports ``generated_cache_hits`` plus
+``generated_cache_stale`` in the existing TCI subset summary.  Deterministic
+Node coverage in ``scripts/ci/wasm-generated-block-prototype-test.mjs`` checks
+cache hit, miss, stale replacement, eviction, invalid keys, invalid
+signatures, and missing compile callbacks.
+
+The rebuilt wasm64 artifact
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/cache-signature`` produced:
+
+* ``qemu-system-x86_64.js`` SHA-256
+  ``14cdafd3e03999d458b64c8afa5200d656fd512f26741e2b09058b2bc6581ef1``
+* ``qemu-system-x86_64.wasm`` SHA-256
+  ``4810087084f0d1ad3fa32752675deb4d871e03344b9caa2e359bfc16e2af66e0``
+
+Generic Chromium ``149.0.7827.55`` smoke with the default path wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-cache-signature-default.json``
+and reached ``QEMU_WASM_LINUX_BOOT_OK`` in ``94207`` ms.  The same artifact
+with the opt-in subset wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-cache-signature-subset.json``
+and reached the same marker in ``96794`` ms with ``generated_compiled=3``,
+``generated_executed=2394``, ``generated_cache_hits=2391``,
+``generated_cache_stale=0``, and dominant generated fallback still ``ld32u``.
+This result is accepted as cache correctness and observability foundation, but
+not as the Bus Engine OS performance fix.  No long Bus Engine OS proof was run
+because the cheap generic opt-in gate remained slower than the default path.
+
 Acceleration work must remain evidence-backed.  Two classes of work are valid
 for this goal:
 
