@@ -57,6 +57,7 @@ typedef struct TCIWasmSubsetEntry {
     uint64_t hits;
     bool validated;
     bool unsupported;
+    bool generated_unsupported;
 } TCIWasmSubsetEntry;
 
 typedef enum TCIWasmSubsetStatus {
@@ -76,6 +77,12 @@ static uint64_t tci_wasm_subset_unsupported_ops[NB_OPS];
 static uint64_t tci_wasm_subset_brcond_bad_target;
 static uint64_t tci_wasm_subset_brcond_backward;
 static uint64_t tci_wasm_subset_brcond_work_full;
+static uint64_t tci_wasm_generated_attempts;
+static uint64_t tci_wasm_generated_compiled;
+static uint64_t tci_wasm_generated_executed;
+static uint64_t tci_wasm_generated_fallback_unsupported;
+static uint64_t tci_wasm_generated_compile_failed;
+static uint64_t tci_wasm_generated_unsupported_ops[NB_OPS];
 
 EM_JS(char *, tci_wasm_getenv, (const char *name), {
     const key = UTF8ToString(Number(name));
@@ -529,9 +536,241 @@ static bool tci_wasm_subset_compare32(uint32_t lhs, uint32_t rhs,
     }
 }
 
+EM_JS(int, tci_wasm_generated_try_exec_js,
+      (uintptr_t tb_arg, uintptr_t regs_arg, uintptr_t ret_arg,
+       uint64_t max_ops_arg, int op_mov, int op_movi, int op_movl,
+       int op_add, int op_sub, int op_mul, int op_and, int op_or, int op_xor,
+       int op_exit_tb, int op_goto_tb),
+{
+    const tb = Number(tb_arg);
+    const regs = Number(regs_arg);
+    const ret = Number(ret_arg);
+    const maxOps = Number(max_ops_arg);
+    const cache = Module.__qemuTciGeneratedCache ||
+        (Module.__qemuTciGeneratedCache = new Map());
+    const key = String(tb);
+    const valueI64 = 0x7e;
+
+    function encodeU32(value) {
+        const bytes = [];
+        let current = Number(value) >>> 0;
+        do {
+            let byte = current & 0x7f;
+            current >>>= 7;
+            if (current !== 0) {
+                byte |= 0x80;
+            }
+            bytes.push(byte);
+        } while (current !== 0);
+        return bytes;
+    }
+
+    function encodeI64(value) {
+        const bytes = [];
+        let current = BigInt.asIntN(64, BigInt(value));
+        let more = true;
+
+        while (more) {
+            let byte = Number(current & 0x7fn);
+            const sign = byte & 0x40;
+
+            current >>= 7n;
+            more = !((current === 0n && sign === 0) ||
+                     (current === -1n && sign !== 0));
+            if (more) {
+                byte |= 0x80;
+            }
+            bytes.push(byte);
+        }
+        return bytes;
+    }
+
+    function vector(items) {
+        return [...encodeU32(items.length), ...items.flat()];
+    }
+
+    function section(id, payload) {
+        return [id, ...encodeU32(payload.length), ...payload];
+    }
+
+    function name(text) {
+        const encoded = Array.from(new TextEncoder().encode(text));
+        return [...encodeU32(encoded.length), ...encoded];
+    }
+
+    function functionType(params, results) {
+        return [0x60, ...vector(params), ...vector(results)];
+    }
+
+    function functionBody(instructions) {
+        const body = [0x00, ...instructions, 0x0b];
+        return [...encodeU32(body.length), ...body];
+    }
+
+    function localGet(index) {
+        return [0x20, ...encodeU32(index)];
+    }
+
+    function localSet(index, expr) {
+        return [...expr, 0x21, ...encodeU32(index)];
+    }
+
+    function i64Const(value) {
+        return [0x42, ...encodeI64(value)];
+    }
+
+    function bits(value, start, length) {
+        return (value >>> start) & ((1 << length) - 1);
+    }
+
+    function sextract(value, start, length) {
+        const mask = (1 << length) - 1;
+        let extracted = (value >>> start) & mask;
+        const sign = 1 << (length - 1);
+
+        if (extracted & sign) {
+            extracted |= ~mask;
+        }
+        return extracted;
+    }
+
+    function readU64(address) {
+        return HEAPU64[Number(address) >> 3];
+    }
+
+    function compileEntry() {
+        const instructions = [];
+        let terminal = null;
+
+        for (let index = 0; index < maxOps; index++) {
+            const insnPtr = tb + index * 4;
+            const tbPtr = insnPtr + 4;
+            const insn = HEAPU32[insnPtr >> 2];
+            const opc = bits(insn, 0, 8);
+            const r0 = bits(insn, 8, 4);
+            const r1 = bits(insn, 12, 4);
+            const r2 = bits(insn, 16, 4);
+
+            if (opc === op_mov) {
+                instructions.push(...localSet(r0, localGet(r1)));
+            } else if (opc === op_movi) {
+                instructions.push(...localSet(r0, i64Const(sextract(insn, 12, 20))));
+            } else if (opc === op_movl) {
+                const ptr = BigInt(tbPtr + sextract(insn, 12, 20));
+                instructions.push(...localSet(r0, i64Const(readU64(ptr))));
+            } else if (opc === op_add || opc === op_sub || opc === op_mul ||
+                       opc === op_and || opc === op_or || opc === op_xor) {
+                instructions.push(...localGet(r1), ...localGet(r2));
+                if (opc === op_add) {
+                    instructions.push(0x7c); /* i64.add */
+                } else if (opc === op_sub) {
+                    instructions.push(0x7d); /* i64.sub */
+                } else if (opc === op_mul) {
+                    instructions.push(0x7e); /* i64.mul */
+                } else if (opc === op_and) {
+                    instructions.push(0x83); /* i64.and */
+                } else if (opc === op_or) {
+                    instructions.push(0x84); /* i64.or */
+                } else {
+                    instructions.push(0x85); /* i64.xor */
+                }
+                instructions.push(0x21, ...encodeU32(r0));
+            } else if (opc === op_exit_tb || opc === op_goto_tb) {
+                const ptr = BigInt(tbPtr + sextract(insn, 12, 20));
+                terminal = {
+                    kind: opc === op_goto_tb ? "goto_tb" : "exit_tb",
+                    ret: ptr,
+                    status: opc === op_goto_tb ? 2n : 1n,
+                };
+                break;
+            } else {
+                return { unsupported: true, opcode: opc };
+            }
+        }
+
+        if (terminal === null) {
+            return { unsupported: true, opcode: 0 };
+        }
+
+        instructions.push(...i64Const(terminal.status));
+        instructions.push(...i64Const(terminal.ret));
+        for (let reg = 0; reg < 16; reg++) {
+            instructions.push(...localGet(reg));
+        }
+
+        const params = new Array(16).fill(valueI64);
+        const results = new Array(18).fill(valueI64);
+        const bytes = [
+            0x00, 0x61, 0x73, 0x6d,
+            0x01, 0x00, 0x00, 0x00,
+            ...section(1, vector([functionType(params, results)])),
+            ...section(3, vector([[0x00]])),
+            ...section(7, vector([[...name("run"), 0x00, ...encodeU32(0)]])),
+            ...section(10, vector([functionBody(instructions)])),
+        ];
+        const module = new WebAssembly.Module(Uint8Array.from(bytes));
+        const instance = new WebAssembly.Instance(module, {});
+
+        return {
+            fn: instance.exports.run,
+            retKind: terminal.kind,
+            fresh: true,
+        };
+    }
+
+    let entry = cache.get(key);
+    if (entry === undefined) {
+        try {
+            entry = compileEntry();
+        } catch (error) {
+            entry = { unsupported: true, compileFailed: true };
+        }
+        cache.set(key, entry);
+    }
+    if (entry.unsupported) {
+        if (entry.compileFailed) {
+            return -1;
+        }
+        if (entry.opcode !== undefined) {
+            return 1000 + Number(entry.opcode);
+        }
+        return 0;
+    }
+
+    const regsIndex = regs >> 3;
+    const args = [];
+    for (let reg = 0; reg < 16; reg++) {
+        args.push(BigInt.asIntN(64, HEAPU64[regsIndex + reg]));
+    }
+
+    const result = entry.fn(...args);
+    if (!Array.isArray(result) || result.length !== 18) {
+        return -1;
+    }
+
+    let status = Number(result[0]);
+    let retValue = BigInt.asUintN(64, result[1]);
+
+    if (entry.retKind === "goto_tb") {
+        retValue = HEAPU64[Number(retValue) >> 3];
+    }
+
+    HEAPU64[ret >> 3] = BigInt.asUintN(64, retValue);
+    for (let reg = 0; reg < 16; reg++) {
+        HEAPU64[regsIndex + reg] = BigInt.asUintN(64, result[reg + 2]);
+    }
+
+    if (entry.fresh) {
+        entry.fresh = false;
+        status += 10;
+    }
+    return status;
+});
+
 static void tci_wasm_subset_report(const char *reason)
 {
     TCGOpcode top_ops[8] = { 0 };
+    TCGOpcode top_generated_ops[8] = { 0 };
 
     for (TCGOpcode opc = 0; opc < NB_OPS; opc++) {
         uint64_t count = tci_wasm_subset_unsupported_ops[opc];
@@ -548,6 +787,23 @@ static void tci_wasm_subset_report(const char *reason)
             }
         }
     }
+    for (TCGOpcode opc = 0; opc < NB_OPS; opc++) {
+        uint64_t count = tci_wasm_generated_unsupported_ops[opc];
+
+        if (count == 0) {
+            continue;
+        }
+        for (size_t i = 0; i < ARRAY_SIZE(top_generated_ops); i++) {
+            if (tci_wasm_generated_unsupported_ops[top_generated_ops[i]] <
+                count) {
+                memmove(&top_generated_ops[i + 1], &top_generated_ops[i],
+                        (ARRAY_SIZE(top_generated_ops) - i - 1) *
+                        sizeof(top_generated_ops[0]));
+                top_generated_ops[i] = opc;
+                break;
+            }
+        }
+    }
 
     fprintf(stderr,
             "qemu-tci-wasm-subset: {\"format\":1,\"event\":\"summary\","
@@ -558,6 +814,11 @@ static void tci_wasm_subset_report(const char *reason)
             "\"brcond_bad_target\":%" PRIu64 ","
             "\"brcond_backward\":%" PRIu64 ","
             "\"brcond_work_full\":%" PRIu64 ","
+            "\"generated_attempts\":%" PRIu64 ","
+            "\"generated_compiled\":%" PRIu64 ","
+            "\"generated_executed\":%" PRIu64 ","
+            "\"generated_fallback_unsupported\":%" PRIu64 ","
+            "\"generated_compile_failed\":%" PRIu64 ","
             "\"top_unsupported_ops\":[",
             reason, tci_wasm_subset_attempts, tci_wasm_subset_executed,
             tci_wasm_subset_fallback_cold,
@@ -565,10 +826,28 @@ static void tci_wasm_subset_report(const char *reason)
             tci_wasm_subset_max_ops_rejected,
             tci_wasm_subset_brcond_bad_target,
             tci_wasm_subset_brcond_backward,
-            tci_wasm_subset_brcond_work_full);
+            tci_wasm_subset_brcond_work_full,
+            tci_wasm_generated_attempts,
+            tci_wasm_generated_compiled,
+            tci_wasm_generated_executed,
+            tci_wasm_generated_fallback_unsupported,
+            tci_wasm_generated_compile_failed);
     for (size_t i = 0; i < ARRAY_SIZE(top_ops); i++) {
         TCGOpcode opc = top_ops[i];
         uint64_t count = tci_wasm_subset_unsupported_ops[opc];
+
+        if (count == 0) {
+            break;
+        }
+        fprintf(stderr, "%s{\"op\":%u,\"name\":\"%s\",\"count\":%" PRIu64 "}",
+                i == 0 ? "" : ",", opc,
+                opc < tcg_op_defs_max ? tcg_op_defs[opc].name : "unknown",
+                count);
+    }
+    fprintf(stderr, "],\"top_generated_unsupported_ops\":[");
+    for (size_t i = 0; i < ARRAY_SIZE(top_generated_ops); i++) {
+        TCGOpcode opc = top_generated_ops[i];
+        uint64_t count = tci_wasm_generated_unsupported_ops[opc];
 
         if (count == 0) {
             break;
@@ -592,6 +871,7 @@ static TCIWasmSubsetEntry *tci_wasm_subset_entry(const uint32_t *tb_ptr)
         entry->hits = 0;
         entry->validated = false;
         entry->unsupported = false;
+        entry->generated_unsupported = false;
     }
 
     return entry;
@@ -769,6 +1049,62 @@ static bool tci_wasm_subset_validate(const uint32_t *tb_start,
     return true;
 }
 
+static TCIWasmSubsetStatus
+tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
+                            tcg_target_ulong *regs, uintptr_t *ret)
+{
+    int status;
+
+    if (entry->generated_unsupported) {
+        return TCI_WASM_SUBSET_UNSUPPORTED;
+    }
+
+    tci_wasm_generated_attempts++;
+    status = tci_wasm_generated_try_exec_js(
+        (uintptr_t)tb_start, (uintptr_t)regs, (uintptr_t)ret,
+        tci_wasm_subset_max_ops, INDEX_op_mov, INDEX_op_tci_movi,
+        INDEX_op_tci_movl, INDEX_op_add, INDEX_op_sub, INDEX_op_mul,
+        INDEX_op_and, INDEX_op_or, INDEX_op_xor, INDEX_op_exit_tb,
+        INDEX_op_goto_tb);
+
+    if (status >= 1000) {
+        TCGOpcode opc = status - 1000;
+
+        entry->generated_unsupported = true;
+        tci_wasm_generated_fallback_unsupported++;
+        if (opc < NB_OPS) {
+            tci_wasm_generated_unsupported_ops[opc]++;
+        }
+        return TCI_WASM_SUBSET_UNSUPPORTED;
+    }
+    if (status == 0) {
+        entry->generated_unsupported = true;
+        tci_wasm_generated_fallback_unsupported++;
+        return TCI_WASM_SUBSET_UNSUPPORTED;
+    }
+    if (status < 0) {
+        entry->generated_unsupported = true;
+        tci_wasm_generated_compile_failed++;
+        return TCI_WASM_SUBSET_UNSUPPORTED;
+    }
+    if (status >= 10) {
+        tci_wasm_generated_compiled++;
+        status -= 10;
+    }
+
+    switch (status) {
+    case TCI_WASM_SUBSET_EXIT:
+        tci_wasm_generated_executed++;
+        return TCI_WASM_SUBSET_EXIT;
+    case TCI_WASM_SUBSET_DISPATCH:
+        tci_wasm_generated_executed++;
+        return TCI_WASM_SUBSET_DISPATCH;
+    default:
+        tci_wasm_generated_compile_failed++;
+        return TCI_WASM_SUBSET_UNSUPPORTED;
+    }
+}
+
 static TCIWasmSubsetStatus tci_wasm_subset_try_exec(const uint32_t *tb_start,
                                                     tcg_target_ulong *regs,
                                                     uintptr_t *ret)
@@ -799,6 +1135,16 @@ static TCIWasmSubsetStatus tci_wasm_subset_try_exec(const uint32_t *tb_start,
     if (entry->unsupported) {
         tci_wasm_subset_fallback_unsupported++;
         return TCI_WASM_SUBSET_UNSUPPORTED;
+    }
+    switch (tci_wasm_generated_try_exec(entry, tb_start, regs, ret)) {
+    case TCI_WASM_SUBSET_EXIT:
+        tci_wasm_subset_executed++;
+        return TCI_WASM_SUBSET_EXIT;
+    case TCI_WASM_SUBSET_DISPATCH:
+        tci_wasm_subset_executed++;
+        return TCI_WASM_SUBSET_DISPATCH;
+    case TCI_WASM_SUBSET_UNSUPPORTED:
+        break;
     }
     if (!entry->validated &&
         !tci_wasm_subset_validate(tb_start, entry)) {
