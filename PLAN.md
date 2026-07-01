@@ -12,12 +12,18 @@ file and then implemented.
 Implement the next browser-hosted Bus Engine WebAssembly MVP by finishing the
 active `PLAN.md` work first: QEMU must provide a generic browser-to-guest
 service bridge with graphics, keyboard, power-control, and suspend/resume
-planning hooks suitable for a 64-bit Bus Engine OS guest; Bus Engine OS and
-Bus Engine layers remain downstream consumers that package and run the
-in-guest services. Work from this plan before taking any new backlog item. If
-every active `PLAN.md` item is complete or blocked on a concrete external
-dependency, promote the highest-value useful work item from the future plan
-backlog in `FUTURE_WORK.md` into `PLAN.md` before implementing more work.
+planning hooks suitable for a 64-bit Bus Engine OS guest. Current
+Chrome/Chromium evidence shows the generic bridge can attach, but wasm64 TCI
+is too slow for the package-built Bus Engine OS systemd guest to reach the
+in-guest service adapter reliably. The active goal therefore also includes the
+first native/generated-WASM execution work needed to make the full Engine OS
+service-bridge proof fast enough to pass without masking ordinary system
+services. Bus Engine OS and Bus Engine layers remain downstream consumers that
+package and run the in-guest services. Work from this plan before taking any
+new backlog item. If every active `PLAN.md` item is complete or blocked on a
+concrete external dependency, promote the highest-value useful work item from
+the future plan backlog in `FUTURE_WORK.md` into `PLAN.md` before implementing
+more work.
 
 ## Current Direction
 
@@ -92,7 +98,54 @@ App Server remain downstream proof payloads.
   `systemd-networkd-wait-online.service` masked and a virtio RNG device
   supplied; native QEMU with the same rootfs reaches login, so this item must
   diagnose and fix the browser-hosted full-system progress gap before it can
-  be checked complete.
+  be checked complete. Fresh optimized QEMU/WASM evidence on 2026-07-01 shows
+  the bridge-capable artifact keeps making progress beyond hostname, but
+  wasm64 TCI is slow enough that early systemd services such as
+  `systemd-journald` and `systemd-udevd` exceed normal boot timing before the
+  downstream adapter can start. The accepted fix must come from making QEMU
+  execution faster or reducing unnecessary QEMU-side overhead for the same
+  real guest, not from declaring a shell/init bypass or heavily masked guest
+  boot as product acceptance.
+
+## Active Browser Performance Work
+
+The full Bus Engine OS service-bridge proof is currently gated by wasm64 TCI
+performance, not by generic bridge API shape. These items were promoted from
+`FUTURE_WORK.md` after Chromium evidence showed that long timeouts and
+systemd masks only move the failure from one slow service to the next.
+
+- [ ] Define the wasm64 TCG/backend acceleration design before implementation:
+  DoD is a developer note that explains how QEMU TCG IR can map to generated
+  WebAssembly, how translated blocks call back into QEMU helpers, how guest
+  RAM is accessed, how block lookup and invalidation work, which browser APIs
+  are required, which part can be implemented first, and why TCI remains the
+  correctness fallback for unsupported or disabled paths.
+- [ ] Add a TCI fallback invariant to every generated-WASM execution
+  milestone: DoD is that unsupported opcodes, helper paths, browser/runtime
+  failures, validation failures, disabled optimization flags, or cache
+  rejection fall back to TCI without removing the already accepted 64-bit
+  browser console boot path or the generic service-bridge API.
+- [ ] Add hot-block instrumentation before compiling blocks: DoD is structured
+  evidence from the generic Linux smoke and the Bus Engine OS browser-hosted
+  service proof showing translation-block frequency, guest PC ranges, helper
+  calls, exit reasons, interpreter hot spots, and candidate instruction
+  families for the first generated-WASM patches.
+- [ ] Add a minimal generated-Wasm block prototype outside the full backend:
+  DoD is a tiny QEMU test harness that emits, validates, compiles,
+  instantiates, and executes one or more simple generated WebAssembly
+  functions in Node.js and Chrome/Chromium without participating in normal
+  guest execution, plus documentation of browser compile latency and memory
+  behavior.
+- [ ] Prototype integer ALU translation as the first wasm64 generated-WASM
+  fast path: DoD is a small patch set for a narrow, named instruction or TCG
+  op family with TCI fallback, deterministic TCG tests, differential
+  comparison against native QEMU TCG where practical, and no regression in the
+  accepted TCI browser boot or generic service-bridge smoke.
+- [ ] Add a translation-block cache design and tests once the first generated
+  blocks exist: DoD is a documented cache key, invalidation rule,
+  memory-pressure behavior, browser-module lifetime policy, and deterministic
+  tests for cache hit, miss, flush, stale-block rejection, and fallback to TCI.
+
 - [ ] Add a generic browser OPFS-backed `virtio-blk` storage backend for
   QEMU/WASM: DoD is upstreamable QEMU-side support that exposes a block device
   to the guest while storing writable disk contents in browser Origin Private

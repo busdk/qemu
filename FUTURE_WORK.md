@@ -13,31 +13,6 @@ active goal.
 
 ## Native wasm64 TCG Work
 
-- [ ] Define the wasm64 TCG backend design before implementation: DoD is a
-  developer note that explains how QEMU TCG IR maps to generated WebAssembly,
-  how translated blocks call back into QEMU helpers, how guest RAM is accessed,
-  how block lookup and invalidation work, which Web APIs are required, and why
-  TCI remains the correctness fallback for unsupported or disabled paths.
-- [ ] Add a TCI fallback invariant to every native wasm64 TCG milestone: DoD is
-  that unsupported opcodes, helper paths, browser/runtime failures, validation
-  failures, or disabled optimization flags can fall back to TCI without
-  removing the already accepted 64-bit browser console boot path.
-- [ ] Add hot-block instrumentation before compiling blocks: DoD is structured
-  evidence from the generic Linux smoke and Bus Engine OS browser proof showing
-  translation-block frequency, guest PC ranges, helper calls, exit reasons, and
-  candidate instruction families for the first wasm64 TCG patches.
-- [ ] Add a translation-block cache design and tests: DoD is a documented cache
-  key, invalidation rule, memory-pressure behavior, browser-module lifetime
-  policy, and deterministic tests for cache hit, miss, flush, and stale-block
-  rejection behavior.
-- [ ] Add a minimal generated-Wasm block prototype outside the full backend:
-  DoD is a tiny QEMU test harness that emits, validates, compiles, instantiates,
-  and executes one or more simple generated Wasm functions in Node.js and
-  Chrome/Chromium without participating in normal guest execution.
-- [ ] Prototype integer ALU translation as the first wasm64 TCG fast path: DoD
-  is a small patch set for a narrow, named instruction/op family with TCI
-  fallback, deterministic TCG tests, differential comparison against native
-  QEMU TCG where practical, and no regression in the accepted TCI browser boot.
 - [ ] Prototype branch and direct block chaining after integer ALU proof: DoD
   is a small patch set that handles a limited branch/control-flow subset,
   preserves precise exits back to the dispatcher, and records whether compile
