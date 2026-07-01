@@ -151,7 +151,7 @@ Options:
                     (default: 1024)
   --tci-wasm-subset-max-ops N
                     Maximum TCI ops accepted by the subset path
-                    (default: 64)
+                    (1..512, default: 64)
   --tci-wasm-subset-interval N
                     Attempt interval between subset summaries
                     (default: 100000)
@@ -609,8 +609,9 @@ function parseArgs(argv) {
     usage(2);
   }
   if (!Number.isInteger(options.tciWasmSubsetMaxOps) ||
-      options.tciWasmSubsetMaxOps <= 0) {
-    console.error("--tci-wasm-subset-max-ops must be a positive integer");
+      options.tciWasmSubsetMaxOps <= 0 ||
+      options.tciWasmSubsetMaxOps > 512) {
+    console.error("--tci-wasm-subset-max-ops must be an integer from 1 to 512");
     usage(2);
   }
   if (!Number.isInteger(options.tciWasmSubsetThreshold) ||

@@ -474,6 +474,23 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     fallback opcodes were `goto_tb`, `goto_ptr`, `brcond`, `tci_movcond32`,
     `rotr`, and `tci_rotl32`:
     `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-extra-ops.json`.
+    Current helper-call subset evidence: the latest generic Chromium smoke
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-call.json`
+    reached `QEMU_WASM_LINUX_BOOT_OK` in Chromium `141.0.7390.37` with the
+    same artifact hashes, and recorded `attempts=340000`, `executed=79444`,
+    `fallback_cold=57173`, and `fallback_unsupported=203318`. Remaining top
+    unsupported operations were `goto_ptr`, `goto_tb`, and `brcond`. This
+    remains an opt-in TCI subset proof inside the QEMU WebAssembly binary, not
+    the final generated WebAssembly backend.
+  - [ ] Resolve the hot TB dispatch/chaining boundary:
+    DoD is a design and implementation for hot blocks that currently fall
+    back on `goto_ptr` and `goto_tb`, preserving QEMU's `tcg_qemu_tb_exec`
+    return-value contract and direct-TB chaining semantics. The accepted path
+    may extend the live subset with a safe terminal dispatch boundary, move to
+    the generated-block dispatcher model, or prove with measurements that a
+    different QEMU-side boundary has become dominant. It must keep generic
+    Chromium smoke passing and record nonzero execution counters without
+    treating raw linked-TB code pointers as `exit_tb` return values.
 - [ ] Prove the acceleration improves the real downstream boot path:
   DoD is a Chrome/Chromium Bus Engine OS `virtual-server` browser run with the
   acceleration enabled that reaches normal multi-user/service readiness, or
@@ -481,6 +498,21 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   remaining QEMU bottleneck promoted into this plan before any goal closeout.
   The proof must include result JSON, screenshot, artifact hashes, elapsed
   timing, fallback counters, and a comparison against the current baseline.
+  Current evidence on 2026-07-01: the opt-in live TCI subset proof still
+  timed out before `Reached target Multi-User System.` and
+  `QEMU_WASM_SERVICE_READY`, but it progressed beyond the refreshed-kernel
+  microvm baseline
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-microvm-new-kernel-2.json`,
+  which stopped at `systemd[1]: Starting Coldplug All udev Devices...`.
+  The latest downstream result
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-tci-wasm-subset-call.json`
+  ran for `420251` ms, recorded `attempts=2660000`, `executed=221581`,
+  `fallback_cold=353660`, and `fallback_unsupported=2084626`, and reached
+  later systemd socket/unit startup such as `systemd[1]: Listening on Console
+  Output Muting Service Socket.` and `systemd[1]: Starting Load Kernel
+  Modules...`. The remaining measured QEMU-side blockers are `goto_ptr`,
+  `goto_tb`, and residual `brcond` fallback, so TB dispatch/chaining is now
+  promoted as the next active work item before goal closeout.
 - [ ] Add a translation-block cache design and tests once the first generated
   blocks exist: DoD is a documented cache key, invalidation rule,
   memory-pressure behavior, browser-module lifetime policy, and deterministic

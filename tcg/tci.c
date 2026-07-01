@@ -196,6 +196,8 @@ static bool tci_wasm_subset_enabled(void)
             tci_parse_u64_env("QEMU_TCI_WASM_SUBSET_MAX_OPS", 64);
         tci_wasm_subset_interval =
             tci_parse_u64_env("QEMU_TCI_WASM_SUBSET_INTERVAL", 100000);
+        tci_wasm_subset_threshold = MAX(tci_wasm_subset_threshold, 1);
+        tci_wasm_subset_max_ops = MIN(MAX(tci_wasm_subset_max_ops, 1), 512);
         tci_wasm_subset_next_report = tci_wasm_subset_interval;
         g_once_init_leave(&initialized, 1);
     }

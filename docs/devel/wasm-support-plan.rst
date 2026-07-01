@@ -4288,3 +4288,83 @@ in about 1.10 ms.  This is not yet live QEMU acceleration.  It is the
 deterministic differential gate that the next opt-in QEMU execution hook must
 preserve before the generic Chromium Linux smoke can be used as the runtime
 regression gate.
+
+Opt-in wasm64 TCI subset execution evidence
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The first live QEMU execution hook is intentionally still conservative.  It is
+not the final generated WebAssembly backend.  It is an opt-in wasm64 TCI
+subset proof inside the QEMU WebAssembly binary, selected with
+``QEMU_TCI_WASM_SUBSET=1`` through the browser smoke runner
+``--tci-wasm-subset`` option.  Cold translation blocks remain on normal TCI,
+unsupported blocks are permanently marked for fallback, and the subset
+validates reachable forward paths before executing blocks that can perform
+local or MMU helper-backed memory operations.
+
+The current supported live subset covers straight-line and forward-branching
+TCI blocks using moves, local loads/stores, MMU ``qemu_ld``/``qemu_st``
+helpers, libffi helper calls, common integer ALU operations, selected count and
+byte-swap operations, memory barriers, and ``exit_tb``.  It deliberately does
+not implement direct TB chaining yet.  Blocks ending in ``goto_tb`` or
+``goto_ptr`` fall back to normal TCI because returning a raw linked-TB code
+pointer is not the same boundary as returning the ``exit_tb`` value expected
+by ``cpu_tb_exec``.
+
+Accepted local validation for this slice on 2026-07-01:
+
+* ``node --check scripts/ci/wasm-browser-smoke.mjs`` passed.
+* ``node --check scripts/ci/wasm-browser-smoke-runner.mjs`` passed.
+* ``node scripts/ci/wasm-browser-smoke-runner-test.mjs`` passed.
+* ``node scripts/ci/wasm-generated-block-prototype-test.mjs`` passed.
+* ``git diff --check`` passed.
+* The wasm64 ``x86_64-softmmu`` artifact rebuilt successfully with
+  ``docker run --rm -v ... qemu/emsdk-wasm64-cross:latest emmake make -j20
+  qemu-system-x86_64.js`` in ``build-wasm64-nodebug-nohot``.
+
+The rebuilt artifact hashes are:
+
+* ``qemu-system-x86_64.js`` =
+  ``dedd3fe899335ade5f5b1b571c28f144d26a3f0fb7f8fe61e07133bd244908e9``
+* ``qemu-system-x86_64.wasm`` =
+  ``e3bcabb190970983a1abeac60a5c96411b4b0d56e562cd76e18fbc3b087c202b``
+
+The generic Chromium smoke with the subset enabled reached
+``QEMU_WASM_LINUX_BOOT_OK``:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-call.json``
+* screenshot:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-call.png``
+* Chromium: ``141.0.7390.37``
+* elapsed: ``76744`` ms
+* final subset counters: ``attempts=340000``, ``executed=79444``,
+  ``fallback_cold=57173``, ``fallback_unsupported=203318``
+* remaining top unsupported operations: ``goto_ptr``, ``goto_tb``, and
+  ``brcond``
+
+The downstream Bus Engine OS ``virtual-server`` microvm proof still timed out
+before ``Reached target Multi-User System.`` and
+``QEMU_WASM_SERVICE_READY``, so the full goal is not complete:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-tci-wasm-subset-call.json``
+* screenshot:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-tci-wasm-subset-call.png``
+* elapsed: ``420251`` ms
+* final subset counters: ``attempts=2660000``, ``executed=221581``,
+  ``fallback_cold=353660``, ``fallback_unsupported=2084626``
+* remaining top unsupported operations: ``goto_ptr``, ``goto_tb``, and
+  ``brcond``
+
+This is still useful progress compared with the earlier refreshed-kernel
+microvm baseline
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-microvm-new-kernel-2.json``,
+which timed out at ``systemd[1]: Starting Coldplug All udev Devices...``.
+The subset-enabled runs progressed into later systemd socket and unit startup
+such as ``systemd[1]: Listening on Console Output Muting Service Socket.``
+and ``systemd[1]: Starting Load Kernel Modules...``.  The next QEMU-side work
+is therefore not OPFS, networking, display, input, or WebCrypto.  It is a
+proper TB-dispatch/chaining design for ``goto_tb`` and ``goto_ptr`` or the
+next generated-block execution step that can preserve QEMU's ``exit_tb``
+contract while avoiding a return to the slow generic TCI interpreter for hot
+linked blocks.
