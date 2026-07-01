@@ -10,12 +10,21 @@ file and then implemented.
 ## Active Goal
 
 Implement an actual browser-hosted QEMU/WASM performance solution for the
-Bus Engine OS boot slowness. Use the accepted hot-block evidence to add a
-small, safe acceleration path for the wasm64 `x86_64-softmmu` browser build
-while preserving TCI as the correctness fallback. The accepted outcome is not
-more diagnostics: the generic Linux browser smoke must keep passing and the
-downstream Bus Engine OS `virtual-server` browser proof must reach normal
-multi-user/service readiness faster than the current timeout path.
+Bus Engine OS boot slowness. First add evidence that separates CPU interpreter
+cost from paravirtual device and browser-adapter cost in the current wasm64
+`x86_64-softmmu` `microvm` proof. Then implement the smallest proven
+acceleration path: hot translation-block WebAssembly execution with strict TCI
+fallback if CPU execution is the blocker, or a virtio/browser API backend if
+the measured blocker is storage, networking, entropy, graphics, input, or
+another paravirtual device boundary. Browser APIs such as OPFS,
+WebSocket/fetch, WebGL/WebGPU, WebCrypto, workers, and shared memory are
+valid implementation tools only when they sit behind the matching QEMU device
+or backend boundary and the measurement justifies them. The accepted outcome
+is not more diagnostics: the generic Linux browser smoke must keep passing and
+the downstream Bus Engine OS `virtual-server` browser proof must reach normal
+multi-user/service readiness faster than the current timeout path or produce a
+measured next bottleneck that is promoted into this plan before more
+implementation work.
 
 This lane must not take over the downstream bus-pkg, OPFS persistence,
 virtio-net, virtual-desktop packaging, Codex packaging, or Engine OS
@@ -276,13 +285,80 @@ systemd masks only move the failure from one slow service to the next.
   functions in Node.js and Chrome/Chromium without participating in normal
   guest execution, plus documentation of browser compile latency and memory
   behavior.
-- [ ] Prototype the first production execution acceleration path:
-  DoD is a small, named wasm64 browser acceleration patch set selected from
-  the hot-block evidence, enabled only when explicitly requested, with TCI
-  fallback for unsupported blocks or runtime failures, deterministic tests,
-  differential comparison against the existing TCI/native behavior where
-  practical, and no regression in the accepted TCI browser boot or generic
-  service-bridge smoke.
+- [x] Build and measure a release-shaped wasm64 TCI artifact before larger
+  generated-block integration: DoD is a wasm64 `x86_64-softmmu` artifact built
+  with hot-block instrumentation disabled, QOM cast debugging disabled, debug
+  info disabled, QEMU assertions kept enabled because upstream QEMU rejects
+  `NDEBUG`, and release-shaped build options recorded from
+  `intro-buildoptions.json`; generic Chromium smoke still reaches
+  `QEMU_WASM_LINUX_BOOT_OK`; the Bus Engine OS microvm proof is repeated
+  against the same kernel/rootfs inputs; and the evidence states whether
+  removing debug/runtime-check overhead reaches multi-user readiness,
+  materially improves marker-to-marker timing, or leaves a different
+  evidence-backed acceleration path as the next required work. Accepted
+  evidence: QEMU rejects `NDEBUG`; the supported no-debug/QOM-cast-debug-off
+  artifact passed generic Chromium smoke in 81.2 seconds and still timed out
+  the Bus Engine OS microvm proof after 420 seconds at early systemd journal
+  startup; adding Emscripten `-sASSERTIONS=0` produced identical JS/WASM
+  hashes.
+- [x] Classify the remaining boot slowness before changing execution again:
+  DoD is a short evidence note based on current Bus Engine OS serial timing,
+  hot-block data, `microvm`/virtio evidence, and prior art from
+  `ktock/qemu-wasm` and upstream QEMU. The note must separate CPU execution
+  cost from paravirtual device cost, name which browser or virtio APIs are
+  relevant to the measured stall, and reject any optimization that is only a
+  guess. This item gates the next implementation patch. Accepted evidence:
+  `docs/devel/wasm-support-plan.rst` records that the current Bus Engine OS
+  proof already uses `microvm`, direct kernel boot, `virtio-mmio` block,
+  `virtio-rng`, and virtio serial/channel plumbing, then stalls in ordinary
+  early systemd work. No current trace points at WebGL/WebGPU/WebCrypto as
+  the next boot blocker, so the selected next implementation slice is hot-TB
+  WebAssembly translation modeled on `ktock/qemu-wasm` with TCI fallback.
+- [x] Add browser-hosted performance attribution before the first acceleration
+  patch:
+  DoD is a Chrome/Chromium Bus Engine OS `virtual-server` run that records
+  enough QEMU-side counters to separate CPU interpreter time from device and
+  browser-adapter time for the current `microvm` proof. At minimum it must
+  report elapsed time, translation-block execution counts, TCI opcode
+  samples, virtio block activity, virtio RNG activity, virtio serial/channel
+  activity, display/input activity when enabled, and host/browser API waits
+  that QEMU can observe. The result must name whether the next patch is CPU
+  hot-TB WebAssembly translation or a paravirtual/browser API improvement
+  such as OPFS-backed virtio block, WebSocket/fetch networking, WebGL/WebGPU
+  display presentation, or WebCrypto-backed entropy/crypto. Do not implement
+  an optimization from intuition alone.
+  Accepted evidence: Chromium `141.0.7390.37` ran
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-perf-attribution-hotblocks.json`
+  against the current hot-block-enabled profiling artifact
+  `build-wasm64-attrib-hotblocks`. The run timed out after 420 seconds before
+  multi-user readiness, but captured `summaryCount=210` hot-block summaries
+  and `summaryCount=3` performance-attribution summaries. The final hot-block
+  summary reported `tb_execs=2100000`, `unique_tbs=4096`,
+  `dropped_tbs=2043592`, `tci_ops=134217728`, `helper_calls=60332`,
+  `qemu_loads=3210491`, and `qemu_stores=3533877`; top sampled TCI opcodes
+  were ordinary interpreter work such as `tci_movi`, `st`, `ld`, `add`, and
+  `brcond`. The final device attribution summary reported 463 block kicks,
+  10 RNG kicks, 70 serial kicks, no network/display/input activity, and about
+  133 milliseconds of measured virtio handler time across the long run. A
+  release-shaped no-hotblocks run produced the same device conclusion and
+  timed out at early systemd journal startup. This points the next patch at
+  CPU hot-TB WebAssembly translation with strict TCI fallback, not OPFS,
+  networking, WebGL/WebGPU, WebCrypto, or another paravirtual browser backend
+  as the first acceleration slice.
+- [ ] Implement the first evidence-backed acceleration slice:
+  DoD is an initial hot-TB WebAssembly translation slice modeled on
+  `ktock/qemu-wasm` if CPU interpreter cost is the measured blocker, or the
+  smallest virtio/browser API patch if a measured paravirtual device boundary
+  is the blocker. A CPU slice must be enabled only when explicitly requested
+  until proven, threshold-gated so cold TBs stay on TCI, conservative about
+  eligible blocks, preserve strict TCI fallback for unsupported blocks or
+  runtime failures, record generated-block hit/fallback counters, include
+  deterministic tests or differential comparison against existing TCI/native
+  behavior where practical, and keep the accepted TCI browser boot and generic
+  service-bridge smoke from regressing. A paravirtual slice must keep the
+  guest-visible device model explicit, use browser APIs only behind the
+  matching QEMU device/backend boundary, include deterministic device tests,
+  and keep the same smoke gates passing.
 - [ ] Prove the acceleration improves the real downstream boot path:
   DoD is a Chrome/Chromium Bus Engine OS `virtual-server` browser run with the
   acceleration enabled that reaches normal multi-user/service readiness, or

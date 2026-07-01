@@ -9,6 +9,7 @@
 #include "qemu/osdep.h"
 #include "qemu/atomic.h"
 #include "qemu/module.h"
+#include "qemu/perf-attrib.h"
 #include "qemu/thread.h"
 #include "ui/console.h"
 #include "ui/input.h"
@@ -104,6 +105,7 @@ static void wasm_display_queue_key_event(WasmDisplay *wd,
     wd->key_write = (wd->key_write + 1) % WASM_DISPLAY_KEY_QUEUE_SIZE;
     wd->key_count++;
     qatomic_inc(&wd->key_events_received);
+    qemu_perf_attrib_display_key_event();
     qemu_mutex_unlock(&wd->key_lock);
 }
 
@@ -266,6 +268,8 @@ static void wasm_display_update(DisplayChangeListener *dcl,
         return;
     }
 
+    qemu_perf_attrib_display_frame((uint64_t)surface_width(wd->surface) *
+                                   (uint64_t)surface_height(wd->surface) * 4);
     wasm_display_present(surface_width(wd->surface),
                          surface_height(wd->surface),
                          wd->rgba);

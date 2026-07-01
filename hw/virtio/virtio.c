@@ -20,6 +20,7 @@
 #include "qemu/log.h"
 #include "qemu/main-loop.h"
 #include "qemu/module.h"
+#include "qemu/perf-attrib.h"
 #include "qemu/target-info.h"
 #include "qom/object_interfaces.h"
 #include "hw/core/cpu.h"
@@ -2498,13 +2499,17 @@ static void virtio_queue_notify_vq(VirtQueue *vq)
 {
     if (vq->vring.desc && vq->handle_output) {
         VirtIODevice *vdev = vq->vdev;
+        int64_t perf_start;
 
         if (unlikely(vdev->broken)) {
             return;
         }
 
         trace_virtio_queue_notify(vdev, vq - vdev->vq, vq);
+        perf_start = qemu_perf_attrib_begin();
         vq->handle_output(vdev, vq);
+        qemu_perf_attrib_virtio_queue(vdev->name, vq - vdev->vq,
+                                      perf_start);
 
         if (unlikely(vdev->start_on_kick)) {
             virtio_set_started(vdev, true);
@@ -2515,6 +2520,7 @@ static void virtio_queue_notify_vq(VirtQueue *vq)
 void virtio_queue_notify(VirtIODevice *vdev, int n)
 {
     VirtQueue *vq = &vdev->vq[n];
+    int64_t perf_start;
 
     if (unlikely(!vq->vring.desc || vdev->broken)) {
         return;
@@ -2523,8 +2529,11 @@ void virtio_queue_notify(VirtIODevice *vdev, int n)
     trace_virtio_queue_notify(vdev, vq - vdev->vq, vq);
     if (vq->host_notifier_enabled) {
         event_notifier_set(&vq->host_notifier);
+        qemu_perf_attrib_virtio_queue(vdev->name, n, 0);
     } else if (vq->handle_output) {
+        perf_start = qemu_perf_attrib_begin();
         vq->handle_output(vdev, vq);
+        qemu_perf_attrib_virtio_queue(vdev->name, n, perf_start);
 
         if (unlikely(vdev->start_on_kick)) {
             virtio_set_started(vdev, true);
@@ -2736,6 +2745,7 @@ void virtio_notify(VirtIODevice *vdev, VirtQueue *vq)
     }
 
     trace_virtio_notify(vdev, vq);
+    qemu_perf_attrib_virtio_notify(vdev->name);
     virtio_irq(vq);
 }
 

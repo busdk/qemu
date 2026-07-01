@@ -1,4 +1,5 @@
 util_ss.add(files('osdep.c', 'cutils.c', 'unicode.c', 'qemu-timer-common.c'))
+util_ss.add(files('perf-attrib.c'))
 emscripten_syscall_sources = []
 util_ss.add(files('thread-context.c'), numa)
 if host_os != 'windows'

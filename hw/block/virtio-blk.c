@@ -16,6 +16,7 @@
 #include "qapi/error.h"
 #include "qemu/iov.h"
 #include "qemu/module.h"
+#include "qemu/perf-attrib.h"
 #include "qemu/error-report.h"
 #include "qemu/main-loop.h"
 #include "block/block_int.h"
@@ -882,6 +883,7 @@ static int virtio_blk_handle_request(VirtIOBlockReq *req, MultiReqBuffer *mrb)
             trace_virtio_blk_handle_read(vdev, req, req->sector_num,
                                          req->qiov.size / BDRV_SECTOR_SIZE);
         }
+        qemu_perf_attrib_virtio_block_request(is_write, req->qiov.size);
 
         if (!virtio_blk_sect_range_ok(s, req->sector_num, req->qiov.size)) {
             virtio_blk_req_complete(req, VIRTIO_BLK_S_IOERR);

@@ -3791,6 +3791,114 @@ but too small to satisfy the Bus Engine OS browser boot goal.  The remaining
 required work is a real generated-WASM or equivalent execution acceleration
 path with strict TCI fallback.
 
+A stricter release-shaped TCI artifact was also measured before starting a
+larger execution change.  Upstream QEMU intentionally rejects ``NDEBUG`` builds
+from ``include/qemu/osdep.h``, so the supported artifact kept QEMU assertions
+enabled while disabling debug info and QOM cast debugging.  The resulting
+artifact produced ``qemu-system-x86_64.js`` SHA-256
+``c197af639082d71084d7c78421e2ce5b80de12c83afdd5d270f4fd67b1245e2c`` and
+``qemu-system-x86_64.wasm`` SHA-256
+``8a401965634474d98786aef6cd8958bab118e170994ba14f284a2b79a135be77``.
+Generic Chromium smoke wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-nodebug-nohot.json``
+and reached ``QEMU_WASM_LINUX_BOOT_OK`` in 81.2 seconds.  The Bus Engine OS
+microvm proof wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-microvm-nodebug-nohot.json``
+and still timed out after 420 seconds at
+``systemd[1]: Starting Journal Service...``.  Adding Emscripten
+``-sASSERTIONS=0`` to the same supported configuration produced the same
+JavaScript and WebAssembly hashes, so it was not repeated as a separate
+runtime proof.  Build-shape cleanup therefore does not solve the boot
+performance gap.
+
+Acceleration work must remain evidence-backed.  Two classes of work are valid
+for this goal:
+
+* CPU execution acceleration, where the prior art is ``ktock/qemu-wasm``:
+  it adds a WebAssembly TCG backend, translates hot translation blocks into
+  browser ``WebAssembly.Module`` / ``WebAssembly.Instance`` objects, imports
+  QEMU memory and helper functions, and keeps TCI for cold or unsupported
+  blocks because compiling every block is too expensive.
+* Paravirtual device acceleration, where the measured boot trace or device
+  profile shows that browser-hosted QEMU is spending time in emulated devices
+  or slow host-device adaptation.  Existing evidence already supports
+  direct-kernel ``microvm``, ``virtio-mmio`` block, ``virtio-rng``, and
+  virtio-serial service channels as better browser-hosted defaults than a full
+  PC/BIOS/PCI path.  Future browser APIs such as OPFS, WebSocket/fetch-backed
+  networking, WebGL/WebGPU display presentation, and WebCrypto-backed entropy
+  or crypto helpers should be used only where they match a measured QEMU
+  device boundary and keep the guest-visible device model explicit.
+
+This rules out speculative one-off TCI opcode rewrites as the next accepted
+optimization.  A new execution patch must cite either the hot-block evidence
+and QEMU-on-WASM prior art, or a measured paravirtual device bottleneck.
+
+For the current Bus Engine OS boot gap, the next implementation step must
+first attribute time to CPU execution or to a paravirtual device boundary.
+The active browser proof already uses the lean ``microvm`` machine, direct
+kernel boot, ``virtio-mmio`` block, ``virtio-rng``, and virtio serial/channel
+plumbing.  The guest gets past kernel/rootfs handoff and continues through
+ordinary early systemd work, but does not reach multi-user within the 420
+second proof window.  There is no current evidence that a browser
+WebGL/WebGPU/WebCrypto mapping is the next boot blocker, but that absence of
+evidence is not enough to hard-code the CPU path as the only acceptable
+answer.  The next proof must record enough QEMU-side counters to distinguish
+TCI interpreter cost from virtio block, virtio RNG, virtio serial, display,
+input, network, storage, and browser-adapter waits.
+
+If that attribution shows a device boundary is dominant, the first
+optimization should be paravirtual: keep the guest-visible device model
+explicit and implement the matching browser API behind a QEMU backend, such
+as OPFS-backed virtio block, WebSocket/fetch-backed networking,
+WebGL/WebGPU display presentation, or WebCrypto-backed entropy/crypto.  If
+the attribution continues to show CPU interpreter cost as dominant, the
+immediate execution slice should follow the proven ``ktock/qemu-wasm``
+pattern: keep TCI as the correctness fallback, count hot translation blocks,
+and compile only hot eligible blocks into WebAssembly modules.
+
+The first combined attribution proof used Chromium ``141.0.7390.37`` with the
+hot-block-enabled profiling artifact ``build-wasm64-attrib-hotblocks``.
+Artifact hashes were:
+
+* ``qemu-system-x86_64.js`` =
+  ``78502d331dd6bb18f2d9fea9f70b744a2bed33069d2858bdb06cc61b63fd54db``.
+* ``qemu-system-x86_64.wasm`` =
+  ``19bac0a51a684bcea2f161ffe05966e3aca1689d9bd7b1669c2dbc2cdb86e1d8``.
+
+The Bus Engine OS microvm proof wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-perf-attribution-hotblocks.json``
+and screenshot
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-perf-attribution-hotblocks.png``.
+It timed out after 420 seconds before ``Reached target Multi-User System.``,
+but collected both CPU and device-side attribution.  The final hot-block
+summary reported ``tb_execs=2100000``, ``unique_tbs=4096``,
+``dropped_tbs=2043592``, ``tci_ops=134217728``,
+``helper_calls=60332``, ``qemu_loads=3210491``, and
+``qemu_stores=3533877``.  The top sampled TCI operations were normal
+interpreter work: ``tci_movi``, ``st``, ``ld``, ``add``, ``brcond``,
+``mb``, and related load/store/set-condition operations.
+
+The final device attribution summary in the same run reported 463 block
+kicks, 10 RNG kicks, 70 serial kicks, no network, display, or input activity,
+and approximately 133 milliseconds of measured virtio handler time across the
+long proof window.  A release-shaped no-hotblocks run gave the same device
+shape and timed out at early journal startup.  This evidence does not justify
+OPFS-backed block I/O, WebSocket/fetch networking, WebGL/WebGPU display, or
+WebCrypto entropy work as the first performance patch.  The next accepted
+implementation slice is CPU execution acceleration through hot translation
+blocks compiled to WebAssembly, with strict fallback to TCI for cold,
+unsupported, invalidated, or failed blocks.
+
+The same profiling artifact also passed the generic Chromium Linux smoke:
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-attrib-hotblocks.json``
+reached ``QEMU_WASM_LINUX_BOOT_OK`` in 92.7 seconds and wrote screenshot
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-attrib-hotblocks.png``.
+That run collected 33 hot-block summaries, with the final summary reporting
+``tb_execs=330000`` and ``tci_ops=134217728``.  It did not collect
+performance-attribution summaries because the tiny initramfs smoke path did
+not exercise the instrumented virtio block, RNG, serial, display, input, or
+network paths before reaching the marker.
+
 Generated WebAssembly Execution Design
 --------------------------------------
 

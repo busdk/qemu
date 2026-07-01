@@ -90,6 +90,11 @@ Options:
   --out FILE          Write smoke result JSON to FILE
   --page-text-tail-bytes N
                      Maximum page text tail bytes to keep in result JSON
+  --perf-attribution
+                     Enable QEMU/browser performance attribution summaries
+  --perf-attribution-interval N
+                     Attribution event interval between summaries
+                     (default: 10000)
   --port PORT         Local smoke server port
   --program FILE      JavaScript launcher inside artifact dir
   --persistent-disk  Add an OPFS-backed writable virtio disk
@@ -191,6 +196,8 @@ function parseArgs(argv) {
     allowSerialFallback: true,
     out: null,
     pageTextTailBytes: DEFAULT_PAGE_TEXT_TAIL_BYTES,
+    performanceAttribution: false,
+    performanceAttributionInterval: 10000,
     port: 8010,
     program: "qemu-system-x86_64.js",
     progressSampleIntervalMs: DEFAULT_PROGRESS_SAMPLE_INTERVAL_MS,
@@ -326,6 +333,12 @@ function parseArgs(argv) {
     } else if (arg === "--page-text-tail-bytes") {
       options.pageTextTailBytes = Number(argv[++i]);
       explicit.add("pageTextTailBytes");
+    } else if (arg === "--perf-attribution") {
+      options.performanceAttribution = true;
+      explicit.add("performanceAttribution");
+    } else if (arg === "--perf-attribution-interval") {
+      options.performanceAttributionInterval = Number(argv[++i]);
+      explicit.add("performanceAttributionInterval");
     } else if (arg === "--port") {
       options.port = Number(argv[++i]);
       explicit.add("port");
@@ -424,6 +437,7 @@ function parseArgs(argv) {
       "focusDisplay",
       "harnessSelfTest",
       "persistentDisk",
+      "performanceAttribution",
       "requireDisplayOutput",
       "screenshotFullPage",
       "tcgHotblocks",
@@ -437,6 +451,7 @@ function parseArgs(argv) {
       "idleTimeoutMs",
       "pageTextTailBytes",
       "persistentDiskSizeBytes",
+      "performanceAttributionInterval",
       "port",
       "preKeyboardWaitMs",
       "postKeyboardWaitMs",
@@ -567,6 +582,13 @@ function parseArgs(argv) {
   }
   if (!Number.isInteger(options.pageTextTailBytes) || options.pageTextTailBytes <= 0) {
     console.error("--page-text-tail-bytes must be a positive integer");
+    usage(2);
+  }
+  if (
+    !Number.isInteger(options.performanceAttributionInterval) ||
+    options.performanceAttributionInterval <= 0
+  ) {
+    console.error("--perf-attribution-interval must be a positive integer");
     usage(2);
   }
   if (!Number.isInteger(options.progressSampleIntervalMs) || options.progressSampleIntervalMs <= 0) {
@@ -1078,6 +1100,7 @@ export function promoteSmokeState(result, smokeState) {
   result.rootfsStorageState = smokeState.rootfsStorage || null;
   result.serviceBridgeState = smokeState.serviceBridge || null;
   result.hotBlocks = smokeState.hotBlocks || null;
+  result.performanceAttribution = smokeState.performanceAttribution || null;
   result.tci = smokeState.tci || null;
 }
 
@@ -1125,6 +1148,13 @@ export function browserSmokeUrl(options) {
   }
   url.searchParams.set("powerOperation", options.powerOperation);
   url.searchParams.set("powerTimeoutMs", String(options.powerTimeoutMs));
+  if (options.performanceAttribution) {
+    url.searchParams.set("performanceAttribution", "1");
+    url.searchParams.set(
+      "performanceAttributionInterval",
+      String(options.performanceAttributionInterval),
+    );
+  }
   if (tcgHotblocks) {
     url.searchParams.set("tcgHotblocks", "1");
     url.searchParams.set("tcgHotblocksInterval", String(tcgHotblocksInterval));
@@ -1195,6 +1225,10 @@ export function initialSmokeResult(options, browserVersion) {
     idleTimeoutMs: options.idleTimeoutMs,
     timeoutMs: options.timeoutMs,
     pageTextTailBytes: options.pageTextTailBytes,
+    performanceAttribution: Boolean(options.performanceAttribution),
+    performanceAttributionInterval: Number.isInteger(options.performanceAttributionInterval)
+      ? options.performanceAttributionInterval
+      : 10000,
     progressSampleIntervalMs: options.progressSampleIntervalMs,
     progressSampleLimit: options.progressSampleLimit,
     persistentDisk: options.persistentDisk,

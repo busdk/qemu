@@ -13,6 +13,7 @@
 #include "qapi/error.h"
 #include "qemu/iov.h"
 #include "qemu/module.h"
+#include "qemu/perf-attrib.h"
 #include "qemu/timer.h"
 #include "hw/virtio/virtio.h"
 #include "hw/core/qdev-properties.h"
@@ -77,6 +78,7 @@ static void chr_read(void *opaque, const void *buf, size_t size)
         len = iov_from_buf(elem->in_sg, elem->in_num,
                            0, buf + offset, size - offset);
         offset += len;
+        qemu_perf_attrib_virtio_rng_deliver(len);
 
         virtqueue_push(vrng->vq, elem, len);
         trace_virtio_rng_pushed(vrng, len);
@@ -118,6 +120,7 @@ static void virtio_rng_process(VirtIORNG *vrng)
 
     size = MIN(vrng->quota_remaining, size);
     if (size) {
+        qemu_perf_attrib_virtio_rng_request(size);
         rng_backend_request_entropy(vrng->rng, size, chr_read, vrng);
     }
 }

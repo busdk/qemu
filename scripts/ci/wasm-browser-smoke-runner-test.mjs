@@ -27,7 +27,9 @@ import {
 } from "./wasm-browser-smoke-runner.mjs";
 import {
   hotBlockSummary,
+  perfAttributionSummary,
   recordHotBlockSummary,
+  recordPerfAttributionSummary,
 } from "./wasm-browser-smoke.mjs";
 
 const marker = "QEMU_WASM_LINUX_BOOT_OK";
@@ -111,6 +113,14 @@ for (const status of [
         tb_execs: 100,
       },
     },
+    performanceAttribution: {
+      enabled: true,
+      summaryCount: 1,
+      lastSummary: {
+        event: "summary",
+        events: 200,
+      },
+    },
   });
 
   assert.equal(result.phase, "failed");
@@ -158,6 +168,14 @@ for (const status of [
     lastSummary: {
       event: "summary",
       tb_execs: 100,
+    },
+  });
+  assert.deepEqual(result.performanceAttribution, {
+    enabled: true,
+    summaryCount: 1,
+    lastSummary: {
+      event: "summary",
+      events: 200,
     },
   });
   assert.equal(result.phases[1].failedDuring, "fetch-guest-inputs");
@@ -222,6 +240,58 @@ for (const status of [
   assert.equal(state.hotBlocks.summaries.length, 2);
   assert.equal(state.hotBlocks.summaries[0].tb_execs, 2);
   assert.equal(state.hotBlocks.lastSummary.elapsedMs, 30);
+}
+
+{
+  const line = "qemu-wasm-perf-attrib: " + JSON.stringify({
+    format: 1,
+    event: "summary",
+    reason: "interval",
+    events: 200,
+    virtio: {
+      block: {
+        kicks: 4,
+        completions: 4,
+        handle_ns: 12345,
+      },
+    },
+    block: {
+      reads: 3,
+      read_bytes: 12288,
+      writes: 1,
+      write_bytes: 4096,
+    },
+  });
+  const parsed = perfAttributionSummary(line);
+  assert.equal(parsed.event, "summary");
+  assert.equal(parsed.events, 200);
+  assert.equal(parsed.virtio.block.kicks, 4);
+  assert.equal(parsed.block.read_bytes, 12288);
+  assert.equal(perfAttributionSummary("ordinary serial line"), null);
+  assert.equal(perfAttributionSummary("qemu-wasm-perf-attrib: not-json"), null);
+}
+
+{
+  const state = {
+    performanceAttribution: {
+      enabled: true,
+      maxSummaries: 2,
+      summaryCount: 0,
+      summaries: [],
+      lastSummary: null,
+    },
+  };
+  for (const value of [1, 2, 3]) {
+    recordPerfAttributionSummary(
+      state,
+      `qemu-wasm-perf-attrib: {"format":1,"event":"summary","events":${value}}`,
+      value * 10,
+    );
+  }
+  assert.equal(state.performanceAttribution.summaryCount, 3);
+  assert.equal(state.performanceAttribution.summaries.length, 2);
+  assert.equal(state.performanceAttribution.summaries[0].events, 2);
+  assert.equal(state.performanceAttribution.lastSummary.elapsedMs, 30);
 }
 
 {
@@ -452,6 +522,42 @@ for (const status of [
     allowSerialFallback: true,
     appendExtra: "",
     cpu: "Nehalem",
+    display: "none",
+    displayDevice: "default",
+    expectedResolution: "",
+    expectText: [],
+    focusDisplay: false,
+    host: "localhost",
+    initrd: "/tmp/initramfs.cpio.gz",
+    keyboardAfterText: "",
+    keyboardText: "",
+    kernelAppend: null,
+    machine: "microvm,acpi=off",
+    marker,
+    maxOutputBytes: 8192,
+    memory: "256M",
+    network: "none",
+    performanceAttribution: true,
+    performanceAttributionInterval: 25,
+    port: 8020,
+    powerOperation: "",
+    powerTimeoutMs: 30000,
+    qemuArgs: [],
+    rootfs: null,
+    rootfsDevice: "virtio-mmio",
+    timeoutMs: 30000,
+    visualMarker: "",
+  });
+
+  assert.equal(url.searchParams.get("performanceAttribution"), "1");
+  assert.equal(url.searchParams.get("performanceAttributionInterval"), "25");
+}
+
+{
+  const url = browserSmokeUrl({
+    allowSerialFallback: true,
+    appendExtra: "",
+    cpu: "Nehalem",
     display: "wasm",
     displayDevice: "default",
     expectedResolution: "",
@@ -609,6 +715,8 @@ for (const status of [
     persistentDiskOpfsName: "virtual-server-state.raw",
     persistentDiskPath: "/guest/persistent.raw",
     persistentDiskSizeBytes: 33554432,
+    performanceAttribution: true,
+    performanceAttributionInterval: 25,
     preKeyboardWaitMs: 500,
     postKeyboardWaitMs: 250,
     powerOperation: "shutdown",
@@ -663,6 +771,8 @@ for (const status of [
   assert.equal(result.persistentDiskSizeBytes, 33554432);
   assert.equal(result.idleAfterText, "");
   assert.equal(result.idleTimeoutMs, 0);
+  assert.equal(result.performanceAttribution, true);
+  assert.equal(result.performanceAttributionInterval, 25);
   assert.equal(result.requireDisplayOutput, true);
   assert.equal(result.displayMinNonblackPixels, 4);
   assert.equal(result.rootfsDevice, "virtio-pci");
@@ -718,7 +828,10 @@ for (const status of [
   });
 
   assert.equal(child.status, 2);
-  assert.match(child.stderr, /--rootfs-storage opfs-snapshot requires --rootfs/);
+  assert.match(
+    `${child.stdout}${child.stderr}`,
+    /--rootfs-storage opfs-snapshot requires --rootfs/,
+  );
 }
 
 {
@@ -735,7 +848,10 @@ for (const status of [
   });
 
   assert.equal(child.status, 2);
-  assert.match(child.stderr, /--rootfs-opfs-name must be a non-empty file name/);
+  assert.match(
+    `${child.stdout}${child.stderr}`,
+    /--rootfs-opfs-name must be a non-empty file name/,
+  );
 }
 
 {

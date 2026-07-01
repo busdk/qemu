@@ -23,6 +23,7 @@
 #include "qemu/iov.h"
 #include "qemu/main-loop.h"
 #include "qemu/module.h"
+#include "qemu/perf-attrib.h"
 #include "migration/qemu-file-types.h"
 #include "monitor/monitor.h"
 #include "qemu/error-report.h"
@@ -121,6 +122,7 @@ static size_t write_to_port(VirtIOSerialPort *port,
         len = iov_from_buf(elem->in_sg, elem->in_num, 0,
                            buf + offset, size - offset);
         offset += len;
+        qemu_perf_attrib_virtio_serial_host_to_guest(len);
 
         virtqueue_push(vq, elem, len);
         g_free(elem);
@@ -189,6 +191,9 @@ static void do_flush_queued_data(VirtIOSerialPort *port, VirtQueue *vq,
                                   port->elem->out_sg[i].iov_base
                                   + port->iov_offset,
                                   buf_size);
+            if (ret > 0) {
+                qemu_perf_attrib_virtio_serial_guest_to_host(ret);
+            }
             if (!port->elem) { /* bail if we got disconnected */
                 return;
             }

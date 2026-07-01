@@ -282,6 +282,23 @@ export function hotBlockSummary(line) {
   }
 }
 
+export function perfAttributionSummary(line) {
+  const prefix = "qemu-wasm-perf-attrib: ";
+
+  if (!line.startsWith(prefix)) {
+    return null;
+  }
+  try {
+    const summary = JSON.parse(line.slice(prefix.length));
+    if (summary === null || typeof summary !== "object" || Array.isArray(summary)) {
+      return null;
+    }
+    return summary;
+  } catch {
+    return null;
+  }
+}
+
 export function recordHotBlockSummary(state, line, elapsedMs) {
   if (!state || !state.hotBlocks || !state.hotBlocks.enabled) {
     return;
@@ -300,6 +317,29 @@ export function recordHotBlockSummary(state, line, elapsedMs) {
     state.hotBlocks.summaries.shift();
   }
 }
+
+export function recordPerfAttributionSummary(state, line, elapsedMs) {
+  if (!state || !state.performanceAttribution || !state.performanceAttribution.enabled) {
+    return;
+  }
+  const summary = perfAttributionSummary(line);
+  if (summary === null) {
+    return;
+  }
+  state.performanceAttribution.summaryCount += 1;
+  state.performanceAttribution.lastSummary = {
+    elapsedMs,
+    ...summary,
+  };
+  state.performanceAttribution.summaries.push(state.performanceAttribution.lastSummary);
+  if (
+    state.performanceAttribution.summaries.length >
+    state.performanceAttribution.maxSummaries
+  ) {
+    state.performanceAttribution.summaries.shift();
+  }
+}
+
 
 function serviceBridgeResponseStatus(response) {
   if (typeof response.status === "string" && response.status !== "") {
@@ -1177,6 +1217,8 @@ function buildConfig() {
     rootfsStorage: option("rootfsStorage", "memfs"),
     powerOperation: option("powerOperation", ""),
     powerTimeoutMs: numberOption("powerTimeoutMs", 30000),
+    performanceAttribution: boolOption("performanceAttribution", false),
+    performanceAttributionInterval: numberOption("performanceAttributionInterval", 10000),
     serviceBridge: jsonObjectOption("serviceBridge", null),
     tcgHotblocks: boolOption("tcgHotblocks", false),
     tcgHotblocksInterval: numberOption("tcgHotblocksInterval", 10000),
@@ -1325,6 +1367,17 @@ async function run() {
         QEMU_TCG_HOTBLOCKS_OP_LIMIT: String(config.tcgHotblocksOpLimit),
         QEMU_TCG_HOTBLOCKS_OP_SAMPLE: String(config.tcgHotblocksOpSample),
         QEMU_TCG_HOTBLOCKS_TOP: String(config.tcgHotblocksTop),
+      } : null,
+      maxSummaries: 16,
+      summaryCount: 0,
+      summaries: [],
+      lastSummary: null,
+    },
+    performanceAttribution: {
+      enabled: config.performanceAttribution,
+      env: config.performanceAttribution ? {
+        QEMU_WASM_PERF_ATTRIBUTION: "1",
+        QEMU_WASM_PERF_ATTRIBUTION_INTERVAL: String(config.performanceAttributionInterval),
       } : null,
       maxSummaries: 16,
       summaryCount: 0,
@@ -1542,6 +1595,11 @@ async function run() {
       line,
       Math.round(performance.now() - startTime),
     );
+    recordPerfAttributionSummary(
+      smokeState,
+      line,
+      Math.round(performance.now() - startTime),
+    );
     if (smokeState.outputBytes < config.maxOutputBytes) {
       const encoded = new TextEncoder().encode(`${line}\n`);
       const remaining = config.maxOutputBytes - smokeState.outputBytes;
@@ -1610,6 +1668,10 @@ async function run() {
     QEMU_TCG_HOTBLOCKS_OP_SAMPLE: String(config.tcgHotblocksOpSample),
     QEMU_TCG_HOTBLOCKS_TOP: String(config.tcgHotblocksTop),
   } : {};
+  const performanceAttributionEnv = config.performanceAttribution ? {
+    QEMU_WASM_PERF_ATTRIBUTION: "1",
+    QEMU_WASM_PERF_ATTRIBUTION_INTERVAL: String(config.performanceAttributionInterval),
+  } : {};
   const tciEnv = config.tciRelaxedMb ? {
     QEMU_TCI_RELAXED_MB: "1",
   } : {};
@@ -1635,8 +1697,9 @@ async function run() {
   };
   const moduleOptions = {
     arguments: generatedQemuArgs,
-    ENV: { ...hotBlocksEnv, ...tciEnv },
+    ENV: { ...hotBlocksEnv, ...performanceAttributionEnv, ...tciEnv },
     qemuWasmHotBlocksEnv: hotBlocksEnv,
+    qemuWasmPerfAttribEnv: performanceAttributionEnv,
     qemuWasmTciEnv: tciEnv,
     qemuWasmDisplayCanvas: canvas,
     locateFile(path) {
@@ -1655,6 +1718,12 @@ async function run() {
             .map(([key, value]) => `${key}=${value}`)
             .join("\n") + "\n";
           module.FS.writeFile("/qemu-tcg-hotblocks-env", lines);
+        }
+        if (config.performanceAttribution) {
+          const lines = Object.entries(performanceAttributionEnv)
+            .map(([key, value]) => `${key}=${value}`)
+            .join("\n") + "\n";
+          module.FS.writeFile("/qemu-wasm-perf-attrib-env", lines);
         }
         if (config.tciRelaxedMb) {
           const lines = Object.entries(tciEnv)
