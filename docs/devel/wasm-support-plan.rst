@@ -4609,6 +4609,30 @@ implementation should add a safe linear-memory access model for the measured
 side-effectful memory cases.  The broader control-flow path still needs
 ``brcond`` support before the C subset fallback can shrink substantially.
 
+On the same day, a follow-up experiment tested whether a narrow memory helper
+would make that next step useful.  The experiment was not promoted.  A rebuilt
+``build-wasm64-nodebug-nohot`` artifact first added a generated-block import
+for host-memory ``ld32u``.  Generic Chromium ``149.0.7827.55`` smoke reached
+``QEMU_WASM_LINUX_BOOT_OK`` with the subset enabled and wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-generated-memory-subset.json``,
+but elapsed time was ``105717`` ms.  The same rebuilt artifact with the subset
+disabled wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-generated-memory-default.json``
+and reached the marker in ``99884`` ms.  The helper removed ``ld32u`` from the
+dominant generated fallback list, but the run was slower and the next generated
+blocker became ``tci_setcond32``.
+
+A second unpromoted variant added native generated ``tci_setcond32`` WebAssembly
+comparisons.  It reached the generic marker and wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-generated-memory-setcond-subset.json``,
+but took ``108723`` ms.  Generated fallback then shifted to ``brcond`` and
+``st8`` while generated execution did not increase.  This evidence rejects
+per-operation JavaScript memory helper calls as the next performance fix unless
+new measurements contradict the result.  Future CPU work should either use a
+lower-overhead shared-memory import model or attack the measured control-flow
+boundary directly, with default and subset runs captured from the same rebuilt
+artifact and browser version.
+
 Guest-progress idle diagnostic
 ==============================
 

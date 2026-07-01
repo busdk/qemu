@@ -596,6 +596,16 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     increased generated execution coverage. The proof must record
     generated-specific unsupported counters again before another downstream
     Bus Engine OS proof is treated as acceptance evidence.
+    Rejected evidence on 2026-07-01: a JS-imported `ld32u` helper kept generic
+    Chromium smoke passing and moved the dominant generated fallback from
+    `ld32u` to `tci_setcond32`, but it was slower than the same-artifact
+    default run (`105717` ms with subset versus `99884` ms default in Chromium
+    `149.0.7827.55`). Adding native generated `tci_setcond32` shifted the
+    dominant generated fallback to `brcond`, but made the generic subset run
+    slower again (`108723` ms) and did not increase generated execution. Do not
+    promote the JS helper-import memory path as a performance fix without
+    new evidence; the next performance-oriented step should avoid per-op JS
+    helper calls or address the measured `brcond`/control-flow boundary.
   - [x] Resolve the hot TB dispatch/chaining boundary:
     DoD is a design and implementation for hot blocks that currently fall
     back on `goto_ptr` and `goto_tb`, preserving QEMU's `tcg_qemu_tb_exec`
