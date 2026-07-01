@@ -1110,6 +1110,8 @@ function buildConfig() {
     serviceBridge: jsonObjectOption("serviceBridge", null),
     tcgHotblocks: boolOption("tcgHotblocks", false),
     tcgHotblocksInterval: numberOption("tcgHotblocksInterval", 10000),
+    tcgHotblocksOpLimit: numberOption("tcgHotblocksOpLimit", 134217728),
+    tcgHotblocksOpSample: numberOption("tcgHotblocksOpSample", 1),
     tcgHotblocksTop: numberOption("tcgHotblocksTop", 12),
     timeoutMs: numberOption("timeoutMs", 180000),
     visualMarker: option("visualMarker", ""),
@@ -1226,6 +1228,8 @@ async function run() {
       env: config.tcgHotblocks ? {
         QEMU_TCG_HOTBLOCKS: "1",
         QEMU_TCG_HOTBLOCKS_INTERVAL: String(config.tcgHotblocksInterval),
+        QEMU_TCG_HOTBLOCKS_OP_LIMIT: String(config.tcgHotblocksOpLimit),
+        QEMU_TCG_HOTBLOCKS_OP_SAMPLE: String(config.tcgHotblocksOpSample),
         QEMU_TCG_HOTBLOCKS_TOP: String(config.tcgHotblocksTop),
       } : null,
       maxSummaries: 16,
@@ -1470,6 +1474,13 @@ async function run() {
   const moduleFactory = (await import(programUrl.href)).default;
   setPhase("start-qemu", "starting QEMU");
   drawBrowserStatusFrame(canvas, "Starting QEMU...");
+  const hotBlocksEnv = config.tcgHotblocks ? {
+    QEMU_TCG_HOTBLOCKS: "1",
+    QEMU_TCG_HOTBLOCKS_INTERVAL: String(config.tcgHotblocksInterval),
+    QEMU_TCG_HOTBLOCKS_OP_LIMIT: String(config.tcgHotblocksOpLimit),
+    QEMU_TCG_HOTBLOCKS_OP_SAMPLE: String(config.tcgHotblocksOpSample),
+    QEMU_TCG_HOTBLOCKS_TOP: String(config.tcgHotblocksTop),
+  } : {};
   const installWasmKeySink = (module) => {
     if (config.display === "wasm" && typeof module._qemu_wasm_display_key_event === "function") {
       qemuKeySink = (linuxKey, down) => {
@@ -1492,11 +1503,8 @@ async function run() {
   };
   const moduleOptions = {
     arguments: generatedQemuArgs,
-    ENV: config.tcgHotblocks ? {
-      QEMU_TCG_HOTBLOCKS: "1",
-      QEMU_TCG_HOTBLOCKS_INTERVAL: String(config.tcgHotblocksInterval),
-      QEMU_TCG_HOTBLOCKS_TOP: String(config.tcgHotblocksTop),
-    } : {},
+    ENV: hotBlocksEnv,
+    qemuWasmHotBlocksEnv: hotBlocksEnv,
     qemuWasmDisplayCanvas: canvas,
     locateFile(path) {
       if (path === "qemu-system-x86_64.wasm") {
@@ -1509,6 +1517,12 @@ async function run() {
       (module) => {
         activeModule = module;
         mountFiles(module, availableMounts);
+        if (config.tcgHotblocks) {
+          const lines = Object.entries(hotBlocksEnv)
+            .map(([key, value]) => `${key}=${value}`)
+            .join("\n") + "\n";
+          module.FS.writeFile("/qemu-tcg-hotblocks-env", lines);
+        }
       },
     ],
     onRuntimeInitialized() {

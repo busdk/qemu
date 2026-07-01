@@ -3583,13 +3583,20 @@ with::
   scripts/ci/wasm-browser-smoke-runner.mjs \
     --tcg-hotblocks \
     --tcg-hotblocks-interval 10000 \
+    --tcg-hotblocks-op-sample 1024 \
+    --tcg-hotblocks-op-limit 134217728 \
     --tcg-hotblocks-top 12 \
     ...
 
 The runner forwards these values to the WebAssembly module environment as
-``QEMU_TCG_HOTBLOCKS=1``, ``QEMU_TCG_HOTBLOCKS_INTERVAL``, and
-``QEMU_TCG_HOTBLOCKS_TOP``.  QEMU then emits bounded JSON lines on stderr with
-the prefix ``qemu-tcg-hotblocks:``.  Each summary records:
+``QEMU_TCG_HOTBLOCKS=1``, ``QEMU_TCG_HOTBLOCKS_INTERVAL``,
+``QEMU_TCG_HOTBLOCKS_OP_SAMPLE``, ``QEMU_TCG_HOTBLOCKS_OP_LIMIT``, and
+``QEMU_TCG_HOTBLOCKS_TOP``.  The browser harness also writes the same
+configuration into ``/qemu-tcg-hotblocks-env`` before QEMU starts, because the
+WebAssembly pthread that runs QEMU ``main()`` cannot rely on arbitrary
+JavaScript module properties being visible as process environment variables.
+QEMU then emits bounded JSON lines on stderr with the prefix
+``qemu-tcg-hotblocks:``.  Each summary records:
 
 * total translation-block executions;
 * unique and dropped translation-block counter slots;
@@ -3597,6 +3604,8 @@ the prefix ``qemu-tcg-hotblocks:``.  Each summary records:
   base, flags, cflags, translated size, guest instruction count, and exit
   reason counters;
 * total interpreted TCI operations;
+* opcode sample rate, opcode collection limit, and whether opcode collection
+  remains active;
 * aggregate helper-call, QEMU load, and QEMU store counters;
 * top TCI opcode counters by TCG opcode name.
 
@@ -3613,3 +3622,32 @@ first narrow generated-WASM fast path.  TCI remains the correctness fallback.
 The counters are intended for the single-threaded wasm64 TCI browser path used
 by these smoke proofs.  They are not a replacement for QEMU's plugin-based
 profiling interfaces for native or multi-threaded accelerator work.
+
+Accepted local hot-block evidence on 2026-07-01 used
+``qemu-system-x86_64.js`` SHA-256
+``bd04d14a196f3126c074c5cb0f22f56aabef1f0034275f0b5e2375c674c73895`` and
+``qemu-system-x86_64.wasm`` SHA-256
+``66066b05e99b666ed41f2899c9f713b57ad2d829ad138d54be9c4c51a4915dbc``.
+The Chromium browser reported version ``149.0.7827.55`` and user agent
+``HeadlessChrome/149.0.0.0``.
+
+The generic browser smoke proof wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-hotblocks-current.json``
+and
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-hotblocks-current.png``.
+It reached ``QEMU_WASM_LINUX_BOOT_OK`` with ``success=true``,
+``markerSeen=true``, ``summaryCount=10``, ``op_sample=1024``,
+``op_limit=134217728``, ``op_active=false``, and representative
+``top_blocks`` plus ``top_tci_ops``.
+
+The downstream Bus Engine OS service proof wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-hotblocks.json``
+and
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-hotblocks.png``.
+It used the existing Bus Engine OS service manifest and did not modify any
+downstream guest files.  The run timed out before
+``QEMU_WASM_SERVICE_READY`` and ``Reached target Multi-User System.``, which
+matches the known wasm64 TCI service-readiness gap for the full downstream
+guest, but it captured QEMU-side evidence with ``summaryCount=15``,
+``op_sample=1024``, ``op_limit=134217728``, ``op_active=false``, and
+representative ``top_blocks`` plus ``top_tci_ops``.

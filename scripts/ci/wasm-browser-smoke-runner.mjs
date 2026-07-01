@@ -118,6 +118,12 @@ Options:
   --tcg-hotblocks-interval N
                      TB execution interval between hotspot summaries
                      (default: 10000)
+  --tcg-hotblocks-op-sample N
+                     Count one TCI opcode per N interpreted opcodes
+                     (default: 1, exact)
+  --tcg-hotblocks-op-limit N
+                     Stop opcode sampling after approximately N interpreted
+                     opcodes; 0 means unlimited (default: 134217728)
   --tcg-hotblocks-top N
                      Maximum hotspot entries per summary (default: 12)
   --visual-marker TEXT
@@ -185,7 +191,9 @@ function parseArgs(argv) {
     screenshotFullPage: false,
     serviceBridge: null,
     tcgHotblocks: false,
+    tcgHotblocksOpLimit: 134217728,
     tcgHotblocksInterval: 10000,
+    tcgHotblocksOpSample: 1,
     tcgHotblocksTop: 12,
     timeoutMs: 180000,
     visualMarker: "",
@@ -343,6 +351,12 @@ function parseArgs(argv) {
     } else if (arg === "--tcg-hotblocks-interval") {
       options.tcgHotblocksInterval = Number(argv[++i]);
       explicit.add("tcgHotblocksInterval");
+    } else if (arg === "--tcg-hotblocks-op-sample") {
+      options.tcgHotblocksOpSample = Number(argv[++i]);
+      explicit.add("tcgHotblocksOpSample");
+    } else if (arg === "--tcg-hotblocks-op-limit") {
+      options.tcgHotblocksOpLimit = Number(argv[++i]);
+      explicit.add("tcgHotblocksOpLimit");
     } else if (arg === "--tcg-hotblocks-top") {
       options.tcgHotblocksTop = Number(argv[++i]);
       explicit.add("tcgHotblocksTop");
@@ -380,6 +394,8 @@ function parseArgs(argv) {
       "progressSampleIntervalMs",
       "progressSampleLimit",
       "tcgHotblocksInterval",
+      "tcgHotblocksOpLimit",
+      "tcgHotblocksOpSample",
       "tcgHotblocksTop",
       "timeoutMs",
     ],
@@ -468,6 +484,14 @@ function parseArgs(argv) {
   }
   if (!Number.isInteger(options.tcgHotblocksInterval) || options.tcgHotblocksInterval <= 0) {
     console.error("--tcg-hotblocks-interval must be a positive integer");
+    usage(2);
+  }
+  if (!Number.isInteger(options.tcgHotblocksOpSample) || options.tcgHotblocksOpSample <= 0) {
+    console.error("--tcg-hotblocks-op-sample must be a positive integer");
+    usage(2);
+  }
+  if (!Number.isInteger(options.tcgHotblocksOpLimit) || options.tcgHotblocksOpLimit < 0) {
+    console.error("--tcg-hotblocks-op-limit must be a non-negative integer");
     usage(2);
   }
   if (
@@ -985,6 +1009,12 @@ export function browserSmokeUrl(options) {
   const tcgHotblocksInterval = Number.isInteger(options.tcgHotblocksInterval)
     ? options.tcgHotblocksInterval
     : 10000;
+  const tcgHotblocksOpSample = Number.isInteger(options.tcgHotblocksOpSample)
+    ? options.tcgHotblocksOpSample
+    : 1;
+  const tcgHotblocksOpLimit = Number.isInteger(options.tcgHotblocksOpLimit)
+    ? options.tcgHotblocksOpLimit
+    : 134217728;
   const tcgHotblocksTop = Number.isInteger(options.tcgHotblocksTop)
     ? options.tcgHotblocksTop
     : 12;
@@ -1009,6 +1039,8 @@ export function browserSmokeUrl(options) {
   if (tcgHotblocks) {
     url.searchParams.set("tcgHotblocks", "1");
     url.searchParams.set("tcgHotblocksInterval", String(tcgHotblocksInterval));
+    url.searchParams.set("tcgHotblocksOpLimit", String(tcgHotblocksOpLimit));
+    url.searchParams.set("tcgHotblocksOpSample", String(tcgHotblocksOpSample));
     url.searchParams.set("tcgHotblocksTop", String(tcgHotblocksTop));
   }
   url.searchParams.set("rootfsDevice", options.rootfsDevice);
@@ -1085,6 +1117,12 @@ export function initialSmokeResult(options, browserVersion) {
     tcgHotblocksInterval: Number.isInteger(options.tcgHotblocksInterval)
       ? options.tcgHotblocksInterval
       : 10000,
+    tcgHotblocksOpLimit: Number.isInteger(options.tcgHotblocksOpLimit)
+      ? options.tcgHotblocksOpLimit
+      : 134217728,
+    tcgHotblocksOpSample: Number.isInteger(options.tcgHotblocksOpSample)
+      ? options.tcgHotblocksOpSample
+      : 1,
     tcgHotblocksTop: Number.isInteger(options.tcgHotblocksTop)
       ? options.tcgHotblocksTop
       : 12,

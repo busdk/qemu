@@ -398,6 +398,8 @@ for (const status of [
     rootfsDevice: "virtio-mmio",
     tcgHotblocks: true,
     tcgHotblocksInterval: 77,
+    tcgHotblocksOpLimit: 4096,
+    tcgHotblocksOpSample: 1024,
     tcgHotblocksTop: 5,
     timeoutMs: 30000,
     visualMarker: "",
@@ -405,6 +407,8 @@ for (const status of [
 
   assert.equal(url.searchParams.get("tcgHotblocks"), "1");
   assert.equal(url.searchParams.get("tcgHotblocksInterval"), "77");
+  assert.equal(url.searchParams.get("tcgHotblocksOpLimit"), "4096");
+  assert.equal(url.searchParams.get("tcgHotblocksOpSample"), "1024");
   assert.equal(url.searchParams.get("tcgHotblocksTop"), "5");
 }
 

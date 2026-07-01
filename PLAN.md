@@ -9,21 +9,22 @@ file and then implemented.
 
 ## Active Goal
 
-Implement the next browser-hosted Bus Engine WebAssembly MVP by finishing the
-active `PLAN.md` work first: QEMU must provide a generic browser-to-guest
-service bridge with graphics, keyboard, power-control, and suspend/resume
-planning hooks suitable for a 64-bit Bus Engine OS guest. Current
-Chrome/Chromium evidence shows the generic bridge can attach, but wasm64 TCI
-is too slow for the package-built Bus Engine OS systemd guest to reach the
-in-guest service adapter reliably. The active goal therefore also includes the
-first native/generated-WASM execution work needed to make the full Engine OS
-service-bridge proof fast enough to pass without masking ordinary system
-services. Bus Engine OS and Bus Engine layers remain downstream consumers that
-package and run the in-guest services. Work from this plan before taking any
-new backlog item. If every active `PLAN.md` item is complete or blocked on a
-concrete external dependency, promote the highest-value useful work item from
-the future plan backlog in `FUTURE_WORK.md` into `PLAN.md` before implementing
-more work.
+Implement QEMU/WASM hot-block instrumentation for the wasm64 TCI browser path.
+QEMU must emit structured, opt-in translation-block and interpreter-hotspot
+evidence for the generic browser smoke and the downstream Bus Engine OS
+browser-hosted service proof while preserving existing TCI behavior when the
+instrumentation is disabled. This lane must not take over the downstream
+bus-pkg, OPFS persistence, virtio-net, virtual-desktop packaging, Codex
+packaging, or Engine OS environment work owned by the parallel agent. Work from
+this plan before taking any new backlog item. If every active `PLAN.md` item is
+complete or blocked on a concrete external dependency, promote the
+highest-value useful work item from the future plan backlog in
+`FUTURE_WORK.md` into `PLAN.md` before implementing more work.
+
+Current-goal tracking rule: every code change, browser proof, artifact rebuild,
+documentation update, commit, push, and BusDK submodule-pin update for this
+hot-block instrumentation lane must be represented by a checkbox in this file
+before it is treated as accepted work.
 
 ## Current Direction
 
@@ -129,13 +130,74 @@ systemd masks only move the failure from one slow service to the next.
   evidence from the generic Linux smoke and the Bus Engine OS browser-hosted
   service proof showing translation-block frequency, guest PC ranges, helper
   calls, exit reasons, interpreter hot spots, and candidate instruction
-  families for the first generated-WASM patches. Progress: QEMU now has
-  opt-in ``QEMU_TCG_HOTBLOCKS=1`` instrumentation that records
-  translation-block execution counts, guest PC ranges, exit reason counters,
-  and TCI opcode hotspots, and the browser smoke runner can collect summaries
-  into result JSON with ``--tcg-hotblocks``. Remaining acceptance gap: rebuild
-  the wasm64 artifact and capture the generic Linux smoke plus downstream
-  Bus Engine OS service-proof evidence with this instrumentation enabled.
+  families for the first generated-WASM patches.
+  - [x] Add opt-in ``QEMU_TCG_HOTBLOCKS=1`` instrumentation that records
+    translation-block execution counts, guest PC ranges, exit reason counters,
+    and TCI opcode hotspots.
+  - [x] Keep the disabled path cheap and preserve TCI behavior when hot-block
+    collection is not requested.
+  - [x] Add browser smoke runner flags for ``--tcg-hotblocks``,
+    ``--tcg-hotblocks-interval``, and ``--tcg-hotblocks-top``.
+  - [x] Parse ``qemu-tcg-hotblocks`` JSON lines into browser smoke result
+    JSON.
+  - [x] Avoid a per-op C function call in the wasm64 TCI interpreter by
+    counting active TCI opcodes through an inline guarded path.
+  - [x] Add explicit TCI opcode sampling so browser proofs can collect useful
+    interpreter hotspots without making exact per-op counting the only
+    acceptance mode.
+  - [x] Add an explicit opcode-sampling limit so QEMU can collect
+    representative TCI hotspots and then continue the long browser boot with
+    low-overhead translation-block summaries.
+  - [x] Make the browser runtime reliably deliver the hot-block configuration
+    to the Emscripten pthread that runs QEMU ``main()``.
+  - [x] Keep the implementation scope to QEMU-side generic instrumentation in
+    ``accel/tcg/cpu-exec.c``, ``include/tcg/hotblocks.h``,
+    ``tcg/hotblocks.c``, and the generic browser smoke harness under
+    ``scripts/ci/``; do not add Bus Engine product logic to QEMU.
+  - [x] Rebuild the wasm64 ``x86_64-softmmu`` TCI artifact with the final
+    instrumentation code and record JavaScript/WebAssembly hashes.
+    - Current artifact hashes:
+      ``qemu-system-x86_64.js`` =
+      ``bd04d14a196f3126c074c5cb0f22f56aabef1f0034275f0b5e2375c674c73895``;
+      ``qemu-system-x86_64.wasm`` =
+      ``66066b05e99b666ed41f2899c9f713b57ad2d829ad138d54be9c4c51a4915dbc``.
+  - [x] Capture passing generic Chrome/Chromium browser smoke evidence with
+    ``summaryCount > 0`` and representative top translation blocks and TCI
+    opcodes in the result JSON.
+    - Current result target:
+      ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-hotblocks-current.json``.
+    - Current screenshot target:
+      ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-hotblocks-current.png``.
+    - Accepted evidence: Chromium ``149.0.7827.55`` reached
+      ``QEMU_WASM_LINUX_BOOT_OK`` with ``summaryCount=10``,
+      ``op_sample=1024``, ``op_limit=134217728``, and representative
+      ``top_blocks`` plus ``top_tci_ops``.
+  - [x] Capture downstream Bus Engine OS browser-hosted service proof evidence
+    with ``summaryCount > 0`` and representative top translation blocks and
+    TCI opcodes in the result JSON.
+    - Use existing downstream Bus Engine OS proof assets only; do not change
+      bus-pkg, OPFS persistence, virtio-net, virtual-desktop packaging, Codex
+      packaging, or Engine OS environment files in this lane.
+    - Current result target:
+      ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-hotblocks.json``.
+    - Current screenshot target:
+      ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-hotblocks.png``.
+    - Accepted QEMU-side evidence: Chromium run on the existing Bus Engine OS
+      service manifest timed out before ``QEMU_WASM_SERVICE_READY`` and
+      ``Reached target Multi-User System.``, matching the known downstream
+      wasm64 TCI service-readiness gap, but captured ``summaryCount=15`` with
+      ``op_sample=1024``, ``op_limit=134217728``, ``op_active=false``, and
+      representative ``top_blocks`` plus ``top_tci_ops``.
+  - [x] Record browser/runtime version, exact commands, artifact hashes,
+    result files, marker state, and hot-block summary details in
+    ``docs/devel/wasm-support-plan.rst``.
+  - [x] Run local validation for this lane: ``git diff --check``, JavaScript
+    syntax checks for the browser smoke scripts, browser smoke runner unit
+    tests, guest manifest tests, and QEMU ``checkpatch.pl`` on the final
+    patch.
+  - [ ] Commit and push QEMU ``develop``, then run BusDK
+    ``scripts/sync-submodules.sh`` and commit/push the required submodule
+    pins.
 - [ ] Add a minimal generated-Wasm block prototype outside the full backend:
   DoD is a tiny QEMU test harness that emits, validates, compiles,
   instantiates, and executes one or more simple generated WebAssembly
