@@ -870,6 +870,16 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   validation ahead of the generic initrd/rootfs requirement so bad storage
   arguments fail with the actionable OPFS rootfs error before long browser
   proof setup.
+- [ ] Add marker-to-marker Bus Engine OS boot timing before another
+  acceleration patch:
+  DoD is browser smoke harness support that records first-seen elapsed times
+  for guest boot milestones even when the run times out, including kernel
+  version, root block device discovery, root filesystem mount, init/systemd
+  start, hostname, journald, udev, basic target, multi-user target, login
+  prompt, and service readiness marker. Result JSON and summaries must expose
+  both ordered milestone entries and lookup-by-id data. The next Bus Engine OS
+  proof must compare these milestones against the current 420 second timeout
+  baseline before accepting any speedup or regression claim.
 - [ ] Add a translation-block cache design and tests once the first generated
   blocks exist: DoD is a documented cache key, invalidation rule,
   memory-pressure behavior, browser-module lifetime policy, and deterministic

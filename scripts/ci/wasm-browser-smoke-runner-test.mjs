@@ -27,8 +27,10 @@ import {
   smokeResultSummary,
 } from "./wasm-browser-smoke-runner.mjs";
 import {
+  bootMilestoneForLine,
   hotBlockSummary,
   perfAttributionSummary,
+  recordBootMilestone,
   recordHotBlockSummary,
   recordPerfAttributionSummary,
   recordTciWasmSubsetSummary,
@@ -78,6 +80,31 @@ for (const status of [
       { phase: "failed", elapsedMs: 10, failedDuring: "fetch-guest-inputs" },
     ],
     programExitStatus: null,
+    bootMilestones: {
+      count: 1,
+      entries: [
+        {
+          id: "rootfs_mounted",
+          label: "root filesystem mounted",
+          elapsedMs: 1234,
+          line: "VFS: Mounted root (ext4 filesystem) on device 254:0.",
+        },
+      ],
+      byId: {
+        rootfs_mounted: {
+          id: "rootfs_mounted",
+          label: "root filesystem mounted",
+          elapsedMs: 1234,
+          line: "VFS: Mounted root (ext4 filesystem) on device 254:0.",
+        },
+      },
+      last: {
+        id: "rootfs_mounted",
+        label: "root filesystem mounted",
+        elapsedMs: 1234,
+        line: "VFS: Mounted root (ext4 filesystem) on device 254:0.",
+      },
+    },
     qemuArgs: ["-M", "microvm,acpi=off", "-nic", "none"],
     runtime: {
       crossOriginIsolated: true,
@@ -135,6 +162,9 @@ for (const status of [
   assert.equal(result.outputSuppressed, true);
   assert.equal(result.lastLine, "last serial line");
   assert.deepEqual(result.expectedTextSeen, [{ text: "Example Linux", seen: true }]);
+  assert.equal(result.bootMilestones.count, 1);
+  assert.equal(result.bootMilestones.entries[0].id, "rootfs_mounted");
+  assert.equal(result.bootMilestones.byId.rootfs_mounted.elapsedMs, 1234);
   assert.deepEqual(result.qemuCommand, ["-M", "microvm,acpi=off", "-nic", "none"]);
   assert.deepEqual(result.browserRuntime, {
     crossOriginIsolated: true,
@@ -182,6 +212,63 @@ for (const status of [
     },
   });
   assert.equal(result.phases[1].failedDuring, "fetch-guest-inputs");
+}
+
+{
+  assert.deepEqual(
+    bootMilestoneForLine("Linux version 6.18.36 (bus@bus-engine-os)"),
+    {
+      id: "kernel_linux_version",
+      label: "Linux kernel version printed",
+    },
+  );
+  assert.deepEqual(
+    bootMilestoneForLine("EXT4-fs (vda): mounted filesystem 00000000 r/w"),
+    {
+      id: "rootfs_mounted",
+      label: "root filesystem mounted",
+    },
+  );
+  assert.deepEqual(
+    bootMilestoneForLine("systemd[1]: Reached target Multi-User System."),
+    {
+      id: "multi_user_target",
+      label: "systemd multi-user target reached",
+    },
+  );
+  assert.deepEqual(
+    bootMilestoneForLine("bus-engine-os login:"),
+    {
+      id: "login_prompt",
+      label: "login prompt visible",
+    },
+  );
+  assert.equal(bootMilestoneForLine("qemu-tci-wasm-subset: {}"), null);
+
+  const state = {
+    bootMilestones: {
+      count: 0,
+      entries: [],
+      byId: {},
+      last: null,
+    },
+  };
+  const first = recordBootMilestone(
+    state,
+    "systemd[1]: Hostname set to <bus-engine-os>.",
+    120000,
+  );
+  const duplicate = recordBootMilestone(
+    state,
+    "systemd[1]: Hostname set to <bus-engine-os>.",
+    130000,
+  );
+
+  assert.equal(first.id, "systemd_hostname");
+  assert.equal(duplicate.elapsedMs, 120000);
+  assert.equal(state.bootMilestones.count, 1);
+  assert.equal(state.bootMilestones.entries[0].elapsedMs, 120000);
+  assert.equal(state.bootMilestones.byId.systemd_hostname.line, "systemd[1]: Hostname set to <bus-engine-os>.");
 }
 
 {
@@ -1550,5 +1637,6 @@ for (const status of [
       lastLine: "x86/fpu: x87 FPU will use FXSAVE",
       guestLastLine: null,
     },
+    bootMilestones: null,
   });
 }

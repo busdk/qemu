@@ -1142,6 +1142,7 @@ export function smokeResultSummary(result) {
     guestIdleTimeout: result.guestIdleTimeout || null,
     progressSampleCount: (result.progressSamples || []).length,
     lastProgressSample,
+    bootMilestones: result.bootMilestones || null,
   };
 }
 
@@ -1245,6 +1246,7 @@ export function promoteSmokeState(result, smokeState) {
   result.guestOutputBytes = smokeState.guestOutputBytes;
   result.guestLastLine = smokeState.guestLastLine;
   result.guestHeartbeat = smokeState.guestHeartbeat || null;
+  result.bootMilestones = smokeState.bootMilestones || null;
   result.browserRuntime = smokeState.runtime || null;
   result.displayState = smokeState.display || null;
   result.powerControlState = smokeState.powerControl || null;

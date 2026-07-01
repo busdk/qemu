@@ -4778,6 +4778,19 @@ current evidence says the next implementation remains CPU execution
 acceleration, not OPFS, networking, graphics, input, WebCrypto, or another
 device/browser backend.
 
+Timeout-only proof runs are not enough to accept performance changes, because
+they do not show whether the guest reached the same boot phase earlier or
+later.  The browser smoke harness therefore records first-seen boot
+milestones in result JSON.  The current milestone set covers the Linux kernel
+version line, root block device discovery, root filesystem mount, init/systemd
+start, hostname configuration, journald, udev, systemd basic target,
+multi-user target, login prompt, and the service readiness marker.  The
+result contains both ordered entries and a by-id map so long Bus Engine OS
+runs can compare marker-to-marker timing even when the final readiness marker
+is not reached.  Any future QEMU execution optimization must compare these
+milestones against the accepted 420 second timeout baseline before claiming a
+speedup or regression.
+
 Guest-progress idle diagnostic
 ==============================
 

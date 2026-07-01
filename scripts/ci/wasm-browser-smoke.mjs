@@ -378,6 +378,102 @@ export function recordPerfAttributionSummary(state, line, elapsedMs) {
   }
 }
 
+export const BOOT_MILESTONES = [
+  {
+    id: "kernel_linux_version",
+    label: "Linux kernel version printed",
+    pattern: /^Linux version /,
+  },
+  {
+    id: "root_block_device",
+    label: "root block device discovered",
+    pattern: /(?:virtio_blk .*\[vda\]|\[vda\] [0-9]+ 512-byte logical blocks)/,
+  },
+  {
+    id: "rootfs_mounted",
+    label: "root filesystem mounted",
+    pattern: /(?:VFS: Mounted root|EXT4-fs \(vda\): mounted filesystem)/,
+  },
+  {
+    id: "init_started",
+    label: "init process started",
+    pattern: /(?:Run .* as init process|systemd\[1\]: systemd )/,
+  },
+  {
+    id: "systemd_hostname",
+    label: "systemd hostname configured",
+    pattern: /systemd\[1\]: Hostname set/,
+  },
+  {
+    id: "journald_started",
+    label: "systemd journal service started",
+    pattern: /systemd\[1\]: .*(?:systemd-journald|Journal Service)/,
+  },
+  {
+    id: "udev_started",
+    label: "udev device manager started",
+    pattern: /systemd\[1\]: .*(?:udev|Rule-based Manager for Device Events)/,
+  },
+  {
+    id: "basic_target",
+    label: "systemd basic target reached",
+    pattern: /systemd\[1\]: Reached target .*Basic System/,
+  },
+  {
+    id: "multi_user_target",
+    label: "systemd multi-user target reached",
+    pattern: /systemd\[1\]: Reached target .*Multi-User System/,
+  },
+  {
+    id: "login_prompt",
+    label: "login prompt visible",
+    pattern: /(?:^|\s)[^\s:]+ login:\s*$/,
+  },
+  {
+    id: "service_ready_marker",
+    label: "service readiness marker printed",
+    pattern: /QEMU_WASM_SERVICE_READY/,
+  },
+];
+
+export function bootMilestoneForLine(line) {
+  if (typeof line !== "string" || line === "") {
+    return null;
+  }
+  for (const milestone of BOOT_MILESTONES) {
+    if (milestone.pattern.test(line)) {
+      return {
+        id: milestone.id,
+        label: milestone.label,
+      };
+    }
+  }
+  return null;
+}
+
+export function recordBootMilestone(state, line, elapsedMs) {
+  if (!state || !state.bootMilestones) {
+    return null;
+  }
+  const milestone = bootMilestoneForLine(line);
+  if (milestone === null) {
+    return null;
+  }
+  if (state.bootMilestones.byId[milestone.id]) {
+    return state.bootMilestones.byId[milestone.id];
+  }
+  const entry = {
+    ...milestone,
+    elapsedMs,
+    line,
+  };
+  state.bootMilestones.byId[milestone.id] = entry;
+  state.bootMilestones.entries.push(entry);
+  state.bootMilestones.count = state.bootMilestones.entries.length;
+  state.bootMilestones.last = entry;
+  return entry;
+}
+
 
 function serviceBridgeResponseStatus(response) {
   if (typeof response.status === "string" && response.status !== "") {
@@ -1375,6 +1471,12 @@ async function run() {
       lastLine: "",
       lastElapsedMs: null,
     },
+    bootMilestones: {
+      count: 0,
+      entries: [],
+      byId: {},
+      last: null,
+    },
     phase: "init",
     phases: [],
     startedAtMs: startTime,
@@ -1684,6 +1786,11 @@ async function run() {
       smokeState.guestLines += 1;
       smokeState.guestOutputBytes += encoded.length;
       smokeState.guestLastLine = line;
+      recordBootMilestone(
+        smokeState,
+        line,
+        Math.round(performance.now() - startTime),
+      );
     }
     recordHotBlockSummary(
       smokeState,
