@@ -78,6 +78,21 @@ App Server remain downstream proof payloads.
   can expose an in-guest agent/service runtime through the generic bridge,
   which fields belong in the guest manifest, how frontend applications should
   discover the bridge, and which claims remain downstream responsibilities.
+- [ ] Prove the full Bus Engine OS service bridge guest through Chrome:
+  DoD is a Chrome/Chromium run using the accepted package-built x86_64
+  Bus Engine OS `virtual-server` kernel and rootfs, the generic QEMU/WASM
+  service bridge, and no `init=/bin/sh`; the run reaches normal systemd
+  multi-user boot, observes the downstream `QEMU_WASM_SERVICE_READY` marker,
+  sends the manifest health request through the generic bridge, receives a
+  structured `ok` response with the same request id, records the Codex App
+  Server binary-exists field without model credentials, and writes result JSON
+  plus a screenshot. Current evidence on 2026-07-01 shows QEMU starts and the
+  guest reaches `systemd[1]: Hostname set to <bus-engine-os>.` in Chromium,
+  but times out before multi-user or bridge readiness even with
+  `systemd-networkd-wait-online.service` masked and a virtio RNG device
+  supplied; native QEMU with the same rootfs reaches login, so this item must
+  diagnose and fix the browser-hosted full-system progress gap before it can
+  be checked complete.
 
 ## MVP Generic QEMU Work
 
