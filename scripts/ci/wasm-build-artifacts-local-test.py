@@ -56,7 +56,7 @@ def test_dry_run_includes_image_build():
             module.image_build_command(args.docker),
             module.docker_run_command(args),
         ]
-        assert commands[0] == ["make", "-f", "Makefile", "docker-image-emsdk-wasm64-cross", "V=1"]
+        assert commands[0] == ["make", "-f", "Makefile", "docker-image-emsdk-wasm64-cross", "RUNC=docker", "V=1"]
         assert commands[1][0:2] == ["docker", "run"]
 
 

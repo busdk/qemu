@@ -61,7 +61,7 @@ def docker_image_exists(docker: str, image: str) -> bool:
 
 
 def image_build_command(docker: str) -> list[str]:
-    return ["make", "-f", "Makefile", "docker-image-emsdk-wasm64-cross", "V=1"]
+    return ["make", "-f", "Makefile", "docker-image-emsdk-wasm64-cross", f"RUNC={docker}", "V=1"]
 
 
 def shell_script(configure_args: list[str], jobs: str, clean: bool) -> str:
