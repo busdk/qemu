@@ -93,6 +93,18 @@ App Server remain downstream proof payloads.
   supplied; native QEMU with the same rootfs reaches login, so this item must
   diagnose and fix the browser-hosted full-system progress gap before it can
   be checked complete.
+- [ ] Add a generic browser OPFS-backed `virtio-blk` storage backend for
+  QEMU/WASM: DoD is upstreamable QEMU-side support that exposes a block device
+  to the guest while storing writable disk contents in browser Origin Private
+  File System; keeps Bus Engine product policy out of QEMU; performs hot block
+  I/O in a worker using synchronous OPFS access handles when available; defines
+  metadata, quota, resize, flush, clean shutdown, and corruption/error
+  behavior; supports an immutable fetched base image plus a writable persistent
+  disk or overlay path; records browser compatibility and cross-origin
+  isolation requirements; has deterministic Node/browser harness coverage for
+  read/write/flush/reload persistence; and provides downstream handoff fields
+  that Bus Engine OS can use to mount persistent user/workspace state for
+  `virtual-server` and `virtual-desktop`.
 
 ## MVP Generic QEMU Work
 
