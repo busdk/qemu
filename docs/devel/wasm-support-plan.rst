@@ -4318,12 +4318,12 @@ local or MMU helper-backed memory operations.
 
 The current supported live subset covers straight-line and forward-branching
 TCI blocks using moves, local loads/stores, MMU ``qemu_ld``/``qemu_st``
-helpers, libffi helper calls, common integer ALU operations, selected count and
-byte-swap operations, memory barriers, and ``exit_tb``.  It deliberately does
-not implement direct TB chaining yet.  Blocks ending in ``goto_tb`` or
-``goto_ptr`` fall back to normal TCI because returning a raw linked-TB code
-pointer is not the same boundary as returning the ``exit_tb`` value expected
-by ``cpu_tb_exec``.
+helpers, libffi helper calls, common integer ALU operations, selected count,
+rotate, movcond, and byte-swap operations, memory barriers, ``exit_tb``, and
+terminal ``goto_tb``/``goto_ptr`` dispatch.  The dispatch path deliberately
+does not return raw linked-TB code pointers to ``cpu_tb_exec``.  Instead it
+returns an internal ``tcg_qemu_tb_exec`` status so the TCI frame can continue
+at the linked target, preserving the existing TCI control-flow boundary.
 
 Accepted local validation for this slice on 2026-07-01:
 
@@ -4341,45 +4341,48 @@ The rebuilt artifact hashes are:
 * ``qemu-system-x86_64.js`` =
   ``dedd3fe899335ade5f5b1b571c28f144d26a3f0fb7f8fe61e07133bd244908e9``
 * ``qemu-system-x86_64.wasm`` =
-  ``e3bcabb190970983a1abeac60a5c96411b4b0d56e562cd76e18fbc3b087c202b``
+  ``98f615687766cfb27477af6e6a0d989084d92987dea509dd1dd0faf888c7ed09``
+
+The generic Chromium smoke with the subset disabled reached
+``QEMU_WASM_LINUX_BOOT_OK``:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-dispatch-ops-default.json``
+* screenshot:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-dispatch-ops-default.png``
+* elapsed: ``80039`` ms
 
 The generic Chromium smoke with the subset enabled reached
 ``QEMU_WASM_LINUX_BOOT_OK``:
 
 * result:
-  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-call.json``
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-dispatch-ops.json``
 * screenshot:
-  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-call.png``
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-dispatch-ops.png``
 * Chromium: ``141.0.7390.37``
-* elapsed: ``76744`` ms
-* final subset counters: ``attempts=340000``, ``executed=79444``,
-  ``fallback_cold=57173``, ``fallback_unsupported=203318``
-* remaining top unsupported operations: ``goto_ptr``, ``goto_tb``, and
-  ``brcond``
+* elapsed: ``91534`` ms
+* final subset counters: ``attempts=72000000``, ``executed=56973162``,
+  ``fallback_cold=6444667``, ``fallback_unsupported=8577811``
+* remaining top unsupported operation: ``brcond``
 
 The downstream Bus Engine OS ``virtual-server`` microvm proof still timed out
 before ``Reached target Multi-User System.`` and
 ``QEMU_WASM_SERVICE_READY``, so the full goal is not complete:
 
 * result:
-  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-tci-wasm-subset-call.json``
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-tci-wasm-subset-dispatch-ops.json``
 * screenshot:
-  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-tci-wasm-subset-call.png``
-* elapsed: ``420251`` ms
-* final subset counters: ``attempts=2660000``, ``executed=221581``,
-  ``fallback_cold=353660``, ``fallback_unsupported=2084626``
-* remaining top unsupported operations: ``goto_ptr``, ``goto_tb``, and
-  ``brcond``
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-tci-wasm-subset-dispatch-ops.png``
+* elapsed: ``420237`` ms
+* final subset counters: ``attempts=236000000``, ``executed=152524448``,
+  ``fallback_cold=64768794``, ``fallback_unsupported=18694499``
+* remaining top unsupported operation: ``brcond``
 
-This is still useful progress compared with the earlier refreshed-kernel
-microvm baseline
-``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-microvm-new-kernel-2.json``,
-which timed out at ``systemd[1]: Starting Coldplug All udev Devices...``.
-The subset-enabled runs progressed into later systemd socket and unit startup
-such as ``systemd[1]: Listening on Console Output Muting Service Socket.``
-and ``systemd[1]: Starting Load Kernel Modules...``.  The next QEMU-side work
-is therefore not OPFS, networking, display, input, or WebCrypto.  It is a
-proper TB-dispatch/chaining design for ``goto_tb`` and ``goto_ptr`` or the
-next generated-block execution step that can preserve QEMU's ``exit_tb``
-contract while avoiding a return to the slow generic TCI interpreter for hot
-linked blocks.
+This is still not sufficient for the full Bus Engine OS readiness goal.  It is
+useful progress because the measured blocker moved: ``goto_tb`` and
+``goto_ptr`` no longer appear in the top unsupported operations after terminal
+dispatch support, and the remaining top unsupported operation is ``brcond``.
+The next QEMU-side work is therefore not OPFS, networking, display, input, or
+WebCrypto.  It is side-effect-safe ``brcond`` support for hot subset blocks,
+with validation strict enough that QEMU does not restart normal TCI after
+partially executing side-effectful operations.

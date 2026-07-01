@@ -59,6 +59,12 @@ typedef struct TCIWasmSubsetEntry {
     bool unsupported;
 } TCIWasmSubsetEntry;
 
+typedef enum TCIWasmSubsetStatus {
+    TCI_WASM_SUBSET_UNSUPPORTED,
+    TCI_WASM_SUBSET_EXIT,
+    TCI_WASM_SUBSET_DISPATCH,
+} TCIWasmSubsetStatus;
+
 static TCIWasmSubsetEntry tci_wasm_subset_cache[TCI_WASM_SUBSET_CACHE_SIZE];
 static uint64_t tci_wasm_subset_attempts;
 static uint64_t tci_wasm_subset_executed;
@@ -67,6 +73,9 @@ static uint64_t tci_wasm_subset_fallback_unsupported;
 static uint64_t tci_wasm_subset_max_ops_rejected;
 static uint64_t tci_wasm_subset_next_report;
 static uint64_t tci_wasm_subset_unsupported_ops[NB_OPS];
+static uint64_t tci_wasm_subset_brcond_bad_target;
+static uint64_t tci_wasm_subset_brcond_backward;
+static uint64_t tci_wasm_subset_brcond_work_full;
 
 EM_JS(char *, tci_wasm_getenv, (const char *name), {
     const key = UTF8ToString(Number(name));
@@ -545,11 +554,18 @@ static void tci_wasm_subset_report(const char *reason)
             "\"reason\":\"%s\",\"attempts\":%" PRIu64 ","
             "\"executed\":%" PRIu64 ",\"fallback_cold\":%" PRIu64 ","
             "\"fallback_unsupported\":%" PRIu64 ","
-            "\"max_ops_rejected\":%" PRIu64 ",\"top_unsupported_ops\":[",
+            "\"max_ops_rejected\":%" PRIu64 ","
+            "\"brcond_bad_target\":%" PRIu64 ","
+            "\"brcond_backward\":%" PRIu64 ","
+            "\"brcond_work_full\":%" PRIu64 ","
+            "\"top_unsupported_ops\":[",
             reason, tci_wasm_subset_attempts, tci_wasm_subset_executed,
             tci_wasm_subset_fallback_cold,
             tci_wasm_subset_fallback_unsupported,
-            tci_wasm_subset_max_ops_rejected);
+            tci_wasm_subset_max_ops_rejected,
+            tci_wasm_subset_brcond_bad_target,
+            tci_wasm_subset_brcond_backward,
+            tci_wasm_subset_brcond_work_full);
     for (size_t i = 0; i < ARRAY_SIZE(top_ops); i++) {
         TCGOpcode opc = top_ops[i];
         uint64_t count = tci_wasm_subset_unsupported_ops[opc];
@@ -629,9 +645,14 @@ static bool tci_wasm_subset_opcode_supported(TCGOpcode opc)
     case INDEX_op_tci_clz32:
     case INDEX_op_tci_ctz32:
     case INDEX_op_tci_setcond32:
+    case INDEX_op_tci_movcond32:
     case INDEX_op_shl:
     case INDEX_op_shr:
     case INDEX_op_sar:
+    case INDEX_op_tci_rotl32:
+    case INDEX_op_tci_rotr32:
+    case INDEX_op_rotl:
+    case INDEX_op_rotr:
     case INDEX_op_deposit:
     case INDEX_op_extract:
     case INDEX_op_sextract:
@@ -652,6 +673,8 @@ static bool tci_wasm_subset_opcode_supported(TCGOpcode opc)
     case INDEX_op_qemu_st:
     case INDEX_op_tci_qemu_st_rrr:
     case INDEX_op_exit_tb:
+    case INDEX_op_goto_tb:
+    case INDEX_op_goto_ptr:
         return true;
     default:
         return false;
@@ -704,13 +727,18 @@ static bool tci_wasm_subset_validate(const uint32_t *tb_start,
                     tci_args_rl(insn, tb_ptr, &ignored, &ptr);
                     if (ptr == NULL ||
                         !tci_wasm_subset_target_ok(tb_start, ptr) ||
-                        (const uint32_t *)ptr <= insn_ptr ||
                         (uint64_t)((const uint32_t *)ptr - tb_start) >=
                         max_ops) {
+                        tci_wasm_subset_brcond_bad_target++;
+                        return tci_wasm_subset_unsupported(entry, opc);
+                    }
+                    if ((const uint32_t *)ptr <= insn_ptr) {
+                        tci_wasm_subset_brcond_backward++;
                         return tci_wasm_subset_unsupported(entry, opc);
                     }
                     target_index = (const uint32_t *)ptr - tb_start;
                     if (work_count == max_ops) {
+                        tci_wasm_subset_brcond_work_full++;
                         return tci_wasm_subset_unsupported(entry, opc);
                     }
                     work[work_count++] = target_index;
@@ -718,6 +746,10 @@ static bool tci_wasm_subset_validate(const uint32_t *tb_start,
                 }
                 break;
             case INDEX_op_exit_tb:
+                has_exit = true;
+                goto next_path;
+            case INDEX_op_goto_tb:
+            case INDEX_op_goto_ptr:
                 has_exit = true;
                 goto next_path;
             default:
@@ -737,9 +769,9 @@ static bool tci_wasm_subset_validate(const uint32_t *tb_start,
     return true;
 }
 
-static bool tci_wasm_subset_try_exec(const uint32_t *tb_start,
-                                     tcg_target_ulong *regs,
-                                     uintptr_t *ret)
+static TCIWasmSubsetStatus tci_wasm_subset_try_exec(const uint32_t *tb_start,
+                                                    tcg_target_ulong *regs,
+                                                    uintptr_t *ret)
 {
     TCIWasmSubsetEntry *entry;
     tcg_target_ulong tmp[TCG_TARGET_NB_REGS];
@@ -747,7 +779,7 @@ static bool tci_wasm_subset_try_exec(const uint32_t *tb_start,
     uint64_t ops;
 
     if (unlikely(!tci_wasm_subset_enabled())) {
-        return false;
+        return TCI_WASM_SUBSET_UNSUPPORTED;
     }
 
     tci_wasm_subset_attempts++;
@@ -762,15 +794,15 @@ static bool tci_wasm_subset_try_exec(const uint32_t *tb_start,
     entry->hits++;
     if (entry->hits < tci_wasm_subset_threshold) {
         tci_wasm_subset_fallback_cold++;
-        return false;
+        return TCI_WASM_SUBSET_UNSUPPORTED;
     }
     if (entry->unsupported) {
         tci_wasm_subset_fallback_unsupported++;
-        return false;
+        return TCI_WASM_SUBSET_UNSUPPORTED;
     }
     if (!entry->validated &&
         !tci_wasm_subset_validate(tb_start, entry)) {
-        return false;
+        return TCI_WASM_SUBSET_UNSUPPORTED;
     }
 
     memcpy(tmp, regs, sizeof(tmp));
@@ -1015,6 +1047,16 @@ static bool tci_wasm_subset_try_exec(const uint32_t *tb_start,
             tci_args_rrrc(insn, &r0, &r1, &r2, &condition);
             tmp[r0] = tci_wasm_subset_compare32(tmp[r1], tmp[r2], condition);
             break;
+        case INDEX_op_tci_movcond32:
+            {
+                TCGReg r3, r4;
+
+                tci_args_rrrrrc(insn, &r0, &r1, &r2, &r3, &r4, &condition);
+                tmp32 = tci_wasm_subset_compare32(tmp[r1], tmp[r2],
+                                                  condition);
+                tmp[r0] = tmp[tmp32 ? r3 : r4];
+            }
+            break;
         case INDEX_op_shl:
             tci_args_rrr(insn, &r0, &r1, &r2);
             tmp[r0] = tmp[r1] << (tmp[r2] % TCG_TARGET_REG_BITS);
@@ -1027,6 +1069,22 @@ static bool tci_wasm_subset_try_exec(const uint32_t *tb_start,
             tci_args_rrr(insn, &r0, &r1, &r2);
             tmp[r0] = (tcg_target_long)tmp[r1] >>
                       (tmp[r2] % TCG_TARGET_REG_BITS);
+            break;
+        case INDEX_op_tci_rotl32:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = rol32(tmp[r1], tmp[r2] & 31);
+            break;
+        case INDEX_op_tci_rotr32:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = ror32(tmp[r1], tmp[r2] & 31);
+            break;
+        case INDEX_op_rotl:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = rol64(tmp[r1], tmp[r2] & 63);
+            break;
+        case INDEX_op_rotr:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = ror64(tmp[r1], tmp[r2] & 63);
             break;
         case INDEX_op_deposit:
             tci_args_rrrbb(insn, &r0, &r1, &r2, &pos, &len);
@@ -1094,25 +1152,45 @@ static bool tci_wasm_subset_try_exec(const uint32_t *tb_start,
             memcpy(regs, tmp, sizeof(tmp));
             *ret = (uintptr_t)ptr;
             tci_wasm_subset_executed++;
-            return true;
+            return TCI_WASM_SUBSET_EXIT;
+        case INDEX_op_goto_tb:
+            tci_args_l(insn, tb_ptr, &ptr);
+            memcpy(regs, tmp, sizeof(tmp));
+            *ret = *(uintptr_t *)ptr;
+            tci_wasm_subset_executed++;
+            return TCI_WASM_SUBSET_DISPATCH;
+        case INDEX_op_goto_ptr:
+            tci_args_r(insn, &r0);
+            memcpy(regs, tmp, sizeof(tmp));
+            *ret = tmp[r0];
+            tci_wasm_subset_executed++;
+            return *ret ? TCI_WASM_SUBSET_DISPATCH : TCI_WASM_SUBSET_EXIT;
         default:
-            return tci_wasm_subset_unsupported(entry, opc);
+            tci_wasm_subset_unsupported(entry, opc);
+            return TCI_WASM_SUBSET_UNSUPPORTED;
         }
     }
 
     tci_wasm_subset_max_ops_rejected++;
-    return tci_wasm_subset_unsupported(entry, NB_OPS);
+    tci_wasm_subset_unsupported(entry, NB_OPS);
+    return TCI_WASM_SUBSET_UNSUPPORTED;
 }
 #else
-static bool tci_wasm_subset_try_exec(const uint32_t *tb_start,
-                                     tcg_target_ulong *regs,
-                                     uintptr_t *ret)
+typedef enum TCIWasmSubsetStatus {
+    TCI_WASM_SUBSET_UNSUPPORTED,
+    TCI_WASM_SUBSET_EXIT,
+    TCI_WASM_SUBSET_DISPATCH,
+} TCIWasmSubsetStatus;
+
+static TCIWasmSubsetStatus tci_wasm_subset_try_exec(const uint32_t *tb_start,
+                                                    tcg_target_ulong *regs,
+                                                    uintptr_t *ret)
 {
     (void)tb_start;
     (void)regs;
     (void)ret;
 
-    return false;
+    return TCI_WASM_SUBSET_UNSUPPORTED;
 }
 #endif
 
@@ -1130,14 +1208,12 @@ uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
     uint64_t stack[(TCG_STATIC_CALL_ARGS_SIZE + TCG_STATIC_FRAME_SIZE)
                    / sizeof(uint64_t)];
     uintptr_t subset_ret;
+    bool at_tb_start = true;
     bool carry = false;
 
     regs[TCG_AREG0] = (tcg_target_ulong)env;
     regs[TCG_REG_CALL_STACK] = (uintptr_t)stack;
     tci_assert(tb_ptr);
-    if (tci_wasm_subset_try_exec(tb_ptr, regs, &subset_ret)) {
-        return subset_ret;
-    }
 
     for (;;) {
         uint32_t insn;
@@ -1151,6 +1227,21 @@ uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
         MemOpIdx oi;
         int32_t ofs;
         void *ptr;
+
+        if (at_tb_start) {
+            switch (tci_wasm_subset_try_exec(tb_ptr, regs, &subset_ret)) {
+            case TCI_WASM_SUBSET_EXIT:
+                return subset_ret;
+            case TCI_WASM_SUBSET_DISPATCH:
+                tb_ptr = (const uint32_t *)subset_ret;
+                continue;
+            case TCI_WASM_SUBSET_UNSUPPORTED:
+                at_tb_start = false;
+                break;
+            default:
+                g_assert_not_reached();
+            }
+        }
 
         insn = *tb_ptr++;
         opc = extract32(insn, 0, 8);
@@ -1550,6 +1641,7 @@ uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
         case INDEX_op_goto_tb:
             tci_args_l(insn, tb_ptr, &ptr);
             tb_ptr = *(void **)ptr;
+            at_tb_start = true;
             break;
 
         case INDEX_op_goto_ptr:
@@ -1559,6 +1651,7 @@ uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
                 return 0;
             }
             tb_ptr = ptr;
+            at_tb_start = true;
             break;
 
         case INDEX_op_qemu_ld:
