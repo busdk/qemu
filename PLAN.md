@@ -617,10 +617,9 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     promote the JS helper-import memory path as a performance fix without
     new evidence; the next performance-oriented step should avoid per-op JS
     helper calls or address the measured `brcond`/control-flow boundary.
-    Follow-up rejected evidence on 2026-07-01: a narrower generated-Wasm
-    `ld32u` experiment imported the QEMU/Emscripten linear memory directly
-    instead of calling a per-load JavaScript helper. The rebuilt artifact
-    hashes were
+    Follow-up rejected evidence on 2026-07-01: the first narrower
+    generated-Wasm `ld32u` experiment imported `Module.wasmMemory` instead
+    of calling a per-load JavaScript helper. The rebuilt artifact hashes were
     `qemu-system-x86_64.js=50aef5028941ce4eedabbe6675d485e810b1c4b7d8be7db4c9602e4431b0ae25`
     and
     `qemu-system-x86_64.wasm=280fee79206958044aeb98d544e6b1ab7753d6b26ce778413ad3629b80ebebac`.
@@ -630,17 +629,25 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     the generated Emscripten glue showed `wasmMemory` is an internal runtime
     variable and `Module.wasmMemory` is not exported in this build shape, so
     the submodules imported an undefined memory. Do not reattempt generated
-    memory loads until a small Node/Chromium prototype proves the exact
-    memory-handle export or import ABI used by the QEMU artifact.
-  - [ ] Prove the generated-block memory import ABI before another QEMU
-    execution patch:
-    DoD is a deterministic Node.js and Chromium prototype, outside normal
-    guest execution, that obtains the actual Emscripten wasm64 memory handle
-    exposed by the QEMU artifact shape, instantiates a generated wasm64 module
-    that imports that memory, performs a 32-bit load from a known address, and
-    fails loudly when the handle is absent, memory32, non-shared/shared
-    mismatched, or otherwise incompatible. Only after this proof passes should
-    `ld32u` be reintroduced into live generated QEMU execution.
+    memory loads through `Module.wasmMemory`.
+  - [x] Reject direct generated-Wasm `ld32u` memory import as the current
+    performance fix:
+    DoD is a rebuilt artifact and paired Chromium default/subset smokes
+    proving whether importing the internal Emscripten `wasmMemory` object into
+    generated wasm64 blocks is both valid and faster than default TCI. Result
+    on 2026-07-01: the rebuilt artifact hashes were
+    `qemu-system-x86_64.js=18f690b5dcb99d4cff6fe6caa78e89af5aec87770f2ee06c5a84c4f9160919b7`
+    and
+    `qemu-system-x86_64.wasm=2bce0f78365aae4d6a08af09c29cfc78a7f425892c1758f2d7d20875f14f788b`.
+    Default Chromium `141.0.7390.37` smoke reached
+    `QEMU_WASM_LINUX_BOOT_OK` in `81487` ms, while the subset run reached the
+    same marker in `115358` ms. The subset run compiled generated modules
+    (`generated_compiled=26153`, `generated_compile_failed=0`) and executed
+    them (`generated_executed=54146`), proving the direct `wasmMemory` import
+    ABI, but it regressed wall-clock time and still fell back mostly on
+    `tci_setcond32`. The live `ld32u` patch was removed; do not promote
+    generated memory loads as a performance solution unless new evidence
+    removes this overhead and improves the generic smoke.
   - [x] Resolve the hot TB dispatch/chaining boundary:
     DoD is a design and implementation for hot blocks that currently fall
     back on `goto_ptr` and `goto_tb`, preserving QEMU's `tcg_qemu_tb_exec`
