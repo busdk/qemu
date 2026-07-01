@@ -1733,6 +1733,8 @@ Follow-up persistent disk proof:
 
   * ``node scripts/ci/wasm-browser-persistent-disk-proof-test.mjs`` validates
     the proof result predicate and option checks.
+  * ``node scripts/ci/wasm-native-persistent-disk-proof-test.mjs`` validates
+    the native emulator-level proof predicate and option checks.
   * ``python3 scripts/ci/wasm-build-smoke-initramfs-test.py`` validates the
     persistent-disk guest init script shape.
   * ``node scripts/ci/wasm-browser-smoke-runner-test.mjs`` validates
@@ -1748,6 +1750,53 @@ Follow-up persistent disk proof:
   supervisor checkout at the time this plumbing was added because no
   ``qemu-system-x86_64.js``/``.wasm`` artifacts or
   ``qemu/emsdk-wasm64-cross:latest`` image were present locally.
+
+  ``scripts/ci/wasm-native-persistent-disk-proof.mjs`` provides an
+  emulator-level proof for the same guest-visible block-device contract when
+  browser artifacts are unavailable.  It runs native
+  ``qemu-system-x86_64`` twice with the same write/verify initramfs pair,
+  attaches the rootfs as a read-only virtio block device, attaches a separate
+  writable raw disk as the persistent device, verifies that the write run
+  starts from an empty disk and the verify run reloads the existing disk file,
+  and compares SHA-256 hashes for both the immutable rootfs and persistent
+  disk.  This proof does not replace OPFS browser evidence, but it gives
+  deterministic local coverage for the virtio-blk/rootfs immutability contract
+  while the stronger browser OPFS proof depends on wasm64 build artifacts.
+
+  Local emulator-level proof on 2026-07-01 used native QEMU 11.0.1 on macOS
+  with ``-cpu Nehalem`` and ``microvm,acpi=off``.  The proof command prepared
+  the pinned TuxBoot guest in a disposable Debian container because the macOS
+  host lacked ``debugfs``, generated write and verify initramfs images with
+  ``wasm-build-smoke-initramfs.py --persistent-disk-smoke write|verify``, and
+  ran::
+
+    node scripts/ci/wasm-native-persistent-disk-proof.mjs \
+      --qemu-system /opt/homebrew/bin/qemu-system-x86_64 \
+      --cpu Nehalem \
+      --kernel /private/tmp/qemu-wasm-smoke-cache/tuxboot-x86_64-bzImage \
+      --rootfs /private/tmp/qemu-native-persistent-disk-guest/tuxboot-x86_64-rootfs.ext4 \
+      --write-initrd /private/tmp/qemu-native-persistent-disk-guest/persistent-disk-write.cpio.gz \
+      --verify-initrd /private/tmp/qemu-native-persistent-disk-guest/persistent-disk-verify.cpio.gz \
+      --persistent-disk-path /private/tmp/qemu-native-persistent-disk-guest/persistent-nehalem-4.raw \
+      --persistent-disk-size-bytes 1048576 \
+      --out /private/tmp/qemu-native-persistent-disk-guest/native-persistent-disk-proof-nehalem-4.json \
+      --timeout-ms 180000
+
+  Result
+  ``/private/tmp/qemu-native-persistent-disk-guest/native-persistent-disk-proof-nehalem-4.json``
+  passed.  The write boot observed
+  ``QEMU_WASM_PERSISTENT_DISK_WRITE_OK`` and
+  ``QEMU_WASM_LINUX_BOOT_OK`` in 1194 ms; the verify boot observed
+  ``QEMU_WASM_PERSISTENT_DISK_VERIFY_OK`` and
+  ``QEMU_WASM_LINUX_BOOT_OK`` in 1139 ms.  Linux detected the immutable root
+  disk as ``/dev/vda`` and the persistent disk as ``/dev/vdb`` in both boots.
+  The immutable rootfs SHA-256 stayed
+  ``1d426a6b31f1a9da8476e3b106bedf854840863b9ca0823e513a2ac2ab64e699`` before
+  and after the two boots.  The persistent disk SHA-256 changed from the empty
+  1 MiB raw image
+  ``30e14955ebf1352266dc2ff8067e68104607e750abb9d3b36582b8af909fcb58`` to
+  ``caf7bb1ce5ac1017d29704166f8f24c77b1e975b31ac0c9e94a75c515f944d7e`` after
+  write and remained that value after verify.
 
 WASM-014: Add minimal browser harness
 -------------------------------------

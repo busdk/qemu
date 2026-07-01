@@ -1006,6 +1006,7 @@ smoke-wasm64-64bit-persistent-disk:
     - node scripts/ci/wasm-browser-smoke-args-test.mjs
     - node scripts/ci/wasm-browser-smoke-runner-test.mjs
     - node scripts/ci/wasm-browser-persistent-disk-proof-test.mjs
+    - node scripts/ci/wasm-native-persistent-disk-proof-test.mjs
     - python3 scripts/ci/wasm-build-smoke-initramfs-test.py
     - section_end smoke_args
     - section_start smoke_guest "Preparing WASM persistent disk proof guest"
