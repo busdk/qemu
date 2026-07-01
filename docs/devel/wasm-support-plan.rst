@@ -5109,3 +5109,52 @@ This patch is accepted as safe instrumentation and fallback cleanup, but it is
 rejected as a performance solution.  The opt-in generated path remained slower
 than the default path on the generic smoke gate, so no Bus Engine OS long proof
 was run from this artifact.
+
+Direct C-callable generated block boundary
+==========================================
+
+The next measured experiment moved the live opt-in generated path away from a
+per-execution ``EM_JS`` helper call.  Accepted register-only TCI blocks are
+compiled once into a generated WebAssembly function, the function-table pointer
+is cached in the C-side subset entry, and C calls the generated function with a
+single context pointer containing the register-array and return-slot pointers.
+Unsupported blocks, validation failures, compile failures, and disabled
+execution still fall back to strict TCI.
+
+The rebuilt artifact was produced with
+``scripts/ci/wasm-build-artifacts-local.py`` and wrote:
+
+* ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/direct-tb-func/qemu-system-x86_64.js``
+* ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/direct-tb-func/qemu-system-x86_64.wasm``
+
+The artifact hashes were:
+
+* ``qemu-system-x86_64.js`` =
+  ``2d06ef25db9698c4815ec274f67c450db7fc4c73ff982e1bd746a36eebf1ef84``
+* ``qemu-system-x86_64.wasm`` =
+  ``b167b063c5345d33cf3ebb8a0347f2bde611d6458bb5fc1c73bbff5f8f9a4d10``
+
+Generic Chromium ``141.0.7390.37`` smoke with the default path reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``78079`` ms:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-direct-tb-func-default.json``
+* screenshot:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-direct-tb-func-default.png``
+
+The same smoke with ``--tci-wasm-subset`` reached the marker in ``90199`` ms:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-direct-tb-func-subset.json``
+* screenshot:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-direct-tb-func-subset.png``
+* final counters: ``generated_compiled=6``, ``generated_executed=14501``,
+  ``generated_cache_hits=14495``, ``generated_compile_failed=0``
+* remaining generated fallbacks: ``ld32u=2538`` and ``st8=1``
+
+This proves that the direct C-callable function-table boundary is viable, but
+it is not a performance solution.  The opt-in path remained slower than the
+default path on the generic smoke gate, so no Bus Engine OS long proof was run
+from this artifact.  Further generated-execution work should not add another
+isolated opcode shortcut until coverage evidence shows that the generated path
+can cover enough hot execution to beat strict TCI.

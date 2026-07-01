@@ -1087,6 +1087,47 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   wasm64 TCG attempt must first preserve the default generic Chromium gate,
   then prove an opt-in speedup on the generic smoke before any downstream Bus
   Engine OS proof is meaningful.
+  - [x] Move live generated execution to a direct C-callable TB function
+    boundary:
+    DoD is an opt-in generated-block path that compiles each accepted
+    register-only TCI block into a WebAssembly function once, stores the
+    Emscripten function-table pointer in the C-side TB cache entry, calls it
+    directly from C with a single context pointer, avoids the previous
+    per-execution `EM_JS` helper call and BigInt argument/result arrays,
+    preserves strict TCI fallback for unsupported or invalid blocks, keeps the
+    default generic Chromium Linux smoke passing, and proves whether the
+    opt-in generic Chromium smoke improves before any downstream Bus Engine OS
+    long proof is attempted.
+    Rejected performance evidence on 2026-07-01: the implementation compiled
+    through `scripts/ci/wasm-build-artifacts-local.py` into
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/direct-tb-func`. Artifact
+    SHA-256 values were
+    `qemu-system-x86_64.js=2d06ef25db9698c4815ec274f67c450db7fc4c73ff982e1bd746a36eebf1ef84`
+    and
+    `qemu-system-x86_64.wasm=b167b063c5345d33cf3ebb8a0347f2bde611d6458bb5fc1c73bbff5f8f9a4d10`.
+    Generic Chromium `141.0.7390.37` default smoke reached
+    `QEMU_WASM_LINUX_BOOT_OK` in `78079` ms
+    (`generic-browser-smoke-direct-tb-func-default.json`). The opt-in subset
+    smoke reached the same marker in `90199` ms
+    (`generic-browser-smoke-direct-tb-func-subset.json`) with
+    `generated_compiled=6`, `generated_executed=14501`,
+    `generated_cache_hits=14495`, `generated_compile_failed=0`, and remaining
+    generated fallbacks `ld32u=2538` plus `st8=1`. This proves the direct
+    C-callable generated-block function-table boundary works and keeps strict
+    fallback, but it is slower than default and is not the Bus Engine OS
+    performance solution. No Bus Engine OS long proof is justified from this
+    artifact.
+  - [ ] Stop expanding the tiny live TCI-subset path unless new evidence
+    predicts a real speedup:
+    DoD is a short implementation note that compares the accepted generated
+    execution coverage against total TCI/subset attempts, explains why
+    register-only or narrow memory/branch additions have not beaten strict TCI
+    in Chromium, and selects the next QEMU-side performance implementation
+    from measured evidence. If the selected direction remains CPU execution,
+    it must move toward a real generated-block/backend shape with broader
+    block coverage and dispatch semantics instead of another isolated opcode
+    shortcut. If a fresh measurement points to a device/backend boundary, the
+    next patch must sit behind that QEMU boundary.
 
 ## MVP Generic QEMU Work
 

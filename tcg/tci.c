@@ -57,11 +57,19 @@ typedef struct TCIWasmSubsetEntry {
     const uint32_t *tb_ptr;
     uint64_t hits;
     uint64_t generated_signature;
+    uintptr_t generated_func;
     bool validated;
     bool unsupported;
     bool generated_signature_valid;
     bool generated_unsupported;
 } TCIWasmSubsetEntry;
+
+typedef struct TCIWasmGeneratedContext {
+    uintptr_t regs;
+    uintptr_t ret;
+} TCIWasmGeneratedContext;
+
+typedef uintptr_t (*TCIWasmGeneratedFunc)(uintptr_t ctx);
 
 typedef enum TCIWasmSubsetStatus {
     TCI_WASM_SUBSET_UNSUPPORTED,
@@ -620,19 +628,13 @@ static bool tci_wasm_generated_prevalidate(TCIWasmSubsetEntry *entry,
     return tci_wasm_generated_mark_unsupported(entry, NB_OPS);
 }
 
-EM_JS(int, tci_wasm_generated_try_exec_js,
-      (uintptr_t tb_arg, uintptr_t regs_arg, uintptr_t ret_arg,
-       uint64_t max_ops_arg, int op_mov, int op_movi, int op_movl,
-       int op_add, int op_sub, int op_mul, int op_and, int op_or, int op_xor,
-       int op_exit_tb, int op_goto_tb),
+EM_JS(uintptr_t, tci_wasm_generated_compile_js,
+      (uintptr_t tb_arg, uint64_t max_ops_arg, int op_mov, int op_movi,
+       int op_movl, int op_add, int op_sub, int op_mul, int op_and, int op_or,
+       int op_xor, int op_exit_tb, int op_goto_tb),
 {
     const tb = Number(tb_arg);
-    const regs = Number(regs_arg);
-    const ret = Number(ret_arg);
     const maxOps = Number(max_ops_arg);
-    const cache = Module.__qemuTciGeneratedCache ||
-        (Module.__qemuTciGeneratedCache = new Map());
-    const key = String(tb);
     const valueI64 = 0x7e;
 
     function encodeU32(value) {
@@ -686,8 +688,15 @@ EM_JS(int, tci_wasm_generated_try_exec_js,
         return [0x60, ...vector(params), ...vector(results)];
     }
 
-    function functionBody(instructions) {
-        const body = [0x00, ...instructions, 0x0b];
+    function functionBody(instructions, locals = []) {
+        const body = [
+            ...vector(locals.map((local) => [
+                ...encodeU32(local.count),
+                local.type,
+            ])),
+            ...instructions,
+            0x0b,
+        ];
         return [...encodeU32(body.length), ...body];
     }
 
@@ -697,6 +706,20 @@ EM_JS(int, tci_wasm_generated_try_exec_js,
 
     function localSet(index, expr) {
         return [...expr, 0x21, ...encodeU32(index)];
+    }
+
+    function i64Load(address, offset) {
+        return [...address, 0x29, ...encodeU32(3), ...encodeU32(offset)];
+    }
+
+    function i64Store(address, value, offset) {
+        return [
+            ...address,
+            ...value,
+            0x37,
+            ...encodeU32(3),
+            ...encodeU32(offset),
+        ];
     }
 
     function i64Const(value) {
@@ -722,32 +745,21 @@ EM_JS(int, tci_wasm_generated_try_exec_js,
         return HEAPU64[Number(address) >> 3];
     }
 
-    function fingerprintEntry() {
-        let hash = 0xcbf29ce484222325n;
-
-        for (let index = 0; index < maxOps; index++) {
-            const insnPtr = tb + index * 4;
-            const tbPtr = insnPtr + 4;
-            const insn = HEAPU32[insnPtr >> 2];
-            const opc = bits(insn, 0, 8);
-
-            hash ^= BigInt(insn >>> 0);
-            hash = BigInt.asUintN(64, hash * 0x100000001b3n);
-
-            if (opc === op_exit_tb || opc === op_goto_tb) {
-                const target = BigInt(tbPtr + sextract(insn, 12, 20));
-                hash ^= BigInt.asUintN(64, target);
-                hash = BigInt.asUintN(64, hash * 0x100000001b3n);
-                break;
-            }
-        }
-
-        return hash.toString(16);
+    function regLocal(reg) {
+        return 3 + Number(reg);
     }
 
-    function compileEntry(signature) {
+    function compileFunction() {
         const instructions = [];
         let terminal = null;
+
+        instructions.push(...localSet(1, i64Load(localGet(0), 0)));
+        instructions.push(...localSet(2, i64Load(localGet(0), 8)));
+        for (let reg = 0; reg < 16; reg++) {
+            instructions.push(
+                ...localSet(regLocal(reg), i64Load(localGet(1), reg * 8))
+            );
+        }
 
         for (let index = 0; index < maxOps; index++) {
             const insnPtr = tb + index * 4;
@@ -759,15 +771,19 @@ EM_JS(int, tci_wasm_generated_try_exec_js,
             const r2 = bits(insn, 16, 4);
 
             if (opc === op_mov) {
-                instructions.push(...localSet(r0, localGet(r1)));
+                instructions.push(...localSet(regLocal(r0),
+                                              localGet(regLocal(r1))));
             } else if (opc === op_movi) {
-                instructions.push(...localSet(r0, i64Const(sextract(insn, 12, 20))));
+                instructions.push(...localSet(regLocal(r0),
+                                              i64Const(sextract(insn, 12, 20))));
             } else if (opc === op_movl) {
                 const ptr = BigInt(tbPtr + sextract(insn, 12, 20));
-                instructions.push(...localSet(r0, i64Const(readU64(ptr))));
+                instructions.push(...localSet(regLocal(r0),
+                                              i64Const(readU64(ptr))));
             } else if (opc === op_add || opc === op_sub || opc === op_mul ||
                        opc === op_and || opc === op_or || opc === op_xor) {
-                instructions.push(...localGet(r1), ...localGet(r2));
+                instructions.push(...localGet(regLocal(r1)),
+                                  ...localGet(regLocal(r2)));
                 if (opc === op_add) {
                     instructions.push(0x7c); /* i64.add */
                 } else if (opc === op_sub) {
@@ -781,7 +797,7 @@ EM_JS(int, tci_wasm_generated_try_exec_js,
                 } else {
                     instructions.push(0x85); /* i64.xor */
                 }
-                instructions.push(0x21, ...encodeU32(r0));
+                instructions.push(0x21, ...encodeU32(regLocal(r0)));
             } else if (opc === op_exit_tb || opc === op_goto_tb) {
                 const ptr = BigInt(tbPtr + sextract(insn, 12, 20));
                 terminal = {
@@ -791,101 +807,61 @@ EM_JS(int, tci_wasm_generated_try_exec_js,
                 };
                 break;
             } else {
-                return { unsupported: true, opcode: opc, signature };
+                return 0;
             }
         }
 
         if (terminal === null) {
-            return { unsupported: true, opcode: 0, signature };
+            return 0;
         }
 
-        instructions.push(...i64Const(terminal.status));
-        instructions.push(...i64Const(terminal.ret));
         for (let reg = 0; reg < 16; reg++) {
-            instructions.push(...localGet(reg));
+            instructions.push(
+                ...i64Store(localGet(1), localGet(regLocal(reg)), reg * 8)
+            );
         }
+        instructions.push(...i64Store(
+            localGet(2),
+            terminal.kind === "goto_tb" ? i64Load(i64Const(terminal.ret), 0)
+                                        : i64Const(terminal.ret),
+            0
+        ));
+        instructions.push(...i64Const(terminal.status));
 
-        const params = new Array(16).fill(valueI64);
-        const results = new Array(18).fill(valueI64);
         const bytes = [
             0x00, 0x61, 0x73, 0x6d,
             0x01, 0x00, 0x00, 0x00,
-            ...section(1, vector([functionType(params, results)])),
+            ...section(1, vector([functionType([valueI64], [valueI64])])),
+            ...section(2, vector([[
+                ...name("env"),
+                ...name("memory"),
+                0x02, 0x07, 0x00, 0x80, 0x80, 0x10,
+            ]])),
             ...section(3, vector([[0x00]])),
             ...section(7, vector([[...name("run"), 0x00, ...encodeU32(0)]])),
-            ...section(10, vector([functionBody(instructions)])),
+            ...section(10, vector([functionBody(
+                instructions,
+                [{ count: 18, type: valueI64 }]
+            )])),
         ];
         const module = new WebAssembly.Module(Uint8Array.from(bytes));
-        const instance = new WebAssembly.Instance(module, {});
+        const instance = new WebAssembly.Instance(module, {
+            env: { memory: wasmMemory },
+        });
 
-        return {
-            fn: instance.exports.run,
-            retKind: terminal.kind,
-            signature,
-            fresh: true,
-        };
+        return addFunction(instance.exports.run, "ii");
     }
 
-    let entry = cache.get(key);
-    let statusOffset = 20;
-    const signature = fingerprintEntry();
-    if (entry === undefined) {
-        statusOffset = 10;
-        try {
-            entry = compileEntry(signature);
-        } catch (error) {
-            entry = { unsupported: true, compileFailed: true, signature };
+    try {
+        if (typeof wasmMemory === "undefined" ||
+            typeof addFunction !== "function") {
+            return 0n;
         }
-        cache.set(key, entry);
-        if (cache.size > 4096) {
-            cache.delete(cache.keys().next().value);
-        }
-    } else if (entry.signature !== signature) {
-        statusOffset = 30;
-        try {
-            entry = compileEntry(signature);
-        } catch (error) {
-            entry = { unsupported: true, compileFailed: true, signature };
-        }
-        cache.set(key, entry);
+        const func = compileFunction();
+        return func ? BigInt(func) : 0n;
+    } catch (error) {
+        return 0n;
     }
-    if (entry.unsupported) {
-        if (entry.compileFailed) {
-            return -1;
-        }
-        if (entry.opcode !== undefined) {
-            return 1000 + Number(entry.opcode);
-        }
-        return 0;
-    }
-
-    const regsIndex = regs >> 3;
-    const args = [];
-    for (let reg = 0; reg < 16; reg++) {
-        args.push(BigInt.asIntN(64, HEAPU64[regsIndex + reg]));
-    }
-
-    const result = entry.fn(...args);
-    if (!Array.isArray(result) || result.length !== 18) {
-        return -1;
-    }
-
-    let status = Number(result[0]);
-    let retValue = BigInt.asUintN(64, result[1]);
-
-    if (entry.retKind === "goto_tb") {
-        retValue = HEAPU64[Number(retValue) >> 3];
-    }
-
-    HEAPU64[ret >> 3] = BigInt.asUintN(64, retValue);
-    for (let reg = 0; reg < 16; reg++) {
-        HEAPU64[regsIndex + reg] = BigInt.asUintN(64, result[reg + 2]);
-    }
-
-    if (entry.fresh) {
-        entry.fresh = false;
-    }
-    return status + statusOffset;
 });
 
 static void tci_wasm_subset_report(const char *reason)
@@ -995,6 +971,7 @@ static TCIWasmSubsetEntry *tci_wasm_subset_entry(const uint32_t *tb_ptr)
         entry->tb_ptr = tb_ptr;
         entry->hits = 0;
         entry->generated_signature = 0;
+        entry->generated_func = 0;
         entry->validated = false;
         entry->unsupported = false;
         entry->generated_signature_valid = false;
@@ -1181,13 +1158,21 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
                             tcg_target_ulong *regs, uintptr_t *ret)
 {
     uint64_t signature = tci_wasm_generated_signature(tb_start);
+    TCIWasmGeneratedContext ctx = {
+        .regs = (uintptr_t)regs,
+        .ret = (uintptr_t)ret,
+    };
     int status;
 
     if (!entry->generated_signature_valid ||
         entry->generated_signature != signature) {
+        if (entry->generated_signature_valid) {
+            tci_wasm_generated_cache_stale++;
+        }
         entry->generated_signature = signature;
         entry->generated_signature_valid = true;
         entry->generated_unsupported = false;
+        entry->generated_func = 0;
     }
     if (entry->generated_unsupported) {
         return TCI_WASM_SUBSET_UNSUPPORTED;
@@ -1197,38 +1182,29 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
     if (!tci_wasm_generated_prevalidate(entry, tb_start)) {
         return TCI_WASM_SUBSET_UNSUPPORTED;
     }
-    status = tci_wasm_generated_try_exec_js(
-        (uintptr_t)tb_start, (uintptr_t)regs, (uintptr_t)ret,
-        tci_wasm_subset_max_ops, INDEX_op_mov, INDEX_op_tci_movi,
-        INDEX_op_tci_movl, INDEX_op_add, INDEX_op_sub, INDEX_op_mul,
-        INDEX_op_and, INDEX_op_or, INDEX_op_xor, INDEX_op_exit_tb,
-        INDEX_op_goto_tb);
 
-    if (status >= 1000) {
-        TCGOpcode opc = status - 1000;
+    if (entry->generated_func == 0) {
+        entry->generated_func = tci_wasm_generated_compile_js(
+            (uintptr_t)tb_start, tci_wasm_subset_max_ops, INDEX_op_mov,
+            INDEX_op_tci_movi, INDEX_op_tci_movl, INDEX_op_add,
+            INDEX_op_sub, INDEX_op_mul, INDEX_op_and, INDEX_op_or,
+            INDEX_op_xor, INDEX_op_exit_tb, INDEX_op_goto_tb);
+        if (entry->generated_func == 0) {
+            entry->generated_unsupported = true;
+            tci_wasm_generated_compile_failed++;
+            return TCI_WASM_SUBSET_UNSUPPORTED;
+        }
+        tci_wasm_generated_compiled++;
+    } else {
+        tci_wasm_generated_cache_hits++;
+    }
 
-        tci_wasm_generated_mark_unsupported(entry, opc);
-        return TCI_WASM_SUBSET_UNSUPPORTED;
-    }
-    if (status == 0) {
-        tci_wasm_generated_mark_unsupported(entry, NB_OPS);
-        return TCI_WASM_SUBSET_UNSUPPORTED;
-    }
-    if (status < 0) {
+    status = ((TCIWasmGeneratedFunc)entry->generated_func)((uintptr_t)&ctx);
+
+    if (status <= 0) {
         entry->generated_unsupported = true;
         tci_wasm_generated_compile_failed++;
         return TCI_WASM_SUBSET_UNSUPPORTED;
-    }
-    if (status >= 30) {
-        tci_wasm_generated_cache_stale++;
-        tci_wasm_generated_compiled++;
-        status -= 30;
-    } else if (status >= 20) {
-        tci_wasm_generated_cache_hits++;
-        status -= 20;
-    } else if (status >= 10) {
-        tci_wasm_generated_compiled++;
-        status -= 10;
     }
 
     switch (status) {
