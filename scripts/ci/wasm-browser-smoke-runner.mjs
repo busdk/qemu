@@ -57,6 +57,13 @@ Options:
   --idle-after-text TEXT
                      Only apply --idle-timeout-ms while the last serial line
                      contains this text
+  --guest-idle-timeout-ms MS
+                     Fail when guest-origin serial output is idle for this
+                     long, ignoring QEMU instrumentation lines
+                     (default: disabled)
+  --guest-idle-after-text TEXT
+                     Only apply --guest-idle-timeout-ms while the last
+                     guest-origin serial line contains this text
   --initrd FILE       Smoke initramfs image
   --kernel FILE       64-bit Linux bzImage
   --keyboard-after-text TEXT
@@ -184,6 +191,8 @@ function parseArgs(argv) {
     expectText: [],
     focusDisplay: false,
     firmwareDir: "pc-bios",
+    guestIdleAfterText: "",
+    guestIdleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
     guestManifest: null,
     harnessExpectedKeyEvents: 0,
     harnessSelfTest: false,
@@ -280,6 +289,12 @@ function parseArgs(argv) {
     } else if (arg === "--firmware-dir") {
       options.firmwareDir = argv[++i];
       explicit.add("firmwareDir");
+    } else if (arg === "--guest-idle-timeout-ms") {
+      options.guestIdleTimeoutMs = Number(argv[++i]);
+      explicit.add("guestIdleTimeoutMs");
+    } else if (arg === "--guest-idle-after-text") {
+      options.guestIdleAfterText = argv[++i];
+      explicit.add("guestIdleAfterText");
     } else if (arg === "--guest-manifest") {
       options.guestManifest = argv[++i];
     } else if (arg === "--harness-expected-key-events") {
@@ -476,6 +491,7 @@ function parseArgs(argv) {
       "maxOutputBytes",
       "displayMinNonblackPixels",
       "harnessExpectedKeyEvents",
+      "guestIdleTimeoutMs",
       "idleTimeoutMs",
       "pageTextTailBytes",
       "persistentDiskSizeBytes",
@@ -515,6 +531,7 @@ function parseArgs(argv) {
       "expectedResolution",
       "expectDisplayHash",
       "firmwareDir",
+      "guestIdleAfterText",
       "host",
       "idleAfterText",
       "initrd",
@@ -625,6 +642,10 @@ function parseArgs(argv) {
   }
   if (!Number.isInteger(options.idleTimeoutMs) || options.idleTimeoutMs < 0) {
     console.error("--idle-timeout-ms must be a non-negative integer");
+    usage(2);
+  }
+  if (!Number.isInteger(options.guestIdleTimeoutMs) || options.guestIdleTimeoutMs < 0) {
+    console.error("--guest-idle-timeout-ms must be a non-negative integer");
     usage(2);
   }
   if (!Number.isInteger(options.pageTextTailBytes) || options.pageTextTailBytes <= 0) {
@@ -819,25 +840,42 @@ export function progressSampleDiagnostic(result, elapsedMs, reason, state) {
     outputByteDelta: state && previousState
       ? state.outputBytes - previousState.outputBytes
       : null,
+    guestLineDelta: state && previousState &&
+        Number.isInteger(state.guestLines) &&
+        Number.isInteger(previousState.guestLines)
+      ? state.guestLines - previousState.guestLines
+      : null,
+    guestOutputByteDelta: state && previousState &&
+        Number.isInteger(state.guestOutputBytes) &&
+        Number.isInteger(previousState.guestOutputBytes)
+      ? state.guestOutputBytes - previousState.guestOutputBytes
+      : null,
     lastLineChanged: state && previousState
       ? state.lastLine !== previousState.lastLine
+      : null,
+    guestLastLineChanged: state && previousState
+      ? state.guestLastLine !== previousState.guestLastLine
       : null,
     previousElapsedMs: previous ? previous.elapsedMs : null,
   };
 }
 
-function serialProgressSignature(sample) {
+function serialProgressSignature(sample, {
+  bytesField = "outputBytes",
+  linesField = "lines",
+  lastLineField = "lastLine",
+} = {}) {
   const state = sample && sample.state ? sample.state : null;
-  if (state === null || !Number.isInteger(state.outputBytes)) {
+  if (state === null || !Number.isInteger(state[bytesField])) {
     return null;
   }
-  if (state.outputBytes <= 0) {
+  if (state[bytesField] <= 0) {
     return null;
   }
   return {
-    lines: Number.isInteger(state.lines) ? state.lines : null,
-    outputBytes: state.outputBytes,
-    lastLine: typeof state.lastLine === "string" ? state.lastLine : "",
+    lines: Number.isInteger(state[linesField]) ? state[linesField] : null,
+    outputBytes: state[bytesField],
+    lastLine: typeof state[lastLineField] === "string" ? state[lastLineField] : "",
   };
 }
 
@@ -869,6 +907,56 @@ export function serialIdleDiagnostic(samples, idleTimeoutMs, idleAfterText = "")
   for (let index = samples.length - 2; index >= 0; index--) {
     const previous = samples[index];
     const previousSignature = serialProgressSignature(previous);
+    if (!sameSerialProgress(currentSignature, previousSignature)) {
+      break;
+    }
+    idleSinceElapsedMs = previous.elapsedMs;
+  }
+
+  const idleMs = current.elapsedMs - idleSinceElapsedMs;
+  if (idleMs < idleTimeoutMs) {
+    return null;
+  }
+  return {
+    idle: true,
+    idleAfterText,
+    idleMs,
+    idleSinceElapsedMs,
+    idleTimeoutMs,
+    lastLine: currentSignature.lastLine,
+    outputBytes: currentSignature.outputBytes,
+    outputLines: currentSignature.lines,
+  };
+}
+
+export function guestSerialIdleDiagnostic(samples, idleTimeoutMs, idleAfterText = "") {
+  if (!Number.isInteger(idleTimeoutMs) || idleTimeoutMs <= 0) {
+    return null;
+  }
+  const current = lastEntry(samples);
+  const currentSignature = serialProgressSignature(current, {
+    bytesField: "guestOutputBytes",
+    linesField: "guestLines",
+    lastLineField: "guestLastLine",
+  });
+  if (current === null || currentSignature === null) {
+    return null;
+  }
+  if (
+    idleAfterText !== "" &&
+    !currentSignature.lastLine.includes(idleAfterText)
+  ) {
+    return null;
+  }
+
+  let idleSinceElapsedMs = current.elapsedMs;
+  for (let index = samples.length - 2; index >= 0; index--) {
+    const previous = samples[index];
+    const previousSignature = serialProgressSignature(previous, {
+      bytesField: "guestOutputBytes",
+      linesField: "guestLines",
+      lastLineField: "guestLastLine",
+    });
     if (!sameSerialProgress(currentSignature, previousSignature)) {
       break;
     }
@@ -1008,8 +1096,12 @@ function compactProgressSample(sample) {
     reason: sample.reason,
     lineDelta: sample.lineDelta,
     outputByteDelta: sample.outputByteDelta,
+    guestLineDelta: sample.guestLineDelta ?? null,
+    guestOutputByteDelta: sample.guestOutputByteDelta ?? null,
     lastLineChanged: sample.lastLineChanged,
+    guestLastLineChanged: sample.guestLastLineChanged ?? null,
     lastLine: sample.state && sample.state.lastLine ? sample.state.lastLine : null,
+    guestLastLine: sample.state && sample.state.guestLastLine ? sample.state.guestLastLine : null,
   };
 }
 
@@ -1039,6 +1131,7 @@ export function smokeResultSummary(result) {
     requestFailureCount: (result.requestFailures || []).length,
     firstRequestFailure,
     idleTimeout: result.idleTimeout || null,
+    guestIdleTimeout: result.guestIdleTimeout || null,
     progressSampleCount: (result.progressSamples || []).length,
     lastProgressSample,
   };
@@ -1140,6 +1233,9 @@ export function promoteSmokeState(result, smokeState) {
   result.outputLines = smokeState.lines;
   result.outputBytes = smokeState.outputBytes;
   result.lastLine = smokeState.lastLine;
+  result.guestOutputLines = smokeState.guestLines;
+  result.guestOutputBytes = smokeState.guestOutputBytes;
+  result.guestLastLine = smokeState.guestLastLine;
   result.browserRuntime = smokeState.runtime || null;
   result.displayState = smokeState.display || null;
   result.powerControlState = smokeState.powerControl || null;
@@ -1291,6 +1387,8 @@ export function initialSmokeResult(options, browserVersion) {
     performanceAttributionInterval: Number.isInteger(options.performanceAttributionInterval)
       ? options.performanceAttributionInterval
       : 10000,
+    guestIdleAfterText: options.guestIdleAfterText,
+    guestIdleTimeoutMs: options.guestIdleTimeoutMs,
     progressSampleIntervalMs: options.progressSampleIntervalMs,
     progressSampleLimit: options.progressSampleLimit,
     persistentDisk: options.persistentDisk,
@@ -1676,6 +1774,17 @@ async function run() {
         result.idleTimeout = idle;
         rejectIdle(new Error(
           `serial output idle for ${idle.idleMs} ms after: ${idle.lastLine}`,
+        ));
+      }
+      const guestIdle = guestSerialIdleDiagnostic(
+        result.progressSamples,
+        options.guestIdleTimeoutMs,
+        options.guestIdleAfterText,
+      );
+      if (guestIdle !== null) {
+        result.guestIdleTimeout = guestIdle;
+        rejectIdle(new Error(
+          `guest serial output idle for ${guestIdle.idleMs} ms after: ${guestIdle.lastLine}`,
         ));
       }
     };

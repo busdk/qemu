@@ -408,6 +408,32 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   CPU hot-TB WebAssembly translation with strict TCI fallback, not OPFS,
   networking, WebGL/WebGPU, WebCrypto, or another paravirtual browser backend
   as the first acceleration slice.
+- [x] Add guest-origin heartbeat/progress diagnostics for Bus Engine OS boot:
+  DoD is browser smoke runner support that records guest-only serial line and
+  byte counters separately from QEMU instrumentation, supports an explicit
+  guest-idle timeout, records the last guest-origin line in result JSON and
+  summaries, and reruns the Bus Engine OS microvm proof with verbose
+  kernel/systemd logging to decide whether the current stop is a mount/unit
+  blocker such as `/sys/fs/bpf` or continued slow CPU execution. This item is
+  QEMU-generic harness work; any downstream Engine OS heartbeat service,
+  kernel config change, or systemd unit mask belongs in the downstream module
+  after this diagnostic names the failing phase.
+  Accepted evidence on 2026-07-01: the QEMU browser harness now tracks
+  `guestLines`, `guestOutputBytes`, and `guestLastLine` separately from raw
+  serial output, exposes `--guest-idle-timeout-ms` and
+  `--guest-idle-after-text`, and includes guest-idle state in result
+  summaries. The Bus Engine OS microvm diagnostic
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-microvm-guest-idle-diagnostic.json`
+  failed after guest-origin serial output was idle for 90001 ms, while raw
+  QEMU serial output continued with `qemu-tci-wasm-subset` summaries. The last
+  guest line was `systemd[1]: Mounting bpf (bpf) on /sys/fs/bpf ...`, so the
+  current blocker is a downstream kernel/systemd BPF filesystem mount phase,
+  not merely lack of QEMU process output. A follow-up run with
+  `systemd.mask=sys-fs-bpf.mount` still reached the same last guest line,
+  proving that argument did not suppress the mount in this path. Downstream
+  Bus Engine OS must add heartbeat/progress policy and rebuild the virtual
+  kernels with `CONFIG_BPF_FS=y` before more QEMU CPU optimization can be
+  treated as the next boot-readiness blocker.
 - [ ] Implement the first evidence-backed acceleration slice:
   DoD is an initial hot-TB WebAssembly translation slice modeled on
   `ktock/qemu-wasm` if CPU interpreter cost is the measured blocker, or the

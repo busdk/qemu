@@ -17,6 +17,7 @@ import {
   displayPixelSummary,
   initialSmokeResult,
   isTerminalPageStatus,
+  guestSerialIdleDiagnostic,
   pageErrorDiagnostic,
   progressSampleDiagnostic,
   promoteSmokeState,
@@ -1195,7 +1196,10 @@ for (const status of [
     state: firstState,
     lineDelta: null,
     outputByteDelta: null,
+    guestLineDelta: null,
+    guestOutputByteDelta: null,
     lastLineChanged: null,
+    guestLastLineChanged: null,
     previousElapsedMs: null,
   });
 
@@ -1211,7 +1215,10 @@ for (const status of [
     state: secondState,
     lineDelta: 0,
     outputByteDelta: 0,
+    guestLineDelta: null,
+    guestOutputByteDelta: null,
     lastLineChanged: false,
+    guestLastLineChanged: false,
     previousElapsedMs: 10000,
   });
 
@@ -1226,7 +1233,10 @@ for (const status of [
     state: thirdState,
     lineDelta: 3,
     outputByteDelta: 120,
+    guestLineDelta: null,
+    guestOutputByteDelta: null,
     lastLineChanged: true,
+    guestLastLineChanged: false,
     previousElapsedMs: 10000,
   });
 }
@@ -1306,6 +1316,69 @@ for (const status of [
       },
     },
   ], 10000), null);
+}
+
+{
+  const samples = [
+    {
+      elapsedMs: 10000,
+      state: {
+        lines: 100,
+        outputBytes: 5000,
+        lastLine: "systemd[1]: Mounting bpf on /sys/fs/bpf...",
+        guestLines: 100,
+        guestOutputBytes: 5000,
+        guestLastLine: "systemd[1]: Mounting bpf on /sys/fs/bpf...",
+      },
+    },
+    {
+      elapsedMs: 20000,
+      state: {
+        lines: 110,
+        outputBytes: 5600,
+        lastLine: "qemu-tci-wasm-subset: {\"event\":\"summary\"}",
+        guestLines: 100,
+        guestOutputBytes: 5000,
+        guestLastLine: "systemd[1]: Mounting bpf on /sys/fs/bpf...",
+      },
+    },
+    {
+      elapsedMs: 30000,
+      state: {
+        lines: 120,
+        outputBytes: 6200,
+        lastLine: "qemu-tci-wasm-subset: {\"event\":\"summary\"}",
+        guestLines: 100,
+        guestOutputBytes: 5000,
+        guestLastLine: "systemd[1]: Mounting bpf on /sys/fs/bpf...",
+      },
+    },
+  ];
+  assert.equal(serialIdleDiagnostic(samples, 20000), null);
+  assert.deepEqual(guestSerialIdleDiagnostic(samples, 20000), {
+    idle: true,
+    idleAfterText: "",
+    idleMs: 20000,
+    idleSinceElapsedMs: 10000,
+    idleTimeoutMs: 20000,
+    lastLine: "systemd[1]: Mounting bpf on /sys/fs/bpf...",
+    outputBytes: 5000,
+    outputLines: 100,
+  });
+  assert.deepEqual(
+    guestSerialIdleDiagnostic(samples, 20000, "/sys/fs/bpf"),
+    {
+      idle: true,
+      idleAfterText: "/sys/fs/bpf",
+      idleMs: 20000,
+      idleSinceElapsedMs: 10000,
+      idleTimeoutMs: 20000,
+      lastLine: "systemd[1]: Mounting bpf on /sys/fs/bpf...",
+      outputBytes: 5000,
+      outputLines: 100,
+    },
+  );
+  assert.equal(guestSerialIdleDiagnostic(samples, 20000, "multi-user"), null);
 }
 
 {
@@ -1390,14 +1463,19 @@ for (const status of [
       outputBytes: 5585,
       outputLines: 107,
     },
+    guestIdleTimeout: null,
     progressSampleCount: 1,
     lastProgressSample: {
       elapsedMs: 240000,
       reason: "final",
       lineDelta: 0,
       outputByteDelta: 0,
+      guestLineDelta: null,
+      guestOutputByteDelta: null,
       lastLineChanged: false,
+      guestLastLineChanged: null,
       lastLine: "x86/fpu: x87 FPU will use FXSAVE",
+      guestLastLine: null,
     },
   });
 }

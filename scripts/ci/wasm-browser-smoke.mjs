@@ -1366,6 +1366,9 @@ async function run() {
     lines: 0,
     outputBytes: 0,
     outputSuppressed: false,
+    guestLines: 0,
+    guestOutputBytes: 0,
+    guestLastLine: "",
     phase: "init",
     phases: [],
     startedAtMs: startTime,
@@ -1645,9 +1648,30 @@ async function run() {
     }
   };
 
+  const isGuestProgressLine = (line) => {
+    if (typeof line !== "string") {
+      return false;
+    }
+    if (line === "") {
+      return false;
+    }
+    return !(
+      line.startsWith("qemu-tci-wasm-subset:") ||
+      line.startsWith("qemu-tcg-hotblocks:") ||
+      line.startsWith("qemu-wasm-perf-attribution:") ||
+      line.startsWith("wasm-browser-smoke:")
+    );
+  };
+
   const emit = (line) => {
     smokeState.lines += 1;
     smokeState.lastLine = line;
+    const encoded = new TextEncoder().encode(`${line}\n`);
+    if (isGuestProgressLine(line)) {
+      smokeState.guestLines += 1;
+      smokeState.guestOutputBytes += encoded.length;
+      smokeState.guestLastLine = line;
+    }
     recordHotBlockSummary(
       smokeState,
       line,
@@ -1664,7 +1688,6 @@ async function run() {
       Math.round(performance.now() - startTime),
     );
     if (smokeState.outputBytes < config.maxOutputBytes) {
-      const encoded = new TextEncoder().encode(`${line}\n`);
       const remaining = config.maxOutputBytes - smokeState.outputBytes;
       if (encoded.length <= remaining) {
         appendLine(output, line);

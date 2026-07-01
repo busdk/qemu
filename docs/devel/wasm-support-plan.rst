@@ -4528,3 +4528,60 @@ does not produce the required downstream boot-readiness improvement.  The next
 implementation must either provide actual generated WebAssembly execution for
 hot TBs, or add fresh attribution proving that another QEMU-side boundary has
 become dominant.
+
+Guest-progress idle diagnostic
+==============================
+
+On 2026-07-01 the browser smoke harness gained a guest-origin progress
+channel alongside raw serial output.  The page-side smoke state records
+``guestLines``, ``guestOutputBytes``, and ``guestLastLine`` after filtering
+out QEMU instrumentation lines such as ``qemu-tci-wasm-subset:`` and
+``qemu-tcg-hotblocks:``.  The runner exposes ``--guest-idle-timeout-ms`` and
+``--guest-idle-after-text`` so long browser runs can fail when Linux stops
+printing guest-origin progress even if QEMU itself continues to emit profiling
+or subset summaries.
+
+The focused Bus Engine OS microvm run used the existing safe artifact:
+
+* ``qemu-system-x86_64.js`` =
+  ``700ae01fe2a06ce86cdd7989556245dc664c5cdf83ba0755b4af11f23399ba66``
+* ``qemu-system-x86_64.wasm`` =
+  ``de11a3fed950420dfc1871bbca88e5a27b667505ab83e08474fe09373f546703``
+
+The guest manifest selected ``machine=microvm,acpi=off``,
+``rootfsDevice=virtio-mmio``, and ``root=/dev/vda``.  Linux detected the
+root filesystem as a virtio-blk disk at ``/dev/vda`` and mounted the ext4
+rootfs before systemd started, so this diagnostic does not point at the
+rootfs block-device path.
+
+The diagnostic result was:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-microvm-guest-idle-diagnostic.json``
+* screenshot:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-microvm-guest-idle-diagnostic.png``
+* outcome: guest-origin serial output idle for ``90001`` ms
+* raw serial lines: ``1426``
+* guest-origin lines: ``1263``
+* final raw line: a ``qemu-tci-wasm-subset`` summary
+* final guest-origin line:
+  ``systemd[1]: Mounting bpf (bpf) on /sys/fs/bpf (MS_NOSUID|MS_NODEV|MS_NOEXEC "mode=0700")...``
+
+A follow-up run added ``systemd.mask=sys-fs-bpf.mount`` to the kernel command
+line, and the result still stopped at the same guest-origin line:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-microvm-mask-bpf-guest-idle.json``
+* screenshot:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-microvm-mask-bpf-guest-idle.png``
+* outcome: guest-origin serial output idle for ``90002`` ms
+* final guest-origin line: the same ``/sys/fs/bpf`` mount message
+
+This evidence changes the immediate blocker classification.  QEMU is still
+executing and producing instrumentation summaries, and the virtio-blk rootfs
+path has already worked.  The next downstream Bus Engine OS work is to fix or
+prove the BPF filesystem mount path, including enabling ``CONFIG_BPF_FS`` in
+the virtual kernels and rebuilding the proof kernel.  A separate heartbeat
+source is still useful, but the harness must treat heartbeat markers as
+liveness evidence rather than boot-progress evidence so a stuck mount or
+systemd unit still fails quickly with the last non-heartbeat progress marker.
