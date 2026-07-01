@@ -14,9 +14,10 @@ active `PLAN.md` work first: QEMU must provide a generic browser-to-guest
 service bridge with graphics, keyboard, power-control, and suspend/resume
 planning hooks suitable for a 64-bit Bus Engine OS guest; Bus Engine OS and
 Bus Engine layers remain downstream consumers that package and run the
-in-guest services. If every active `PLAN.md` item is complete or blocked on a
-concrete external dependency, promote the highest-value item from the future
-plan backlog in `FUTURE_WORK.md` into `PLAN.md` before implementing more work.
+in-guest services. Work from this plan before taking any new backlog item. If
+every active `PLAN.md` item is complete or blocked on a concrete external
+dependency, promote the highest-value useful work item from the future plan
+backlog in `FUTURE_WORK.md` into `PLAN.md` before implementing more work.
 
 ## Current Direction
 
