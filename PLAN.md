@@ -573,6 +573,28 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     shape. The next valid implementation needs a proper generated-block
     control-flow model for side-effectful loops, or new evidence showing a
     different QEMU-side bottleneck.
+    Follow-up rejected evidence on 2026-07-01: a RAM-only `qemu_ld`/`qemu_st`
+    fallback experiment used `probe_access()` plus a bounded store journal so
+    backward `brcond` loops could roll back local and RAM stores before
+    falling back to TCI. The rebuilt artifact hashes were
+    `qemu-system-x86_64.js=abcdad6c42b0c384b18e5c1cb932ca2a61161c67a2e7beb1fb2c47338a94676a`
+    and
+    `qemu-system-x86_64.wasm=a842e329148b46717692c93134d04a3eb97c2eb16d02dbe3fc129f0fda43b688`.
+    Generic Chromium smoke
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-store-journal-qemu-ram.json`
+    reached `QEMU_WASM_LINUX_BOOT_OK` in `90688` ms with
+    `brcond_backward_safe=4217`, proving that the validation shape can accept
+    real loops. The default path with the same artifact reached the marker in
+    `85201` ms, and a threshold-`1` generic run
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-store-journal-qemu-ram-threshold1.json`
+    reached the marker in `95473` ms with `fallback_cold=0`. The downstream
+    Bus Engine OS proof
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-tci-wasm-subset-store-journal-qemu-ram.json`
+    still timed out after `420228` ms before multi-user readiness with
+    `brcond_backward_safe=4304`, `fallback_cold=66385502`, and
+    `fallback_unsupported=24048`. The accepted conclusion is that this C
+    interpreter replay path is diagnostic evidence, not the performance
+    solution. It should not be merged as the current acceleration slice.
   - [x] Raise the opt-in TCI subset validation window to the measured useful
     maximum: DoD is a rebuilt wasm64 artifact where the default
     `QEMU_TCI_WASM_SUBSET_MAX_OPS` and browser harness default are `512`,
@@ -623,6 +645,17 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   `brcond_bad_target=700`, `brcond_backward=5479`, and top unsupported op
   `brcond`. This is material fallback-coverage improvement, but not the
   required boot-readiness solution; the goal remains open.
+  Follow-up RAM-only store-journal evidence accepted thousands of backward
+  branches as replay-safe but still timed out before multi-user readiness:
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-tci-wasm-subset-store-journal-qemu-ram.json`
+  ran for `420228` ms with `executed=173584564`, `fallback_cold=66385502`,
+  `fallback_unsupported=24048`, `brcond_backward_safe=4304`, and
+  `brcond_backward_unsafe=20`. The run reached early systemd mount setup but
+  not `Reached target Multi-User System.` or `QEMU_WASM_SERVICE_READY`.
+  This rejects committing the C replay-journal experiment as the performance
+  fix. The next implementation must either produce actual generated
+  WebAssembly execution for hot TBs, or add fresh attribution proving a
+  different QEMU-side boundary has become dominant.
 - [ ] Add a translation-block cache design and tests once the first generated
   blocks exist: DoD is a documented cache key, invalidation rule,
   memory-pressure behavior, browser-module lifetime policy, and deterministic

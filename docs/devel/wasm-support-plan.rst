@@ -4468,3 +4468,63 @@ That result rejects the shortcut: the remaining loop shapes include
 side-effectful operations, so the next valid branch-control implementation
 needs a proper generated-block loop/control-flow model or fresh evidence that
 another QEMU-side boundary has become dominant.
+
+A follow-up RAM-only replay experiment on 2026-07-01 used ``probe_access()``
+for ``qemu_ld`` and ``qemu_st`` operations and a bounded store journal for
+local and RAM stores before falling back to TCI.  This proved that QEMU can
+classify many real backward branches as replay-safe without committing device
+or MMIO side effects, but it did not solve the measured boot problem.
+
+The rebuilt artifact hashes were:
+
+* ``qemu-system-x86_64.js`` =
+  ``abcdad6c42b0c384b18e5c1cb932ca2a61161c67a2e7beb1fb2c47338a94676a``
+* ``qemu-system-x86_64.wasm`` =
+  ``a842e329148b46717692c93134d04a3eb97c2eb16d02dbe3fc129f0fda43b688``
+
+Generic Chromium ``141.0.7390.37`` smoke with the subset disabled reached
+``QEMU_WASM_LINUX_BOOT_OK``:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-store-journal-qemu-ram-default.json``
+* elapsed: ``85201`` ms
+
+Generic Chromium smoke with the subset enabled also reached
+``QEMU_WASM_LINUX_BOOT_OK``:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-store-journal-qemu-ram.json``
+* elapsed: ``90688`` ms
+* final subset counters: ``attempts=72000000``, ``executed=65137365``,
+  ``fallback_cold=6822219``, ``fallback_unsupported=28663``,
+  ``brcond_backward_safe=4217``, ``brcond_backward_unsafe=1``
+
+A threshold-``1`` generic run removed cold fallbacks but was slower, reaching
+the same marker in ``95473`` ms:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-store-journal-qemu-ram-threshold1.json``
+* final subset counters: ``attempts=72000000``, ``executed=71933868``,
+  ``fallback_cold=0``, ``fallback_unsupported=49794``,
+  ``brcond_backward_safe=11497``
+
+The downstream Bus Engine OS ``virtual-server`` microvm proof still timed out
+before ``Reached target Multi-User System.`` and
+``QEMU_WASM_SERVICE_READY``:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-tci-wasm-subset-store-journal-qemu-ram.json``
+* elapsed: ``420228`` ms
+* final subset counters: ``attempts=240000000``, ``executed=173584564``,
+  ``fallback_cold=66385502``, ``fallback_unsupported=24048``,
+  ``brcond_backward_safe=4304``, ``brcond_backward_unsafe=20``
+* progress sample evidence showed early systemd mount setup, but not
+  multi-user readiness.
+
+This rejects committing the RAM replay-journal path as the current performance
+fix.  It is useful diagnostic evidence because it proves loop replay can be
+made precise for RAM-only accesses, but the C interpreter replay path still
+does not produce the required downstream boot-readiness improvement.  The next
+implementation must either provide actual generated WebAssembly execution for
+hot TBs, or add fresh attribution proving that another QEMU-side boundary has
+become dominant.
