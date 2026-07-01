@@ -182,6 +182,10 @@ function i64Const(value) {
   return [0x42, ...encodeS64(value)];
 }
 
+function memArg(align, offset) {
+  return [...encodeU32(align), ...encodeU32(offset)];
+}
+
 function packExit(statusCode, valueCode) {
   return [
     ...statusCode,
@@ -204,6 +208,14 @@ export function interpretGeneratedSubset(arg0, arg1) {
     return packDispatchResult(1, 100);
   }
   return packDispatchResult(2, (sum ^ 0x55) & 0xff);
+}
+
+export function interpretContextBlock(reg0, reg1) {
+  const sum = BigInt.asUintN(64, BigInt(reg0) + BigInt(reg1));
+  return {
+    sum: sum.toString(),
+    dispatch: packDispatchResult(5, Number(sum & 0xffffffffn)),
+  };
 }
 
 export function createGeneratedBlockCache({ maxEntries = 4096 } = {}) {
@@ -285,9 +297,11 @@ export function buildGeneratedBlockModule() {
       functionType([valueI32], [valueI32]),
       functionType([valueI32], [valueI64]),
       functionType([valueI32, valueI32], [valueI64]),
+      functionType([valueI32], [valueI64]),
     ])),
     ...section(2, vector([
       [...name("h"), ...name("fallback"), 0x00, ...encodeU32(3)],
+      [...name("env"), ...name("memory"), 0x02, 0x00, ...encodeU32(1)],
     ])),
     ...section(3, vector([
       [0x00],
@@ -296,6 +310,7 @@ export function buildGeneratedBlockModule() {
       [0x02],
       [0x03],
       [0x03],
+      [0x04],
     ])),
     ...section(7, vector([
       [...name("add64"), 0x00, ...encodeU32(1)],
@@ -304,6 +319,7 @@ export function buildGeneratedBlockModule() {
       [...name("countdownExit"), 0x00, ...encodeU32(4)],
       [...name("helperGate"), 0x00, ...encodeU32(5)],
       [...name("subsetBlock"), 0x00, ...encodeU32(6)],
+      [...name("contextBlock"), 0x00, ...encodeU32(7)],
     ])),
     ...section(10, vector([
       functionBody([
@@ -390,6 +406,24 @@ export function buildGeneratedBlockModule() {
           ),
         0x0b,                  /* end */
       ], [{ count: 1, type: valueI32 }]),
+      functionBody([
+        ...localGet(0),
+        0x29, ...memArg(3, 0), /* i64.load ctx.regs[0] */
+        ...localGet(0),
+        0x29, ...memArg(3, 8), /* i64.load ctx.regs[1] */
+        0x7c,                  /* i64.add */
+        ...localSet(1),
+        ...localGet(0),
+        ...localGet(1),
+        0x37, ...memArg(3, 16), /* i64.store ctx.ret */
+        ...packExit(
+          i32Const(5),
+          [
+            ...localGet(1),
+            0xa7,              /* i32.wrap_i64 */
+          ],
+        ),
+      ], [{ count: 1, type: valueI64 }]),
     ])),
   ];
 
@@ -430,6 +464,12 @@ export function validatePrototypeResult(result) {
     }
     if (runtime.subsetDifferentialMismatches !== 0) {
       throw new Error(`${runtime.runtime} subset differential mismatch`);
+    }
+    if (runtime.contextBlockResult !== "21474836522") {
+      throw new Error(`${runtime.runtime} contextBlock result mismatch`);
+    }
+    if (runtime.contextBlockStored !== "42") {
+      throw new Error(`${runtime.runtime} contextBlock stored value mismatch`);
     }
     if (!Array.isArray(runtime.subsetDifferentialCases) ||
         runtime.subsetDifferentialCases.length < 5) {
@@ -511,12 +551,16 @@ export async function runGeneratedBlockProbe(iterations, now = performance.now.b
   const compileMs = now() - compileStart;
   const instantiateStart = now();
   let helperFallbacks = 0;
+  const memory = new WebAssembly.Memory({ initial: 1 });
   const instance = await WebAssembly.instantiate(compiled, {
     h: {
       fallback(opcode, value) {
         helperFallbacks++;
         return (99n << 32n) | BigInt((opcode ^ value) >>> 0);
       },
+    },
+    env: {
+      memory,
     },
   });
   const instantiateMs = now() - instantiateStart;
@@ -527,6 +571,7 @@ export async function runGeneratedBlockProbe(iterations, now = performance.now.b
     countdownExit: runCountdownExit,
     helperGate,
     subsetBlock,
+    contextBlock,
   } = instance.exports;
   const add64Result = add64(19n, 23n);
   const mix32Result = mix32(42);
@@ -555,6 +600,14 @@ export async function runGeneratedBlockProbe(iterations, now = performance.now.b
   });
   const subsetDifferentialMismatches =
     subsetDifferentialCases.filter((entry) => !entry.ok).length;
+  const contextPointer = 64;
+  const contextView = new DataView(memory.buffer);
+  const contextExpected = interpretContextBlock(19n, 23n);
+  contextView.setBigUint64(contextPointer, 19n, true);
+  contextView.setBigUint64(contextPointer + 8, 23n, true);
+  const contextBlockResult = contextBlock(contextPointer).toString();
+  const contextBlockStored =
+    contextView.getBigUint64(contextPointer + 16, true).toString();
   let accumulator = 0;
   const executeStart = now();
   for (let i = 0; i < iterations; i++) {
@@ -571,7 +624,9 @@ export async function runGeneratedBlockProbe(iterations, now = performance.now.b
       helperGateFast === 17179869198n &&
       helperGateFallback === 425201762319n &&
       helperFallbacks === 1 &&
-      subsetDifferentialMismatches === 0,
+      subsetDifferentialMismatches === 0 &&
+      contextBlockResult === contextExpected.dispatch &&
+      contextBlockStored === contextExpected.sum,
     moduleBytes: moduleBytes.length,
     validate: WebAssembly.validate(moduleBytes),
     compileMs,
@@ -588,6 +643,8 @@ export async function runGeneratedBlockProbe(iterations, now = performance.now.b
     helperFallbacks,
     subsetDifferentialCases,
     subsetDifferentialMismatches,
+    contextBlockResult,
+    contextBlockStored,
     accumulator,
   };
 }
@@ -629,9 +686,11 @@ async function runBrowser(options) {
           localTee,
           i32Const,
           i64Const,
+          memArg,
           packExit,
           packDispatchResult,
           interpretGeneratedSubset,
+          interpretContextBlock,
           functionBody,
           buildGeneratedBlockModule,
           runGeneratedBlockProbe,

@@ -4371,6 +4371,43 @@ deterministic differential gate that the next opt-in QEMU execution hook must
 preserve before the generic Chromium Linux smoke can be used as the runtime
 regression gate.
 
+Context-pointer TB ABI prototype
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The failed live generated-block experiments showed that passing sixteen
+``BigInt`` register arguments and receiving eighteen ``BigInt`` results is not
+the right long-term execution boundary.  The reference ``qemu-wasm``
+``wasm64-tcg-b`` branch uses a small context pointer passed into a generated
+TB function.  QEMU state is shared through memory, and the TB function returns
+through a direct dispatcher boundary.
+
+The standalone prototype now includes that shape without changing live QEMU
+execution.  The generated module imports linear memory from ``env.memory`` and
+exports ``contextBlock(ctxPtr)``.  The function:
+
+* reads two 64-bit register slots at ``ctxPtr + 0`` and ``ctxPtr + 8``;
+* adds them in generated WebAssembly;
+* stores the 64-bit result at ``ctxPtr + 16``;
+* returns a packed dispatch result with status ``5`` and the low 32 bits of
+  the result.
+
+Accepted evidence on 2026-07-01:
+
+* ``node --check scripts/ci/wasm-generated-block-prototype.mjs`` passed.
+* ``node scripts/ci/wasm-generated-block-prototype-test.mjs`` passed.
+* Node.js ``v22.19.0`` proof
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-context-node.json``
+  passed with ``moduleBytes=399``, ``contextBlockResult=21474836522``, and
+  ``contextBlockStored=42``.
+* Chromium ``141.0.7390.37`` proof
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-context-browser.json``
+  passed with the same context result and stored value.
+
+This is not a Bus Engine OS performance fix yet.  It is the accepted ABI
+prototype for replacing the EM_JS generated-block helper shape with a native
+TB function boundary that can later be wired into an opt-in wasm64 backend or
+QEMU-side generated-TB path while preserving strict TCI fallback.
+
 Opt-in wasm64 TCI subset execution evidence
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

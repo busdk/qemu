@@ -1015,6 +1015,21 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   preserves strict TCI fallback for unsupported or invalid blocks, and proves
   generic Chromium smoke does not regress before any Bus Engine OS long proof
   is attempted.
+  Accepted prototype evidence on 2026-07-01: the standalone generated-block
+  prototype now includes a context-pointer ABI modeled on a native TB
+  function boundary. The generated module imports linear memory, accepts one
+  context pointer, reads two 64-bit register slots, stores a 64-bit return
+  slot, and returns a packed TB-dispatch value without using many BigInt
+  parameters or result arrays. This does not alter live QEMU execution yet.
+  Node.js `v22.19.0` proof
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-context-node.json`
+  passed with `moduleBytes=399`, `contextBlockResult=21474836522`, and
+  `contextBlockStored=42`. Chromium `141.0.7390.37` proof
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-context-browser.json`
+  passed with the same context result and stored value. The next implementation
+  step is to move this ABI into a QEMU-side opt-in TB function boundary or
+  wasm64 backend skeleton while preserving strict TCI fallback; a standalone
+  prototype alone is not the Bus Engine OS performance fix.
   Rejected evidence on 2026-07-01: an opt-in direct register-memory ABI was
   tested so generated blocks imported QEMU's shared wasm64 memory and accepted
   only `(regsPtr, retPtr) -> i32`, avoiding the previous BigInt argument/result

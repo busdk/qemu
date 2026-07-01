@@ -14,6 +14,7 @@ import {
   encodeS64,
   encodeU32,
   GENERATED_BLOCK_CONTROL_FLOW_MODEL_VERSION,
+  interpretContextBlock,
   interpretGeneratedSubset,
   packDispatchResult,
   parseArgs,
@@ -36,6 +37,10 @@ assert.equal(packDispatchResult(1, 100), "4294967396");
 assert.equal(packDispatchResult(2, 82), "8589934674");
 assert.equal(interpretGeneratedSubset(1, 2), "8589934678");
 assert.equal(interpretGeneratedSubset(-1, 1), "4294967396");
+assert.deepEqual(interpretContextBlock(19n, 23n), {
+  sum: "42",
+  dispatch: "21474836522",
+});
 
 const generatedCache = createGeneratedBlockCache({ maxEntries: 2 });
 let cacheCompiles = 0;
@@ -116,6 +121,8 @@ assert.equal(probe.helperGateFast, "17179869198");
 assert.equal(probe.helperGateFallback, "425201762319");
 assert.equal(probe.helperFallbacks, 1);
 assert.equal(probe.subsetDifferentialMismatches, 0);
+assert.equal(probe.contextBlockResult, "21474836522");
+assert.equal(probe.contextBlockStored, "42");
 assert.equal(probe.subsetDifferentialCases.length, 5);
 for (const entry of probe.subsetDifferentialCases) {
   assert.equal(entry.generated, entry.expected);
@@ -169,6 +176,8 @@ assert.equal(
           },
         ],
         subsetDifferentialMismatches: 0,
+        contextBlockResult: "21474836522",
+        contextBlockStored: "42",
         compileMs: 0,
         executeMs: 0,
       },
