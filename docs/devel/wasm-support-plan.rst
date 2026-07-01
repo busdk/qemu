@@ -3875,6 +3875,23 @@ JavaScript and WebAssembly hashes, so it was not repeated as a separate
 runtime proof.  Build-shape cleanup therefore does not solve the boot
 performance gap.
 
+An O3/no-LTO/no-debug-info artifact was measured as a final compiler-flag
+sanity check before spending more time on generated execution.  The build kept
+QEMU assertions enabled because upstream QEMU rejects ``NDEBUG``, disabled QOM
+cast debugging, disabled debug info, and used Meson ``-Doptimization=3``
+without LTO.  The resulting artifact produced ``qemu-system-x86_64.js``
+SHA-256
+``088c177d4e2099d187052008ee32203f4b5a8fc481cb6ce4d2eb7659ddfc04a4`` and
+``qemu-system-x86_64.wasm`` SHA-256
+``cbf01416613890e67629a642bfbcb41266f095f8d33bd991c524966133dbe9db``.
+Generic Chromium ``149.0.7827.55`` smoke wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-o3-nodebug-nohot.json``
+and reached ``QEMU_WASM_LINUX_BOOT_OK`` in ``98467`` ms.  The same-browser O2
+comparison from the branch-to-terminal experiment reached the marker in
+``95502`` ms, and the earlier O3/LTO result reached it in ``79973`` ms.
+Therefore O3/no-LTO compiler flags are rejected as the current performance
+solution and do not justify a long Bus Engine OS proof run.
+
 Acceleration work must remain evidence-backed.  Two classes of work are valid
 for this goal:
 
@@ -4632,6 +4649,28 @@ new measurements contradict the result.  Future CPU work should either use a
 lower-overhead shared-memory import model or attack the measured control-flow
 boundary directly, with default and subset runs captured from the same rebuilt
 artifact and browser version.
+
+A separate control-flow experiment then tested a narrower generated
+``brcond`` shape without any JavaScript memory helper.  The unpromoted patch
+accepted only forward branches whose target was an in-block ``exit_tb`` or
+``goto_tb`` terminal, emitted an early WebAssembly ``return`` for the taken
+branch, and rejected every other branch before execution.  Generic Chromium
+``149.0.7827.55`` smoke passed, but did not produce a speedup.  The default
+same-artifact run wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-generated-brcond-terminal-default.json``
+and reached ``QEMU_WASM_LINUX_BOOT_OK`` in ``95502`` ms.  The subset run wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-generated-brcond-terminal-subset.json``
+and reached the marker in ``104833`` ms.  Generated counters still reported
+``ld32u`` as the dominant generated fallback with ``854356`` classifications.
+This rejects the narrow branch-to-terminal generated path as the current
+performance fix; a useful generated path needs to cover the measured memory
+and control-flow shapes together without adding per-operation helper overhead.
+It also means opcode coverage alone is not sufficient evidence for the next
+implementation patch.  A CPU-side acceleration patch must either improve the
+generic Chromium smoke path or be backed by fresh attribution showing why the
+generic slowdown is not relevant to the Bus Engine OS boot path.  A
+paravirtual or browser-API patch must be tied to a measured QEMU device or
+backend boundary rather than to plausible browser technology alone.
 
 Guest-progress idle diagnostic
 ==============================

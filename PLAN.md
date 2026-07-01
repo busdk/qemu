@@ -364,6 +364,17 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   the Bus Engine OS microvm proof after 420 seconds at early systemd journal
   startup; adding Emscripten `-sASSERTIONS=0` produced identical JS/WASM
   hashes.
+  Follow-up evidence on 2026-07-01: an O3/no-LTO/no-debug-info artifact with
+  QOM cast debugging disabled and QEMU assertions kept enabled produced
+  `qemu-system-x86_64.js=088c177d4e2099d187052008ee32203f4b5a8fc481cb6ce4d2eb7659ddfc04a4`
+  and
+  `qemu-system-x86_64.wasm=cbf01416613890e67629a642bfbcb41266f095f8d33bd991c524966133dbe9db`.
+  Generic Chromium `149.0.7827.55` smoke
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-o3-nodebug-nohot.json`
+  reached `QEMU_WASM_LINUX_BOOT_OK` in `98467` ms. This is slower than the
+  same-browser O2/default comparison (`95502` ms) and slower than the earlier
+  O3/LTO run (`79973` ms), so O3/no-LTO compiler flags are rejected as the
+  current performance solution and do not justify a long Bus Engine OS proof.
 - [x] Classify the remaining boot slowness before changing execution again:
   DoD is a short evidence note based on current Bus Engine OS serial timing,
   hot-block data, `microvm`/virtio evidence, and prior art from
@@ -678,6 +689,20 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     `fallback_unsupported=24048`. The accepted conclusion is that this C
     interpreter replay path is diagnostic evidence, not the performance
     solution. It should not be merged as the current acceleration slice.
+    Follow-up rejected evidence on 2026-07-01: a generated-Wasm
+    branch-to-terminal experiment accepted only forward `brcond` targets that
+    resolved to an in-block `exit_tb` or `goto_tb`, emitted an early Wasm
+    `return`, and rejected every other branch shape before execution. Generic
+    Chromium smoke passed, but the subset run was slower than the same-artifact
+    default run (`104833` ms versus `95502` ms in Chromium `149.0.7827.55`).
+    Generated counters still showed `ld32u` as the dominant generated fallback
+    (`854356`) and did not make the generated path a performance win. Do not
+    promote this narrow branch-to-terminal generated path without new evidence.
+    Current decision: do not keep expanding generated `brcond` or memory
+    helper coverage from opcode availability alone. Each accepted CPU
+    acceleration patch must first improve the generic Chromium smoke or
+    provide stronger attribution that the generic-smoke slowdown is irrelevant
+    to the Bus Engine OS boot path.
   - [x] Raise the opt-in TCI subset validation window to the measured useful
     maximum: DoD is a rebuilt wasm64 artifact where the default
     `QEMU_TCI_WASM_SUBSET_MAX_OPS` and browser harness default are `512`,
@@ -739,6 +764,18 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   fix. The next implementation must either produce actual generated
   WebAssembly execution for hot TBs, or add fresh attribution proving a
   different QEMU-side boundary has become dominant.
+- [ ] Refresh current bottleneck attribution after rejected generated-execution
+  and compiler-flag experiments:
+  DoD is a current Chromium Bus Engine OS `virtual-server` run, using the
+  latest accepted QEMU artifact and the same accepted downstream kernel/rootfs
+  fixture, that records marker timing, final guest progress, hot-block or
+  lightweight execution counters, and device/backend attribution. The result
+  must explicitly decide whether the next implementation is a generated
+  WebAssembly execution slice that can plausibly improve runtime, a
+  paravirtual/browser API backend behind an existing QEMU device boundary, or
+  a downstream guest-profile issue that must be handed off before more QEMU
+  optimization. Do not implement another acceleration patch from opcode
+  coverage alone.
 - [ ] Add a translation-block cache design and tests once the first generated
   blocks exist: DoD is a documented cache key, invalidation rule,
   memory-pressure behavior, browser-module lifetime policy, and deterministic
