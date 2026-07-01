@@ -3651,3 +3651,38 @@ matches the known wasm64 TCI service-readiness gap for the full downstream
 guest, but it captured QEMU-side evidence with ``summaryCount=15``,
 ``op_sample=1024``, ``op_limit=134217728``, ``op_active=false``, and
 representative ``top_blocks`` plus ``top_tci_ops``.
+
+Lean x86 microvm evidence
+-------------------------
+
+The first non-TCG performance-reduction probe was the x86 ``microvm`` machine
+with direct kernel boot, ACPI disabled, and ``virtio-mmio`` devices instead of
+the default PC/i440FX/PCI path.  This is still QEMU-generic evidence; the Bus
+Engine OS kernel/rootfs are downstream proof payloads.
+
+The initial Chromium run with the accepted Bus Engine OS x86_64 kernel reached
+Linux but panicked before mounting root because the kernel could not discover
+the ``virtio-blk-device`` root disk.  QEMU's x86 ``microvm`` machine exposes
+MMIO devices to direct-boot kernels through auto-appended
+``virtio_mmio.device=`` command-line descriptors, and that downstream kernel
+had ``CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES`` disabled.
+
+After the downstream Bus Engine OS x86_64 virtual kernel enabled
+``CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES=y`` and rebuilt the Linux package,
+Chromium proof
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-microvm-new-kernel-2.json``
+used refreshed kernel SHA-256
+``3169668b74ef4fae4ca6a54bc5ad334a47e4eaf0c63c236248c9301af1c17920`` with the
+existing rootfs SHA-256
+``5452bcc0c6fe0cab89f187e80572bc52174456cc60ed3cb723a8531519a0d22e``.  The
+QEMU command used ``-M microvm,acpi=off``, ``virtio-blk-device``,
+``virtio-serial-device``, and ``virtio-rng-device``.
+
+That run proved the lean machine can register ``virtio-mmio`` devices, expose
+``/dev/vda``, mount the ext4 root filesystem, and start systemd.  It still
+timed out after 420 seconds before ``Reached target Multi-User System.`` and
+before the service bridge readiness marker.  The conclusion is that ``microvm``
+removes the root-device blocker and avoids unnecessary PC firmware/ACPI/PCI
+setup, but it does not by itself solve the wasm64 TCI slowness for the full
+Bus Engine OS systemd guest.  The remaining active performance work is a real
+execution acceleration path with TCI fallback.

@@ -9,22 +9,27 @@ file and then implemented.
 
 ## Active Goal
 
-Implement QEMU/WASM hot-block instrumentation for the wasm64 TCI browser path.
-QEMU must emit structured, opt-in translation-block and interpreter-hotspot
-evidence for the generic browser smoke and the downstream Bus Engine OS
-browser-hosted service proof while preserving existing TCI behavior when the
-instrumentation is disabled. This lane must not take over the downstream
-bus-pkg, OPFS persistence, virtio-net, virtual-desktop packaging, Codex
-packaging, or Engine OS environment work owned by the parallel agent. Work from
-this plan before taking any new backlog item. If every active `PLAN.md` item is
+Implement an actual browser-hosted QEMU/WASM performance solution for the
+Bus Engine OS boot slowness. Use the accepted hot-block evidence to add a
+small, safe acceleration path for the wasm64 `x86_64-softmmu` browser build
+while preserving TCI as the correctness fallback. The accepted outcome is not
+more diagnostics: the generic Linux browser smoke must keep passing and the
+downstream Bus Engine OS `virtual-server` browser proof must reach normal
+multi-user/service readiness faster than the current timeout path.
+
+This lane must not take over the downstream bus-pkg, OPFS persistence,
+virtio-net, virtual-desktop packaging, Codex packaging, or Engine OS
+environment work owned by the parallel agent unless a narrow downstream proof
+fixture is strictly required to prove the QEMU performance fix. Work from this
+plan before taking any new backlog item. If every active `PLAN.md` item is
 complete or blocked on a concrete external dependency, promote the
 highest-value useful work item from the future plan backlog in
 `FUTURE_WORK.md` into `PLAN.md` before implementing more work.
 
-Current-goal tracking rule: every code change, browser proof, artifact rebuild,
-documentation update, commit, push, and BusDK submodule-pin update for this
-hot-block instrumentation lane must be represented by a checkbox in this file
-before it is treated as accepted work.
+Current-goal tracking rule: every design note, code change, browser proof,
+performance baseline, artifact rebuild, documentation update, commit, push,
+and BusDK submodule-pin update for this slowness-fix lane must be represented
+by a checkbox in this file before it is treated as accepted work.
 
 ## Current Direction
 
@@ -115,6 +120,51 @@ performance, not by generic bridge API shape. These items were promoted from
 `FUTURE_WORK.md` after Chromium evidence showed that long timeouts and
 systemd masks only move the failure from one slow service to the next.
 
+- [x] Capture the current slowness baseline before changing execution:
+  DoD is a Chrome/Chromium Bus Engine OS browser run with the current
+  `x86_64-softmmu` wasm64 TCI artifact, result JSON, screenshot, timeout or
+  readiness state, elapsed time to the last meaningful serial/systemd marker,
+  hot-block summary count, and artifact hashes. This baseline is the
+  comparison point for accepting the performance fix. Accepted baseline:
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-hotblocks.json`
+  timed out before multi-user/service readiness after capturing QEMU hot-block
+  summaries, and
+  `build/wasm-browser-proof-current/bus-engine-os-codex-bridge-optimized-long-result.json`
+  showed the existing PC/i440FX path still timing out before service readiness.
+- [x] Prove a lean `microvm` Bus Engine OS browser boot before writing a new
+  TCG backend: DoD is a Chrome/Chromium run using the same accepted Bus Engine
+  OS `virtual-server` kernel/rootfs artifacts and generic service bridge, but
+  with `machine=microvm,acpi=off`, `rootfsDevice=virtio-mmio`, and matching
+  non-PCI virtio devices. The run must record whether removing the default
+  PC/i440FX/BIOS/ACPI path reaches multi-user/service readiness or materially
+  improves marker-to-marker timing. If this works, make the harness or
+  manifest path prefer the lean machine shape for browser-hosted virtual
+  server proofs. If it does not, record the blocker and continue with the
+  generated-WASM execution acceleration items below. Current evidence:
+  `microvm,acpi=off` reaches the Linux kernel much faster than the PC path,
+  but the accepted Bus Engine OS x86_64 kernel cannot discover the
+  `virtio-blk-device` root disk because QEMU exposes `microvm` MMIO devices
+  through auto-appended `virtio_mmio.device=` descriptors and the downstream
+  kernel profile has `CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES` disabled.
+  Follow-up evidence with refreshed downstream kernel
+  `3169668b74ef4fae4ca6a54bc5ad334a47e4eaf0c63c236248c9301af1c17920`
+  wrote
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-microvm-new-kernel-2.json`.
+  That run proved `virtio-mmio` devices register, `/dev/vda` appears, the
+  ext4 rootfs mounts, and systemd starts under `microvm,acpi=off`, but it still
+  timed out before `Reached target Multi-User System.`. The lean machine path
+  removes the root-device blocker but is not by itself the performance
+  solution, so continue with generated-WASM execution acceleration.
+- [x] Refresh the downstream Bus Engine OS x86_64 virtual kernel proof fixture
+  for lean `microvm`: DoD is an Engine OS commit enabling only the
+  virtualization-specific kernel option needed for QEMU x86 `microvm`
+  `virtio-mmio` command-line devices, a rebuilt browser proof kernel/rootfs
+  input or documented accepted artifact replacement, and a repeated Chromium
+  run that proves whether `/dev/vda` appears and the root filesystem mounts
+  under `machine=microvm,acpi=off`. Accepted downstream commits:
+  `099cde6` enables and gates `CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES=y`; `0ebf158`
+  fixes Docker package source-cache propagation so the refreshed x86_64 Linux
+  package can be rebuilt repeatably.
 - [ ] Define the wasm64 TCG/backend acceleration design before implementation:
   DoD is a developer note that explains how QEMU TCG IR can map to generated
   WebAssembly, how translated blocks call back into QEMU helpers, how guest
@@ -204,11 +254,20 @@ systemd masks only move the failure from one slow service to the next.
   functions in Node.js and Chrome/Chromium without participating in normal
   guest execution, plus documentation of browser compile latency and memory
   behavior.
-- [ ] Prototype integer ALU translation as the first wasm64 generated-WASM
-  fast path: DoD is a small patch set for a narrow, named instruction or TCG
-  op family with TCI fallback, deterministic TCG tests, differential
-  comparison against native QEMU TCG where practical, and no regression in the
-  accepted TCI browser boot or generic service-bridge smoke.
+- [ ] Prototype the first production execution acceleration path:
+  DoD is a small, named wasm64 browser acceleration patch set selected from
+  the hot-block evidence, enabled only when explicitly requested, with TCI
+  fallback for unsupported blocks or runtime failures, deterministic tests,
+  differential comparison against the existing TCI/native behavior where
+  practical, and no regression in the accepted TCI browser boot or generic
+  service-bridge smoke.
+- [ ] Prove the acceleration improves the real downstream boot path:
+  DoD is a Chrome/Chromium Bus Engine OS `virtual-server` browser run with the
+  acceleration enabled that reaches normal multi-user/service readiness, or
+  shows a measured and material marker-to-marker improvement plus a concrete
+  remaining QEMU bottleneck promoted into this plan before any goal closeout.
+  The proof must include result JSON, screenshot, artifact hashes, elapsed
+  timing, fallback counters, and a comparison against the current baseline.
 - [ ] Add a translation-block cache design and tests once the first generated
   blocks exist: DoD is a documented cache key, invalidation rule,
   memory-pressure behavior, browser-module lifetime policy, and deterministic
