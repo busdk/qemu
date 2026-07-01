@@ -3524,6 +3524,48 @@ The downstream Bus Engine OS proof can then replace the tiny echo service with
 a governed in-guest service adapter without adding product-specific code to
 QEMU.
 
+Downstream guest service proof handoff
+--------------------------------------
+
+A downstream guest such as Bus Engine OS should hand QEMU only generic guest
+inputs and bridge metadata.  The QEMU manifest should identify:
+
+* kernel, initrd or rootfs, firmware, memory, machine, CPU, display, and
+  device choices;
+* expected serial readiness text and any additional expected serial identity
+  strings;
+* ``serviceBridge.kind``, request and response channel names, readiness
+  marker, health request, timeout, payload limit, and whether the bridge is
+  automated or interactive-only;
+* optional ``powerOperation`` and ``powerTimeoutMs`` values when a proof must
+  exercise shutdown, reboot, guest power button, or forced QEMU control;
+* screenshot, display-output, keyboard-input, and visual-marker expectations
+  when the proof includes graphics.
+
+Frontend applications should discover the bridge through the browser harness,
+not by parsing QEMU command lines.  Same-page code can check
+``globalThis.qemuWasmServiceBridge`` and read the non-secret
+``qemuWasmSmokeState.serviceBridge`` status.  Iframe callers can use the
+same-origin ``qemu-wasm-service-request`` and ``qemu-wasm-service-response``
+messages.  Frontends should treat bridge status as unavailable until the
+manifest readiness marker has been observed and should handle timeout and
+structured error responses as normal outcomes.
+
+The downstream guest owns the service adapter and policy.  QEMU does not
+define product service names, model-provider configuration, approval rules,
+audit storage, identity, secrets, guest filesystem policy, or arbitrary shell
+access.  A downstream Codex App Server proof should expose only the reviewed
+health/status/request shapes through its in-guest adapter, keep credentials out
+of static browser-hosted artifacts, and report service readiness with stable
+serial or bridge-visible markers.
+
+Accepted downstream evidence should include the exact manifest, result JSON,
+serial tail, screenshot, browser/runtime version, QEMU artifact digests, guest
+kernel/rootfs digests, bridge readiness state, request id, response status, and
+any display or keyboard evidence required by that proof.  A successful generic
+QEMU bridge smoke does not by itself prove a downstream Bus Engine OS service;
+the downstream proof must boot that guest and exercise its adapter.
+
 Accepted local proof on 2026-06-30 used Chromium 141.0.7390.37 in the
 Playwright container with ``serial-jsonl``.  The result JSON recorded
 ``success=true``, ``phase=success``, readiness source ``serial``,

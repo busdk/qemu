@@ -72,7 +72,7 @@ App Server remain downstream proof payloads.
   fields must match before restore, how incompatible state is rejected, and why
   native QEMU managed save remains the first acceptance target before browser
   persistence claims.
-- [ ] Add downstream handoff documentation for Bus Engine OS service proofs:
+- [x] Add downstream handoff documentation for Bus Engine OS service proofs:
   DoD is documentation explaining how a downstream guest such as Bus Engine OS
   can expose an in-guest agent/service runtime through the generic bridge,
   which fields belong in the guest manifest, how frontend applications should
