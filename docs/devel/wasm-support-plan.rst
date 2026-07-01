@@ -4650,10 +4650,9 @@ lower-overhead shared-memory import model or attack the measured control-flow
 boundary directly, with default and subset runs captured from the same rebuilt
 artifact and browser version.
 
-A narrower follow-up tried to avoid the per-load JavaScript callback by
-importing QEMU's Emscripten linear memory directly into each generated
-``ld32u`` block.  That experiment was also rejected.  The rebuilt artifact
-hashes were:
+A narrower follow-up first tried to avoid the per-load JavaScript callback by
+importing ``Module.wasmMemory`` into each generated ``ld32u`` block.  That
+experiment was also rejected.  The rebuilt artifact hashes were:
 
 * ``qemu-system-x86_64.js`` =
   ``50aef5028941ce4eedabbe6675d485e810b1c4b7d8be7db4c9602e4431b0ae25``
@@ -4671,12 +4670,31 @@ showed why: ``wasmMemory`` is an internal runtime variable in this artifact
 shape, while ``Module.wasmMemory`` is listed as unexported.  The generated
 submodules therefore did not receive the real QEMU memory object.
 
-This narrows the next valid memory work to an ABI proof, not another live
-guest-execution patch.  Before reintroducing generated ``ld32u`` execution,
-add a small Node.js and Chromium prototype that obtains the actual QEMU
-artifact memory handle, imports it into a generated wasm64 module, performs a
-known 32-bit load, and fails loudly for absent handles or memory32/shared-state
-mismatches.
+This proves ``Module.wasmMemory`` is not the right ABI for generated memory
+loads in the current artifact shape.
+
+A second direct-memory variant imported the internal Emscripten ``wasmMemory``
+object into generated wasm64 blocks.  That fixed the compile-failure mode, but
+still did not produce a performance win.  The rebuilt artifact hashes were:
+
+* ``qemu-system-x86_64.js`` =
+  ``18f690b5dcb99d4cff6fe6caa78e89af5aec87770f2ee06c5a84c4f9160919b7``
+* ``qemu-system-x86_64.wasm`` =
+  ``2bce0f78365aae4d6a08af09c29cfc78a7f425892c1758f2d7d20875f14f788b``
+
+Default Chromium ``141.0.7390.37`` smoke reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``81487`` ms and wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-native-ld32u-wasmmemory-default.json``.
+The subset run also reached the marker, but took ``115358`` ms and wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-native-ld32u-wasmmemory-subset.json``.
+Its final counters had ``generated_compiled=26153``,
+``generated_executed=54146``, and ``generated_compile_failed=0``.  That proves
+the internal ``wasmMemory`` import can instantiate and execute generated
+memory-load blocks, but the extra generated-module overhead still regressed
+wall-clock time and the dominant generated fallback remained
+``tci_setcond32``.  The live ``ld32u`` patch was removed.  Do not promote
+generated memory loads as the current performance solution unless new
+evidence removes this overhead and improves the same-artifact generic smoke.
 
 A separate control-flow experiment then tested a narrower generated
 ``brcond`` shape without any JavaScript memory helper.  The unpromoted patch
