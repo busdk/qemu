@@ -1116,6 +1116,21 @@ source root::
       sha256sum * > SHA256SUMS
       ls -lh'
 
+The same local artifact path is now available as a repeatable helper command::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /tmp/qemu-wasm64-tci-artifacts \
+    --build-image
+
+The helper checks for Docker, optionally builds
+``qemu/emsdk-wasm64-cross:latest``, copies the source tree into the container,
+configures the CI-equivalent ``x86_64-softmmu`` wasm64 TCI/SDL build, copies
+``qemu-system-x86_64.js`` and ``qemu-system-x86_64.wasm`` to the requested
+output directory, writes ``qemu-system-wasm-artifacts.json`` with
+``scripts/ci/wasm-artifact-manifest.py``, verifies the x86_64 target pair, and
+writes ``SHA256SUMS``.  ``--dry-run`` prints the exact Docker commands without
+running them.
+
 The current upstream Emscripten link configuration is intentionally browser
 oriented.  It enables pthreads, Asyncify, ``PROXY_TO_PTHREAD``, filesystem
 support, table growth, a 2 GiB initial memory, WebAssembly BigInt, ES module
