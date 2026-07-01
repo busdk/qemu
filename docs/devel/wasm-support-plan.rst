@@ -4650,6 +4650,34 @@ lower-overhead shared-memory import model or attack the measured control-flow
 boundary directly, with default and subset runs captured from the same rebuilt
 artifact and browser version.
 
+A narrower follow-up tried to avoid the per-load JavaScript callback by
+importing QEMU's Emscripten linear memory directly into each generated
+``ld32u`` block.  That experiment was also rejected.  The rebuilt artifact
+hashes were:
+
+* ``qemu-system-x86_64.js`` =
+  ``50aef5028941ce4eedabbe6675d485e810b1c4b7d8be7db4c9602e4431b0ae25``
+* ``qemu-system-x86_64.wasm`` =
+  ``280fee79206958044aeb98d544e6b1ab7753d6b26ce778413ad3629b80ebebac``
+
+Default Chromium ``141.0.7390.37`` smoke reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``81075`` ms and wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-native-ld32u-default-fresh.json``.
+The subset run also reached the marker, but took ``113677`` ms and wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-native-ld32u-subset.json``.
+Its final counters had ``generated_compiled=0``, ``generated_executed=0``,
+and ``generated_compile_failed=27627``.  The generated Emscripten JavaScript
+showed why: ``wasmMemory`` is an internal runtime variable in this artifact
+shape, while ``Module.wasmMemory`` is listed as unexported.  The generated
+submodules therefore did not receive the real QEMU memory object.
+
+This narrows the next valid memory work to an ABI proof, not another live
+guest-execution patch.  Before reintroducing generated ``ld32u`` execution,
+add a small Node.js and Chromium prototype that obtains the actual QEMU
+artifact memory handle, imports it into a generated wasm64 module, performs a
+known 32-bit load, and fails loudly for absent handles or memory32/shared-state
+mismatches.
+
 A separate control-flow experiment then tested a narrower generated
 ``brcond`` shape without any JavaScript memory helper.  The unpromoted patch
 accepted only forward branches whose target was an in-block ``exit_tb`` or
@@ -4671,6 +4699,35 @@ generic Chromium smoke path or be backed by fresh attribution showing why the
 generic slowdown is not relevant to the Bus Engine OS boot path.  A
 paravirtual or browser-API patch must be tied to a measured QEMU device or
 backend boundary rather than to plausible browser technology alone.
+
+Two refreshed Bus Engine OS runs then used the accepted max-512 artifact
+(``qemu-system-x86_64.js`` SHA-256
+``700ae01fe2a06ce86cdd7989556245dc664c5cdf83ba0755b4af11f23399ba66`` and
+``qemu-system-x86_64.wasm`` SHA-256
+``de11a3fed950420dfc1871bbca88e5a27b667505ab83e08474fe09373f546703``), the
+accepted downstream kernel SHA-256
+``3169668b74ef4fae4ca6a54bc5ad334a47e4eaf0c63c236248c9301af1c17920``, and the
+accepted rootfs SHA-256
+``5452bcc0c6fe0cab89f187e80572bc52174456cc60ed3cb723a8531519a0d22e``.
+The first run wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-current-attribution-20260701.json``
+and timed out after ``420194`` ms.  The last guest-origin line was
+``systemd[1]: Load Kernel Module fuse skipped, unmet condition check ConditionKernelModuleLoaded=!fuse``.
+The TCI subset summary reported ``attempts=244000000``,
+``executed=174460225``, ``fallback_cold=69414765``,
+``fallback_unsupported=110081``, and top unsupported op ``brcond``.  The second
+run lowered the performance-attribution interval and wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-current-attribution-interval1000-20260701.json``.
+It timed out after ``420165`` ms with last guest-origin line
+``Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)``
+and TCI subset counters ``attempts=110000000``, ``executed=98857540``,
+``fallback_cold=483940``, ``fallback_unsupported=37461``, and top unsupported
+op ``brcond``.  Both runs recorded zero performance-attribution summaries.
+This is not enough to close the attribution item.  It keeps the known evidence
+pointing at CPU/interpreter progress, but the next attribution proof must use
+an artifact or interval that actually emits device/backend summaries, or
+explicitly prove that no measured QEMU device boundary is active before the
+guest stalls.
 
 Guest-progress idle diagnostic
 ==============================

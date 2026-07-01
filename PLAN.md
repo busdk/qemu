@@ -617,6 +617,30 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     promote the JS helper-import memory path as a performance fix without
     new evidence; the next performance-oriented step should avoid per-op JS
     helper calls or address the measured `brcond`/control-flow boundary.
+    Follow-up rejected evidence on 2026-07-01: a narrower generated-Wasm
+    `ld32u` experiment imported the QEMU/Emscripten linear memory directly
+    instead of calling a per-load JavaScript helper. The rebuilt artifact
+    hashes were
+    `qemu-system-x86_64.js=50aef5028941ce4eedabbe6675d485e810b1c4b7d8be7db4c9602e4431b0ae25`
+    and
+    `qemu-system-x86_64.wasm=280fee79206958044aeb98d544e6b1ab7753d6b26ce778413ad3629b80ebebac`.
+    Default Chromium smoke reached `QEMU_WASM_LINUX_BOOT_OK` in `81075` ms,
+    but the subset run took `113677` ms with `generated_compiled=0`,
+    `generated_executed=0`, and `generated_compile_failed=27627`. Inspecting
+    the generated Emscripten glue showed `wasmMemory` is an internal runtime
+    variable and `Module.wasmMemory` is not exported in this build shape, so
+    the submodules imported an undefined memory. Do not reattempt generated
+    memory loads until a small Node/Chromium prototype proves the exact
+    memory-handle export or import ABI used by the QEMU artifact.
+  - [ ] Prove the generated-block memory import ABI before another QEMU
+    execution patch:
+    DoD is a deterministic Node.js and Chromium prototype, outside normal
+    guest execution, that obtains the actual Emscripten wasm64 memory handle
+    exposed by the QEMU artifact shape, instantiates a generated wasm64 module
+    that imports that memory, performs a 32-bit load from a known address, and
+    fails loudly when the handle is absent, memory32, non-shared/shared
+    mismatched, or otherwise incompatible. Only after this proof passes should
+    `ld32u` be reintroduced into live generated QEMU execution.
   - [x] Resolve the hot TB dispatch/chaining boundary:
     DoD is a design and implementation for hot blocks that currently fall
     back on `goto_ptr` and `goto_tb`, preserving QEMU's `tcg_qemu_tb_exec`
@@ -776,6 +800,31 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   a downstream guest-profile issue that must be handed off before more QEMU
   optimization. Do not implement another acceleration patch from opcode
   coverage alone.
+  Current evidence on 2026-07-01: two refreshed Chromium runs used accepted
+  artifact hashes
+  `qemu-system-x86_64.js=700ae01fe2a06ce86cdd7989556245dc664c5cdf83ba0755b4af11f23399ba66`
+  and
+  `qemu-system-x86_64.wasm=de11a3fed950420dfc1871bbca88e5a27b667505ab83e08474fe09373f546703`,
+  downstream kernel
+  `3169668b74ef4fae4ca6a54bc5ad334a47e4eaf0c63c236248c9301af1c17920`,
+  and rootfs
+  `5452bcc0c6fe0cab89f187e80572bc52174456cc60ed3cb723a8531519a0d22e`.
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-current-attribution-20260701.json`
+  timed out after `420194` ms with last guest line
+  `systemd[1]: Load Kernel Module fuse skipped, unmet condition check ConditionKernelModuleLoaded=!fuse`
+  and TCI subset counters `attempts=244000000`, `executed=174460225`,
+  `fallback_cold=69414765`, `fallback_unsupported=110081`, and top
+  unsupported op `brcond`. A second run with a lower performance-attribution
+  interval,
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-current-attribution-interval1000-20260701.json`,
+  timed out after `420165` ms with last guest line
+  `Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)`
+  and counters `attempts=110000000`, `executed=98857540`,
+  `fallback_cold=483940`, `fallback_unsupported=37461`, and top unsupported
+  op `brcond`. Both runs recorded zero performance-attribution summaries, so
+  this item remains open: the next proof must use an artifact or interval that
+  actually emits device/backend summaries, or explicitly prove that no
+  measured device boundary is active before the guest stalls.
 - [ ] Add a translation-block cache design and tests once the first generated
   blocks exist: DoD is a documented cache key, invalidation rule,
   memory-pressure behavior, browser-module lifetime policy, and deterministic
