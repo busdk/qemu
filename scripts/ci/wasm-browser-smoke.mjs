@@ -1266,7 +1266,7 @@ function buildConfig() {
     tciRelaxedMb: boolOption("tciRelaxedMb", false),
     tciWasmSubset: boolOption("tciWasmSubset", false),
     tciWasmSubsetInterval: numberOption("tciWasmSubsetInterval", 100000),
-    tciWasmSubsetMaxOps: numberOption("tciWasmSubsetMaxOps", 64),
+    tciWasmSubsetMaxOps: numberOption("tciWasmSubsetMaxOps", 512),
     tciWasmSubsetThreshold: numberOption("tciWasmSubsetThreshold", 1024),
     timeoutMs: numberOption("timeoutMs", 180000),
     visualMarker: option("visualMarker", ""),

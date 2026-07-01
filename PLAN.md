@@ -560,6 +560,40 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     smoke must pass with nonzero subset counters and the next unsupported
     operation recorded before another Bus Engine OS proof is treated as
     acceptance evidence.
+    Rejected evidence on 2026-07-01: a conservative backward-`brcond`
+    validator that accepted only reachable side-effect-free loop bodies kept
+    generic Chromium smoke passing, but the accepted-safe counter stayed at
+    zero. The run
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-brcond-safe.json`
+    reached `QEMU_WASM_LINUX_BOOT_OK` with `attempts=72000000`,
+    `executed=65063722`, `fallback_unsupported=156066`,
+    `brcond_backward_safe=0`, and `brcond_backward_unsafe=1860`; the top
+    unsupported operations were `brcond` and `st8`. That shortcut was removed
+    rather than committed because it did not accelerate a measured safe loop
+    shape. The next valid implementation needs a proper generated-block
+    control-flow model for side-effectful loops, or new evidence showing a
+    different QEMU-side bottleneck.
+  - [x] Raise the opt-in TCI subset validation window to the measured useful
+    maximum: DoD is a rebuilt wasm64 artifact where the default
+    `QEMU_TCI_WASM_SUBSET_MAX_OPS` and browser harness default are `512`,
+    generic Chromium smoke passes with and without `--tci-wasm-subset`, and
+    the downstream Bus Engine OS proof records whether the wider window
+    materially changes fallback coverage or readiness. Accepted evidence on
+    2026-07-01: rebuilt artifact hashes
+    `qemu-system-x86_64.js=700ae01fe2a06ce86cdd7989556245dc664c5cdf83ba0755b4af11f23399ba66`
+    and
+    `qemu-system-x86_64.wasm=de11a3fed950420dfc1871bbca88e5a27b667505ab83e08474fe09373f546703`.
+    Default generic Chromium smoke
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-max512-default.json`
+    reached `QEMU_WASM_LINUX_BOOT_OK` in `81626` ms. Subset generic Chromium
+    smoke
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-max512-default.json`
+    reached the same marker in `86959` ms with `attempts=72000000`,
+    `executed=65159611`, `fallback_cold=6680304`,
+    `fallback_unsupported=147287`, and top unsupported op `brcond`. The wider
+    window is accepted because it reduces unsupported fallback by orders of
+    magnitude compared with the previous `64`-op default, while remaining
+    opt-in behind `--tci-wasm-subset`.
 - [ ] Prove the acceleration improves the real downstream boot path:
   DoD is a Chrome/Chromium Bus Engine OS `virtual-server` browser run with the
   acceleration enabled that reaches normal multi-user/service readiness, or
@@ -579,6 +613,16 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   because the guest did not reach multi-user/service readiness, but the next
   active QEMU work item is now side-effect-safe `brcond` support rather than
   `goto_tb`/`goto_ptr`, OPFS, networking, display, input, or WebCrypto.
+  Follow-up evidence with the accepted `512`-op default:
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-tci-wasm-subset-max512-default.json`
+  still timed out after `420333` ms before multi-user/service readiness. It
+  reached the Linux kernel and progressed into early systemd, with last line
+  `systemd[1]: Load Kernel Module fuse skipped, unmet condition check ConditionKernelModuleLoaded=!fuse`.
+  Final subset counters were `attempts=241000000`, `executed=174939800`,
+  `fallback_cold=65979484`, `fallback_unsupported=73921`,
+  `brcond_bad_target=700`, `brcond_backward=5479`, and top unsupported op
+  `brcond`. This is material fallback-coverage improvement, but not the
+  required boot-readiness solution; the goal remains open.
 - [ ] Add a translation-block cache design and tests once the first generated
   blocks exist: DoD is a documented cache key, invalidation rule,
   memory-pressure behavior, browser-module lifetime policy, and deterministic

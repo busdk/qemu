@@ -4386,3 +4386,85 @@ The next QEMU-side work is therefore not OPFS, networking, display, input, or
 WebCrypto.  It is side-effect-safe ``brcond`` support for hot subset blocks,
 with validation strict enough that QEMU does not restart normal TCI after
 partially executing side-effectful operations.
+
+Follow-up evidence with a wider validation window on 2026-07-01 kept the
+subset opt-in but changed the default ``QEMU_TCI_WASM_SUBSET_MAX_OPS`` and
+browser harness default from ``64`` to ``512``.  This is the maximum accepted
+window already enforced by the runner and validator, and the previous result
+showed no ``max_ops_rejected`` pressure.
+
+The rebuilt artifact hashes were:
+
+* ``qemu-system-x86_64.js`` =
+  ``700ae01fe2a06ce86cdd7989556245dc664c5cdf83ba0755b4af11f23399ba66``
+* ``qemu-system-x86_64.wasm`` =
+  ``de11a3fed950420dfc1871bbca88e5a27b667505ab83e08474fe09373f546703``
+
+Validation commands passed:
+
+* ``git diff --check``
+* ``node --check scripts/ci/wasm-browser-smoke.mjs``
+* ``node --check scripts/ci/wasm-browser-smoke-runner.mjs``
+* ``node scripts/ci/wasm-browser-smoke-runner-test.mjs``
+* ``node scripts/ci/wasm-generated-block-prototype-test.mjs``
+
+Generic Chromium ``141.0.7390.37`` smoke with the subset disabled reached
+``QEMU_WASM_LINUX_BOOT_OK``:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-max512-default.json``
+* screenshot:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-max512-default.png``
+* elapsed: ``81626`` ms
+
+Generic Chromium smoke with ``--tci-wasm-subset`` and no explicit
+``--tci-wasm-subset-max-ops`` override also reached
+``QEMU_WASM_LINUX_BOOT_OK``:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-max512-default.json``
+* screenshot:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-max512-default.png``
+* elapsed: ``86959`` ms
+* final subset counters: ``attempts=72000000``, ``executed=65159611``,
+  ``fallback_cold=6680304``, ``fallback_unsupported=147287``,
+  ``brcond_bad_target=7481``, ``brcond_backward=761``
+* remaining top unsupported operation: ``brcond``
+
+The downstream Bus Engine OS ``virtual-server`` microvm proof with the same
+artifact and default ``512``-op subset window still timed out before
+``Reached target Multi-User System.`` and ``QEMU_WASM_SERVICE_READY``:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-tci-wasm-subset-max512-default.json``
+* screenshot:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-tci-wasm-subset-max512-default.png``
+* elapsed: ``420333`` ms
+* last serial line:
+  ``systemd[1]: Load Kernel Module fuse skipped, unmet condition check ConditionKernelModuleLoaded=!fuse``
+* final subset counters: ``attempts=241000000``, ``executed=174939800``,
+  ``fallback_cold=65979484``, ``fallback_unsupported=73921``,
+  ``brcond_bad_target=700``, ``brcond_backward=5479``
+* remaining top unsupported operation: ``brcond``
+
+This wider window is accepted as a small opt-in acceleration-path improvement
+because it reduces unsupported fallback by orders of magnitude compared with
+the previous ``64``-op default.  It is not the full Bus Engine OS boot
+solution because the downstream guest still times out before readiness.
+
+A conservative side-effect-free backward-``brcond`` experiment was built and
+tested, then removed.  It kept generic Chromium smoke passing, but it did not
+accept any useful safe loop body:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-brcond-safe.json``
+* elapsed: ``93182`` ms
+* final subset counters: ``attempts=72000000``, ``executed=65063722``,
+  ``fallback_cold=6768273``, ``fallback_unsupported=156066``,
+  ``brcond_backward_safe=0``, ``brcond_backward_unsafe=1860``
+* top unsupported operations: ``brcond`` and ``st8``
+
+That result rejects the shortcut: the remaining loop shapes include
+side-effectful operations, so the next valid branch-control implementation
+needs a proper generated-block loop/control-flow model or fresh evidence that
+another QEMU-side boundary has become dominant.

@@ -151,7 +151,7 @@ Options:
                     (default: 1024)
   --tci-wasm-subset-max-ops N
                     Maximum TCI ops accepted by the subset path
-                    (1..512, default: 64)
+                    (1..512, default: 512)
   --tci-wasm-subset-interval N
                     Attempt interval between subset summaries
                     (default: 100000)
@@ -237,7 +237,7 @@ function parseArgs(argv) {
     tciRelaxedMb: false,
     tciWasmSubset: false,
     tciWasmSubsetInterval: 100000,
-    tciWasmSubsetMaxOps: 64,
+    tciWasmSubsetMaxOps: 512,
     tciWasmSubsetThreshold: 1024,
     timeoutMs: 180000,
     userDataDir: null,
