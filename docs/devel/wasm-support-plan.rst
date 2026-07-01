@@ -4098,3 +4098,41 @@ measured against the generic Chromium smoke again.  If later attribution shows
 a paravirtual device boundary rather than CPU execution as the blocker, the
 optimization should move behind the matching QEMU device/backend instead of
 reopening this EM_JS prefix shortcut.
+
+Generated-block control-flow model gate
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The first accepted follow-up is a deterministic model gate for generated
+block control flow, implemented in the standalone generated-block prototype
+rather than in the live QEMU execution path.  The gate records the semantics
+that the rejected shortcut lacked:
+
+* branch targets must resolve to internal labels known to the generated block;
+* generated exits must leave through a TB-dispatch boundary, not through an
+  arbitrary TCI bytecode pointer;
+* helper calls are accepted only when the block shape records explicit
+  fallback to the existing TCI path;
+* missing labels, raw pointer exits, helper calls without fallback, and
+  unknown operation kinds reject the generated block before execution.
+
+The model is intentionally small.  It does not claim to be the final wasm64
+TCG backend, and it does not wire generated execution into QEMU.  Its purpose
+is to make the next implementation step testable before another browser smoke
+run can regress.  `scripts/ci/wasm-generated-block-prototype.mjs` exports
+``GENERATED_BLOCK_CONTROL_FLOW_MODEL_VERSION`` and
+``validateGeneratedBlockControlFlow()``.  The focused test file
+``scripts/ci/wasm-generated-block-prototype-test.mjs`` covers:
+
+* a valid branch-to-label block ending at TB dispatch;
+* a helper-call shape that falls back to TCI;
+* rejection for a missing branch target;
+* rejection for returned internal TCI pointers;
+* rejection for helper calls without explicit TCI fallback;
+* rejection for exits that do not use TB dispatch.
+
+The accepted local validation command is::
+
+  node --check scripts/ci/wasm-generated-block-prototype.mjs
+  node scripts/ci/wasm-generated-block-prototype-test.mjs
+
+Both commands passed on 2026-07-01 after the model gate was added.

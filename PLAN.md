@@ -369,10 +369,16 @@ systemd masks only move the failure from one slow service to the next.
   acceleration attempt must either implement a proper translated-block
   control-flow model with differential tests, or prove a different measured
   bottleneck before changing direction.
-  - [ ] Define the minimal proper wasm64 generated-block control-flow model:
+  - [x] Define the minimal proper wasm64 generated-block control-flow model:
     DoD is a design note and tests for branch targets, internal labels,
     exit-to-dispatch semantics, helper fallback, and why returned internal TCI
     pointers are not accepted as the execution boundary.
+    Accepted evidence: `scripts/ci/wasm-generated-block-prototype.mjs` now
+    exposes `validateGeneratedBlockControlFlow()` with model version 1, and
+    `scripts/ci/wasm-generated-block-prototype-test.mjs` covers accepted
+    label/branch/dispatch and helper-fallback shapes plus rejection for
+    missing labels, raw/internal TCI pointer returns, helper calls without TCI
+    fallback, and non-dispatch exits.
   - [ ] Implement generated execution only after the control-flow model has
     deterministic coverage: DoD is a small supported opcode/control-flow
     subset with differential tests against TCI and a passing generic Chromium

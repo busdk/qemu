@@ -14,6 +14,7 @@ import {
 } from "./wasm-playwright-loader.mjs";
 
 const DEFAULT_ITERATIONS = 100000;
+export const GENERATED_BLOCK_CONTROL_FLOW_MODEL_VERSION = 1;
 
 function usage(status) {
   const stream = status === 0 ? process.stdout : process.stderr;
@@ -126,8 +127,36 @@ function localGet(index) {
   return [0x20, ...encodeU32(index)];
 }
 
-function functionBody(instructions) {
-  const body = [0x00, ...instructions, 0x0b];
+function localSet(index) {
+  return [0x21, ...encodeU32(index)];
+}
+
+function i32Const(value) {
+  return [0x41, ...encodeU32(value)];
+}
+
+function i64Const(value) {
+  return [0x42, ...encodeU32(value)];
+}
+
+function packExit(statusCode, valueCode) {
+  return [
+    ...statusCode,
+    0xad,          /* i64.extend_i32_u */
+    ...i64Const(32),
+    0x86,          /* i64.shl */
+    ...valueCode,
+    0xad,          /* i64.extend_i32_u */
+    0x84,          /* i64.or */
+  ];
+}
+
+function functionBody(instructions, locals = []) {
+  const body = [
+    ...vector(locals.map(({ count, type }) => [encodeU32(count), [type]].flat())),
+    ...instructions,
+    0x0b,
+  ];
   return [...encodeU32(body.length), ...body];
 }
 
@@ -140,14 +169,25 @@ export function buildGeneratedBlockModule() {
     ...section(1, vector([
       functionType([valueI64, valueI64], [valueI64]),
       functionType([valueI32], [valueI32]),
+      functionType([valueI32], [valueI64]),
+      functionType([valueI32, valueI32], [valueI64]),
+    ])),
+    ...section(2, vector([
+      [...name("h"), ...name("fallback"), 0x00, ...encodeU32(3)],
     ])),
     ...section(3, vector([
       [0x00],
       [0x01],
+      [0x02],
+      [0x02],
+      [0x03],
     ])),
     ...section(7, vector([
-      [...name("add64"), 0x00, ...encodeU32(0)],
-      [...name("mix32"), 0x00, ...encodeU32(1)],
+      [...name("add64"), 0x00, ...encodeU32(1)],
+      [...name("mix32"), 0x00, ...encodeU32(2)],
+      [...name("branchExit"), 0x00, ...encodeU32(3)],
+      [...name("countdownExit"), 0x00, ...encodeU32(4)],
+      [...name("helperGate"), 0x00, ...encodeU32(5)],
     ])),
     ...section(10, vector([
       functionBody([
@@ -157,10 +197,61 @@ export function buildGeneratedBlockModule() {
       ]),
       functionBody([
         ...localGet(0),
-        0x41, ...encodeU32(17), /* i32.const 17 */
+        ...i32Const(17),
         0x6a,                  /* i32.add */
-        0x41, ...encodeU32(3),  /* i32.const 3 */
+        ...i32Const(3),
         0x74,                  /* i32.shl */
+      ]),
+      functionBody([
+        ...localGet(0),
+        0x45,                  /* i32.eqz */
+        0x04, valueI64,        /* if result i64 */
+          ...packExit(i32Const(1), i32Const(100)),
+        0x05,                  /* else */
+          ...packExit(
+            i32Const(2),
+            [...localGet(0), ...i32Const(17), 0x6a],
+          ),
+        0x0b,                  /* end */
+      ]),
+      functionBody([
+        ...i32Const(0),
+        ...localSet(1),
+        0x02, valueI64,        /* block result i64 */
+          0x03, 0x40,          /* loop */
+            ...localGet(0),
+            0x45,              /* i32.eqz */
+            0x04, 0x40,        /* if */
+              ...packExit(i32Const(3), localGet(1)),
+              0x0c, ...encodeU32(2), /* br to outer block */
+            0x0b,              /* end if */
+            ...localGet(1),
+            ...localGet(0),
+            0x6a,              /* i32.add */
+            ...localSet(1),
+            ...localGet(0),
+            ...i32Const(1),
+            0x6b,              /* i32.sub */
+            ...localSet(0),
+            0x0c, ...encodeU32(0), /* br loop */
+          0x0b,                /* end loop */
+          ...packExit(i32Const(255), i32Const(0)),
+        0x0b,                  /* end block */
+      ], [{ count: 1, type: valueI32 }]),
+      functionBody([
+        ...localGet(0),
+        ...i32Const(7),
+        0x46,                  /* i32.eq */
+        0x04, valueI64,        /* if result i64 */
+          ...packExit(
+            i32Const(4),
+            [...localGet(1), ...i32Const(0x55), 0x73],
+          ),
+        0x05,                  /* else */
+          ...localGet(0),
+          ...localGet(1),
+          0x10, ...encodeU32(0), /* call h.fallback */
+        0x0b,                  /* end */
       ]),
     ])),
   ];
@@ -182,6 +273,24 @@ export function validatePrototypeResult(result) {
     if (runtime.mix32 !== 472) {
       throw new Error(`${runtime.runtime} mix32 result mismatch`);
     }
+    if (runtime.branchExitZero !== "4294967396") {
+      throw new Error(`${runtime.runtime} branchExit zero result mismatch`);
+    }
+    if (runtime.branchExitNonzero !== "8589934626") {
+      throw new Error(`${runtime.runtime} branchExit nonzero result mismatch`);
+    }
+    if (runtime.countdownExit !== "12884901898") {
+      throw new Error(`${runtime.runtime} countdownExit result mismatch`);
+    }
+    if (runtime.helperGateFast !== "17179869278") {
+      throw new Error(`${runtime.runtime} helperGate fast result mismatch`);
+    }
+    if (runtime.helperGateFallback !== "425201762323") {
+      throw new Error(`${runtime.runtime} helperGate fallback result mismatch`);
+    }
+    if (runtime.helperFallbacks !== 1) {
+      throw new Error(`${runtime.runtime} helper fallback count mismatch`);
+    }
     if (!Number.isFinite(runtime.compileMs) || runtime.compileMs < 0) {
       throw new Error(`${runtime.runtime} compileMs must be non-negative`);
     }
@@ -192,17 +301,95 @@ export function validatePrototypeResult(result) {
   return true;
 }
 
+export function validateGeneratedBlockControlFlow(block) {
+  if (!block || block.version !== GENERATED_BLOCK_CONTROL_FLOW_MODEL_VERSION) {
+    throw new Error("unexpected generated-block control-flow model version");
+  }
+  if (!Array.isArray(block.ops) || block.ops.length === 0) {
+    throw new Error("control-flow block must contain operations");
+  }
+
+  const labels = new Map();
+  for (let index = 0; index < block.ops.length; index++) {
+    const op = block.ops[index];
+    if (op.kind === "label") {
+      if (!op.name) {
+        throw new Error("label operation requires a name");
+      }
+      if (labels.has(op.name)) {
+        throw new Error(`duplicate generated-block label: ${op.name}`);
+      }
+      labels.set(op.name, index);
+    }
+  }
+
+  let hasTerminal = false;
+  for (const op of block.ops) {
+    if (op.kind === "br" || op.kind === "brcond") {
+      if (!op.target || !labels.has(op.target)) {
+        throw new Error(`branch target is not a known label: ${op.target}`);
+      }
+    } else if (op.kind === "exit") {
+      if (op.boundary !== "tb-dispatch") {
+        throw new Error("generated blocks may exit only through TB dispatch");
+      }
+      hasTerminal = true;
+    } else if (op.kind === "helper") {
+      if (op.fallback !== "tci") {
+        throw new Error("helper calls require explicit TCI fallback");
+      }
+      hasTerminal = true;
+    } else if (op.kind === "return-internal-pointer") {
+      throw new Error("internal TCI pointers are not generated-block exits");
+    } else if (op.kind !== "label" && op.kind !== "op") {
+      throw new Error(`unsupported generated-block operation: ${op.kind}`);
+    }
+  }
+
+  const last = block.ops[block.ops.length - 1];
+  if (!hasTerminal || (last.kind !== "exit" && last.kind !== "helper" &&
+                       last.kind !== "br")) {
+    throw new Error("control-flow block must end at dispatch or TCI fallback");
+  }
+
+  return {
+    version: block.version,
+    labels: labels.size,
+    ops: block.ops.length,
+    terminal: last.kind,
+  };
+}
+
 export async function runGeneratedBlockProbe(iterations, now = performance.now.bind(performance)) {
   const moduleBytes = buildGeneratedBlockModule();
   const compileStart = now();
   const compiled = await WebAssembly.compile(moduleBytes);
   const compileMs = now() - compileStart;
   const instantiateStart = now();
-  const instance = await WebAssembly.instantiate(compiled, {});
+  let helperFallbacks = 0;
+  const instance = await WebAssembly.instantiate(compiled, {
+    h: {
+      fallback(opcode, value) {
+        helperFallbacks++;
+        return (99n << 32n) | BigInt((opcode ^ value) >>> 0);
+      },
+    },
+  });
   const instantiateMs = now() - instantiateStart;
-  const { add64, mix32 } = instance.exports;
+  const {
+    add64,
+    mix32,
+    branchExit,
+    countdownExit,
+    helperGate,
+  } = instance.exports;
   const add64Result = add64(19n, 23n);
   const mix32Result = mix32(42);
+  const branchExitZero = branchExit(0);
+  const branchExitNonzero = branchExit(17);
+  const countdownExit = instance.exports.countdownExit(4);
+  const helperGateFast = helperGate(7, 91);
+  const helperGateFallback = helperGate(5, 10);
   let accumulator = 0;
   const executeStart = now();
   for (let i = 0; i < iterations; i++) {
@@ -211,7 +398,14 @@ export async function runGeneratedBlockProbe(iterations, now = performance.now.b
   const executeMs = now() - executeStart;
 
   return {
-    ok: add64Result === 42n && mix32Result === 472,
+    ok: add64Result === 42n &&
+      mix32Result === 472 &&
+      branchExitZero === 4294967396n &&
+      branchExitNonzero === 8589934626n &&
+      countdownExit === 12884901898n &&
+      helperGateFast === 17179869278n &&
+      helperGateFallback === 425201762323n &&
+      helperFallbacks === 1,
     moduleBytes: moduleBytes.length,
     validate: WebAssembly.validate(moduleBytes),
     compileMs,
@@ -220,6 +414,12 @@ export async function runGeneratedBlockProbe(iterations, now = performance.now.b
     iterations,
     add64: add64Result.toString(),
     mix32: mix32Result,
+    branchExitZero: branchExitZero.toString(),
+    branchExitNonzero: branchExitNonzero.toString(),
+    countdownExit: countdownExit.toString(),
+    helperGateFast: helperGateFast.toString(),
+    helperGateFallback: helperGateFallback.toString(),
+    helperFallbacks,
     accumulator,
   };
 }
