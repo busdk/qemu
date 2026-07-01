@@ -13,6 +13,7 @@ tcg_ss.add(files(
   'tcg-op-ldst.c',
   'tcg-op-gvec.c',
   'tcg-op-vec.c',
+  'hotblocks.c',
 ))
 
 if get_option('tcg_interpreter')

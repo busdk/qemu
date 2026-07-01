@@ -213,6 +213,42 @@ function programExitStatus(line) {
   return match === null ? null : Number(match[1]);
 }
 
+export function hotBlockSummary(line) {
+  const prefix = "qemu-tcg-hotblocks: ";
+
+  if (!line.startsWith(prefix)) {
+    return null;
+  }
+  try {
+    const summary = JSON.parse(line.slice(prefix.length));
+    if (summary === null || typeof summary !== "object" || Array.isArray(summary)) {
+      return null;
+    }
+    return summary;
+  } catch {
+    return null;
+  }
+}
+
+export function recordHotBlockSummary(state, line, elapsedMs) {
+  if (!state || !state.hotBlocks || !state.hotBlocks.enabled) {
+    return;
+  }
+  const summary = hotBlockSummary(line);
+  if (summary === null) {
+    return;
+  }
+  state.hotBlocks.summaryCount += 1;
+  state.hotBlocks.lastSummary = {
+    elapsedMs,
+    ...summary,
+  };
+  state.hotBlocks.summaries.push(state.hotBlocks.lastSummary);
+  if (state.hotBlocks.summaries.length > state.hotBlocks.maxSummaries) {
+    state.hotBlocks.summaries.shift();
+  }
+}
+
 function serviceBridgeResponseStatus(response) {
   if (typeof response.status === "string" && response.status !== "") {
     return response.status;
@@ -1072,6 +1108,9 @@ function buildConfig() {
     powerOperation: option("powerOperation", ""),
     powerTimeoutMs: numberOption("powerTimeoutMs", 30000),
     serviceBridge: jsonObjectOption("serviceBridge", null),
+    tcgHotblocks: boolOption("tcgHotblocks", false),
+    tcgHotblocksInterval: numberOption("tcgHotblocksInterval", 10000),
+    tcgHotblocksTop: numberOption("tcgHotblocksTop", 12),
     timeoutMs: numberOption("timeoutMs", 180000),
     visualMarker: option("visualMarker", ""),
     wasm: option("wasm", "/artifacts/qemu-system-x86_64.wasm"),
@@ -1181,6 +1220,18 @@ async function run() {
       loadedBytes: 0,
       persisted: false,
       persistedBytes: 0,
+    },
+    hotBlocks: {
+      enabled: config.tcgHotblocks,
+      env: config.tcgHotblocks ? {
+        QEMU_TCG_HOTBLOCKS: "1",
+        QEMU_TCG_HOTBLOCKS_INTERVAL: String(config.tcgHotblocksInterval),
+        QEMU_TCG_HOTBLOCKS_TOP: String(config.tcgHotblocksTop),
+      } : null,
+      maxSummaries: 16,
+      summaryCount: 0,
+      summaries: [],
+      lastSummary: null,
     },
     markerSeen: false,
     expectedTextSeen: config.expectText.map((text) => ({ text, seen: false })),
@@ -1358,6 +1409,11 @@ async function run() {
   const emit = (line) => {
     smokeState.lines += 1;
     smokeState.lastLine = line;
+    recordHotBlockSummary(
+      smokeState,
+      line,
+      Math.round(performance.now() - startTime),
+    );
     if (smokeState.outputBytes < config.maxOutputBytes) {
       const encoded = new TextEncoder().encode(`${line}\n`);
       const remaining = config.maxOutputBytes - smokeState.outputBytes;
@@ -1436,6 +1492,11 @@ async function run() {
   };
   const moduleOptions = {
     arguments: generatedQemuArgs,
+    ENV: config.tcgHotblocks ? {
+      QEMU_TCG_HOTBLOCKS: "1",
+      QEMU_TCG_HOTBLOCKS_INTERVAL: String(config.tcgHotblocksInterval),
+      QEMU_TCG_HOTBLOCKS_TOP: String(config.tcgHotblocksTop),
+    } : {},
     qemuWasmDisplayCanvas: canvas,
     locateFile(path) {
       if (path === "qemu-system-x86_64.wasm") {

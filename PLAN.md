@@ -129,7 +129,13 @@ systemd masks only move the failure from one slow service to the next.
   evidence from the generic Linux smoke and the Bus Engine OS browser-hosted
   service proof showing translation-block frequency, guest PC ranges, helper
   calls, exit reasons, interpreter hot spots, and candidate instruction
-  families for the first generated-WASM patches.
+  families for the first generated-WASM patches. Progress: QEMU now has
+  opt-in ``QEMU_TCG_HOTBLOCKS=1`` instrumentation that records
+  translation-block execution counts, guest PC ranges, exit reason counters,
+  and TCI opcode hotspots, and the browser smoke runner can collect summaries
+  into result JSON with ``--tcg-hotblocks``. Remaining acceptance gap: rebuild
+  the wasm64 artifact and capture the generic Linux smoke plus downstream
+  Bus Engine OS service-proof evidence with this instrumentation enabled.
 - [ ] Add a minimal generated-Wasm block prototype outside the full backend:
   DoD is a tiny QEMU test harness that emits, validates, compiles,
   instantiates, and executes one or more simple generated WebAssembly

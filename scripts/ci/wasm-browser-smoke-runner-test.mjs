@@ -25,6 +25,10 @@ import {
   serialIdleDiagnostic,
   smokeResultSummary,
 } from "./wasm-browser-smoke-runner.mjs";
+import {
+  hotBlockSummary,
+  recordHotBlockSummary,
+} from "./wasm-browser-smoke.mjs";
 
 const marker = "QEMU_WASM_LINUX_BOOT_OK";
 const runnerPath = fileURLToPath(new URL("./wasm-browser-smoke-runner.mjs", import.meta.url));
@@ -87,6 +91,14 @@ for (const status of [
       deliveryPath: "qemu-guest-powerdown",
       completed: true,
     },
+    hotBlocks: {
+      enabled: true,
+      summaryCount: 1,
+      lastSummary: {
+        event: "summary",
+        tb_execs: 100,
+      },
+    },
   });
 
   assert.equal(result.phase, "failed");
@@ -116,7 +128,76 @@ for (const status of [
     deliveryPath: "qemu-guest-powerdown",
     completed: true,
   });
+  assert.deepEqual(result.hotBlocks, {
+    enabled: true,
+    summaryCount: 1,
+    lastSummary: {
+      event: "summary",
+      tb_execs: 100,
+    },
+  });
   assert.equal(result.phases[1].failedDuring, "fetch-guest-inputs");
+}
+
+{
+  const line = "qemu-tcg-hotblocks: " + JSON.stringify({
+    format: 1,
+    event: "summary",
+    reason: "interval",
+    tb_execs: 10000,
+    unique_tbs: 200,
+    dropped_tbs: 0,
+    tci_ops: 40000,
+    helper_calls: 20,
+    qemu_loads: 300,
+    qemu_stores: 100,
+    top_blocks: [
+      {
+        pc: "0xffffffff81000000",
+        size: 64,
+        icount: 12,
+        execs: 2500,
+        exit0: 2000,
+        exit1: 500,
+      },
+    ],
+    top_tci_ops: [
+      {
+        op: "add",
+        count: 9000,
+      },
+    ],
+  });
+  const parsed = hotBlockSummary(line);
+  assert.equal(parsed.event, "summary");
+  assert.equal(parsed.tb_execs, 10000);
+  assert.equal(parsed.helper_calls, 20);
+  assert.equal(parsed.top_blocks[0].pc, "0xffffffff81000000");
+  assert.equal(hotBlockSummary("ordinary serial line"), null);
+  assert.equal(hotBlockSummary("qemu-tcg-hotblocks: not-json"), null);
+}
+
+{
+  const state = {
+    hotBlocks: {
+      enabled: true,
+      maxSummaries: 2,
+      summaryCount: 0,
+      summaries: [],
+      lastSummary: null,
+    },
+  };
+  for (const value of [1, 2, 3]) {
+    recordHotBlockSummary(
+      state,
+      `qemu-tcg-hotblocks: {"format":1,"event":"summary","tb_execs":${value}}`,
+      value * 10,
+    );
+  }
+  assert.equal(state.hotBlocks.summaryCount, 3);
+  assert.equal(state.hotBlocks.summaries.length, 2);
+  assert.equal(state.hotBlocks.summaries[0].tb_execs, 2);
+  assert.equal(state.hotBlocks.lastSummary.elapsedMs, 30);
 }
 
 {
@@ -286,6 +367,45 @@ for (const status of [
   assert.equal(url.searchParams.get("allowSerialFallback"), "1");
   assert.equal(url.searchParams.has("rootfsStorage"), false);
   assert.equal(url.searchParams.has("rootfsOpfsName"), false);
+  assert.equal(url.searchParams.has("tcgHotblocks"), false);
+}
+
+{
+  const url = browserSmokeUrl({
+    allowSerialFallback: true,
+    appendExtra: "",
+    cpu: "Nehalem",
+    display: "none",
+    displayDevice: "default",
+    expectedResolution: "",
+    expectText: [],
+    focusDisplay: false,
+    host: "localhost",
+    initrd: "/tmp/initramfs.cpio.gz",
+    keyboardAfterText: "",
+    keyboardText: "",
+    kernelAppend: null,
+    machine: "microvm,acpi=off",
+    marker,
+    maxOutputBytes: 8192,
+    memory: "256M",
+    network: "none",
+    port: 8020,
+    powerOperation: "",
+    powerTimeoutMs: 30000,
+    qemuArgs: [],
+    rootfs: null,
+    rootfsDevice: "virtio-mmio",
+    tcgHotblocks: true,
+    tcgHotblocksInterval: 77,
+    tcgHotblocksTop: 5,
+    timeoutMs: 30000,
+    visualMarker: "",
+  });
+
+  assert.equal(url.searchParams.get("tcgHotblocks"), "1");
+  assert.equal(url.searchParams.get("tcgHotblocksInterval"), "77");
+  assert.equal(url.searchParams.get("tcgHotblocksTop"), "5");
 }
 
 {

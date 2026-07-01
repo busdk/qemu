@@ -113,6 +113,13 @@ Options:
   --screenshot-full-page
                      Capture the full scrollable page instead of the viewport
   --timeout-ms MS     Timeout in milliseconds
+  --tcg-hotblocks    Enable QEMU TCG hot-block instrumentation and collect
+                     summaries in result JSON
+  --tcg-hotblocks-interval N
+                     TB execution interval between hotspot summaries
+                     (default: 10000)
+  --tcg-hotblocks-top N
+                     Maximum hotspot entries per summary (default: 12)
   --visual-marker TEXT
                      Expected visual marker metadata for display proofs
   --help              Show this help
@@ -177,6 +184,9 @@ function parseArgs(argv) {
     screenshot: null,
     screenshotFullPage: false,
     serviceBridge: null,
+    tcgHotblocks: false,
+    tcgHotblocksInterval: 10000,
+    tcgHotblocksTop: 12,
     timeoutMs: 180000,
     visualMarker: "",
   };
@@ -327,6 +337,15 @@ function parseArgs(argv) {
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number(argv[++i]);
       explicit.add("timeoutMs");
+    } else if (arg === "--tcg-hotblocks") {
+      options.tcgHotblocks = true;
+      explicit.add("tcgHotblocks");
+    } else if (arg === "--tcg-hotblocks-interval") {
+      options.tcgHotblocksInterval = Number(argv[++i]);
+      explicit.add("tcgHotblocksInterval");
+    } else if (arg === "--tcg-hotblocks-top") {
+      options.tcgHotblocksTop = Number(argv[++i]);
+      explicit.add("tcgHotblocksTop");
     } else if (arg === "--visual-marker") {
       options.visualMarker = argv[++i];
       explicit.add("visualMarker");
@@ -345,6 +364,7 @@ function parseArgs(argv) {
       "harnessSelfTest",
       "requireDisplayOutput",
       "screenshotFullPage",
+      "tcgHotblocks",
     ],
     checksumFields: ["kernel", "initrd", "rootfs"],
     integerFields: [
@@ -359,6 +379,8 @@ function parseArgs(argv) {
       "powerTimeoutMs",
       "progressSampleIntervalMs",
       "progressSampleLimit",
+      "tcgHotblocksInterval",
+      "tcgHotblocksTop",
       "timeoutMs",
     ],
     pathFields: [
@@ -442,6 +464,18 @@ function parseArgs(argv) {
   }
   if (!Number.isInteger(options.timeoutMs) || options.timeoutMs <= 0) {
     console.error("--timeout-ms must be a positive integer");
+    usage(2);
+  }
+  if (!Number.isInteger(options.tcgHotblocksInterval) || options.tcgHotblocksInterval <= 0) {
+    console.error("--tcg-hotblocks-interval must be a positive integer");
+    usage(2);
+  }
+  if (
+    !Number.isInteger(options.tcgHotblocksTop) ||
+    options.tcgHotblocksTop <= 0 ||
+    options.tcgHotblocksTop > 64
+  ) {
+    console.error("--tcg-hotblocks-top must be an integer from 1 to 64");
     usage(2);
   }
   if (!Number.isInteger(options.maxOutputBytes) || options.maxOutputBytes <= 0) {
@@ -940,12 +974,20 @@ export function promoteSmokeState(result, smokeState) {
   result.powerControlState = smokeState.powerControl || null;
   result.rootfsStorageState = smokeState.rootfsStorage || null;
   result.serviceBridgeState = smokeState.serviceBridge || null;
+  result.hotBlocks = smokeState.hotBlocks || null;
 }
 
 export function browserSmokeUrl(options) {
   const url = new URL(`http://${options.host}:${options.port}/`);
   const rootfsStorage = options.rootfsStorage || "memfs";
   const rootfsOpfsName = options.rootfsOpfsName || "qemu-wasm-rootfs.raw";
+  const tcgHotblocks = Boolean(options.tcgHotblocks);
+  const tcgHotblocksInterval = Number.isInteger(options.tcgHotblocksInterval)
+    ? options.tcgHotblocksInterval
+    : 10000;
+  const tcgHotblocksTop = Number.isInteger(options.tcgHotblocksTop)
+    ? options.tcgHotblocksTop
+    : 12;
   url.searchParams.set("appendExtra", options.appendExtra);
   url.searchParams.set("allowSerialFallback", options.allowSerialFallback ? "1" : "0");
   url.searchParams.set("cpu", options.cpu);
@@ -964,6 +1006,11 @@ export function browserSmokeUrl(options) {
   url.searchParams.set("network", options.network);
   url.searchParams.set("powerOperation", options.powerOperation);
   url.searchParams.set("powerTimeoutMs", String(options.powerTimeoutMs));
+  if (tcgHotblocks) {
+    url.searchParams.set("tcgHotblocks", "1");
+    url.searchParams.set("tcgHotblocksInterval", String(tcgHotblocksInterval));
+    url.searchParams.set("tcgHotblocksTop", String(tcgHotblocksTop));
+  }
   url.searchParams.set("rootfsDevice", options.rootfsDevice);
   if (rootfsStorage !== "memfs") {
     url.searchParams.set("rootfsStorage", rootfsStorage);
@@ -1034,6 +1081,13 @@ export function initialSmokeResult(options, browserVersion) {
     rootfsOpfsName: options.rootfsOpfsName,
     rootfsStorage: options.rootfsStorage,
     serviceBridge: options.serviceBridge,
+    tcgHotblocks: Boolean(options.tcgHotblocks),
+    tcgHotblocksInterval: Number.isInteger(options.tcgHotblocksInterval)
+      ? options.tcgHotblocksInterval
+      : 10000,
+    tcgHotblocksTop: Number.isInteger(options.tcgHotblocksTop)
+      ? options.tcgHotblocksTop
+      : 12,
     visualMarker: options.visualMarker,
     success: false,
     consoleMessages: [],

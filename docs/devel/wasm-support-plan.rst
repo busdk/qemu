@@ -3572,3 +3572,44 @@ Playwright container with ``serial-jsonl``.  The result JSON recorded
 ``sent=1``, ``received=1``, ``resolved=1``, request id ``health-1``,
 response id ``health-1``, response status ``ok``, and screenshot
 ``build/wasm-service-bridge-proof-local/screenshot.png``.
+
+TCI hot-block instrumentation
+-----------------------------
+
+The first performance evidence path is opt-in TCG/TCI hot-block
+instrumentation.  It is disabled by default.  Browser smoke runs enable it
+with::
+
+  scripts/ci/wasm-browser-smoke-runner.mjs \
+    --tcg-hotblocks \
+    --tcg-hotblocks-interval 10000 \
+    --tcg-hotblocks-top 12 \
+    ...
+
+The runner forwards these values to the WebAssembly module environment as
+``QEMU_TCG_HOTBLOCKS=1``, ``QEMU_TCG_HOTBLOCKS_INTERVAL``, and
+``QEMU_TCG_HOTBLOCKS_TOP``.  QEMU then emits bounded JSON lines on stderr with
+the prefix ``qemu-tcg-hotblocks:``.  Each summary records:
+
+* total translation-block executions;
+* unique and dropped translation-block counter slots;
+* top translation blocks by execution count, including guest PC, code segment
+  base, flags, cflags, translated size, guest instruction count, and exit
+  reason counters;
+* total interpreted TCI operations;
+* aggregate helper-call, QEMU load, and QEMU store counters;
+* top TCI opcode counters by TCG opcode name.
+
+The browser harness parses those lines into
+``qemuWasmSmokeState.hotBlocks`` and the runner copies that field into result
+JSON as ``hotBlocks``.  The same mechanism applies to the generic Linux smoke
+guest and downstream Bus Engine OS browser-hosted service proofs because it is
+QEMU-side instrumentation rather than guest-specific code.
+
+This instrumentation is a measurement step, not a performance fix.  The first
+accepted use is to compare generic Linux smoke and Bus Engine OS systemd boot
+profiles, identify hot guest PC ranges and TCI opcode families, and choose the
+first narrow generated-WASM fast path.  TCI remains the correctness fallback.
+The counters are intended for the single-threaded wasm64 TCI browser path used
+by these smoke proofs.  They are not a replacement for QEMU's plugin-based
+profiling interfaces for native or multi-threaded accelerator work.

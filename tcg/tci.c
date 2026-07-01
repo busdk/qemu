@@ -19,6 +19,7 @@
 
 #include "qemu/osdep.h"
 #include "tcg/tcg.h"
+#include "tcg/hotblocks.h"
 #include "tcg/helper-info.h"
 #include "tcg/tcg-ldst.h"
 #include "disas/dis-asm.h"
@@ -341,6 +342,7 @@ uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
 
         insn = *tb_ptr++;
         opc = extract32(insn, 0, 8);
+        tcg_hotblocks_maybe_tci_op(opc);
 
         switch (opc) {
         case INDEX_op_call:
