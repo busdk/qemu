@@ -11,6 +11,7 @@
 
 bool qemu_perf_attrib_enabled(void);
 int64_t qemu_perf_attrib_begin(void);
+void qemu_perf_attrib_poll(void);
 void qemu_perf_attrib_virtio_queue(const char *device, unsigned queue,
                                    int64_t start_ns);
 void qemu_perf_attrib_virtio_notify(const char *device);

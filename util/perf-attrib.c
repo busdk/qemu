@@ -13,6 +13,7 @@
 #endif
 
 #define PERF_ATTRIB_DEFAULT_INTERVAL 10000
+#define PERF_ATTRIB_DEFAULT_TIME_INTERVAL_MS 30000
 #define PERF_ATTRIB_WASM_ENV_FILE "/qemu-wasm-perf-attrib-env"
 
 typedef struct PerfAttribVirtioCounters {
@@ -26,6 +27,8 @@ typedef struct PerfAttribState {
     bool enabled;
     uint64_t interval;
     uint64_t next_report;
+    uint64_t time_interval_ms;
+    int64_t next_time_report_ns;
     int64_t started_ns;
     uint64_t events;
     uint64_t virtio_notifies;
@@ -185,7 +188,15 @@ static void perf_attrib_init(void)
         parse_u64_env("QEMU_WASM_PERF_ATTRIBUTION_INTERVAL",
                       PERF_ATTRIB_DEFAULT_INTERVAL, 1, UINT64_MAX / 2);
     perf_attrib.next_report = perf_attrib.interval;
+    perf_attrib.time_interval_ms =
+        parse_u64_env("QEMU_WASM_PERF_ATTRIBUTION_TIME_INTERVAL_MS",
+                      PERF_ATTRIB_DEFAULT_TIME_INTERVAL_MS, 1,
+                      UINT64_MAX / 1000000);
     perf_attrib.started_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+    if (perf_attrib.started_ns > 0) {
+        perf_attrib.next_time_report_ns = perf_attrib.started_ns +
+            perf_attrib.time_interval_ms * 1000000;
+    }
     atexit(perf_attrib_atexit);
 }
 
@@ -201,6 +212,27 @@ int64_t qemu_perf_attrib_begin(void)
         return 0;
     }
     return qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+}
+
+void qemu_perf_attrib_poll(void)
+{
+    int64_t now_ns;
+
+    if (!qemu_perf_attrib_enabled() ||
+        perf_attrib.next_time_report_ns <= 0) {
+        return;
+    }
+
+    now_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
+    if (now_ns < perf_attrib.next_time_report_ns) {
+        return;
+    }
+
+    perf_attrib_report("time");
+    do {
+        perf_attrib.next_time_report_ns +=
+            perf_attrib.time_interval_ms * 1000000;
+    } while (now_ns >= perf_attrib.next_time_report_ns);
 }
 
 static PerfAttribVirtioCounters *virtio_counters_for(const char *device)

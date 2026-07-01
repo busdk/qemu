@@ -47,7 +47,11 @@ This goal is done only when all of the following are true:
 - [ ] The current browser-hosted Bus Engine OS `virtual-server` boot baseline
   is recorded with exact QEMU artifact hashes, guest kernel/rootfs hashes,
   browser version, command line, timeout/readiness state, and final serial
-  marker.
+  marker. Current accepted baseline on 2026-07-01: service readiness time is
+  unknown and greater than `420000` ms because Chromium proof
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-current-attribution-20260701.json`
+  timed out after `420194` ms without `Reached target Multi-User System.` or
+  `QEMU_WASM_SERVICE_READY`.
 - [ ] QEMU-side attribution identifies the dominant measured bottleneck for
   that baseline. The accepted bottleneck must be backed by counters or timing
   evidence, not by intuition.
@@ -63,11 +67,16 @@ This goal is done only when all of the following are true:
   acceleration counters when the optimization is CPU-side.
 - [ ] The Bus Engine OS `virtual-server` Chromium proof is rerun with the same
   accepted kernel/rootfs fixture and the optimized QEMU artifact.
-- [ ] The Bus Engine OS optimized proof either reaches normal systemd
+- [ ] The Bus Engine OS optimized proof reaches normal systemd
   multi-user/service readiness and the downstream `QEMU_WASM_SERVICE_READY`
-  bridge marker, or records a measured and material marker-to-marker
-  improvement plus the next concrete QEMU-side bottleneck promoted into this
-  plan before any closeout.
+  bridge marker in Chromium within `300000` ms using the accepted
+  `virtual-server` kernel/rootfs fixture. This is the MVP product bar for a
+  usable browser-hosted virtual server boot: five minutes, matching the
+  operator's stated acceptable normal-server boot range. A run that only beats
+  the old `420000` ms timeout is not enough unless it also reaches readiness;
+  if readiness remains above `300000` ms or is not reached, the work must
+  record a measured marker-to-marker improvement and promote the next concrete
+  QEMU-side bottleneck into this plan before any closeout.
 - [ ] Result JSON, screenshot, artifact hashes, elapsed timing, fallback or
   device counters, and baseline comparison are recorded in this file and in
   `docs/devel/wasm-support-plan.rst`.
@@ -795,7 +804,7 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   fix. The next implementation must either produce actual generated
   WebAssembly execution for hot TBs, or add fresh attribution proving a
   different QEMU-side boundary has become dominant.
-- [ ] Refresh current bottleneck attribution after rejected generated-execution
+- [x] Refresh current bottleneck attribution after rejected generated-execution
   and compiler-flag experiments:
   DoD is a current Chromium Bus Engine OS `virtual-server` run, using the
   latest accepted QEMU artifact and the same accepted downstream kernel/rootfs
@@ -832,6 +841,35 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   this item remains open: the next proof must use an artifact or interval that
   actually emits device/backend summaries, or explicitly prove that no
   measured device boundary is active before the guest stalls.
+  Implementation step in progress: add `qemu_perf_attrib_poll()` with a
+  time-based report interval so CPU-bound browser runs can emit attribution
+  summaries even when device event counts stay below the event interval and
+  QEMU does not exit before the harness timeout. The first call site is the
+  low-frequency TCI wasm-subset summary path, which is already enabled for
+  this proof lane.
+  Accepted implementation evidence: rebuilt artifact hashes
+  `qemu-system-x86_64.js=f890fb7cb7b6469df6b21ffc0e129a4f2e35d166e2aac34a77a096dd5ce1a412`
+  and
+  `qemu-system-x86_64.wasm=d869e74146dbd4fe0b89aa6ce1b476dfa7ea0b003175850c6bb2c795a422f0d3`
+  passed generic Chromium `149.0.7827.55` smoke
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-perf-time-poll.json`
+  and recorded three time-based performance-attribution summaries. The
+  downstream Bus Engine OS proof
+  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-attribution-time-poll-20260701.json`
+  still timed out after `420211` ms before multi-user/service readiness, but
+  recorded `perfCount=13`. The final attribution summary at QEMU elapsed
+  `391824` ms reported `events=0`, `virtio_notifies=0`, and zero block, RNG,
+  serial, network, display, input, and other device counters. The final TCI
+  subset summary reported `attempts=232000000`, `executed=231826121`,
+  `fallback_cold=147870`, `fallback_unsupported=12026`, top unsupported op
+  `brcond`, and generated fallbacks `ld32u=18058` plus `st8=16`. This closes
+  the attribution gap: current evidence says the next implementation remains
+  CPU execution acceleration, not OPFS, networking, graphics, input, WebCrypto,
+  or another device/browser backend.
+  Proof-harness hygiene in progress: keep `--rootfs-storage opfs-snapshot`
+  validation ahead of the generic initrd/rootfs requirement so bad storage
+  arguments fail with the actionable OPFS rootfs error before long browser
+  proof setup.
 - [ ] Add a translation-block cache design and tests once the first generated
   blocks exist: DoD is a documented cache key, invalidation rule,
   memory-pressure behavior, browser-module lifetime policy, and deterministic

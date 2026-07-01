@@ -22,6 +22,7 @@
 #include "tcg/hotblocks.h"
 #include "tcg/helper-info.h"
 #include "tcg/tcg-ldst.h"
+#include "qemu/perf-attrib.h"
 #include "disas/dis-asm.h"
 #include "tcg-has.h"
 #include <ffi.h>
@@ -1122,6 +1123,7 @@ static TCIWasmSubsetStatus tci_wasm_subset_try_exec(const uint32_t *tb_start,
     if (tci_wasm_subset_interval != 0 &&
         tci_wasm_subset_attempts >= tci_wasm_subset_next_report) {
         tci_wasm_subset_report("interval");
+        qemu_perf_attrib_poll();
         tci_wasm_subset_next_report =
             tci_wasm_subset_attempts + tci_wasm_subset_interval;
     }

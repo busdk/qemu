@@ -1664,6 +1664,7 @@ async function run() {
     return !(
       line.startsWith("qemu-tci-wasm-subset:") ||
       line.startsWith("qemu-tcg-hotblocks:") ||
+      line.startsWith("qemu-wasm-perf-attrib:") ||
       line.startsWith("qemu-wasm-perf-attribution:") ||
       line.startsWith("wasm-browser-smoke:") ||
       line.startsWith(smokeState.guestHeartbeat.marker)

@@ -4747,6 +4747,37 @@ an artifact or interval that actually emits device/backend summaries, or
 explicitly prove that no measured QEMU device boundary is active before the
 guest stalls.
 
+The attribution gap was then fixed by adding a time-based
+``qemu_perf_attrib_poll()`` path.  The poll is called from the low-frequency
+TCI wasm-subset summary path, so CPU-bound browser runs can emit attribution
+summaries even when device event counts stay below the event interval and QEMU
+does not exit before the browser harness timeout.  The browser harness was
+also corrected to treat ``qemu-wasm-perf-attrib:`` lines as instrumentation
+rather than guest-origin progress.
+
+The rebuilt artifact produced ``qemu-system-x86_64.js`` SHA-256
+``f890fb7cb7b6469df6b21ffc0e129a4f2e35d166e2aac34a77a096dd5ce1a412`` and
+``qemu-system-x86_64.wasm`` SHA-256
+``d869e74146dbd4fe0b89aa6ce1b476dfa7ea0b003175850c6bb2c795a422f0d3``.
+Generic Chromium ``149.0.7827.55`` smoke wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-perf-time-poll.json``,
+reached ``QEMU_WASM_LINUX_BOOT_OK``, and recorded three time-based
+performance-attribution summaries.
+
+The downstream Bus Engine OS proof wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-attribution-time-poll-20260701.json``
+and still timed out after ``420211`` ms before multi-user/service readiness.
+It recorded ``perfCount=13``.  The final attribution summary at QEMU elapsed
+``391824`` ms reported ``events=0``, ``virtio_notifies=0``, and zero block,
+RNG, serial, network, display, input, and other device counters.  The final
+TCI subset summary reported ``attempts=232000000``,
+``executed=231826121``, ``fallback_cold=147870``,
+``fallback_unsupported=12026``, top unsupported op ``brcond``, and generated
+fallbacks ``ld32u=18058`` plus ``st8=16``.  This closes the attribution gap:
+current evidence says the next implementation remains CPU execution
+acceleration, not OPFS, networking, graphics, input, WebCrypto, or another
+device/browser backend.
+
 Guest-progress idle diagnostic
 ==============================
 
