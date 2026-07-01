@@ -66,7 +66,7 @@ App Server remain downstream proof payloads.
   available, QEMU exit/reset state, timeout, and screenshot evidence; and the
   default serial/display smoke path remains unchanged unless a power operation
   is explicitly requested.
-- [ ] Add generic suspend/resume planning for browser-hosted QEMU state:
+- [x] Add generic suspend/resume planning for browser-hosted QEMU state:
   DoD is a developer note describing which QEMU state can be saved in the
   browser runtime, which browser storage APIs are candidates, which manifest
   fields must match before restore, how incompatible state is rejected, and why

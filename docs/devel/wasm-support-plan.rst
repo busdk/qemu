@@ -3437,6 +3437,57 @@ QEMU action/status for direct QEMU requests, timeout, completion flag, and
 non-secret error text.  It does not expose monitor commands, raw transport
 frames, guest filesystem paths, or product-specific service names.
 
+Suspend and resume planning
+---------------------------
+
+Suspend and resume must be treated as VM-state compatibility work, not as a
+browser storage promise.  The first acceptance target should remain native QEMU
+managed save or migration-style state save under a normal host runtime, because
+that path exercises QEMU's existing VMState machinery before adding browser
+storage constraints.
+
+Browser-hosted state can only be restored when every compatibility input still
+matches the saved state.  A browser-hosted save manifest should record at
+least:
+
+* QEMU JavaScript and WebAssembly artifact digests;
+* QEMU target, machine, CPU model, accelerator mode, memory size, display
+  device, rootfs device model, and extra QEMU arguments;
+* guest architecture, kernel digest, initrd digest if present, rootfs digest
+  if present, and kernel command line;
+* firmware file digests and firmware directory identity;
+* service-bridge channel kind and channel names;
+* browser harness format version and storage schema version.
+
+Restore must reject saved state when any compatibility field differs.  The
+error should name the first incompatible field and keep the old saved state
+available for export or deletion rather than trying a best-effort restore into
+a different emulator or guest image.
+
+The browser storage candidates are:
+
+``IndexedDB``
+  The first realistic browser-local storage target for manifest metadata and
+  moderate binary chunks.  It is asynchronous and quota-managed by the browser,
+  so it must report quota failures clearly and must not be described as durable
+  production storage.
+
+``Origin Private File System``
+  Useful for larger local files when supported by the browser.  It still
+  inherits origin quota and user-agent eviction behavior, so it needs the same
+  compatibility and export story as IndexedDB.
+
+``File System Access API``
+  Useful for explicit user-selected import/export of state bundles.  It is
+  better for manual evidence and support cases than for automatic restore
+  because it requires user-mediated file handles in supported browsers.
+
+The browser-hosted MVP should first expose enough metadata to say why a save is
+compatible or incompatible.  Actual browser persistence should wait until a
+native QEMU managed-save proof and a browser quota/error proof both exist.
+Until then, screenshots, serial logs, result JSON, and guest artifact manifests
+remain the accepted browser evidence.
+
 First proof shape
 -----------------
 
