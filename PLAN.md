@@ -176,6 +176,28 @@ systemd masks only move the failure from one slow service to the next.
   failures, validation failures, disabled optimization flags, or cache
   rejection fall back to TCI without removing the already accepted 64-bit
   browser console boot path or the generic service-bridge API.
+- [x] Build and measure an optimized wasm64 TCI artifact before deeper codegen
+  work: DoD is a wasm64 `x86_64-softmmu` browser artifact built with Meson
+  `-Doptimization=3` and LTO where Emscripten accepts it; generic Chromium
+  smoke remains passing; the Bus Engine OS `virtual-server` browser proof is
+  repeated against the same microvm kernel/rootfs inputs; result JSON records
+  elapsed timing and last serial marker; and the evidence states whether this
+  production-speed TCI build reaches multi-user/service readiness, materially
+  improves the baseline, or leaves generated-WASM execution as the next
+  required acceleration path.
+- [x] Compile hot-block instrumentation out of normal TCI builds: DoD is a
+  configure/Meson option that keeps the existing hot-block evidence path
+  available for profiling builds, removes `tcg/hotblocks.c` and the per-op
+  `tcg_hotblocks_maybe_tci_op()` branch from normal production wasm64 TCI
+  artifacts, keeps generic Chromium smoke passing, and repeats the Bus Engine
+  OS microvm proof to measure whether removing instrumentation overhead moves
+  the full guest closer to multi-user readiness.
+- [x] Add an opt-in wasm64 TCI memory-barrier fast path experiment: DoD is an
+  Emscripten/TCI-only runtime switch that keeps the default `INDEX_op_mb`
+  behavior unchanged, records why system-mode barriers cannot be removed
+  unconditionally, runs generic Chromium smoke with the switch enabled, and
+  repeats the Bus Engine OS microvm proof to measure whether the hot-block
+  `mb` opcode overhead is a real boot bottleneck.
 - [x] Add hot-block instrumentation before compiling blocks: DoD is structured
   evidence from the generic Linux smoke and the Bus Engine OS browser-hosted
   service proof showing translation-block frequency, guest PC ranges, helper

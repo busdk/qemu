@@ -13,8 +13,11 @@ tcg_ss.add(files(
   'tcg-op-ldst.c',
   'tcg-op-gvec.c',
   'tcg-op-vec.c',
-  'hotblocks.c',
 ))
+
+if get_option('tcg_hotblocks')
+  tcg_ss.add(files('hotblocks.c'))
+endif
 
 if get_option('tcg_interpreter')
   libffi = dependency('libffi', version: '>=3.0', required: true,

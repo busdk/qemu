@@ -3686,3 +3686,74 @@ removes the root-device blocker and avoids unnecessary PC firmware/ACPI/PCI
 setup, but it does not by itself solve the wasm64 TCI slowness for the full
 Bus Engine OS systemd guest.  The remaining active performance work is a real
 execution acceleration path with TCI fallback.
+
+A follow-up Chromium diagnostic masked only
+``systemd-udev-trigger.service`` through the guest command line while keeping
+the same kernel, rootfs, machine, and QEMU artifact.  It wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-microvm-mask-udev-trigger.json``
+and still timed out before multi-user after 300 seconds.  The last serial
+state advanced only into early systemd socket setup.  This rules out treating
+one masked coldplug unit as the performance solution.  It remains useful
+downstream evidence that the virtual kernel profile should avoid unnecessary
+PC-era probing such as absent PCI configuration space and absent i8042
+controllers, but the accepted QEMU goal still needs a faster execution path.
+
+An O3/LTO wasm64 TCI build was tested as a bounded production-speed artifact
+experiment.  The Emscripten toolchain accepted Meson ``-Doptimization=3`` and
+LTO, and generic Chromium smoke still reached ``QEMU_WASM_LINUX_BOOT_OK``.
+The fair no-hot-blocks generic comparison did not improve: the existing O2
+artifact reached the marker in about 75 seconds, while the O3/LTO artifact
+reached it in about 80 seconds.  The Bus Engine OS microvm proof still timed
+out before multi-user.  Therefore O3/LTO is not the accepted performance
+solution and is not enabled in the normal CI artifact.
+
+The next production-artifact cleanup is to compile hot-block instrumentation
+out of normal builds.  Profiling builds can opt into the existing JSON
+hot-block evidence path, but the default browser artifact should not pay a
+per-interpreted-opcode branch for instrumentation that is disabled at runtime.
+
+That cleanup is implemented as the default build behavior.  Profiling builds
+can pass ``--enable-tcg-hotblocks`` to keep ``tcg/hotblocks.c`` and the TCI
+opcode sampling path.  Normal TCI builds compile the inline hot-block hooks to
+no-ops and do not include the hot-block source file.  A rebuilt O2 wasm64 TCI
+artifact without default hot-block instrumentation produced
+``qemu-system-x86_64.js`` SHA-256
+``818a5ae872e67081771d3dead252f1c12ac8e1d8c2184975cc201069c4ff70cb`` and
+``qemu-system-x86_64.wasm`` SHA-256
+``fb315ef7180443d6aecc9c622db1f4d6a958d4110ea0707f55d2c12d9364dae2``.
+The artifact manifest check passed.  Generic Chromium smoke wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-nohot.json``
+and reached ``QEMU_WASM_LINUX_BOOT_OK`` in 73.3 seconds.  The Bus Engine OS
+microvm proof wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-microvm-nohot.json``
+and still timed out after 420 seconds at
+``systemd[1]: Starting Coldplug All udev Devices...``.  This cleanup is safe
+and removes measurement overhead from production artifacts, but it is not the
+full boot-speed solution.
+
+The first hot-opcode acceleration experiment targeted ``INDEX_op_mb`` because
+the accepted hot-block sample recorded about 5.6 million sampled ``mb``
+operations during the Bus Engine OS proof.  QEMU cannot remove system-mode
+barriers unconditionally: ``tcg_gen_mb()`` deliberately emits them even for
+one guest CPU because I/O threads and devices can observe virtio queues.
+Therefore the experiment is Emscripten/TCI-only, explicit, and default-off via
+``QEMU_TCI_RELAXED_MB=1`` or the browser runner's ``--tci-relaxed-mb`` flag.
+The strict TCI path remains the fallback.
+
+A rebuilt artifact with the explicit relaxed-barrier switch available produced
+``qemu-system-x86_64.js`` SHA-256
+``c197af639082d71084d7c78421e2ce5b80de12c83afdd5d270f4fd67b1245e2c`` and
+``qemu-system-x86_64.wasm`` SHA-256
+``74c0578dd65d50e4e1e4570bdb21197b2f24fb17ffb571a418bdb3ab2d7515bb``.
+Generic Chromium smoke with ``--tci-relaxed-mb`` wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-relaxed-mb-2.json``
+and reached ``QEMU_WASM_LINUX_BOOT_OK`` in 68.2 seconds with result JSON
+recording ``tci.relaxedMb=true``.  The Bus Engine OS
+microvm proof with the same flag wrote
+``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-service-microvm-relaxed-mb.json``
+and still timed out after 420 seconds, although it advanced slightly farther
+than the strict run, from ``Coldplug All udev Devices`` to the ext4 rootfs
+remount message.  This result shows that memory-barrier overhead is measurable
+but too small to satisfy the Bus Engine OS browser boot goal.  The remaining
+required work is a real generated-WASM or equivalent execution acceleration
+path with strict TCI fallback.

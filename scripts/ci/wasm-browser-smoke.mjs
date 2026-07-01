@@ -1113,6 +1113,7 @@ function buildConfig() {
     tcgHotblocksOpLimit: numberOption("tcgHotblocksOpLimit", 134217728),
     tcgHotblocksOpSample: numberOption("tcgHotblocksOpSample", 1),
     tcgHotblocksTop: numberOption("tcgHotblocksTop", 12),
+    tciRelaxedMb: boolOption("tciRelaxedMb", false),
     timeoutMs: numberOption("timeoutMs", 180000),
     visualMarker: option("visualMarker", ""),
     wasm: option("wasm", "/artifacts/qemu-system-x86_64.wasm"),
@@ -1236,6 +1237,12 @@ async function run() {
       summaryCount: 0,
       summaries: [],
       lastSummary: null,
+    },
+    tci: {
+      relaxedMb: Boolean(config.tciRelaxedMb),
+      env: config.tciRelaxedMb ? {
+        QEMU_TCI_RELAXED_MB: "1",
+      } : null,
     },
     markerSeen: false,
     expectedTextSeen: config.expectText.map((text) => ({ text, seen: false })),
@@ -1481,6 +1488,9 @@ async function run() {
     QEMU_TCG_HOTBLOCKS_OP_SAMPLE: String(config.tcgHotblocksOpSample),
     QEMU_TCG_HOTBLOCKS_TOP: String(config.tcgHotblocksTop),
   } : {};
+  const tciEnv = config.tciRelaxedMb ? {
+    QEMU_TCI_RELAXED_MB: "1",
+  } : {};
   const installWasmKeySink = (module) => {
     if (config.display === "wasm" && typeof module._qemu_wasm_display_key_event === "function") {
       qemuKeySink = (linuxKey, down) => {
@@ -1503,8 +1513,9 @@ async function run() {
   };
   const moduleOptions = {
     arguments: generatedQemuArgs,
-    ENV: hotBlocksEnv,
+    ENV: { ...hotBlocksEnv, ...tciEnv },
     qemuWasmHotBlocksEnv: hotBlocksEnv,
+    qemuWasmTciEnv: tciEnv,
     qemuWasmDisplayCanvas: canvas,
     locateFile(path) {
       if (path === "qemu-system-x86_64.wasm") {
@@ -1522,6 +1533,12 @@ async function run() {
             .map(([key, value]) => `${key}=${value}`)
             .join("\n") + "\n";
           module.FS.writeFile("/qemu-tcg-hotblocks-env", lines);
+        }
+        if (config.tciRelaxedMb) {
+          const lines = Object.entries(tciEnv)
+            .map(([key, value]) => `${key}=${value}`)
+            .join("\n") + "\n";
+          module.FS.writeFile("/qemu-tci-env", lines);
         }
       },
     ],

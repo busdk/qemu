@@ -126,6 +126,8 @@ Options:
                      opcodes; 0 means unlimited (default: 134217728)
   --tcg-hotblocks-top N
                      Maximum hotspot entries per summary (default: 12)
+  --tci-relaxed-mb  Enable the Emscripten/TCI-only relaxed memory-barrier
+                    experiment; default QEMU execution remains strict
   --visual-marker TEXT
                      Expected visual marker metadata for display proofs
   --help              Show this help
@@ -195,6 +197,7 @@ function parseArgs(argv) {
     tcgHotblocksInterval: 10000,
     tcgHotblocksOpSample: 1,
     tcgHotblocksTop: 12,
+    tciRelaxedMb: false,
     timeoutMs: 180000,
     visualMarker: "",
   };
@@ -360,6 +363,9 @@ function parseArgs(argv) {
     } else if (arg === "--tcg-hotblocks-top") {
       options.tcgHotblocksTop = Number(argv[++i]);
       explicit.add("tcgHotblocksTop");
+    } else if (arg === "--tci-relaxed-mb") {
+      options.tciRelaxedMb = true;
+      explicit.add("tciRelaxedMb");
     } else if (arg === "--visual-marker") {
       options.visualMarker = argv[++i];
       explicit.add("visualMarker");
@@ -379,6 +385,7 @@ function parseArgs(argv) {
       "requireDisplayOutput",
       "screenshotFullPage",
       "tcgHotblocks",
+      "tciRelaxedMb",
     ],
     checksumFields: ["kernel", "initrd", "rootfs"],
     integerFields: [
@@ -999,6 +1006,7 @@ export function promoteSmokeState(result, smokeState) {
   result.rootfsStorageState = smokeState.rootfsStorage || null;
   result.serviceBridgeState = smokeState.serviceBridge || null;
   result.hotBlocks = smokeState.hotBlocks || null;
+  result.tci = smokeState.tci || null;
 }
 
 export function browserSmokeUrl(options) {
@@ -1042,6 +1050,9 @@ export function browserSmokeUrl(options) {
     url.searchParams.set("tcgHotblocksOpLimit", String(tcgHotblocksOpLimit));
     url.searchParams.set("tcgHotblocksOpSample", String(tcgHotblocksOpSample));
     url.searchParams.set("tcgHotblocksTop", String(tcgHotblocksTop));
+  }
+  if (options.tciRelaxedMb) {
+    url.searchParams.set("tciRelaxedMb", "1");
   }
   url.searchParams.set("rootfsDevice", options.rootfsDevice);
   if (rootfsStorage !== "memfs") {
@@ -1126,6 +1137,7 @@ export function initialSmokeResult(options, browserVersion) {
     tcgHotblocksTop: Number.isInteger(options.tcgHotblocksTop)
       ? options.tcgHotblocksTop
       : 12,
+    tciRelaxedMb: Boolean(options.tciRelaxedMb),
     visualMarker: options.visualMarker,
     success: false,
     consoleMessages: [],

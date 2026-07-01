@@ -26,6 +26,9 @@
 #include "tcg-has.h"
 #include <ffi.h>
 
+#ifdef CONFIG_EMSCRIPTEN
+#include <emscripten/emscripten.h>
+#endif
 
 /*
  * Enable TCI assertions only when debugging TCG (and without NDEBUG defined).
@@ -38,6 +41,125 @@
 #endif
 
 __thread uintptr_t tci_tb_ptr;
+
+#ifdef CONFIG_EMSCRIPTEN
+#define TCI_WASM_ENV_FILE "/qemu-tci-env"
+
+static bool tci_relaxed_mb;
+
+EM_JS(char *, tci_wasm_getenv, (const char *name), {
+    const key = UTF8ToString(Number(name));
+    const env = Module["qemuWasmTciEnv"] || globalThis.qemuWasmTciEnv || {};
+    const value = env[key];
+
+    if (!value) {
+        return 0n;
+    }
+
+    const text = String(value);
+    const length = lengthBytesUTF8(text) + 1;
+    const pointer = _malloc(length);
+    const pointerNumber = Number(pointer);
+
+    stringToUTF8(text, pointerNumber, length);
+    return BigInt(pointerNumber);
+});
+
+static char *tci_wasm_file_getenv(const char *name)
+{
+    g_autofree char *contents = NULL;
+    const char *line;
+    size_t name_len = strlen(name);
+
+    if (!g_file_get_contents(TCI_WASM_ENV_FILE, &contents, NULL, NULL)) {
+        return NULL;
+    }
+
+    line = contents;
+    while (*line != '\0') {
+        const char *end = strchr(line, '\n');
+        size_t line_len = end ? end - line : strlen(line);
+
+        if (line_len > name_len && line[name_len] == '=' &&
+            memcmp(line, name, name_len) == 0) {
+            return g_strndup(line + name_len + 1, line_len - name_len - 1);
+        }
+        line += line_len;
+        if (*line == '\n') {
+            line++;
+        }
+    }
+
+    return NULL;
+}
+
+static const char *tci_getenv(const char *name, char **owned)
+{
+    const char *value = g_getenv(name);
+
+    *owned = NULL;
+    if (value == NULL) {
+        *owned = tci_wasm_getenv(name);
+        value = *owned;
+    }
+    if (value == NULL) {
+        *owned = tci_wasm_file_getenv(name);
+        value = *owned;
+    }
+
+    return value;
+}
+
+static bool tci_parse_bool_env(const char *raw)
+{
+    if (raw == NULL || raw[0] == '\0') {
+        return false;
+    }
+    if (g_ascii_strcasecmp(raw, "0") == 0 ||
+        g_ascii_strcasecmp(raw, "false") == 0 ||
+        g_ascii_strcasecmp(raw, "no") == 0 ||
+        g_ascii_strcasecmp(raw, "off") == 0) {
+        return false;
+    }
+    return true;
+}
+
+static bool tci_relaxed_mb_enabled(void)
+{
+    static gsize initialized;
+
+    if (unlikely(g_once_init_enter(&initialized))) {
+        char *owned;
+        const char *raw = tci_getenv("QEMU_TCI_RELAXED_MB", &owned);
+
+        tci_relaxed_mb = tci_parse_bool_env(raw);
+        free(owned);
+        g_once_init_leave(&initialized, 1);
+    }
+
+    return tci_relaxed_mb;
+}
+
+static inline void tci_mb(void)
+{
+    /*
+     * System-mode barriers preserve ordering against I/O threads and devices.
+     * Keep the default path strict.  The relaxed path is an Emscripten-only
+     * browser proof experiment for single-vCPU TCI guests where barrier
+     * overhead is being measured against a known fallback.
+     */
+    if (unlikely(tci_relaxed_mb_enabled())) {
+        barrier();
+        return;
+    }
+    smp_mb();
+}
+#else
+static inline void tci_mb(void)
+{
+    smp_mb();
+}
+#endif
 
 /*
  * Load sets of arguments all at once.  The naming convention is:
@@ -775,7 +897,7 @@ uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
 
         case INDEX_op_mb:
             /* Ensure ordering for all kinds */
-            smp_mb();
+            tci_mb();
             break;
         default:
             g_assert_not_reached();

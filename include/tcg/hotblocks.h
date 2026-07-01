@@ -10,6 +10,8 @@
 #include "exec/translation-block.h"
 #include "tcg/tcg.h"
 
+#ifdef CONFIG_TCG_HOTBLOCKS
+
 extern bool tcg_hotblocks_active;
 extern bool tcg_hotblocks_checked;
 extern uint64_t tcg_hotblocks_op_counts[NB_OPS];
@@ -53,5 +55,37 @@ static inline void tcg_hotblocks_maybe_tci_op(TCGOpcode opc)
         }
     }
 }
+
+#else
+
+static inline bool tcg_hotblocks_enabled(void)
+{
+    return false;
+}
+
+static inline void tcg_hotblocks_tb_exec(const TranslationBlock *tb,
+                                         int tb_exit)
+{
+    (void)tb;
+    (void)tb_exit;
+}
+
+static inline void tcg_hotblocks_maybe_start(void)
+{
+}
+
+static inline void tcg_hotblocks_maybe_tb_exec(const TranslationBlock *tb,
+                                               int tb_exit)
+{
+    (void)tb;
+    (void)tb_exit;
+}
+
+static inline void tcg_hotblocks_maybe_tci_op(TCGOpcode opc)
+{
+    (void)opc;
+}
+
+#endif /* CONFIG_TCG_HOTBLOCKS */
 
 #endif /* TCG_HOTBLOCKS_H */
