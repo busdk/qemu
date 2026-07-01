@@ -1716,6 +1716,39 @@ Proof:
 Non-goals:
   No persistent storage.
 
+Follow-up persistent disk proof:
+  The generic browser harness now has an opt-in persistent raw disk path that
+  is separate from the rootfs image.  ``persistentDisk=1`` creates or restores
+  an OPFS-backed raw image, attaches it as a second virtio block device, records
+  OPFS/quota state in ``persistentDiskState``, and writes the disk back to OPFS
+  after the success marker.  ``scripts/ci/wasm-build-smoke-initramfs.py`` can
+  now generate write and verify guests for this disk, and
+  ``scripts/ci/wasm-browser-persistent-disk-proof.mjs`` runs the browser smoke
+  harness twice with the same persistent browser profile: first to write a
+  payload to the second disk, then after browser restart to verify the payload
+  loads from OPFS.  The proof wrapper also hashes the immutable rootfs before
+  and after both runs.
+
+  Deterministic coverage added with this path:
+
+  * ``node scripts/ci/wasm-browser-persistent-disk-proof-test.mjs`` validates
+    the proof result predicate and option checks.
+  * ``python3 scripts/ci/wasm-build-smoke-initramfs-test.py`` validates the
+    persistent-disk guest init script shape.
+  * ``node scripts/ci/wasm-browser-smoke-runner-test.mjs`` validates
+    persistent browser profile metadata and ``persistentDiskState`` promotion
+    into result JSON.
+
+  The ``smoke-wasm64-64bit-persistent-disk`` GitLab job wires this into the
+  existing wasm64 artifact flow.  It consumes ``build-wasm64-64bit`` artifacts,
+  prepares the pinned TuxBoot guest, builds write/verify initramfs images,
+  attaches the immutable TuxBoot ext4 rootfs as ``/dev/vda``, attaches the
+  OPFS-backed persistent disk as ``/dev/vdb``, and archives the write, verify,
+  and combined proof JSON.  A local proof run was not completed in the
+  supervisor checkout at the time this plumbing was added because no
+  ``qemu-system-x86_64.js``/``.wasm`` artifacts or
+  ``qemu/emsdk-wasm64-cross:latest`` image were present locally.
+
 WASM-014: Add minimal browser harness
 -------------------------------------
 

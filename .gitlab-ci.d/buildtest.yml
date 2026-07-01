@@ -833,7 +833,9 @@ smoke-wasm64-64bit-linux:
     - node scripts/ci/wasm-memory-probe-test.mjs
     - node scripts/ci/wasm-browser-memory-probe-runner-test.mjs
     - node scripts/ci/wasm-browser-smoke-args-test.mjs
+    - node scripts/ci/wasm-browser-persistent-disk-proof-test.mjs
     - node scripts/ci/wasm-browser-smoke-runner-test.mjs
+    - python3 scripts/ci/wasm-build-smoke-initramfs-test.py
     - python3 scripts/ci/wasm-prepare-tuxboot-smoke-guest-test.py
     - section_end smoke_args
     - section_start smoke_guest "Preparing WASM smoke guest"
@@ -952,6 +954,106 @@ smoke-wasm64-64bit-browser:
           --screenshot "$QEMU_WASM_BROWSER_SCREENSHOT"
           --timeout-ms "$QEMU_WASM_BROWSER_TIMEOUT_MS"
     - section_end smoke_browser
+
+smoke-wasm64-64bit-persistent-disk:
+  extends: .base_job_template
+  stage: test
+  image: mcr.microsoft.com/playwright:v1.56.1-noble
+  needs:
+    - job: build-wasm64-64bit
+      artifacts: true
+  cache:
+    key: "$CI_JOB_NAME"
+    paths:
+      - wasm-smoke-cache
+    when: always
+  artifacts:
+    name: "$CI_JOB_NAME-$CI_COMMIT_REF_SLUG"
+    when: always
+    expire_in: 7 days
+    paths:
+      - ci-runner-env
+      - build/wasm-persistent-disk-proof.json
+      - build/wasm-persistent-disk-proof.json.write.json
+      - build/wasm-persistent-disk-proof.json.verify.json
+      - build/wasm-persistent-disk-guest/tuxboot-smoke-guest.json
+      - build/wasm-persistent-disk-guest/persistent-disk-write.cpio.gz
+      - build/wasm-persistent-disk-guest/persistent-disk-verify.cpio.gz
+  variables:
+    QEMU_JOB_OPTIONAL: 1
+    QEMU_WASM_BROWSER: chromium
+    QEMU_WASM_PERSISTENT_DISK_TIMEOUT_MS: 180000
+  script:
+    - source scripts/ci/gitlab-ci-section
+    - mkdir -p ci-runner-env
+    - cp /proc/cpuinfo ci-runner-env/cpuinfo.txt
+    - cp /proc/meminfo ci-runner-env/meminfo.txt
+    - section_start setup "Preparing browser persistent disk proof runtime"
+    - apt-get update
+    - apt-get install -y zstd
+    - mkdir -p /tmp/qemu-playwright
+    - cd /tmp/qemu-playwright
+    - npm install --silent --no-audit --no-fund playwright@1.56.1
+    - cd "$CI_PROJECT_DIR"
+    - export NODE_PATH=/tmp/qemu-playwright/node_modules
+    - node --version
+    - /ms-playwright/chromium-1194/chrome-linux/chrome --version
+    - section_end setup
+    - section_start smoke_args "Checking WASM persistent disk proof helpers"
+    - python3 scripts/ci/wasm-artifact-manifest-check.py
+          --manifest build/qemu-system-wasm-artifacts.json
+          --target x86_64
+    - node scripts/ci/wasm-browser-smoke-args-test.mjs
+    - node scripts/ci/wasm-browser-smoke-runner-test.mjs
+    - node scripts/ci/wasm-browser-persistent-disk-proof-test.mjs
+    - python3 scripts/ci/wasm-build-smoke-initramfs-test.py
+    - section_end smoke_args
+    - section_start smoke_guest "Preparing WASM persistent disk proof guest"
+    - python3 scripts/ci/wasm-prepare-tuxboot-smoke-guest.py
+          --cache-dir wasm-smoke-cache
+          --output-dir build/wasm-persistent-disk-guest
+          --artifact-dir build
+          --firmware-dir pc-bios
+    - python3 scripts/ci/wasm-build-smoke-initramfs.py
+          --busybox build/wasm-persistent-disk-guest/tuxboot-rootfs-files/bin/busybox
+          --extra-file build/wasm-persistent-disk-guest/tuxboot-rootfs-files/lib/ld64-uClibc-1.0.45.so:/lib/ld64-uClibc-1.0.45.so
+          --extra-file build/wasm-persistent-disk-guest/tuxboot-rootfs-files/lib/libuClibc-1.0.45.so:/lib/libuClibc-1.0.45.so
+          --extra-file build/wasm-persistent-disk-guest/tuxboot-rootfs-files/usr/lib/libtirpc.so.3.0.0:/usr/lib/libtirpc.so.3.0.0
+          --extra-symlink /lib/ld64-uClibc.so.0:ld64-uClibc.so.1
+          --extra-symlink /lib/ld64-uClibc.so.1:ld64-uClibc-1.0.45.so
+          --extra-symlink /lib/libc.so.0:libuClibc-1.0.45.so
+          --extra-symlink /usr/lib/libtirpc.so.3:libtirpc.so.3.0.0
+          --output build/wasm-persistent-disk-guest/persistent-disk-write.cpio.gz
+          --persistent-disk-smoke write
+          --persistent-disk-device /dev/vdb
+    - python3 scripts/ci/wasm-build-smoke-initramfs.py
+          --busybox build/wasm-persistent-disk-guest/tuxboot-rootfs-files/bin/busybox
+          --extra-file build/wasm-persistent-disk-guest/tuxboot-rootfs-files/lib/ld64-uClibc-1.0.45.so:/lib/ld64-uClibc-1.0.45.so
+          --extra-file build/wasm-persistent-disk-guest/tuxboot-rootfs-files/lib/libuClibc-1.0.45.so:/lib/libuClibc-1.0.45.so
+          --extra-file build/wasm-persistent-disk-guest/tuxboot-rootfs-files/usr/lib/libtirpc.so.3.0.0:/usr/lib/libtirpc.so.3.0.0
+          --extra-symlink /lib/ld64-uClibc.so.0:ld64-uClibc.so.1
+          --extra-symlink /lib/ld64-uClibc.so.1:ld64-uClibc-1.0.45.so
+          --extra-symlink /lib/libc.so.0:libuClibc-1.0.45.so
+          --extra-symlink /usr/lib/libtirpc.so.3:libtirpc.so.3.0.0
+          --output build/wasm-persistent-disk-guest/persistent-disk-verify.cpio.gz
+          --persistent-disk-smoke verify
+          --persistent-disk-device /dev/vdb
+    - section_end smoke_guest
+    - section_start persistent_disk "Running WASM browser persistent disk proof"
+    - node scripts/ci/wasm-browser-persistent-disk-proof.mjs
+          --browser "$QEMU_WASM_BROWSER"
+          --artifact-dir build
+          --firmware-dir pc-bios
+          --kernel wasm-smoke-cache/tuxboot-x86_64-bzImage
+          --rootfs build/wasm-persistent-disk-guest/tuxboot-x86_64-rootfs.ext4
+          --rootfs-device virtio-mmio
+          --write-initrd build/wasm-persistent-disk-guest/persistent-disk-write.cpio.gz
+          --verify-initrd build/wasm-persistent-disk-guest/persistent-disk-verify.cpio.gz
+          --persistent-disk-device virtio-mmio
+          --persistent-disk-size-bytes 1048576
+          --out build/wasm-persistent-disk-proof.json
+          --timeout-ms "$QEMU_WASM_PERSISTENT_DISK_TIMEOUT_MS"
+    - section_end persistent_disk
 
 smoke-wasm64-64bit-service-bridge:
   extends: .base_job_template

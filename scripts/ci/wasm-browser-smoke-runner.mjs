@@ -97,8 +97,12 @@ Options:
                      Persistent disk device kind: virtio-mmio or virtio-pci
   --persistent-disk-opfs-name NAME
                      OPFS file name used by the persistent disk
+  --persistent-disk-path PATH
+                     In-guest path used for the persistent raw disk
   --persistent-disk-size-bytes N
                      Persistent disk size when no OPFS image exists
+  --persistent-disk-storage MODE
+                     Persistent disk storage backend (default: opfs)
   --progress-sample-interval-ms MS
                      Interval for smoke progress samples in result JSON
   --progress-sample-limit N
@@ -135,6 +139,8 @@ Options:
                      Maximum hotspot entries per summary (default: 12)
   --tci-relaxed-mb  Enable the Emscripten/TCI-only relaxed memory-barrier
                     experiment; default QEMU execution remains strict
+  --user-data-dir DIR
+                    Browser profile directory reused for OPFS restart proofs
   --visual-marker TEXT
                      Expected visual marker metadata for display proofs
   --help              Show this help
@@ -192,7 +198,9 @@ function parseArgs(argv) {
     persistentDisk: false,
     persistentDiskDevice: "virtio-mmio",
     persistentDiskOpfsName: "qemu-wasm-persistent.raw",
+    persistentDiskPath: "/persistent.raw",
     persistentDiskSizeBytes: 256 * 1024 * 1024,
+    persistentDiskStorage: "opfs",
     qemuArgs: [],
     requireDisplayOutput: false,
     displayMinNonblackPixels: 1,
@@ -210,6 +218,7 @@ function parseArgs(argv) {
     tcgHotblocksTop: 12,
     tciRelaxedMb: false,
     timeoutMs: 180000,
+    userDataDir: null,
     visualMarker: "",
   };
   const explicit = new Set();
@@ -332,9 +341,15 @@ function parseArgs(argv) {
     } else if (arg === "--persistent-disk-opfs-name") {
       options.persistentDiskOpfsName = argv[++i];
       explicit.add("persistentDiskOpfsName");
+    } else if (arg === "--persistent-disk-path") {
+      options.persistentDiskPath = argv[++i];
+      explicit.add("persistentDiskPath");
     } else if (arg === "--persistent-disk-size-bytes") {
       options.persistentDiskSizeBytes = Number(argv[++i]);
       explicit.add("persistentDiskSizeBytes");
+    } else if (arg === "--persistent-disk-storage") {
+      options.persistentDiskStorage = argv[++i];
+      explicit.add("persistentDiskStorage");
     } else if (arg === "--progress-sample-interval-ms") {
       options.progressSampleIntervalMs = Number(argv[++i]);
       explicit.add("progressSampleIntervalMs");
@@ -389,6 +404,9 @@ function parseArgs(argv) {
     } else if (arg === "--tci-relaxed-mb") {
       options.tciRelaxedMb = true;
       explicit.add("tciRelaxedMb");
+    } else if (arg === "--user-data-dir") {
+      options.userDataDir = argv[++i];
+      explicit.add("userDataDir");
     } else if (arg === "--visual-marker") {
       options.visualMarker = argv[++i];
       explicit.add("visualMarker");
@@ -405,6 +423,7 @@ function parseArgs(argv) {
       "allowSerialFallback",
       "focusDisplay",
       "harnessSelfTest",
+      "persistentDisk",
       "requireDisplayOutput",
       "screenshotFullPage",
       "tcgHotblocks",
@@ -417,6 +436,7 @@ function parseArgs(argv) {
       "harnessExpectedKeyEvents",
       "idleTimeoutMs",
       "pageTextTailBytes",
+      "persistentDiskSizeBytes",
       "port",
       "preKeyboardWaitMs",
       "postKeyboardWaitMs",
@@ -437,6 +457,7 @@ function parseArgs(argv) {
       "out",
       "rootfs",
       "screenshot",
+      "userDataDir",
     ],
     stringFields: [
       "appendExtra",
@@ -460,6 +481,10 @@ function parseArgs(argv) {
       "memory",
       "network",
       "out",
+      "persistentDiskDevice",
+      "persistentDiskOpfsName",
+      "persistentDiskPath",
+      "persistentDiskStorage",
       "powerOperation",
       "program",
       "rootfs",
@@ -576,6 +601,14 @@ function parseArgs(argv) {
   }
   if (options.persistentDiskOpfsName === "" || /[\\/]/.test(options.persistentDiskOpfsName)) {
     console.error("--persistent-disk-opfs-name must be a non-empty file name without path separators");
+    usage(2);
+  }
+  if (!options.persistentDiskPath.startsWith("/")) {
+    console.error("--persistent-disk-path must be an absolute in-guest path");
+    usage(2);
+  }
+  if (options.persistentDiskStorage !== "opfs") {
+    console.error("--persistent-disk-storage must be opfs");
     usage(2);
   }
   if (!["memfs", "opfs-snapshot"].includes(options.rootfsStorage)) {
@@ -1041,6 +1074,7 @@ export function promoteSmokeState(result, smokeState) {
   result.browserRuntime = smokeState.runtime || null;
   result.displayState = smokeState.display || null;
   result.powerControlState = smokeState.powerControl || null;
+  result.persistentDiskState = smokeState.persistentDisk || null;
   result.rootfsStorageState = smokeState.rootfsStorage || null;
   result.serviceBridgeState = smokeState.serviceBridge || null;
   result.hotBlocks = smokeState.hotBlocks || null;
@@ -1049,6 +1083,7 @@ export function promoteSmokeState(result, smokeState) {
 
 export function browserSmokeUrl(options) {
   const url = new URL(`http://${options.host}:${options.port}/`);
+  const persistentDiskStorage = options.persistentDiskStorage || "opfs";
   const rootfsStorage = options.rootfsStorage || "memfs";
   const rootfsOpfsName = options.rootfsOpfsName || "qemu-wasm-rootfs.raw";
   const tcgHotblocks = Boolean(options.tcgHotblocks);
@@ -1084,8 +1119,9 @@ export function browserSmokeUrl(options) {
     url.searchParams.set("persistentDisk", "1");
     url.searchParams.set("persistentDiskDevice", options.persistentDiskDevice);
     url.searchParams.set("persistentDiskOpfsName", options.persistentDiskOpfsName);
+    url.searchParams.set("persistentDiskPath", options.persistentDiskPath);
     url.searchParams.set("persistentDiskSizeBytes", String(options.persistentDiskSizeBytes));
-    url.searchParams.set("persistentDiskStorage", "opfs");
+    url.searchParams.set("persistentDiskStorage", persistentDiskStorage);
   }
   url.searchParams.set("powerOperation", options.powerOperation);
   url.searchParams.set("powerTimeoutMs", String(options.powerTimeoutMs));
@@ -1164,6 +1200,7 @@ export function initialSmokeResult(options, browserVersion) {
     persistentDisk: options.persistentDisk,
     persistentDiskDevice: options.persistentDiskDevice,
     persistentDiskOpfsName: options.persistentDiskOpfsName,
+    persistentDiskPath: options.persistentDiskPath,
     persistentDiskSizeBytes: options.persistentDiskSizeBytes,
     qemuArgs: options.qemuArgs,
     requireDisplayOutput: options.requireDisplayOutput,
@@ -1187,6 +1224,7 @@ export function initialSmokeResult(options, browserVersion) {
       ? options.tcgHotblocksTop
       : 12,
     tciRelaxedMb: Boolean(options.tciRelaxedMb),
+    userDataDir: options.userDataDir,
     visualMarker: options.visualMarker,
     success: false,
     consoleMessages: [],
@@ -1447,9 +1485,15 @@ async function run() {
   const options = parseArgs(process.argv.slice(2));
   const browserType = await loadPlaywright(options.browser);
   const server = await startServer(options);
-  const browser = await browserType.launch(playwrightLaunchOptions(options.browser));
+  const launchOptions = playwrightLaunchOptions(options.browser);
+  const context = options.userDataDir === null
+    ? null
+    : await browserType.launchPersistentContext(options.userDataDir, launchOptions);
+  const browser = context === null
+    ? await browserType.launch(launchOptions)
+    : context.browser();
   const startTime = Date.now();
-  const result = initialSmokeResult(options, browser.version());
+  const result = initialSmokeResult(options, browser ? browser.version() : "unknown");
   let page = null;
   let progressTimer = null;
   let rejectIdle = null;
@@ -1468,7 +1512,7 @@ async function run() {
     await Promise.allSettled([...pendingDiagnostics]);
   };
   try {
-    page = await browser.newPage();
+    page = context === null ? await browser.newPage() : await context.newPage();
     await page.addInitScript({
       content: `${isTerminalPageStatus.toString()}\n` +
         "globalThis.qemuWasmIsTerminalPageStatus = isTerminalPageStatus;\n",
@@ -1596,7 +1640,11 @@ async function run() {
     console.error(error && error.stack ? error.stack : String(error));
     throw error;
   } finally {
-    await browser.close();
+    if (context !== null) {
+      await context.close();
+    } else if (browser !== null) {
+      await browser.close();
+    }
     await stopServer(server);
   }
 }

@@ -178,9 +178,53 @@ def test_service_bridge_smoke_initramfs():
                     "service bridge init should print the success marker")
 
 
+def test_persistent_disk_smoke_initramfs():
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        busybox = root / "busybox"
+        output = root / "persistent-disk-initramfs.cpio.gz"
+        busybox.write_bytes(b"busybox")
+        busybox.chmod(0o755)
+
+        subprocess.run([
+            sys.executable,
+            str(SCRIPT),
+            "--busybox",
+            str(busybox),
+            "--output",
+            str(output),
+            "--persistent-disk-smoke",
+            "verify",
+            "--persistent-disk-device",
+            "/dev/vdb",
+            "--persistent-disk-payload",
+            "BUS_ENGINE_OS_DISK_PROOF",
+        ], check=True)
+
+        entries = parse_newc(output)
+        init = entries["init"]["data"]
+        assert_true(b"/dev/vdb" in init,
+                    "persistent disk init should use the requested disk device")
+        assert_true(b"BUS_ENGINE_OS_DISK_PROOF" in init,
+                    "persistent disk init should include the proof payload")
+        assert_true(b"QEMU_WASM_PERSISTENT_DISK_VERIFY_OK" in init,
+                    "verify init should print the verify success marker")
+        assert_true(b"QEMU_WASM_PERSISTENT_DISK_WRITE_OK" not in init,
+                    "verify init should not print the write success marker")
+        assert_true(b"QEMU_WASM_PERSISTENT_DISK_DEVICE_MISSING" in init,
+                    "persistent disk init should diagnose missing disk devices")
+        assert_true(b"dd if=\"$device\" bs=1 count=\"$payload_len\"" in init,
+                    "persistent disk init should read back the exact proof payload")
+        assert_true(b"conv=notrunc" in init,
+                    "persistent disk init should preserve the rest of the raw disk on writes")
+        assert_true(b"QEMU_WASM_LINUX_BOOT_OK" in init,
+                    "persistent disk init should print the success marker")
+
+
 def main():
     test_display_input_smoke_initramfs()
     test_service_bridge_smoke_initramfs()
+    test_persistent_disk_smoke_initramfs()
     print("wasm-build-smoke-initramfs-test: ok")
 
 

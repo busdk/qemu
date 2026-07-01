@@ -91,6 +91,21 @@ def parse_args():
         default=DEFAULT_SERVICE_RESPONSE_PATH,
         help="guest path for service bridge response output",
     )
+    parser.add_argument(
+        "--persistent-disk-smoke",
+        choices=("write", "verify"),
+        help="generate an init that writes or verifies the persistent virtio disk",
+    )
+    parser.add_argument(
+        "--persistent-disk-device",
+        default="/dev/vdb",
+        help="guest block device used by --persistent-disk-smoke",
+    )
+    parser.add_argument(
+        "--persistent-disk-payload",
+        default="QEMU_WASM_PERSISTENT_DISK_OK",
+        help="payload written and verified by --persistent-disk-smoke",
+    )
     return parser.parse_args()
 
 
@@ -301,6 +316,60 @@ poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || /bin/busybox 
 """.encode("utf-8")
 
 
+def build_persistent_disk_init(marker, mode, device, payload):
+    payload_len = len(payload.encode("utf-8"))
+    success_marker = "QEMU_WASM_PERSISTENT_DISK_WRITE_OK"
+    if mode == "verify":
+        success_marker = "QEMU_WASM_PERSISTENT_DISK_VERIFY_OK"
+    return f"""#!/bin/sh
+PATH=/bin
+/bin/busybox mkdir -p /proc /sys /dev
+/bin/busybox mount -t proc proc /proc 2>/dev/null || true
+/bin/busybox mount -t sysfs sysfs /sys 2>/dev/null || true
+/bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+
+serial=/dev/ttyS0
+[ -c "$serial" ] || serial=/dev/console
+say() {{
+    printf '%s\\n' "$1" > "$serial" 2>/dev/null || printf '%s\\n' "$1"
+}}
+
+device={shell_quote(device)}
+payload={shell_quote(payload)}
+payload_len={payload_len}
+
+i=0
+while [ ! -b "$device" ]; do
+    i=$((i + 1))
+    if [ "$i" -gt 30 ]; then
+        say "QEMU_WASM_PERSISTENT_DISK_DEVICE_MISSING:$device"
+        poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || /bin/busybox sleep 5
+        exit 1
+    fi
+    /bin/busybox sleep 1
+done
+
+if [ {shell_quote(mode)} = write ]; then
+    if ! printf '%s' "$payload" | /bin/busybox dd of="$device" bs=1 conv=notrunc 2>/dev/null; then
+        say 'QEMU_WASM_PERSISTENT_DISK_WRITE_FAILED'
+        poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || /bin/busybox sleep 5
+        exit 1
+    fi
+    /bin/busybox sync
+fi
+
+readback=$(/bin/busybox dd if="$device" bs=1 count="$payload_len" 2>/dev/null)
+if [ "$readback" = "$payload" ]; then
+    say {shell_quote(success_marker)}
+    say {shell_quote(marker)}
+else
+    say "QEMU_WASM_PERSISTENT_DISK_MISMATCH:$readback"
+fi
+
+poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || /bin/busybox sleep 5
+""".encode("utf-8")
+
+
 def shell_quote(value):
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
@@ -354,7 +423,14 @@ def main():
                     13,
                     event_minor,
                 )
-            if args.service_bridge_smoke:
+            if args.persistent_disk_smoke:
+                init = build_persistent_disk_init(
+                    args.marker,
+                    args.persistent_disk_smoke,
+                    args.persistent_disk_device,
+                    args.persistent_disk_payload,
+                )
+            elif args.service_bridge_smoke:
                 init = build_service_bridge_init(
                     args.marker,
                     args.service_ready_marker,

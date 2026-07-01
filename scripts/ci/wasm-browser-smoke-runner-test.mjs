@@ -91,6 +91,18 @@ for (const status of [
       deliveryPath: "qemu-guest-powerdown",
       completed: true,
     },
+    persistentDisk: {
+      enabled: true,
+      mode: "opfs",
+      opfsName: "proof.raw",
+      path: "/persistent.raw",
+      device: "virtio-pci",
+      sizeBytes: 1048576,
+      loadSource: "opfs",
+      loadedBytes: 1048576,
+      persisted: true,
+      persistedBytes: 1048576,
+    },
     hotBlocks: {
       enabled: true,
       summaryCount: 1,
@@ -127,6 +139,18 @@ for (const status of [
     operation: "shutdown",
     deliveryPath: "qemu-guest-powerdown",
     completed: true,
+  });
+  assert.deepEqual(result.persistentDiskState, {
+    enabled: true,
+    mode: "opfs",
+    opfsName: "proof.raw",
+    path: "/persistent.raw",
+    device: "virtio-pci",
+    sizeBytes: 1048576,
+    loadSource: "opfs",
+    loadedBytes: 1048576,
+    persisted: true,
+    persistedBytes: 1048576,
   });
   assert.deepEqual(result.hotBlocks, {
     enabled: true,
@@ -287,6 +311,7 @@ for (const status of [
     persistentDisk: true,
     persistentDiskDevice: "virtio-pci",
     persistentDiskOpfsName: "virtual-server-state.raw",
+    persistentDiskPath: "/guest/persistent.raw",
     persistentDiskSizeBytes: 33554432,
     powerOperation: "shutdown",
     powerTimeoutMs: 15000,
@@ -315,6 +340,7 @@ for (const status of [
     "persistentDisk=1&" +
     "persistentDiskDevice=virtio-pci&" +
     "persistentDiskOpfsName=virtual-server-state.raw&" +
+    "persistentDiskPath=%2Fguest%2Fpersistent.raw&" +
     "persistentDiskSizeBytes=33554432&" +
     "persistentDiskStorage=opfs&" +
     "powerOperation=shutdown&" +
@@ -581,6 +607,7 @@ for (const status of [
     persistentDisk: true,
     persistentDiskDevice: "virtio-pci",
     persistentDiskOpfsName: "virtual-server-state.raw",
+    persistentDiskPath: "/guest/persistent.raw",
     persistentDiskSizeBytes: 33554432,
     preKeyboardWaitMs: 500,
     postKeyboardWaitMs: 250,
@@ -606,6 +633,7 @@ for (const status of [
       interactiveOnly: false,
     },
     timeoutMs: 180000,
+    userDataDir: "/tmp/qemu-wasm-profile",
     visualMarker: "login",
   }, "HeadlessChrome/141.0.7390.37");
 
@@ -631,12 +659,14 @@ for (const status of [
   assert.equal(result.persistentDisk, true);
   assert.equal(result.persistentDiskDevice, "virtio-pci");
   assert.equal(result.persistentDiskOpfsName, "virtual-server-state.raw");
+  assert.equal(result.persistentDiskPath, "/guest/persistent.raw");
   assert.equal(result.persistentDiskSizeBytes, 33554432);
   assert.equal(result.idleAfterText, "");
   assert.equal(result.idleTimeoutMs, 0);
   assert.equal(result.requireDisplayOutput, true);
   assert.equal(result.displayMinNonblackPixels, 4);
   assert.equal(result.rootfsDevice, "virtio-pci");
+  assert.equal(result.userDataDir, "/tmp/qemu-wasm-profile");
   assert.equal(result.visualMarker, "login");
   assert.deepEqual(result.serviceBridge, {
     kind: "virtio-console-jsonl",
