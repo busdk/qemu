@@ -584,6 +584,14 @@ function parseArgs(argv) {
     console.error("--kernel is required");
     usage(2);
   }
+  if (!["memfs", "opfs-snapshot"].includes(options.rootfsStorage)) {
+    console.error("--rootfs-storage must be memfs or opfs-snapshot");
+    usage(2);
+  }
+  if (options.rootfsStorage === "opfs-snapshot" && options.rootfs === null) {
+    console.error("--rootfs-storage opfs-snapshot requires --rootfs");
+    usage(2);
+  }
   if (!options.harnessSelfTest && options.initrd === null && options.rootfs === null) {
     console.error("either --initrd or --rootfs is required");
     usage(2);
@@ -701,16 +709,8 @@ function parseArgs(argv) {
     console.error("--persistent-disk-storage must be opfs");
     usage(2);
   }
-  if (!["memfs", "opfs-snapshot"].includes(options.rootfsStorage)) {
-    console.error("--rootfs-storage must be memfs or opfs-snapshot");
-    usage(2);
-  }
   if (options.rootfsOpfsName === "" || /[\\/]/.test(options.rootfsOpfsName)) {
     console.error("--rootfs-opfs-name must be a non-empty file name without path separators");
-    usage(2);
-  }
-  if (options.rootfsStorage === "opfs-snapshot" && options.rootfs === null) {
-    console.error("--rootfs-storage opfs-snapshot requires --rootfs");
     usage(2);
   }
   if (!["none", "sdl", "wasm"].includes(options.display)) {
