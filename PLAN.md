@@ -129,27 +129,27 @@ performance, not by generic bridge API shape. These items were promoted from
 `FUTURE_WORK.md` after Chromium evidence showed that long timeouts and
 systemd masks only move the failure from one slow service to the next.
 
-Current exact implementation goal: make the opt-in wasm64 TCI subset path
-execute accepted complete blocks during the normal generic Chromium Linux
-smoke, without requiring `-d nochain`, while keeping the default TCI path
-unchanged. The immediate blocker is `goto_tb`/TB-dispatch handling. DoD for
-this narrow goal is:
+Current exact implementation goal: prove whether the opt-in wasm64 TCI subset
+path produces a material Bus Engine OS boot improvement now that normal
+generic Chromium smoke can execute accepted subset blocks without `-d nochain`.
+Keep the default TCI path unchanged. DoD for this narrow goal is:
 
-- [ ] Document the precise `goto_tb` semantics needed by the subset path,
-  including how TCI reads `jmp_target_addr`, how `exit_tb` encodes TB pointer
-  plus exit index, and why the selected boundary is equivalent to normal TCI.
-- [ ] Implement the smallest safe `goto_tb` or dispatch-exit handling needed
-  for the opt-in subset path, with unsupported shapes falling back to TCI.
-- [ ] Keep `QEMU_TCI_WASM_SUBSET` disabled by default and prove the default
+- [x] Keep `QEMU_TCI_WASM_SUBSET` disabled by default and prove the default
   generic Chromium smoke still reaches `QEMU_WASM_LINUX_BOOT_OK`.
-- [ ] Prove normal generic Chromium smoke with `--tci-wasm-subset` reaches
+- [x] Prove normal generic Chromium smoke with `--tci-wasm-subset` reaches
   `QEMU_WASM_LINUX_BOOT_OK` and reports `executed > 0` without `-d nochain`.
-- [ ] Record result JSON, screenshot, artifact hashes, subset counters, and
-  remaining top fallback opcodes in this plan and
+- [ ] Record the latest generic result JSON, screenshot, artifact hashes,
+  subset counters, and remaining top fallback opcodes in this plan and
   `docs/devel/wasm-support-plan.rst`.
-- [ ] Only after the normal generic smoke has `executed > 0`, run the Bus
-  Engine OS `virtual-server` browser proof and compare marker-to-marker timing
-  against the current baseline.
+- [ ] Run the Bus Engine OS `virtual-server` browser proof with
+  `--tci-wasm-subset` and compare marker-to-marker timing against the current
+  baseline.
+- [ ] If Bus Engine OS still does not reach multi-user/service readiness,
+  promote the next measured blocker into this plan. Current generic-smoke
+  fallback evidence says the likely next QEMU execution boundary is
+  `goto_tb`/`goto_ptr` plus remaining branch/control-flow shapes, but this
+  must be confirmed against the Bus Engine OS proof before more implementation
+  work.
 
 - [x] Capture the current slowness baseline before changing execution:
   DoD is a Chrome/Chromium Bus Engine OS browser run with the current
@@ -462,6 +462,18 @@ this narrow goal is:
     the terminal boundary. It was slower than the normal smoke path, so
     `-d nochain` is not the performance solution; it is evidence that the next
     useful implementation target is correct `goto_tb`/TB-dispatch handling.
+    Follow-up evidence on the same date added helper-call and remaining
+    arithmetic support. A rebuilt artifact with
+    `qemu-system-x86_64.js=dedd3fe899335ade5f5b1b571c28f144d26a3f0fb7f8fe61e07133bd244908e9`
+    and
+    `qemu-system-x86_64.wasm=e3bcabb190970983a1abeac60a5c96411b4b0d56e562cd76e18fbc3b087c202b`
+    passed default generic Chromium smoke:
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-subset-extra-ops-default.json`.
+    The normal subset-enabled smoke also passed without `-d nochain` and
+    reported `executed=84850`, `fallback_unsupported=255064`; remaining top
+    fallback opcodes were `goto_tb`, `goto_ptr`, `brcond`, `tci_movcond32`,
+    `rotr`, and `tci_rotl32`:
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-extra-ops.json`.
 - [ ] Prove the acceleration improves the real downstream boot path:
   DoD is a Chrome/Chromium Bus Engine OS `virtual-server` browser run with the
   acceleration enabled that reaches normal multi-user/service readiness, or

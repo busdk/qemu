@@ -4142,12 +4142,29 @@ Current QEMU hook evidence on 2026-07-01:
   path, so ``-d nochain`` is not a product performance fix.  It proves the
   current subset machinery can execute complete blocks and that normal
   execution is blocked first by ``goto_tb``/TB-dispatch semantics.
+* A follow-up added helper-call and remaining arithmetic support.  The rebuilt
+  artifact hashes were
+  ``dedd3fe899335ade5f5b1b571c28f144d26a3f0fb7f8fe61e07133bd244908e9``
+  for ``qemu-system-x86_64.js`` and
+  ``e3bcabb190970983a1abeac60a5c96411b4b0d56e562cd76e18fbc3b087c202b``
+  for ``qemu-system-x86_64.wasm``.
+* The default disabled-path smoke reached ``QEMU_WASM_LINUX_BOOT_OK``:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-subset-extra-ops-default.json``.
+* The normal subset-enabled smoke also reached ``QEMU_WASM_LINUX_BOOT_OK``
+  without ``-d nochain``:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-tci-wasm-subset-extra-ops.json``.
+  It reported ``executed=84850`` and ``fallback_unsupported=255064``.
+  Remaining top fallback opcodes were ``goto_tb``, ``goto_ptr``, ``brcond``,
+  ``tci_movcond32``, ``rotr``, and ``tci_rotl32``.
 
-The next QEMU execution step must therefore prove safe ``goto_tb`` or
-dispatch-exit semantics, or another complete-block boundary, before claiming
-generated or subset execution value.  Adding more side-effectful memory or
-helper operations without that boundary would only expand fallback risk rather
-than solve the boot-performance problem.
+The next proof step is now downstream timing, not more generic-smoke
+plumbing.  Run the Bus Engine OS ``virtual-server`` browser proof with the
+opt-in subset enabled and compare marker-to-marker timing against the current
+baseline.  If it still does not reach multi-user/service readiness, promote
+the next measured blocker into the plan.  The generic smoke suggests the
+likely remaining QEMU execution boundary is ``goto_tb``/``goto_ptr`` plus
+remaining branch/control-flow shapes, but the Bus Engine OS proof must confirm
+that before more implementation work.
 
 Rejected tiny TCI bytecode shortcut
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

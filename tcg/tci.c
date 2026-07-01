@@ -593,6 +593,7 @@ static bool tci_wasm_subset_unsupported(TCIWasmSubsetEntry *entry,
 static bool tci_wasm_subset_opcode_supported(TCGOpcode opc)
 {
     switch (opc) {
+    case INDEX_op_call:
     case INDEX_op_br:
     case INDEX_op_setcond:
     case INDEX_op_movcond:
@@ -620,6 +621,11 @@ static bool tci_wasm_subset_opcode_supported(TCGOpcode opc)
     case INDEX_op_nor:
     case INDEX_op_neg:
     case INDEX_op_not:
+    case INDEX_op_ctpop:
+    case INDEX_op_muls2:
+    case INDEX_op_mulu2:
+    case INDEX_op_tci_clz32:
+    case INDEX_op_tci_ctz32:
     case INDEX_op_tci_setcond32:
     case INDEX_op_shl:
     case INDEX_op_shr:
@@ -633,6 +639,8 @@ static bool tci_wasm_subset_opcode_supported(TCGOpcode opc)
     case INDEX_op_ld32u:
     case INDEX_op_ld32s:
     case INDEX_op_st32:
+    case INDEX_op_clz:
+    case INDEX_op_ctz:
     case INDEX_op_ext_i32_i64:
     case INDEX_op_extu_i32_i64:
     case INDEX_op_bswap64:
@@ -778,6 +786,49 @@ static bool tci_wasm_subset_try_exec(const uint32_t *tb_start,
         void *ptr;
 
         switch (opc) {
+        case INDEX_op_call:
+            {
+                uint64_t *stack = (uint64_t *)(uintptr_t)tmp[TCG_REG_CALL_STACK];
+                void *call_slots[MAX_CALL_IARGS];
+                ffi_cif *cif;
+                void *func;
+                unsigned i, s, n;
+
+                tci_args_nl(insn, tb_ptr, &len, &ptr);
+                func = ((void **)ptr)[0];
+                cif = ((void **)ptr)[1];
+
+                n = cif->nargs;
+                for (i = s = 0; i < n; ++i) {
+                    ffi_type *t = cif->arg_types[i];
+                    call_slots[i] = &stack[s];
+                    s += DIV_ROUND_UP(t->size, 8);
+                }
+
+                tci_tb_ptr = (uintptr_t)tb_ptr;
+                ffi_call(cif, func, stack, call_slots);
+
+                switch (len) {
+                case 0:
+                    break;
+                case 1:
+                    if (sizeof(ffi_arg) == 8) {
+                        tmp[TCG_REG_R0] = (uint32_t)stack[0];
+                    } else {
+                        tmp[TCG_REG_R0] = *(uint32_t *)stack;
+                    }
+                    break;
+                case 2:
+                    memcpy(&tmp[TCG_REG_R0], stack, 8);
+                    break;
+                case 3:
+                    memcpy(&tmp[TCG_REG_R0], stack, 16);
+                    break;
+                default:
+                    g_assert_not_reached();
+                }
+            }
+            break;
         case INDEX_op_br:
             tci_args_l(insn, tb_ptr, &ptr);
             tb_ptr = ptr;
@@ -905,6 +956,26 @@ static bool tci_wasm_subset_try_exec(const uint32_t *tb_start,
             tci_args_rr(insn, &r0, &r1);
             tmp[r0] = ~tmp[r1];
             break;
+        case INDEX_op_ctpop:
+            tci_args_rr(insn, &r0, &r1);
+            tmp[r0] = ctpop64(tmp[r1]);
+            break;
+        case INDEX_op_muls2:
+            {
+                TCGReg r3;
+
+                tci_args_rrrr(insn, &r0, &r1, &r2, &r3);
+                muls64(&tmp[r0], &tmp[r1], tmp[r2], tmp[r3]);
+            }
+            break;
+        case INDEX_op_mulu2:
+            {
+                TCGReg r3;
+
+                tci_args_rrrr(insn, &r0, &r1, &r2, &r3);
+                mulu64(&tmp[r0], &tmp[r1], tmp[r2], tmp[r3]);
+            }
+            break;
         case INDEX_op_ext_i32_i64:
             tci_args_rr(insn, &r0, &r1);
             tmp[r0] = (int32_t)tmp[r1];
@@ -927,6 +998,16 @@ static bool tci_wasm_subset_try_exec(const uint32_t *tb_start,
             tci_args_rrs(insn, &r0, &r1, &ofs);
             ptr = (void *)(tmp[r1] + ofs);
             *(uint32_t *)ptr = tmp[r0];
+            break;
+        case INDEX_op_tci_clz32:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp32 = tmp[r1];
+            tmp[r0] = tmp32 ? clz32(tmp32) : tmp[r2];
+            break;
+        case INDEX_op_tci_ctz32:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp32 = tmp[r1];
+            tmp[r0] = tmp32 ? ctz32(tmp32) : tmp[r2];
             break;
         case INDEX_op_tci_setcond32:
             tci_args_rrrc(insn, &r0, &r1, &r2, &condition);
@@ -968,6 +1049,14 @@ static bool tci_wasm_subset_try_exec(const uint32_t *tb_start,
         case INDEX_op_bswap64:
             tci_args_rr(insn, &r0, &r1);
             tmp[r0] = bswap64(tmp[r1]);
+            break;
+        case INDEX_op_clz:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = tmp[r1] ? clz64(tmp[r1]) : tmp[r2];
+            break;
+        case INDEX_op_ctz:
+            tci_args_rrr(insn, &r0, &r1, &r2);
+            tmp[r0] = tmp[r1] ? ctz64(tmp[r1]) : tmp[r2];
             break;
         case INDEX_op_mb:
             tci_mb();
