@@ -1198,6 +1198,7 @@ for (const status of [
     outputByteDelta: null,
     guestLineDelta: null,
     guestOutputByteDelta: null,
+    guestHeartbeatDelta: null,
     lastLineChanged: null,
     guestLastLineChanged: null,
     previousElapsedMs: null,
@@ -1217,6 +1218,7 @@ for (const status of [
     outputByteDelta: 0,
     guestLineDelta: null,
     guestOutputByteDelta: null,
+    guestHeartbeatDelta: null,
     lastLineChanged: false,
     guestLastLineChanged: false,
     previousElapsedMs: 10000,
@@ -1235,6 +1237,7 @@ for (const status of [
     outputByteDelta: 120,
     guestLineDelta: null,
     guestOutputByteDelta: null,
+    guestHeartbeatDelta: null,
     lastLineChanged: true,
     guestLastLineChanged: false,
     previousElapsedMs: 10000,
@@ -1379,6 +1382,75 @@ for (const status of [
     },
   );
   assert.equal(guestSerialIdleDiagnostic(samples, 20000, "multi-user"), null);
+
+  const heartbeatSamples = [
+    {
+      elapsedMs: 10000,
+      state: {
+        lines: 100,
+        outputBytes: 5000,
+        lastLine: "systemd[1]: Mounting bpf on /sys/fs/bpf...",
+        guestLines: 100,
+        guestOutputBytes: 5000,
+        guestLastLine: "systemd[1]: Mounting bpf on /sys/fs/bpf...",
+        guestHeartbeat: {
+          count: 0,
+          lastLine: "",
+        },
+      },
+    },
+    {
+      elapsedMs: 20000,
+      state: {
+        lines: 101,
+        outputBytes: 5075,
+        lastLine: "bus-engine-os-heartbeat: seq=1 event=tick",
+        guestLines: 100,
+        guestOutputBytes: 5000,
+        guestLastLine: "systemd[1]: Mounting bpf on /sys/fs/bpf...",
+        guestHeartbeat: {
+          count: 1,
+          lastLine: "bus-engine-os-heartbeat: seq=1 event=tick",
+        },
+      },
+    },
+    {
+      elapsedMs: 30000,
+      state: {
+        lines: 102,
+        outputBytes: 5150,
+        lastLine: "bus-engine-os-heartbeat: seq=2 event=tick",
+        guestLines: 100,
+        guestOutputBytes: 5000,
+        guestLastLine: "systemd[1]: Mounting bpf on /sys/fs/bpf...",
+        guestHeartbeat: {
+          count: 2,
+          lastLine: "bus-engine-os-heartbeat: seq=2 event=tick",
+        },
+      },
+    },
+  ];
+  assert.equal(serialIdleDiagnostic(heartbeatSamples, 20000), null);
+  assert.deepEqual(guestSerialIdleDiagnostic(heartbeatSamples, 20000), {
+    idle: true,
+    idleAfterText: "",
+    idleMs: 20000,
+    idleSinceElapsedMs: 10000,
+    idleTimeoutMs: 20000,
+    lastLine: "systemd[1]: Mounting bpf on /sys/fs/bpf...",
+    outputBytes: 5000,
+    outputLines: 100,
+  });
+  const heartbeatProgress = progressSampleDiagnostic({
+    progressSamples: [
+      {
+        elapsedMs: 20000,
+        state: heartbeatSamples[1].state,
+      },
+    ],
+  }, 30000, "sample", heartbeatSamples[2].state);
+  assert.equal(heartbeatProgress.guestHeartbeatDelta, 1);
+  assert.equal(heartbeatProgress.guestOutputByteDelta, 0);
 }
 
 {
@@ -1472,6 +1544,7 @@ for (const status of [
       outputByteDelta: 0,
       guestLineDelta: null,
       guestOutputByteDelta: null,
+      guestHeartbeatDelta: null,
       lastLineChanged: false,
       guestLastLineChanged: null,
       lastLine: "x86/fpu: x87 FPU will use FXSAVE",

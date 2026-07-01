@@ -1369,6 +1369,12 @@ async function run() {
     guestLines: 0,
     guestOutputBytes: 0,
     guestLastLine: "",
+    guestHeartbeat: {
+      marker: "bus-engine-os-heartbeat:",
+      count: 0,
+      lastLine: "",
+      lastElapsedMs: null,
+    },
     phase: "init",
     phases: [],
     startedAtMs: startTime,
@@ -1659,7 +1665,8 @@ async function run() {
       line.startsWith("qemu-tci-wasm-subset:") ||
       line.startsWith("qemu-tcg-hotblocks:") ||
       line.startsWith("qemu-wasm-perf-attribution:") ||
-      line.startsWith("wasm-browser-smoke:")
+      line.startsWith("wasm-browser-smoke:") ||
+      line.startsWith(smokeState.guestHeartbeat.marker)
     );
   };
 
@@ -1667,6 +1674,11 @@ async function run() {
     smokeState.lines += 1;
     smokeState.lastLine = line;
     const encoded = new TextEncoder().encode(`${line}\n`);
+    if (line.startsWith(smokeState.guestHeartbeat.marker)) {
+      smokeState.guestHeartbeat.count += 1;
+      smokeState.guestHeartbeat.lastLine = line;
+      smokeState.guestHeartbeat.lastElapsedMs = Math.round(performance.now() - startTime);
+    }
     if (isGuestProgressLine(line)) {
       smokeState.guestLines += 1;
       smokeState.guestOutputBytes += encoded.length;

@@ -850,6 +850,13 @@ export function progressSampleDiagnostic(result, elapsedMs, reason, state) {
         Number.isInteger(previousState.guestOutputBytes)
       ? state.guestOutputBytes - previousState.guestOutputBytes
       : null,
+    guestHeartbeatDelta: state && previousState &&
+        state.guestHeartbeat &&
+        previousState.guestHeartbeat &&
+        Number.isInteger(state.guestHeartbeat.count) &&
+        Number.isInteger(previousState.guestHeartbeat.count)
+      ? state.guestHeartbeat.count - previousState.guestHeartbeat.count
+      : null,
     lastLineChanged: state && previousState
       ? state.lastLine !== previousState.lastLine
       : null,
@@ -1098,6 +1105,7 @@ function compactProgressSample(sample) {
     outputByteDelta: sample.outputByteDelta,
     guestLineDelta: sample.guestLineDelta ?? null,
     guestOutputByteDelta: sample.guestOutputByteDelta ?? null,
+    guestHeartbeatDelta: sample.guestHeartbeatDelta ?? null,
     lastLineChanged: sample.lastLineChanged,
     guestLastLineChanged: sample.guestLastLineChanged ?? null,
     lastLine: sample.state && sample.state.lastLine ? sample.state.lastLine : null,
@@ -1236,6 +1244,7 @@ export function promoteSmokeState(result, smokeState) {
   result.guestOutputLines = smokeState.guestLines;
   result.guestOutputBytes = smokeState.guestOutputBytes;
   result.guestLastLine = smokeState.guestLastLine;
+  result.guestHeartbeat = smokeState.guestHeartbeat || null;
   result.browserRuntime = smokeState.runtime || null;
   result.displayState = smokeState.display || null;
   result.powerControlState = smokeState.powerControl || null;

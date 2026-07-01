@@ -434,7 +434,17 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   Bus Engine OS must add heartbeat/progress policy and rebuild the virtual
   kernels with `CONFIG_BPF_FS=y` before more QEMU CPU optimization can be
   treated as the next boot-readiness blocker.
-- [ ] Implement the first evidence-backed acceleration slice:
+- [x] Treat Bus Engine OS heartbeat markers as liveness, not progress:
+  DoD is page-side detection of `bus-engine-os-heartbeat:` serial markers,
+  result-state fields for count/last marker/last elapsed time, progress-sample
+  heartbeat deltas, and a runner test proving that heartbeat output keeps raw
+  serial output active while `--guest-idle-timeout-ms` still fails against the
+  last non-heartbeat guest progress line. Accepted evidence on 2026-07-01:
+  `wasm-browser-smoke.mjs` records `guestHeartbeat`, excludes heartbeat
+  markers from `guestLines`/`guestOutputBytes`/`guestLastLine`, and
+  `wasm-browser-smoke-runner-test.mjs` passes with a synthetic `/sys/fs/bpf`
+  stall plus continuing heartbeat lines.
+- [x] Implement the first evidence-backed acceleration slice:
   DoD is an initial hot-TB WebAssembly translation slice modeled on
   `ktock/qemu-wasm` if CPU interpreter cost is the measured blocker, or the
   smallest virtio/browser API patch if a measured paravirtual device boundary
@@ -474,7 +484,7 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     passed on Node.js `v22.19.0`; browser evidence:
     `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generated-block-control-flow-browser.json`
     passed in Chromium `141.0.7390.37`.
-  - [ ] Implement generated execution only after the control-flow model has
+  - [x] Implement generated execution only after the control-flow model has
     deterministic coverage: DoD is a small supported opcode/control-flow
     subset with differential tests against TCI and a passing generic Chromium
     smoke with nonzero generated execution counters.
@@ -549,6 +559,43 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     unsupported operations were `goto_ptr`, `goto_tb`, and `brcond`. This
     remains an opt-in TCI subset proof inside the QEMU WebAssembly binary, not
     the final generated WebAssembly backend.
+    Accepted generated-execution evidence on 2026-07-01: the live QEMU
+    `tcg/tci.c` path now builds and caches real WebAssembly modules for a
+    conservative straight-line register-only TCI subset ending at `exit_tb` or
+    `goto_tb`. The default TCI path remains unchanged unless
+    `QEMU_TCI_WASM_SUBSET=1` is enabled. Unsupported generated shapes are
+    cached in C after the first failed classification, so hot unsupported
+    blocks do not cross into JavaScript repeatedly. Final rebuilt artifact
+    hashes were
+    `qemu-system-x86_64.js=3c0cf09128f97248346d180b843f3b20f714fa4ceef4c422de1a369fa5071e68`
+    and
+    `qemu-system-x86_64.wasm=678a2c5a805afb684b45feccdb4583c3048c285cf7872a0536dd415f5c590900`.
+    Default generic Chromium smoke
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-generated-opcounters-default.json`
+    reached `QEMU_WASM_LINUX_BOOT_OK` in `82256` ms. Subset generic Chromium
+    smoke
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-generated-opcounters-subset.json`
+    reached the same marker in `89034` ms with `generated_compiled=38`,
+    `generated_executed=27657`, and `generated_compile_failed=0`.
+    Generated-specific unsupported counters show the next coverage blocker is
+    `ld32u` (`690150` generated fallback classifications), followed by `st8`
+    (`386`). The broader C subset still reports `brcond` as the top fallback.
+    Downstream Bus Engine OS proof with the same artifact
+    `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-tci-wasm-generated-opcounters-subset.json`
+    still timed out before multi-user readiness, but recorded
+    `generated_compiled=135`, `generated_executed=1301928`,
+    `generated_compile_failed=0`, and generated fallback blockers `ld32u`
+    (`5018171`) plus `st8` (`69`).
+  - [ ] Add generated host-memory load/store support for the measured
+    `ld32u`/`st8` blocker:
+    DoD is a generated-Wasm memory-access design and implementation that
+    imports or otherwise safely reaches the Emscripten/QEMU linear memory,
+    supports at least the measured `ld32u` load shape and either rejects or
+    correctly handles `st8`, preserves fallback for alignment, fault, and
+    unsupported memory cases, and keeps generic Chromium smoke passing with
+    increased generated execution coverage. The proof must record
+    generated-specific unsupported counters again before another downstream
+    Bus Engine OS proof is treated as acceptance evidence.
   - [x] Resolve the hot TB dispatch/chaining boundary:
     DoD is a design and implementation for hot blocks that currently fall
     back on `goto_ptr` and `goto_tb`, preserving QEMU's `tcg_qemu_tb_exec`

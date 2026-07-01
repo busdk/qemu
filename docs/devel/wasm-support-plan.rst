@@ -4529,6 +4529,86 @@ implementation must either provide actual generated WebAssembly execution for
 hot TBs, or add fresh attribution proving that another QEMU-side boundary has
 become dominant.
 
+Generated WebAssembly straight-line slice
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The next accepted step on 2026-07-01 added the first live generated
+WebAssembly execution path inside the opt-in TCI subset gate.  This is still
+not a full TCG backend.  It is a narrow generated-block proof for hot,
+straight-line, side-effect-free TCI blocks that end at ``exit_tb`` or
+``goto_tb``.  Unsupported shapes continue through the existing C subset path
+and then normal TCI fallback.
+
+The implementation builds a small WebAssembly module per accepted TB in the
+browser worker, caches unsupported generated shapes in C after the first
+classification, and records generated-specific counters in the existing
+``qemu-tci-wasm-subset`` summary JSON.  The default path remains unchanged
+unless ``QEMU_TCI_WASM_SUBSET=1`` is enabled.
+
+The final rebuilt artifact hashes were:
+
+* ``qemu-system-x86_64.js`` =
+  ``3c0cf09128f97248346d180b843f3b20f714fa4ceef4c422de1a369fa5071e68``
+* ``qemu-system-x86_64.wasm`` =
+  ``678a2c5a805afb684b45feccdb4583c3048c285cf7872a0536dd415f5c590900``
+
+Validation commands passed:
+
+* ``git diff --check``
+* ``node --check scripts/ci/wasm-browser-smoke.mjs``
+* ``node --check scripts/ci/wasm-browser-smoke-runner.mjs``
+* ``node scripts/ci/wasm-browser-smoke-runner-test.mjs``
+* ``node scripts/ci/wasm-generated-block-prototype-test.mjs``
+
+Generic Chromium ``141.0.7390.37`` smoke with the subset disabled reached
+``QEMU_WASM_LINUX_BOOT_OK``:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-generated-opcounters-default.json``
+* screenshot:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-generated-opcounters-default.png``
+* elapsed: ``82256`` ms
+
+Generic Chromium smoke with ``--tci-wasm-subset`` also reached the marker:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-generated-opcounters-subset.json``
+* screenshot:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/generic-browser-smoke-generated-opcounters-subset.png``
+* elapsed: ``89034`` ms
+* final subset counters: ``attempts=72000000``, ``executed=64993772``,
+  ``fallback_cold=6899614``, ``fallback_unsupported=94420``
+* generated counters: ``generated_compiled=38``,
+  ``generated_executed=27657``, ``generated_compile_failed=0``
+* generated-specific blockers: ``ld32u`` with ``690150`` classifications and
+  ``st8`` with ``386``
+* broader subset blocker: ``brcond`` with ``10624`` unsupported fallbacks
+
+The downstream Bus Engine OS ``virtual-server`` microvm proof with the same
+artifact still timed out before ``Reached target Multi-User System.`` and
+``QEMU_WASM_SERVICE_READY``:
+
+* result:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-tci-wasm-generated-opcounters-subset.json``
+* screenshot:
+  ``/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-tci-wasm-generated-opcounters-subset.png``
+* elapsed: ``420223`` ms
+* last serial line: ``systemd[1]: Mounting Huge Pages File System...``
+* generated counters: ``generated_compiled=135``,
+  ``generated_executed=1301928``, ``generated_compile_failed=0``
+* generated-specific blockers: ``ld32u`` with ``5018171`` classifications and
+  ``st8`` with ``69``
+* broader subset blocker: ``brcond`` with ``7968`` unsupported fallbacks
+
+This is accepted as the first real generated WebAssembly execution slice
+because the generated path executed in both generic Chromium smoke and the
+downstream Bus Engine OS proof while preserving fallback.  It does not close
+the full Bus Engine OS boot-readiness goal.  The next generated-execution
+implementation should add a safe linear-memory access model for the measured
+``ld32u`` blocker, with explicit fallback for unsupported, faulting, or
+side-effectful memory cases.  The broader control-flow path still needs
+``brcond`` support before the C subset fallback can shrink substantially.
+
 Guest-progress idle diagnostic
 ==============================
 
@@ -4585,3 +4665,21 @@ the virtual kernels and rebuilding the proof kernel.  A separate heartbeat
 source is still useful, but the harness must treat heartbeat markers as
 liveness evidence rather than boot-progress evidence so a stuck mount or
 systemd unit still fails quickly with the last non-heartbeat progress marker.
+
+Heartbeat liveness markers
+==========================
+
+On 2026-07-01 the browser smoke harness added explicit accounting for
+``bus-engine-os-heartbeat:`` serial markers emitted by downstream Bus Engine
+OS diagnostic boots.  The page state records ``guestHeartbeat.count``,
+``guestHeartbeat.lastLine``, and ``guestHeartbeat.lastElapsedMs``.  Progress
+samples include a ``guestHeartbeatDelta`` so long runs can show that the
+guest-side heartbeat is still active.
+
+Heartbeat markers are intentionally excluded from ``guestLines``,
+``guestOutputBytes``, and ``guestLastLine``.  That separation is required for
+failed boot runs: a kernel or early userspace heartbeat can prove that the
+emulated guest is still executing, but it must not reset the boot-progress
+idle timer.  A guest stuck at a mount unit such as ``/sys/fs/bpf`` should
+still fail quickly with that mount line as the final non-heartbeat progress
+marker.
