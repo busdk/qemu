@@ -25,6 +25,8 @@ const OPTIONAL_FIRMWARE_FILES = [
   "vgabios-stdvga.bin",
   "efi-virtio.rom",
 ];
+const DEFAULT_ROOTFS_OPFS_NAME = "qemu-wasm-rootfs.raw";
+const OPFS_ROOTFS_DIRECTORY = "qemu-wasm-rootfs";
 
 function option(name, fallback) {
   const value = new URLSearchParams(window.location.search).get(name);
@@ -140,6 +142,70 @@ function mountFiles(module, mounts) {
     createParentPaths(module, mount.path);
     module.FS.writeFile(mount.path, mount.data);
   }
+}
+
+function validateOpfsFileName(name) {
+  if (name === "" || /[\\/]/.test(name)) {
+    throw new Error("rootfsOpfsName must be a non-empty file name without path separators");
+  }
+}
+
+async function openRootfsOpfsDirectory(create) {
+  if (!navigator.storage || typeof navigator.storage.getDirectory !== "function") {
+    throw new Error("OPFS is not available in this browser");
+  }
+  const root = await navigator.storage.getDirectory();
+  return root.getDirectoryHandle(OPFS_ROOTFS_DIRECTORY, { create });
+}
+
+async function readRootfsOpfsSnapshot(name) {
+  validateOpfsFileName(name);
+  try {
+    const directory = await openRootfsOpfsDirectory(false);
+    const fileHandle = await directory.getFileHandle(name, { create: false });
+    const file = await fileHandle.getFile();
+    return new Uint8Array(await file.arrayBuffer());
+  } catch (error) {
+    if (error && error.name === "NotFoundError") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function writeRootfsOpfsSnapshot(name, data) {
+  validateOpfsFileName(name);
+  const directory = await openRootfsOpfsDirectory(true);
+  const fileHandle = await directory.getFileHandle(name, { create: true });
+  const writable = await fileHandle.createWritable();
+  try {
+    await writable.truncate(0);
+    await writable.write(data);
+  } finally {
+    await writable.close();
+  }
+}
+
+async function loadRootfsData(mount, config, storageState) {
+  if (config.rootfsStorage !== "opfs-snapshot") {
+    storageState.loadSource = "network";
+    const data = await fetchBytes(mount.url);
+    storageState.loadedBytes = data.length;
+    return data;
+  }
+
+  const snapshot = await readRootfsOpfsSnapshot(config.rootfsOpfsName);
+  if (snapshot !== null) {
+    storageState.loadSource = "opfs";
+    storageState.loadedBytes = snapshot.length;
+    return snapshot;
+  }
+
+  const fetched = await fetchBytes(mount.url);
+  storageState.loadSource = "network";
+  storageState.loadedBytes = fetched.length;
+  storageState.seededFromNetwork = true;
+  return fetched;
 }
 
 function programExitStatus(line) {
@@ -1001,6 +1067,8 @@ function buildConfig() {
     qboot: option("qboot", "/firmware/qboot.rom"),
     rootfs: pathOption("rootfs", ""),
     rootfsDevice: option("rootfsDevice", "virtio-mmio"),
+    rootfsOpfsName: option("rootfsOpfsName", DEFAULT_ROOTFS_OPFS_NAME),
+    rootfsStorage: option("rootfsStorage", "memfs"),
     powerOperation: option("powerOperation", ""),
     powerTimeoutMs: numberOption("powerTimeoutMs", 30000),
     serviceBridge: jsonObjectOption("serviceBridge", null),
@@ -1070,6 +1138,13 @@ async function run() {
   if (!["virtio-mmio", "virtio-pci"].includes(config.rootfsDevice)) {
     throw new Error("rootfsDevice must be virtio-mmio or virtio-pci");
   }
+  if (!["memfs", "opfs-snapshot"].includes(config.rootfsStorage)) {
+    throw new Error("rootfsStorage must be memfs or opfs-snapshot");
+  }
+  validateOpfsFileName(config.rootfsOpfsName);
+  if (config.rootfsStorage === "opfs-snapshot" && !config.rootfs) {
+    throw new Error("rootfsStorage=opfs-snapshot requires rootfs");
+  }
   if (!["none", "default"].includes(config.network)) {
     throw new Error("network must be none or default");
   }
@@ -1099,6 +1174,14 @@ async function run() {
       expectedResolution,
       visualMarker: config.visualMarker,
     },
+    rootfsStorage: {
+      mode: config.rootfsStorage,
+      opfsName: config.rootfsOpfsName,
+      loadSource: null,
+      loadedBytes: 0,
+      persisted: false,
+      persistedBytes: 0,
+    },
     markerSeen: false,
     expectedTextSeen: config.expectText.map((text) => ({ text, seen: false })),
     lastLine: "",
@@ -1110,6 +1193,7 @@ async function run() {
   const powerControl = createPowerControl(config, smokeState, serviceBridge);
   let qemuKeySink = null;
   let qemuModule = null;
+  let activeModule = null;
   const setPhase = (phase, message = phase) => {
     smokeState.phase = phase;
     smokeState.phases.push({
@@ -1171,7 +1255,7 @@ async function run() {
     mounts.push({ url: config.initrd, path: "/initramfs.cpio.gz" });
   }
   if (config.rootfs) {
-    mounts.push({ url: config.rootfs, path: "/rootfs.raw" });
+    mounts.push({ url: config.rootfs, path: "/rootfs.raw", rootfs: true });
   }
 
   setPhase("validate-browser", "validating browser WebAssembly features");
@@ -1228,10 +1312,46 @@ async function run() {
   const allExpectedTextSeen = () =>
     smokeState.expectedTextSeen.every((expected) => expected.seen);
 
+  let completionStarted = false;
+  const completeSuccess = () => {
+    setPhase("success", `marker reached: ${config.marker}`);
+  };
+  const persistRootfsSnapshot = async () => {
+    if (config.rootfsStorage !== "opfs-snapshot") {
+      return;
+    }
+    if (!activeModule || !activeModule.FS) {
+      throw new Error("QEMU module FS is not available for OPFS persistence");
+    }
+    const rootfs = activeModule.FS.readFile("/rootfs.raw");
+    await writeRootfsOpfsSnapshot(config.rootfsOpfsName, rootfs);
+    smokeState.rootfsStorage.persisted = true;
+    smokeState.rootfsStorage.persistedBytes = rootfs.length;
+  };
   const maybeComplete = () => {
     if (smokeState.markerSeen && allExpectedTextSeen()) {
+      if (completionStarted) {
+        return;
+      }
+      completionStarted = true;
       clearTimeout(timeout);
-      setPhase("success", `marker reached: ${config.marker}`);
+      if (config.rootfsStorage !== "opfs-snapshot") {
+        completeSuccess();
+        return;
+      }
+      setPhase("persist-rootfs-opfs", "persisting rootfs snapshot to OPFS");
+      persistRootfsSnapshot().then(completeSuccess).catch((error) => {
+        smokeState.rootfsStorage.errorName = error && error.name ? error.name : "Error";
+        smokeState.rootfsStorage.errorMessage =
+          error && error.message ? error.message : String(error);
+        recordHarnessFailure(
+          smokeState,
+          error,
+          Math.round(performance.now() - startTime),
+        );
+        status.textContent = "failed";
+        appendLine(output, error && error.stack ? error.stack : String(error));
+      });
     }
   };
 
@@ -1279,9 +1399,13 @@ async function run() {
   setPhase("fetch-guest-inputs", "loading smoke guest inputs");
   drawBrowserStatusFrame(canvas, "Loading Bus Engine OS guest...");
   for (const mount of mounts) {
-    mount.data = mount.optional
-      ? await fetchOptionalBytes(mount.url)
-      : await fetchBytes(mount.url);
+    if (mount.rootfs) {
+      mount.data = await loadRootfsData(mount, config, smokeState.rootfsStorage);
+    } else {
+      mount.data = mount.optional
+        ? await fetchOptionalBytes(mount.url)
+        : await fetchBytes(mount.url);
+    }
   }
   const availableMounts = mounts.filter((mount) => mount.data !== null);
 
@@ -1322,6 +1446,7 @@ async function run() {
     mainScriptUrlOrBlob: programUrl.href,
     preRun: [
       (module) => {
+        activeModule = module;
         mountFiles(module, availableMounts);
       },
     ],

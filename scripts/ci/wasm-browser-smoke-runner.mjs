@@ -104,6 +104,11 @@ Options:
   --rootfs FILE       Raw root filesystem image exposed as /dev/vda
   --rootfs-device KIND
                      Rootfs block device kind: virtio-mmio or virtio-pci
+  --rootfs-opfs-name NAME
+                     OPFS file name used by --rootfs-storage opfs-snapshot
+  --rootfs-storage MODE
+                     Rootfs browser storage mode: memfs or opfs-snapshot
+                     (default: memfs)
   --screenshot FILE  Save a browser page screenshot to FILE
   --screenshot-full-page
                      Capture the full scrollable page instead of the viewport
@@ -167,6 +172,8 @@ function parseArgs(argv) {
     displayMinNonblackPixels: 1,
     rootfs: null,
     rootfsDevice: "virtio-mmio",
+    rootfsOpfsName: "qemu-wasm-rootfs.raw",
+    rootfsStorage: "memfs",
     screenshot: null,
     screenshotFullPage: false,
     serviceBridge: null,
@@ -305,6 +312,12 @@ function parseArgs(argv) {
     } else if (arg === "--rootfs-device") {
       options.rootfsDevice = argv[++i];
       explicit.add("rootfsDevice");
+    } else if (arg === "--rootfs-opfs-name") {
+      options.rootfsOpfsName = argv[++i];
+      explicit.add("rootfsOpfsName");
+    } else if (arg === "--rootfs-storage") {
+      options.rootfsStorage = argv[++i];
+      explicit.add("rootfsStorage");
     } else if (arg === "--screenshot") {
       options.screenshot = argv[++i];
       explicit.add("screenshot");
@@ -383,6 +396,8 @@ function parseArgs(argv) {
       "program",
       "rootfs",
       "rootfsDevice",
+      "rootfsOpfsName",
+      "rootfsStorage",
       "screenshot",
       "visualMarker",
     ],
@@ -458,6 +473,18 @@ function parseArgs(argv) {
   }
   if (!["virtio-mmio", "virtio-pci"].includes(options.rootfsDevice)) {
     console.error("--rootfs-device must be virtio-mmio or virtio-pci");
+    usage(2);
+  }
+  if (!["memfs", "opfs-snapshot"].includes(options.rootfsStorage)) {
+    console.error("--rootfs-storage must be memfs or opfs-snapshot");
+    usage(2);
+  }
+  if (options.rootfsOpfsName === "" || /[\\/]/.test(options.rootfsOpfsName)) {
+    console.error("--rootfs-opfs-name must be a non-empty file name without path separators");
+    usage(2);
+  }
+  if (options.rootfsStorage === "opfs-snapshot" && options.rootfs === null) {
+    console.error("--rootfs-storage opfs-snapshot requires --rootfs");
     usage(2);
   }
   if (!["none", "sdl", "wasm"].includes(options.display)) {
@@ -911,11 +938,14 @@ export function promoteSmokeState(result, smokeState) {
   result.browserRuntime = smokeState.runtime || null;
   result.displayState = smokeState.display || null;
   result.powerControlState = smokeState.powerControl || null;
+  result.rootfsStorageState = smokeState.rootfsStorage || null;
   result.serviceBridgeState = smokeState.serviceBridge || null;
 }
 
 export function browserSmokeUrl(options) {
   const url = new URL(`http://${options.host}:${options.port}/`);
+  const rootfsStorage = options.rootfsStorage || "memfs";
+  const rootfsOpfsName = options.rootfsOpfsName || "qemu-wasm-rootfs.raw";
   url.searchParams.set("appendExtra", options.appendExtra);
   url.searchParams.set("allowSerialFallback", options.allowSerialFallback ? "1" : "0");
   url.searchParams.set("cpu", options.cpu);
@@ -935,6 +965,10 @@ export function browserSmokeUrl(options) {
   url.searchParams.set("powerOperation", options.powerOperation);
   url.searchParams.set("powerTimeoutMs", String(options.powerTimeoutMs));
   url.searchParams.set("rootfsDevice", options.rootfsDevice);
+  if (rootfsStorage !== "memfs") {
+    url.searchParams.set("rootfsStorage", rootfsStorage);
+    url.searchParams.set("rootfsOpfsName", rootfsOpfsName);
+  }
   if (options.kernelAppend !== null) {
     url.searchParams.set("kernelAppend", options.kernelAppend);
   }
@@ -997,6 +1031,8 @@ export function initialSmokeResult(options, browserVersion) {
     displayMinNonblackPixels: options.displayMinNonblackPixels,
     rootfs: options.rootfs,
     rootfsDevice: options.rootfsDevice,
+    rootfsOpfsName: options.rootfsOpfsName,
+    rootfsStorage: options.rootfsStorage,
     serviceBridge: options.serviceBridge,
     visualMarker: options.visualMarker,
     success: false,

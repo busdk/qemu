@@ -208,6 +208,8 @@ for (const status of [
     qemuArgs: ["-name", "wasm-smoke"],
     rootfs: "/tmp/rootfs.raw",
     rootfsDevice: "virtio-pci",
+    rootfsOpfsName: "virtual-server.raw",
+    rootfsStorage: "opfs-snapshot",
     timeoutMs: 180000,
     visualMarker: "login",
   });
@@ -228,6 +230,8 @@ for (const status of [
     "powerOperation=shutdown&" +
     "powerTimeoutMs=15000&" +
     "rootfsDevice=virtio-pci&" +
+    "rootfsStorage=opfs-snapshot&" +
+    "rootfsOpfsName=virtual-server.raw&" +
     "kernelAppend=console%3DttyS0+root%3D%2Fdev%2Fvda+rw&" +
     "expectText=Example+Linux&" +
     "expectText=systemd+261.1&" +
@@ -280,6 +284,8 @@ for (const status of [
   assert.equal(url.searchParams.get("powerOperation"), "");
   assert.equal(url.searchParams.get("powerTimeoutMs"), "30000");
   assert.equal(url.searchParams.get("allowSerialFallback"), "1");
+  assert.equal(url.searchParams.has("rootfsStorage"), false);
+  assert.equal(url.searchParams.has("rootfsOpfsName"), false);
 }
 
 {
@@ -526,6 +532,39 @@ for (const status of [
   });
 
   assert.equal(child.status, 2);
+}
+
+{
+  const child = spawnSync(process.execPath, [
+    runnerPath,
+    "--artifact-dir", "/tmp/artifacts",
+    "--kernel", "/tmp/kernel",
+    "--initrd", "/tmp/initrd",
+    "--rootfs-storage", "opfs-snapshot",
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+
+  assert.equal(child.status, 2);
+  assert.match(child.stderr, /--rootfs-storage opfs-snapshot requires --rootfs/);
+}
+
+{
+  const child = spawnSync(process.execPath, [
+    runnerPath,
+    "--artifact-dir", "/tmp/artifacts",
+    "--kernel", "/tmp/kernel",
+    "--rootfs", "/tmp/rootfs.raw",
+    "--rootfs-storage", "opfs-snapshot",
+    "--rootfs-opfs-name", "bad/name.raw",
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+
+  assert.equal(child.status, 2);
+  assert.match(child.stderr, /--rootfs-opfs-name must be a non-empty file name/);
 }
 
 {
