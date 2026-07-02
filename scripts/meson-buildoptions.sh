@@ -52,6 +52,9 @@ meson_options_help() {
   printf "%s\n" '  --enable-strip           Strip targets on install'
   printf "%s\n" '  --enable-tcg-hotblocks   TCG hot-block instrumentation'
   printf "%s\n" '  --enable-tcg-interpreter TCG with bytecode interpreter (slow)'
+  printf "%s\n" '  --enable-tcg-wasm64-backend'
+  printf "%s\n" '                           experimental wasm64 TCG backend skeleton (not'
+  printf "%s\n" '                           runnable yet)'
   printf "%s\n" '  --enable-trace-backends=CHOICES'
   printf "%s\n" '                           Set available tracing backends [log] (choices:'
   printf "%s\n" '                           dtrace/ftrace/log/nop/simple/syslog/ust)'
@@ -517,6 +520,8 @@ _meson_option_parse() {
     --disable-tcg-hotblocks) printf "%s" -Dtcg_hotblocks=false ;;
     --enable-tcg-interpreter) printf "%s" -Dtcg_interpreter=true ;;
     --disable-tcg-interpreter) printf "%s" -Dtcg_interpreter=false ;;
+    --enable-tcg-wasm64-backend) printf "%s" -Dtcg_wasm64_backend=true ;;
+    --disable-tcg-wasm64-backend) printf "%s" -Dtcg_wasm64_backend=false ;;
     --tls-priority=*) quote_sh "-Dtls_priority=$2" ;;
     --enable-tools) printf "%s" -Dtools=enabled ;;
     --disable-tools) printf "%s" -Dtools=disabled ;;

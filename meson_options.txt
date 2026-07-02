@@ -99,6 +99,8 @@ option('tcg_interpreter', type: 'boolean', value: false,
        description: 'TCG with bytecode interpreter (slow)')
 option('tcg_hotblocks', type: 'boolean', value: false,
        description: 'TCG hot-block instrumentation')
+option('tcg_wasm64_backend', type: 'boolean', value: false,
+       description: 'experimental wasm64 TCG backend skeleton (not runnable yet)')
 option('safe_stack', type: 'boolean', value: false,
        description: 'SafeStack Stack Smash Protection (requires clang/llvm and coroutine backend ucontext)')
 option('asan', type: 'boolean', value: false,

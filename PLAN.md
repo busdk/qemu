@@ -1171,13 +1171,37 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
       import table, memory64-aware load/store emission, label/block patching,
       and strict fallback model; the fork-specific monolithic TCI copy and
       wholesale backend import should not be copied directly.
-    - [ ] Add a gated `tcg/wasm64` backend skeleton without instruction
+    - [x] Add a gated `tcg/wasm64` backend skeleton without instruction
       lowering:
       DoD is build plumbing and empty backend files that can be selected only
       by an explicit experimental Emscripten/wasm64 option, carries the
       context/TB-header types and instance-lifetime plan, fails closed or
       falls back to TCI when no lowering is available, and keeps the existing
       TCI wasm64 build and generic Chromium smoke path unchanged.
+      Accepted implementation on 2026-07-02: Meson now exposes
+      `tcg_wasm64_backend=false` as an explicit experimental option. On a
+      wasm64 host, selecting it is mutually exclusive with `tcg_interpreter`
+      and fails closed with a configure error because no lowering exists yet.
+      The default wasm64 rule still requires TCI. The skeleton adds
+      `tcg/wasm64.h` and `tcg/wasm64.c` for the context/TB-header/instance
+      boundary, plus `tcg/wasm64/` target include files. The target source
+      contains an intentional compile-time fail-closed guard if it is included
+      before lowering exists. This commit does not make the backend runnable
+      and does not alter the default TCI execution path. Verification:
+      `_meson_option_parse --enable-tcg-wasm64-backend` emits
+      `-Dtcg_wasm64_backend=true`; `python3
+      scripts/ci/wasm-build-artifacts-local.py --out
+      /tmp/qemu-wasm64-backend-skeleton-guard --jobs 1
+      --configure-arg=--enable-tcg-wasm64-backend` fails during Meson setup
+      with `The experimental wasm64 TCG backend and TCG interpreter are
+      mutually exclusive`; `python3
+      scripts/ci/wasm-build-artifacts-local.py --out
+      /tmp/qemu-wasm64-backend-skeleton-tci --jobs auto` built the default
+      wasm64 TCI artifact (`qemu-system-x86_64.wasm`
+      `sha256:b167b063c5345d33cf3ebb8a0347f2bde611d6458bb5fc1c73bbff5f8f9a4d10`);
+      Chromium 141 browser smoke reached `QEMU_WASM_LINUX_BOOT_OK` in
+      `/tmp/qemu-wasm64-backend-skeleton-tci/generic-browser-smoke-default.json`
+      at 80436 ms, with kernel banner at 31397 ms and init at 78824 ms.
     - [ ] Add deterministic module-emitter tests for the backend skeleton:
       DoD is a host-side test that emits and validates a minimal wasm64 TB
       module with `env.memory`, a `start(ctx)` function, context loads/stores,

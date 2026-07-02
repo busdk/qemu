@@ -5214,3 +5214,46 @@ host-memory loads/stores for measured hot shapes, helper-call imports, and
 QEMU load/store helper fallback for MMU or fault paths.  The backend remains
 experimental until default generic Chromium smoke is unchanged and the opt-in
 backend path beats the strict-TCI generic smoke gate.
+
+Gated wasm64 backend skeleton
+=============================
+
+The first backend-shaped implementation step adds a fail-closed skeleton.  A
+new Meson option, ``tcg_wasm64_backend``, defaults to ``false``.  The option is
+accepted only for wasm64 hosts, is mutually exclusive with
+``tcg_interpreter``, and currently stops configuration with an explicit error:
+the backend has no instruction lowering yet.  This preserves the existing
+Emscripten requirement that wasm64 builds use TCI until the backend is made
+runnable.
+
+The skeleton files are:
+
+* ``tcg/wasm64.h`` for the generated-TB context, TB function pointer,
+  instance record, and TB header.
+* ``tcg/wasm64.c`` for the placeholder runtime boundary.
+* ``tcg/wasm64/tcg-target*.h`` and ``tcg/wasm64/tcg-target.c.inc`` for the
+  target include directory.
+
+The target source intentionally fails closed if it is included before lowering
+exists.  The next accepted step is not a browser boot proof; it is a
+deterministic module-emitter test that validates the minimal
+``env.memory``/``start(ctx)`` module shape without requiring a full QEMU boot.
+
+Validation on 2026-07-02:
+
+* ``_meson_option_parse --enable-tcg-wasm64-backend`` emits
+  ``-Dtcg_wasm64_backend=true``.
+* ``python3 scripts/ci/wasm-build-artifacts-local.py --out
+  /tmp/qemu-wasm64-backend-skeleton-guard --jobs 1
+  --configure-arg=--enable-tcg-wasm64-backend`` fails during Meson setup with
+  ``The experimental wasm64 TCG backend and TCG interpreter are mutually
+  exclusive``.
+* ``python3 scripts/ci/wasm-build-artifacts-local.py --out
+  /tmp/qemu-wasm64-backend-skeleton-tci --jobs auto`` built the unchanged
+  default wasm64 TCI artifact.
+* ``qemu-system-x86_64.wasm`` from that build has SHA-256
+  ``b167b063c5345d33cf3ebb8a0347f2bde611d6458bb5fc1c73bbff5f8f9a4d10``.
+* Chromium 141 browser smoke reached ``QEMU_WASM_LINUX_BOOT_OK`` in
+  ``/tmp/qemu-wasm64-backend-skeleton-tci/generic-browser-smoke-default.json``
+  at 80436 ms.  The same run recorded the kernel banner at 31397 ms and init
+  at 78824 ms.
