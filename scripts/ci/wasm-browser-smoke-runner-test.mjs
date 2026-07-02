@@ -37,9 +37,11 @@ import {
   recordPerfAttributionSummary,
   recordTciProgressSummary,
   recordTciWasmGeneratedTrace,
+  recordWasm64RunloopSummary,
   recordWasm64TcgSummary,
   tciProgressSummary,
   tciWasmGeneratedTrace,
+  wasm64RunloopSummary,
   wasm64TcgSummary,
 } from "./wasm-browser-smoke.mjs";
 
@@ -181,6 +183,14 @@ for (const status of [
         generated_executed: 12,
       },
     },
+    wasm64Runloop: {
+      enabled: true,
+      summaryCount: 1,
+      lastSummary: {
+        event: "runtime-smoke",
+        generated_guest_instructions: 4000000,
+      },
+    },
     tci: {
       progress: {
         enabled: true,
@@ -273,6 +283,14 @@ for (const status of [
     lastSummary: {
       event: "summary",
       generated_executed: 12,
+    },
+  });
+  assert.deepEqual(result.wasm64Runloop, {
+    enabled: true,
+    summaryCount: 1,
+    lastSummary: {
+      event: "runtime-smoke",
+      generated_guest_instructions: 4000000,
     },
   });
   assert.deepEqual(result.tci, {
@@ -714,6 +732,56 @@ for (const status of [
 }
 
 {
+  const line = "qemu-wasm64-runloop: " + JSON.stringify({
+    format: 1,
+    event: "runtime-smoke",
+    ok: true,
+    budget: 1000000,
+    exit_reason: "budget",
+    generated_guest_instructions: 4000000,
+    generated_body_time_ns: 1000000,
+    generated_chain_length: 1000000,
+    inline_tlb_hit_loads: 1000000,
+    inline_tlb_hit_stores: 1000000,
+    helper_calls: 0,
+    qemu_ld_calls: 0,
+    qemu_st_calls: 0,
+    exits_budget: 1,
+  });
+  const parsed = wasm64RunloopSummary(line);
+  assert.equal(parsed.event, "runtime-smoke");
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.generated_guest_instructions, 4000000);
+  assert.equal(parsed.generated_chain_length, 1000000);
+  assert.equal(parsed.inline_tlb_hit_loads, 1000000);
+  assert.equal(parsed.qemu_ld_calls, 0);
+  assert.equal(wasm64RunloopSummary("ordinary serial line"), null);
+  assert.equal(wasm64RunloopSummary("qemu-wasm64-runloop: not-json"), null);
+}
+
+{
+  const state = {
+    wasm64Runloop: {
+      maxSummaries: 2,
+      summaryCount: 0,
+      summaries: [],
+      lastSummary: null,
+    },
+  };
+  for (const value of [1, 2, 3]) {
+    recordWasm64RunloopSummary(
+      state,
+      `qemu-wasm64-runloop: {"format":1,"event":"runtime-smoke","generated_guest_instructions":${value}}`,
+      value * 10,
+    );
+  }
+  assert.equal(state.wasm64Runloop.summaryCount, 3);
+  assert.equal(state.wasm64Runloop.summaries.length, 2);
+  assert.equal(state.wasm64Runloop.summaries[0].generated_guest_instructions, 2);
+  assert.equal(state.wasm64Runloop.lastSummary.elapsedMs, 30);
+}
+
+{
   const result = { untouched: true };
   promoteSmokeState(result, null);
 
@@ -1010,10 +1078,12 @@ for (const status of [
     tciProgressInterval: 2000000,
     timeoutMs: 30000,
     visualMarker: "",
+    wasm64RunloopSmoke: true,
   });
 
   assert.equal(url.searchParams.get("tciProgress"), "1");
   assert.equal(url.searchParams.get("tciProgressInterval"), "2000000");
+  assert.equal(url.searchParams.get("wasm64RunloopSmoke"), "1");
 }
 
 {
@@ -1289,6 +1359,7 @@ for (const status of [
     tciWasmGeneratedTraceLimit: 7,
     userDataDir: "/tmp/qemu-wasm-profile",
     visualMarker: "login",
+    wasm64RunloopSmoke: true,
   }, "HeadlessChrome/141.0.7390.37");
 
   assert.equal(result.format, 1);
@@ -1329,6 +1400,7 @@ for (const status of [
   assert.equal(result.tciProgressInterval, 2000000);
   assert.equal(result.tciWasmGeneratedTrace, true);
   assert.equal(result.tciWasmGeneratedTraceLimit, 7);
+  assert.equal(result.wasm64RunloopSmoke, true);
   assert.equal(Object.hasOwn(result, "tciWasmSubset"), false);
   assert.equal(Object.hasOwn(result, "tciWasmGeneratedOnly"), false);
   assert.equal(result.userDataDir, "/tmp/qemu-wasm-profile");
