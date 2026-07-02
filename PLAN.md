@@ -108,12 +108,20 @@ run that reaches a weaker marker than normal multi-user readiness.
     `qemu-system-riscv64.wasm`, validated manifest target `riscv64`, and
     wrote SHA256SUMS for those artifact names. No full artifact build or
     browser boot was run in this slice.
-- [ ] R2 - Add the RV64-to-WASM accelerator design and fail-closed boundary.
+- [x] R2 - Add the RV64-to-WASM accelerator design and fail-closed boundary.
   DoD: document CPU state layout, register residency, synthetic exits
   (`BUDGET`, `MMIO`, `TLB_MISS`, `INTERRUPT`, `CSR`, `INVALID`, `FATAL`),
   inline RAM/TLB-hit handling, invalidation, strict TCI fallback,
   no-silent-fallback performance mode, counters, and non-regression gates
-  before the hot path is enabled.
+  before the hot path is enabled. Accepted 2026-07-03:
+  `docs/devel/wasm-support-plan.rst` now names the active
+  `riscv64-softmmu` accelerator lane, preserves `x86_64-softmmu` as a
+  non-regression gate, and documents the guarded translator boundary,
+  `TCGWasm64Context`/`CPUArchState` state model, RISC-V state offset rule,
+  exit classes, inline RAM/TLB-hit limits, invalidation rule, explicit TCI
+  fallback/no-silent-fallback behavior, required counters, and performance
+  gates. `git diff --check` passed. No generated hot path was enabled by this
+  design-only slice.
 - [ ] R3 - Implement the first selectable `riscv64-softmmu` WASM accelerator
   slice. DoD: generated RV64 execution is opt-in, unsupported or failed
   lowering falls back to TCI with identical guest-visible behavior, deterministic

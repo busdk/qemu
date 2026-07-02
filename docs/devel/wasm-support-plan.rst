@@ -26,11 +26,14 @@ Settled MVP decisions
 =====================
 
 The Bus Engine browser target needs 64-bit guest environments only.  The MVP
-therefore uses the upstream ``wasm64`` Emscripten host baseline and the
-``x86_64-softmmu`` system emulator.  ``wasm32`` compatibility is not an MVP
-goal.  Existing ``wasm32`` material in experimental forks remains useful only
-as historical design input for browser packaging, JavaScript integration, and
-TCG-to-WebAssembly ideas.
+therefore uses the upstream ``wasm64`` Emscripten host baseline.  The original
+browser boot proof used the ``x86_64-softmmu`` system emulator; that path
+remains a non-regression gate.  The active five-minute Bus Engine OS boot lane
+now targets ``riscv64-softmmu`` because the downstream guest architecture,
+kernel, userland, QEMU machine shape, and browser harness can be optimized
+together.  ``wasm32`` compatibility is not an MVP goal.  Existing ``wasm32``
+material in experimental forks remains useful only as historical design input
+for browser packaging, JavaScript integration, and TCG-to-WebAssembly ideas.
 
 The first executable milestone is the TCI boot path.  A native WebAssembly TCG
 backend remains a later performance and maintainability milestone after the
@@ -38,6 +41,78 @@ TCI path can boot a 64-bit Linux guest in a browser-controlled runtime.
 Chromium or Chrome is the preferred browser target for the MVP acceptance
 path.  Firefox remains compatibility tracking, not a first-MVP requirement,
 unless Chromium stops being a viable proof browser.
+
+RISC-V 64 accelerator boundary
+==============================
+
+The active performance goal is not an opcode-at-a-time interpreter shortcut.
+It is a guarded ``riscv64-softmmu`` path for WebAssembly-hosted QEMU that keeps
+TCI as the correctness fallback while allowing translated RISC-V 64 guest work
+to spend long stretches inside generated WebAssembly.
+
+The first implementation boundary is still QEMU's normal translator pipeline:
+``target/riscv`` translates guest instructions into TCG ops, and the wasm64 TCG
+target attaches generated WebAssembly output or an explicit fallback marker to
+the translated block.  This keeps device models, exceptions, interrupt checks,
+and helper calls under QEMU's normal semantics.  The accelerator may use
+RISC-V-specific knowledge only behind a target guard, for example when mapping
+RISC-V CPU state offsets or deciding which TCG op shapes are required by the
+``riscv64`` virtual-server guest.
+
+Generated blocks receive a single ``TCGWasm64Context *``.  The context carries
+the current TB pointer, next-TB result, ``CPUArchState`` pointer, temporary
+stack, counters, and flags.  Guest integer registers, PC, and CSR-visible state
+must either remain in QEMU's normal CPU state layout or be cached in generated
+locals with a precise flush point before any exit that can observe state.  For
+RISC-V this means ``CPURISCVState`` storage such as ``gpr[32]`` and ``pc`` is
+reached through QEMU's translated global-memory operations or guarded generated
+offsets, not through a separately maintained browser-only CPU-state ABI.
+
+The generated path must be opt-in until the browser speed gate is accepted.
+Unsupported or unsafe TBs keep the existing TCI execution path.  A stricter
+performance/debug mode may reject unsupported hot paths, but default execution
+must preserve guest-visible behavior by falling back explicitly rather than
+silently changing semantics.
+
+Generated execution exits must be classified, at minimum, as:
+
+* ``BUDGET`` for cooperative return to the browser/QEMU loop;
+* ``MMIO`` for device or non-RAM memory access;
+* ``TLB_MISS`` for softmmu lookup failure or page permission mismatch;
+* ``INTERRUPT`` for pending interrupt/timer checks;
+* ``CSR`` for CSR/helper work not lowered in generated code;
+* ``INVALID`` for invalid guest instruction or decoded state paths that must
+  route through QEMU's existing exception machinery;
+* ``INVALIDATION`` for stale TB or memory mapping state;
+* ``UNSUPPORTED`` for unlowered TCG op shapes;
+* ``FATAL`` for invariant violations that cannot safely fall back.
+
+Inline memory handling is allowed only for proven RAM/TLB-hit paths.  The first
+accepted version should inline common aligned integer loads and stores when the
+softmmu TLB entry proves a direct RAM mapping.  TLB miss, I/O, page fault,
+atomic, unaligned, or permission-sensitive paths must exit to QEMU's existing
+helpers until each case has deterministic tests.
+
+Generated code must not outlive QEMU invalidation.  Runtime instances are keyed
+to the translated block and must be discarded or made unreachable when the TB is
+flushed, invalidated, or otherwise no longer current for the guest address
+space.  Running stale generated code is a correctness failure, not a performance
+fallback.
+
+Every generated execution summary must explain coverage and exits.  Required
+counters include generated attempts, compiled blocks, generated executions,
+cache hits, fallback executions, fallback reason, generated instruction or
+TCG-op equivalent count, wall time in generated bodies, wall time in fallback,
+inline RAM load/store hits, TLB misses, MMIO exits, helper/CSR exits,
+interrupt/WFI/budget exits, compile failures, top hot guest PCs or TBs still
+falling back, browser version, artifact SHA-256 values, and result JSON paths.
+
+The browser performance gate comes before any long Bus Engine OS proof.  A
+same-commit generic RISC-V Chromium smoke must beat default RISC-V TCI by the
+accepted threshold, and deterministic tests must prove fallback accounting and
+generated behavior for supported integer, branch, load/store, helper/CSR-exit,
+and invalidation cases.  Existing ``x86_64`` QEMU/WASM TCI smoke remains a
+non-regression gate.
 
 Strict definition of done
 =========================
