@@ -22,7 +22,8 @@ export const WASMJIT_RUN_CTX = {
   exit: 32,
   mode: 40,
   flags: 44,
-  size: 48,
+  hotset: 48,
+  size: 56,
 };
 
 export const WASMJIT_RUN_EXIT = {
@@ -63,6 +64,22 @@ export const WASMJIT_COUNTERS = {
   exitsHlt: 176,
   exitsInvalidated: 184,
   size: 192,
+};
+
+export const WASMJIT_HOTSET_TB = {
+  tbId: 0,
+  nextTbId: 4,
+  op: 8,
+  guestInstructions: 12,
+  immediate: 16,
+  size: 24,
+};
+
+export const WASMJIT_HOTSET = {
+  tbCount: 0,
+  entryTbId: 4,
+  tbs: 8,
+  size: 16,
 };
 
 export function encodeU32(value) {

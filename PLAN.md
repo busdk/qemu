@@ -1173,6 +1173,65 @@ Engineering rules for this goal:
   because sandboxed child-process spawning returns `EPERM`. This completes
   the QEMU runtime-smoke slice only; it does not complete W2, W3, or the
   Bus Engine OS five-minute proof.
+- [x] W2q - Make the runtime run/exit smoke descriptor-backed instead of a
+  hardcoded synthetic two-block loop. Accepted slice evidence: W2p proved
+  that the browser runtime can execute one generated run loop, but it still
+  generated the loop from literals inside the JavaScript bridge. W2q adds a
+  C-owned `TCGWasm64RunHotset` descriptor table and `TCGWasm64RunHotsetTB`
+  entries. The Emscripten runtime bridge reads those descriptors from live
+  QEMU memory, emits internal dispatch/chaining for three descriptor TBs,
+  updates inline RAM with add/xor operations, counts guest-instruction
+  equivalents, and returns only for a synthetic budget exit. The first W2q
+  artifact was rejected: disabled smoke still paid a synthetic
+  million-iteration expected-value loop before the environment check, and
+  the generic marker timed out at `180227` ms in
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2q-hotset-runtime-smoke/wasm-browser-smoke-result.json`
+  while the no-smoke control timed out at `140180` ms. The accepted fix moves
+  all descriptor setup and expected-value work behind
+  `QEMU_WASM64_RUNLOOP_SMOKE`.
+
+  The accepted artifact build command was
+  `python3 scripts/ci/wasm-build-artifacts-local.py --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2q-hotset-runtime-rebased-artifacts --jobs auto --configure-arg=--disable-tcg-interpreter --configure-arg=--enable-tcg-wasm64-backend`.
+  Fixed artifact hashes: `qemu-system-x86_64.js`
+  `363bd6db44bc3808a3f55e17a10d7cd669f70561418f6dfaeea94897a17ee23a`,
+  `qemu-system-x86_64.wasm`
+  `c1ed8b634657ffece1d5fe66d7fa2b309b6610aebdb1ec1448aa1b062ef5c855`,
+  manifest
+  `916aba9397058fe98da4696a476cbd3abca7d612fda7e72f78232a55a21ccffc`.
+  Chromium `149.0.7827.55` no-smoke control reached
+  `QEMU_WASM_LINUX_BOOT_OK` in `91812` ms with result JSON
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2q-hotset-runtime-rebased-nosmoke/wasm-browser-smoke-result.json`.
+  Chromium `149.0.7827.55` descriptor-smoke run reached the same marker in
+  `91203` ms with result JSON
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2q-hotset-runtime-rebased-smoke/wasm-browser-smoke-result.json`.
+  The descriptor runtime summary at `2237` ms reported `ok=true`,
+  `budget=1000000`, `generated_guest_instructions=4000000`,
+  `fallback_guest_instructions=0`, `generated_chain_length=1000000`,
+  `inline_tlb_hit_loads=1000000`, `inline_tlb_hit_stores=1000000`,
+  `helper_calls=0`, `qemu_ld_calls=0`, `qemu_st_calls=0`,
+  `generated_body_time_ns=5230000`, `compile_time_ns=735000`,
+  `instantiate_time_ns=55000`, and one budget exit with no MMIO, TLB,
+  interrupt, helper, unsupported, HLT, or invalidation exits. Checks:
+  `git diff --check`, `node scripts/ci/wasm64-runloop-contract-test.mjs`,
+  `node scripts/ci/wasmjit-runloop-model-test.mjs`, and
+  `node scripts/ci/wasm-browser-smoke-runner-test.mjs` outside the sandbox
+  because the sandboxed run reproduced an existing child-process output
+  capture failure from the base W2p worktree. This slice still does not
+  attach real translated Linux TBs; it creates the runtime ABI needed for
+  the next translated-hotset slice.
+- [ ] W2r - Attach the descriptor-backed runloop ABI to real translated TB
+  metadata in a deterministic proof before another W3 browser speed run.
+  Prediction: W2q proves that a C-owned hotset descriptor table can drive a
+  generated run loop with internal dispatch, inline RAM operations, and rare
+  synthetic exits. The next mechanism that can plausibly move W3 is creating
+  compatible descriptors from QEMU-translated TB metadata instead of synthetic
+  smoke data. DoD: a focused deterministic test builds at least one valid
+  multi-TB hotset descriptor from translated TB metadata or generated-output
+  metadata, rejects unsupported hot TBs with explicit no-silent-fallback
+  reasons, and proves the descriptor fields are sufficient for the runtime
+  ABI without returning to the old direct-boundary path. No generic Chromium
+  speed gate should run for this item until the deterministic proof predicts
+  nonzero real translated hotset execution.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and
