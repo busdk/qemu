@@ -13,7 +13,24 @@
 
 uintptr_t tcg_tci_qemu_tb_exec(CPUArchState *env, const void *tb_ptr);
 
+#define TCG_WASM64_TRANSLATE_CACHE_SIZE 8192u
+
+typedef struct TCGWasm64TranslateEntry {
+    const void *tb_ptr;
+    TCGWasm64TBMetadata metadata;
+} TCGWasm64TranslateEntry;
+
 static __thread TCGWasm64Counters *active_counters;
+static __thread TCGWasm64TranslateEntry translate_cache[
+    TCG_WASM64_TRANSLATE_CACHE_SIZE];
+static __thread TCGWasm64TBMetadata *active_translate_metadata;
+
+static TCGWasm64TranslateEntry *tcg_wasm64_translate_entry(const void *tb_ptr)
+{
+    uintptr_t hash = (uintptr_t)tb_ptr >> 4;
+
+    return &translate_cache[hash % TCG_WASM64_TRANSLATE_CACHE_SIZE];
+}
 
 void tcg_wasm64_counters_reset(TCGWasm64Counters *counters)
 {
@@ -35,6 +52,10 @@ void tcg_wasm64_counters_add(TCGWasm64Counters *dst,
     dst->generated_cache_hits += src->generated_cache_hits;
     dst->generated_coverage_numerator += src->generated_coverage_numerator;
     dst->generated_coverage_denominator += src->generated_coverage_denominator;
+    dst->translated_tbs += src->translated_tbs;
+    dst->translated_ops += src->translated_ops;
+    dst->translated_fallback_markers += src->translated_fallback_markers;
+    dst->translated_metadata_misses += src->translated_metadata_misses;
     dst->fallback_unsupported += src->fallback_unsupported;
     dst->fallback_helper += src->fallback_helper;
     dst->fallback_qemu_load += src->fallback_qemu_load;
@@ -68,6 +89,68 @@ void tcg_wasm64_count_fallback(TCGWasm64Counters *counters,
     default:
         g_assert_not_reached();
     }
+}
+
+void tcg_wasm64_translate_begin(const void *tb_ptr)
+{
+    TCGWasm64TranslateEntry *entry;
+
+    if (!tb_ptr) {
+        active_translate_metadata = NULL;
+        return;
+    }
+
+    entry = tcg_wasm64_translate_entry(tb_ptr);
+    entry->tb_ptr = tb_ptr;
+    memset(&entry->metadata, 0, sizeof(entry->metadata));
+    entry->metadata.tb_ptr = tb_ptr;
+    entry->metadata.magic = TCG_WASM64_TB_METADATA_MAGIC;
+    entry->metadata.version = TCG_WASM64_TB_METADATA_VERSION;
+    entry->metadata.flags = TCG_WASM64_TB_METADATA_VALID |
+                            TCG_WASM64_TB_METADATA_FALLBACK;
+    entry->metadata.first_op = UINT32_MAX;
+    entry->metadata.last_op = UINT32_MAX;
+    entry->metadata.first_unsupported_op = UINT32_MAX;
+    entry->metadata.fallback_reason =
+        TCG_WASM64_TRANSLATE_FALLBACK_NO_WASM_EMITTER;
+    active_translate_metadata = &entry->metadata;
+}
+
+void tcg_wasm64_translate_note_tci_word(uint32_t word)
+{
+    TCGWasm64TBMetadata *metadata = active_translate_metadata;
+    uint32_t op = word & 0xffu;
+
+    if (!metadata) {
+        return;
+    }
+
+    if (metadata->op_count == 0) {
+        metadata->first_op = op;
+        metadata->first_unsupported_op = op;
+    }
+    metadata->last_op = op;
+    metadata->op_count++;
+}
+
+const TCGWasm64TBMetadata *tcg_wasm64_translate_lookup(const void *tb_ptr)
+{
+    TCGWasm64TranslateEntry *entry;
+    const TCGWasm64TBMetadata *metadata;
+
+    if (!tb_ptr) {
+        return NULL;
+    }
+
+    entry = tcg_wasm64_translate_entry(tb_ptr);
+    metadata = &entry->metadata;
+    if (entry->tb_ptr != tb_ptr ||
+        metadata->magic != TCG_WASM64_TB_METADATA_MAGIC ||
+        metadata->version != TCG_WASM64_TB_METADATA_VERSION ||
+        !(metadata->flags & TCG_WASM64_TB_METADATA_VALID)) {
+        return NULL;
+    }
+    return metadata;
 }
 
 bool tcg_wasm64_backend_available(void)
@@ -106,6 +189,10 @@ void tcg_wasm64_report_summary(const char *reason,
             "\"generated_coverage_numerator\":%" PRIu64 ","
             "\"generated_coverage_denominator\":%" PRIu64 ","
             "\"generated_coverage_ppm\":%" PRIu64 ","
+            "\"translated_tbs\":%" PRIu64 ","
+            "\"translated_ops\":%" PRIu64 ","
+            "\"translated_fallback_markers\":%" PRIu64 ","
+            "\"translated_metadata_misses\":%" PRIu64 ","
             "\"fallback_unsupported\":%" PRIu64 ","
             "\"fallback_helper\":%" PRIu64 ","
             "\"fallback_qemu_load\":%" PRIu64 ","
@@ -119,6 +206,10 @@ void tcg_wasm64_report_summary(const char *reason,
             counters->generated_coverage_numerator,
             counters->generated_coverage_denominator,
             generated_coverage_ppm,
+            counters->translated_tbs,
+            counters->translated_ops,
+            counters->translated_fallback_markers,
+            counters->translated_metadata_misses,
             counters->fallback_unsupported,
             counters->fallback_helper,
             counters->fallback_qemu_load,
@@ -130,6 +221,7 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
                              TCGWasm64Counters *counters)
 {
     TCGWasm64Counters *previous_counters = active_counters;
+    const TCGWasm64TBMetadata *metadata;
     uintptr_t ret;
     TCGWasm64Context ctx = {
         .tb_ptr = (void *)tb_ptr,
@@ -144,6 +236,18 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
      * validated the TCI bytecode shape.
      */
     (void)ctx;
+    metadata = tcg_wasm64_translate_lookup(tb_ptr);
+    if (counters) {
+        if (metadata) {
+            counters->translated_tbs++;
+            counters->translated_ops += metadata->op_count;
+            if (metadata->flags & TCG_WASM64_TB_METADATA_FALLBACK) {
+                counters->translated_fallback_markers++;
+            }
+        } else {
+            counters->translated_metadata_misses++;
+        }
+    }
     active_counters = counters;
     ret = tcg_tci_qemu_tb_exec(env, tb_ptr);
     active_counters = previous_counters;

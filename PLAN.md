@@ -462,7 +462,7 @@ Engineering rules for this goal:
   not W2: generated coverage remains far too small, and the next accepted
   work is W2k translation-time lowering, not another opcode-at-a-time browser
   run.
-- [ ] W2k - Move the backend toward translation-time lowering instead of the
+- [x] W2k - Move the backend toward translation-time lowering instead of the
   runtime TCI-bytecode subset. DoD: introduce a small translation-time
   wasm64 lowering skeleton in the backend path, fed from `tcg/wasm64/
   tcg-target.c.inc` or the equivalent selected target lowering hook, that
@@ -472,7 +472,39 @@ Engineering rules for this goal:
   may leave execution on fallback, but it must remove the current need for a
   threshold-hot runtime TCI-bytecode revalidation loop for deciding whether a
   TB is generatable. Record the expected effect on generated coverage share
-  before any browser run.
+  before any browser run. Accepted evidence: the wasm64 target now wraps the
+  TCI fallback emitter at translation time. `tcg_out_tb_start()` calls
+  `tcg_wasm64_translate_begin()` with the TB code pointer before bytecode
+  emission, `tcg_out32()` is routed through `tcg_wasm64_out32()`, and each
+  emitted TCI bytecode word records side-band `TCGWasm64TBMetadata`. The
+  current skeleton deliberately marks every TB with
+  `TCG_WASM64_TB_METADATA_FALLBACK` and
+  `TCG_WASM64_TRANSLATE_FALLBACK_NO_WASM_EMITTER`, preserving strict TCI
+  execution while giving the future WebAssembly emitter a translation-time
+  metadata slot instead of deciding generatability through the threshold-hot
+  runtime TCI-bytecode subset. The expected immediate generated coverage share
+  change is `0`: this slice moves the decision point and metadata contract; it
+  does not lower new operations or justify a browser speed run. Deterministic
+  checks passed: `git diff --check`,
+  `node --check scripts/ci/wasm64-translate-metadata-test.mjs`,
+  `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+  `node --check scripts/ci/wasm-browser-smoke-runner-test.mjs`, and
+  `node scripts/ci/wasm-browser-smoke-runner-test.mjs` outside the sandbox
+  because sandboxed child-process handling returned empty validation output.
+  The backend artifact compile check used:
+  `python3 scripts/ci/wasm-build-artifacts-local.py --out
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2k-translate-metadata
+  --jobs auto --configure-arg=--disable-tcg-interpreter
+  --configure-arg=--enable-tcg-wasm64-backend`. It configured as
+  `TCG backend: experimental wasm64 with TCI fallback`, compiled, linked, and
+  wrote artifact hashes: JS
+  `b23de585246226886ea328e20bed98ca379241456ea7757da37f2e1442cc1dbe`,
+  WASM `502463d1bc124e0d4153b00a5e7abab73df417a741850f04989818bf5496c916`,
+  manifest `b42ebb3f6c1baefa728e4b02fd258c74295c43462bee6f0bb4eee5377c4c76c9`,
+  and `SHA256SUMS`
+  `7cd5af188bc618118345d503a4850c65f9646cc0798d0b130771b13c0e858c40`.
+  This completes W2k only; W2 remains open until generated TBs execute through
+  the translation-time backend and pass the W2/W3 gates.
 - [ ] W2l - Prove and batch the next broad lowering family only after W2j and
   W2k. DoD: prove WebAssembly memory-barrier lowering in the deterministic
   emitter first, using the threads `atomic.fence` encoding

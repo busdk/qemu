@@ -6316,3 +6316,69 @@ handful of blocks, and generated execution covers roughly ``0.0414%`` of
 eligible attempts.  W2 should continue by moving generation toward
 translation-time lowering with per-TB fallback metadata, not by spending
 another browser run on the next live rejection entry.
+
+W2k: translation-time fallback metadata
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The next accepted slice moved the wasm64 backend structure toward
+translation-time lowering without adding another opcode-at-a-time browser
+measurement.  The expected immediate generated coverage share change is
+``0``: execution still falls back through TCI, but the decision point for
+whether a TB is generatable now has a translation-time metadata slot.
+
+The wasm64 target wraps the TCI fallback emitter:
+
+* ``tcg_out_tb_start()`` calls ``tcg_wasm64_translate_begin()`` with the TB
+  code pointer before fallback bytecode emission starts.
+* ``tcg_out32()`` is routed through ``tcg_wasm64_out32()``, which records each
+  emitted TCI bytecode word in side-band ``TCGWasm64TBMetadata`` before
+  delegating to the unchanged fallback bytecode emitter.
+* The current metadata marks every TB with
+  ``TCG_WASM64_TB_METADATA_FALLBACK`` and
+  ``TCG_WASM64_TRANSLATE_FALLBACK_NO_WASM_EMITTER``.  Future lowering should
+  replace that fallback marker with generated WebAssembly bytes for supported
+  TBs.
+
+This removes the need for the threshold-hot runtime TCI-bytecode revalidation
+loop to decide whether a TB is generatable, while preserving strict fallback
+semantics for this slice.
+
+Checks passed:
+
+* ``git diff --check``
+* ``node --check scripts/ci/wasm64-translate-metadata-test.mjs``
+* ``node scripts/ci/wasm64-translate-metadata-test.mjs``
+* ``node --check scripts/ci/wasm-browser-smoke-runner-test.mjs``
+* ``node scripts/ci/wasm-browser-smoke-runner-test.mjs`` outside the sandbox,
+  because the sandboxed child-process validation path returned empty output
+* a full Docker Emscripten build of the wasm64 backend artifact
+
+The artifact build command was:
+
+.. code-block:: console
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2k-translate-metadata \
+    --jobs auto \
+    --configure-arg=--disable-tcg-interpreter \
+    --configure-arg=--enable-tcg-wasm64-backend
+
+It configured as ``TCG backend: experimental wasm64 with TCI fallback``,
+compiled, linked, and wrote artifacts to:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2k-translate-metadata``
+
+Hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``b23de585246226886ea328e20bed98ca379241456ea7757da37f2e1442cc1dbe``
+* ``qemu-system-x86_64.wasm`` =
+  ``502463d1bc124e0d4153b00a5e7abab73df417a741850f04989818bf5496c916``
+* manifest =
+  ``b42ebb3f6c1baefa728e4b02fd258c74295c43462bee6f0bb4eee5377c4c76c9``
+* ``SHA256SUMS`` =
+  ``7cd5af188bc618118345d503a4850c65f9646cc0798d0b130771b13c0e858c40``
+
+This completes W2k only.  W2 remains open until generated TBs execute through
+the translation-time backend, exported counters show meaningful generated
+coverage, and the generic W3 speed gate passes.

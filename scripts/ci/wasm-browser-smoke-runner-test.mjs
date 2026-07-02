@@ -546,6 +546,10 @@ for (const status of [
     generated_coverage_numerator: 21,
     generated_coverage_denominator: 1000,
     generated_coverage_ppm: 21000,
+    translated_tbs: 8,
+    translated_ops: 144,
+    translated_fallback_markers: 8,
+    translated_metadata_misses: 1,
     fallback_unsupported: 88,
     fallback_runtime: 1,
   });
@@ -555,6 +559,10 @@ for (const status of [
   assert.equal(parsed.generated_coverage_numerator, 21);
   assert.equal(parsed.generated_coverage_denominator, 1000);
   assert.equal(parsed.generated_coverage_ppm, 21000);
+  assert.equal(parsed.translated_tbs, 8);
+  assert.equal(parsed.translated_ops, 144);
+  assert.equal(parsed.translated_fallback_markers, 8);
+  assert.equal(parsed.translated_metadata_misses, 1);
   assert.equal(parsed.fallback_unsupported, 88);
   assert.equal(wasm64TcgSummary("ordinary serial line"), null);
   assert.equal(wasm64TcgSummary("qemu-wasm64-tcg: not-json"), null);
