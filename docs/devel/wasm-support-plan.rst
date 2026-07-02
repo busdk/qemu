@@ -4912,6 +4912,13 @@ the rebuilt artifact must still pass the strict default generic Chromium smoke
 and beat the opt-in generic speed gate before a long Bus Engine OS proof is
 meaningful.
 
+The helper also supports repeated ``--require-op`` arguments.  A proof can use
+that to require individual measured hot operations such as ``ld``, ``st``,
+``mb``, and ``tci_setcond32`` even when the aggregate coverage ratio would
+otherwise pass.  Result JSON reports ``requiredOps`` and
+``missingRequiredOps`` and fails the gate when any required operation is
+missing.
+
 The deterministic emitter also gained executable differential coverage for raw
 imported-memory load/store and memory-barrier shapes from the measured hot-op
 set.  The generated and interpreted paths now agree for ``ld_mem_i64``,

@@ -105,13 +105,24 @@ assert.deepEqual(deterministicGate.summary, {
 const plannedGate = coverageGate(result, {
   profile: "planned-hotblock",
   minRatio: 0.7,
+  requiredOps: ["ld", "st", "mb", "tci_setcond32"],
 });
 assert.equal(plannedGate.profile, "plannedHotblock");
 assert.equal(plannedGate.ok, true);
+assert.deepEqual(plannedGate.requiredOps, ["ld", "st", "mb", "tci_setcond32"]);
+assert.deepEqual(plannedGate.missingRequiredOps, []);
 assert.equal(plannedGate.coverage.supportedRatio, 0.8);
 assert.deepEqual(plannedGate.coverage.unsupported, [
   { op: "call", count: 40 },
 ]);
+
+const missingRequiredGate = coverageGate(result, {
+  profile: "deterministic",
+  minRatio: 0.7,
+  requiredOps: ["call"],
+});
+assert.equal(missingRequiredGate.ok, false);
+assert.deepEqual(missingRequiredGate.missingRequiredOps, ["call"]);
 
 assert.throws(
   () => coverageGate({}, { profile: "deterministic" }),

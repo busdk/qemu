@@ -1204,6 +1204,15 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
       scripts/ci/wasm-tcg-coverage-gate-test.mjs`, and `node
       scripts/ci/wasm-tcg-coverage-gate-test.mjs` passed. This is a planning
       and proof gate, not a performance fix.
+      Follow-up tightening on 2026-07-02: the helper supports repeated
+      `--require-op` arguments so a proof can require individual measured hot
+      operations such as `ld`, `st`, `mb`, and `tci_setcond32`, even if the
+      aggregate supported ratio would otherwise pass. The result JSON reports
+      `requiredOps`, `missingRequiredOps`, and fails the gate when any required
+      operation is missing. Verification: `node --check
+      scripts/ci/wasm-tcg-coverage-gate.mjs`, `node --check
+      scripts/ci/wasm-tcg-coverage-gate-test.mjs`, and `node
+      scripts/ci/wasm-tcg-coverage-gate-test.mjs` passed.
     - [x] Inspect the `ktock/qemu-wasm` `origin/wasm64-tcg-b` backend
       architecture without copying it wholesale:
       DoD is a short note naming the reference files, the runtime boundary,

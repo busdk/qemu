@@ -13,9 +13,9 @@ export const COVERAGE_GATE_MODEL_VERSION = 1;
 export const LOWERING_PROFILES = {
   /*
    * Operations covered by the deterministic backend-shaped lowering probe in
-   * wasm-tb-module-emitter.mjs.  This profile is intentionally conservative:
-   * it does not count raw host-memory ld/st or memory barriers until the
-   * backend lowering contract has executable differential coverage for them.
+   * wasm-tb-module-emitter.mjs.  Keep this profile conservative: add an
+   * operation only after the emitter has executable differential coverage for
+   * the corresponding lowering shape.
    */
   deterministic: new Set([
     "add",
@@ -85,6 +85,8 @@ Options:
                        (default: deterministic)
   --min-ratio RATIO    Minimum supported top-op ratio from 0 to 1
                        (default: 0.80)
+  --require-op OP      Require a specific operation to be covered by the
+                       selected profile. May be repeated.
   --json               Print JSON only
 `;
 }
@@ -153,6 +155,9 @@ export function coverageGate(result, options = {}) {
   const profileName = normalizeProfileName(options.profile || "deterministic");
   const supportedOps = LOWERING_PROFILES[profileName];
   const minRatio = options.minRatio ?? 0.80;
+  const requiredOps = Array.isArray(options.requiredOps)
+    ? options.requiredOps
+    : [];
   const summary = latestHotBlockSummary(result);
 
   if (!supportedOps) {
@@ -163,13 +168,16 @@ export function coverageGate(result, options = {}) {
   }
 
   const coverage = coverageFromHotBlockSummary(summary, supportedOps);
+  const missingRequiredOps = requiredOps.filter((op) => !supportedOps.has(op));
   return {
     format: 1,
     purpose: "qemu-wasm64-tcg-coverage-gate",
     version: COVERAGE_GATE_MODEL_VERSION,
     profile: profileName,
     minRatio,
-    ok: coverage.supportedRatio >= minRatio,
+    requiredOps,
+    missingRequiredOps,
+    ok: coverage.supportedRatio >= minRatio && missingRequiredOps.length === 0,
     summary: {
       reason: summary.reason,
       tbExecs: summary.tb_execs,
@@ -186,6 +194,7 @@ function parseArgs(argv) {
   const options = {
     profile: "deterministic",
     minRatio: 0.80,
+    requiredOps: [],
     json: false,
   };
   for (let index = 2; index < argv.length; index++) {
@@ -196,6 +205,8 @@ function parseArgs(argv) {
       options.profile = argv[++index];
     } else if (arg === "--min-ratio") {
       options.minRatio = Number(argv[++index]);
+    } else if (arg === "--require-op") {
+      options.requiredOps.push(argv[++index]);
     } else if (arg === "--json") {
       options.json = true;
     } else if (arg === "--help" || arg === "-h") {
@@ -232,8 +243,14 @@ async function run() {
       `supported=${gate.coverage.supportedCount} ` +
       `unsupported=${gate.coverage.unsupportedCount} ` +
       `ratio=${gate.coverage.supportedRatio.toFixed(4)} ` +
-      `min=${gate.minRatio.toFixed(4)} ok=${gate.ok}\n`,
+      `min=${gate.minRatio.toFixed(4)} ` +
+      `missing_required=${gate.missingRequiredOps.length} ok=${gate.ok}\n`,
     );
+    if (gate.missingRequiredOps.length > 0) {
+      process.stdout.write(
+        `missing required ops: ${gate.missingRequiredOps.join(", ")}\n`,
+      );
+    }
     if (gate.coverage.unsupported.length > 0) {
       process.stdout.write(
         `unsupported top ops: ${gate.coverage.unsupported
