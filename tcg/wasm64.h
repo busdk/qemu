@@ -41,6 +41,9 @@ typedef struct TCGWasm64Counters {
     uint64_t translated_generated_supported_ops;
     uint64_t translated_generated_unsupported_ops;
     uint64_t translated_generated_output_tbs;
+    uint64_t translated_generated_output_unavailable_tbs;
+    uint64_t translated_generated_output_missing_candidate_tbs;
+    uint64_t translated_generated_output_incomplete_tbs;
     uint64_t translated_generated_output_bytes;
     uint64_t translated_generated_output_ops;
     uint64_t translated_generated_output_truncated;
@@ -105,6 +108,7 @@ typedef struct TCGWasm64TBMetadata {
     uint32_t unsupported_op_count;
     uint32_t generated_supported_op_count;
     uint32_t generated_unsupported_op_count;
+    uint32_t first_generated_unsupported_op;
     uint32_t generated_output_size;
     uint32_t generated_output_op_count;
     uint32_t generated_output_checksum;

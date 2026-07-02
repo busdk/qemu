@@ -6781,3 +6781,74 @@ The accepted fallback baseline remains the final W2m-b opt-in-guarded
 Chromium smoke at ``93186`` ms, which projects Bus Engine OS browser
 multi-user readiness at roughly ``34.7`` to ``45.8`` minutes until generated
 coverage increases by orders of magnitude.
+
+W2m-d generated-output availability attribution
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The wasm64 backend summary now reports why generated output is unavailable:
+
+* ``translated_generated_output_unavailable_tbs``
+* ``translated_generated_output_missing_candidate_tbs``
+* ``translated_generated_output_incomplete_tbs``
+* ``translated_generated_first_unsupported_ops``
+
+The compile-check artifact was built with:
+
+.. code-block:: console
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-gap-attribution-artifacts \
+    --jobs auto \
+    --build-image \
+    --configure-arg=--disable-tcg-interpreter \
+    --configure-arg=--enable-tcg-wasm64-backend
+
+Artifact hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``d60558aadfddbf06347e01353fad4056c8da44ff74d8d26f8657e3c14dd52b3c``
+* ``qemu-system-x86_64.wasm`` =
+  ``6d6dd5984e03b08dea502aabaecae6322f82f18236c56aa4b767de59e5364200``
+* manifest =
+  ``1b5b86a5d71bc8af754fcd40a81173e9fef457ce15621729243fe701d2d2812b``
+* ``SHA256SUMS`` =
+  ``53ea99b6a5795bfca37ce7628682b90b9a96c3cd87644cdbec9bc83348a15608``
+
+A bounded Chromium ``149.0.7827.55`` diagnostic run timed out after
+``30195`` ms, as expected, but produced the required attribution:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-gap-attribution-smoke/wasm-browser-smoke-result.json``
+
+Result JSON SHA-256:
+
+``4b6df1b486ce8916fcf629fc6994109fcd0b091cea1b469a4a728f7916efaaad``
+
+The summary reported:
+
+* ``translated_tbs=315``
+* ``translated_generated_output_tbs=13``
+* ``translated_generated_output_unavailable_tbs=302``
+* ``translated_generated_output_missing_candidate_tbs=302``
+* ``translated_generated_output_incomplete_tbs=0``
+* ``translated_generated_output_truncated=0``
+
+The top first generated-unsupported opcodes were:
+
+* ``tci_qemu_st_rrr=148``
+* ``tci_qemu_ld_rrr=145``
+* ``call=6``
+* ``deposit=3``
+
+The QEMU load/store pair explains ``293 / 302`` unavailable TBs, or about
+``97.0%`` of the measured generated-output availability gap.  Supporting that
+pair correctly could move early generated-output candidate coverage from
+``13 / 315`` TBs, or ``4.1%``, to roughly ``306 / 315`` TBs, or ``97.1%``,
+subject to helper correctness and fallback behavior.  This is the next
+high-leverage mechanism.  Further single-opcode arithmetic lowering remains
+rejected by the standing rules.
+
+The next accepted slice must add a deterministic generated helper boundary
+for ``tci_qemu_ld_rrr`` and ``tci_qemu_st_rrr`` before any Chromium
+measurement.  The local test should compare generated helper calls with a
+reference interpreter for trace-shaped qemu memory blocks, including helper
+call counts, register updates, memory side effects, and fallback results.

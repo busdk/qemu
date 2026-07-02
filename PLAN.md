@@ -746,13 +746,46 @@ Engineering rules for this goal:
   `node scripts/ci/wasm-generated-output-equivalence-test.mjs`. This completes
   the deterministic safety gate only; it does not move the current browser
   estimate of about `34.7` to `45.8` minutes.
-- [ ] W2m-d - Quantify the generated-output availability gap before more
+- [x] W2m-d - Quantify the generated-output availability gap before more
   backend lowering. DoD: add or extract reason-level data that explains why
   the W2m-b browser run translated hundreds of TBs but exposed only `13`
   generated-output TBs and `24` generated attempts, then record a coverage
   prediction for the next implementation item. A browser run is not allowed
   for W2m-d unless the local data names a mechanism that can plausibly move
-  generated coverage from tens of executions to thousands.
+  generated coverage from tens of executions to thousands. Accepted evidence:
+  the wasm64 backend summary now reports generated-output unavailable,
+  missing-candidate, incomplete-output, and top first-generated-unsupported
+  opcode fields. The compile-check artifact was built successfully at
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-gap-attribution-artifacts`
+  with JS
+  `d60558aadfddbf06347e01353fad4056c8da44ff74d8d26f8657e3c14dd52b3c`,
+  WASM `6d6dd5984e03b08dea502aabaecae6322f82f18236c56aa4b767de59e5364200`,
+  manifest `1b5b86a5d71bc8af754fcd40a81173e9fef457ce15621729243fe701d2d2812b`,
+  and `SHA256SUMS`
+  `53ea99b6a5795bfca37ce7628682b90b9a96c3cd87644cdbec9bc83348a15608`.
+  The bounded Chromium `149.0.7827.55` diagnostic run timed out at `30195`
+  ms as expected, but produced the required attribution at
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-gap-attribution-smoke/wasm-browser-smoke-result.json`
+  with result SHA-256
+  `4b6df1b486ce8916fcf629fc6994109fcd0b091cea1b469a4a728f7916efaaad`.
+  Summary: `315` translated TBs, `13` generated-output TBs, `302`
+  unavailable TBs, all `302` unavailable because the TB missed the generated
+  candidate condition, `0` incomplete-output TBs, and `0` truncations. The top
+  first unsupported generated opcodes were `tci_qemu_st_rrr=148`,
+  `tci_qemu_ld_rrr=145`, `call=6`, and `deposit=3`. The qemu load/store pair
+  explains `293 / 302` unavailable TBs (`97.0%`) and can plausibly move early
+  generated-output candidate coverage from `13 / 315` TBs (`4.1%`) to roughly
+  `306 / 315` TBs (`97.1%`) if implemented with correct fallback. That is the
+  next high-leverage mechanism; single-opcode arithmetic work remains
+  rejected.
+- [ ] W2m-e - Add a deterministic generated QEMU memory helper boundary for
+  `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` before runtime browser execution.
+  DoD: a local generated-output equivalence test models generated calls to
+  qemu load/store helpers, compares the resulting registers, memory side
+  effects, helper-call counts, and fallback behavior against the reference
+  interpreter for trace-shaped qemu memory blocks, and records the predicted
+  candidate coverage increase from the W2m-d data. No Chromium run is allowed
+  until this deterministic helper boundary passes.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and
