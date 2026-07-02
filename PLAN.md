@@ -148,6 +148,32 @@ run that reaches a weaker marker than normal multi-user readiness.
     `3caa09ef368be264c1989c0e72fb7a14b67bb6c2bb2ab234b5c5e903e8686b07`,
     manifest
     `5b9b0f594e0f85ed6c604a221124c0e0b10114c7bae2d7f8cf546a757868b288`.
+  - [x] R3b - Make local RISC-V WASM artifacts selectable between the default
+    TCI backend and the experimental wasm64 TCG backend without layering both
+    backend choices together. DoD: default artifact builds still use
+    `--enable-tcg-interpreter`, backend-mode builds use
+    `-Dtcg_wasm64_backend=true` and omit `--enable-tcg-interpreter`, tests
+    cover the generated Docker command, Meson reports
+    `TCG backend: experimental wasm64 with TCI fallback`, and a full
+    `riscv64-softmmu` backend-mode artifact build passes. Accepted
+    2026-07-03: `scripts/ci/wasm-build-artifacts-local.py` now has
+    `--tcg-wasm64-backend`; default behavior is unchanged, while backend mode
+    selects `-Dtcg_wasm64_backend=true`. The parser/unit test
+    `test_tcg_wasm64_backend_command_replaces_interpreter()` verifies the
+    backend command shape. Checks:
+    `python3 scripts/ci/wasm-build-artifacts-local-test.py`,
+    `git diff --check`,
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-backend-r3b-clean
+    --target riscv64 --tcg-wasm64-backend` passed. The clean build produced:
+    `qemu-system-riscv64.js`
+    `0e40cc3de971cfd5a06e24e438f1cbed8110f87df5a452bc2c216c0b441d6cac`,
+    `qemu-system-riscv64.wasm`
+    `e908866db0b00206d1f2e5ff408b036311298f17da5e18538d7a16acd32c709a`,
+    manifest
+    `c455ba71fbac1c911b77183810b354959b180455a4e8d2d8ef8d9bf43c6b1cad`.
+    The slice does not enable generated guest execution yet; it creates the
+    clean selectable artifact path required before running backend smokes.
 - [ ] R4 - Prove performance before Bus Engine OS long runs. DoD: a same-commit
   Chromium generic RISC-V accelerator smoke is at least 25% faster than
   default RISC-V TCI, and microbenchmarks show at least 3x over RISC-V TCI for

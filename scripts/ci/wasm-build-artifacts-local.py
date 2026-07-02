@@ -24,11 +24,12 @@ DEFAULT_CONFIGURE_ARGS = [
     "--static",
     "--cpu=wasm64",
     "--disable-tools",
-    "--enable-tcg-interpreter",
     "--enable-sdl",
     "--extra-cflags=-sUSE_SDL=2",
     "--extra-ldflags=-sUSE_SDL=2",
 ]
+DEFAULT_TCG_BACKEND_ARGS = ["--enable-tcg-interpreter"]
+WASM64_TCG_BACKEND_ARGS = ["-Dtcg_wasm64_backend=true"]
 TARGET_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")
 
 
@@ -42,6 +43,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     parser.add_argument("--docker", default="docker")
     parser.add_argument("--jobs", default="auto")
+    parser.add_argument(
+        "--tcg-wasm64-backend",
+        action="store_true",
+        help="select the experimental wasm64 TCG backend instead of TCI",
+    )
     parser.add_argument("--build-image", action="store_true", help="build qemu/emsdk-wasm64-cross first when it is missing")
     parser.add_argument("--no-clean", action="store_true", help="do not remove existing files from the output directory")
     parser.add_argument("--dry-run", action="store_true", help="print the commands that would run")
@@ -96,7 +102,9 @@ ls -lh
 def docker_run_command(args: argparse.Namespace) -> list[str]:
     source_root = args.source_root.resolve()
     out = args.out.resolve()
+    tcg_backend_args = WASM64_TCG_BACKEND_ARGS if args.tcg_wasm64_backend else DEFAULT_TCG_BACKEND_ARGS
     configure_args = DEFAULT_CONFIGURE_ARGS + [
+        *tcg_backend_args,
         f"--target-list={args.target}-softmmu",
     ] + list(args.configure_arg)
     return [

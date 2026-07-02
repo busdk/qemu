@@ -203,7 +203,7 @@ void tcg_wasm64_count_exit(TCGWasm64Counters *counters,
     if (!counters) {
         return;
     }
-    if (reason < 0 || reason >= TCG_WASM64_EXIT__MAX) {
+    if (reason >= TCG_WASM64_EXIT__MAX) {
         counters->generated_exits[TCG_WASM64_EXIT_FATAL]++;
         return;
     }
