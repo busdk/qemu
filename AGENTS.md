@@ -86,6 +86,10 @@ sandboxed Node child-process spawning may return `EPERM`, `/tmp` space can be
 exhausted by Emscripten artifacts, and submodule/fetch quirks must be handled
 through the repository's normal sync flow.
 
+Use the supervisor/workspace `./tmp` area for large WebAssembly artifacts,
+browser smoke outputs, guest images, and evidence bundles. Host `/tmp` is a
+small partition and should only hold small throwaway files.
+
 ## Evidence
 
 Record browser/runtime evidence in `docs/devel/wasm-support-plan.rst` with:
