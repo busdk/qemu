@@ -173,6 +173,22 @@ function traceDerivedGenerated(result) {
 }
 
 function coverageFromSummary(summary, fallbackCoverage = null) {
+  const directNumerator = numberOrZero(summary.direct_coverage_numerator);
+  const directDenominator = numberOrZero(summary.direct_coverage_denominator);
+  const directPpm = numberOrZero(summary.direct_coverage_ppm);
+  if (directDenominator !== 0) {
+    const computedDirectPpm =
+      Math.floor((directNumerator * 1000000) / directDenominator);
+    return {
+      basis: summary.direct_coverage_basis ??
+        "direct_generated_executed/direct_tb_entries",
+      numerator: directNumerator,
+      denominator: directDenominator,
+      ppm: directPpm || computedDirectPpm,
+      ratio: directNumerator / directDenominator,
+    };
+  }
+
   const numerator = numberOrZero(summary.generated_coverage_numerator);
   const denominator = numberOrZero(summary.generated_coverage_denominator);
   const ppm = numberOrZero(summary.generated_coverage_ppm);
@@ -205,6 +221,12 @@ export function diagnosticSummary(result, options = {}) {
     (source ? 0 : traceDerived.cacheHits);
   const generatedAttempts = numberOrZero(summary.generated_attempts) ||
     (source ? 0 : traceDerived.attempts);
+  const directTbEntries = numberOrZero(summary.direct_tb_entries);
+  const directGeneratedExecuted =
+    numberOrZero(summary.direct_generated_executed);
+  const directGeneratedDispatches =
+    numberOrZero(summary.direct_generated_dispatches);
+  const directTciFallbacks = numberOrZero(summary.direct_tci_fallbacks);
   const hasThresholds = minCoveragePpm > 0 || minCompiled > 0;
 
   return {
@@ -231,6 +253,12 @@ export function diagnosticSummary(result, options = {}) {
       executed: generatedExecuted,
       cacheHits: generatedCacheHits,
       coverage,
+      direct: {
+        tbEntries: directTbEntries,
+        generatedExecuted: directGeneratedExecuted,
+        generatedDispatches: directGeneratedDispatches,
+        tciFallbacks: directTciFallbacks,
+      },
       traceDerived,
     },
     translated: {
@@ -325,6 +353,14 @@ function printText(summary) {
     ` coverage=${coverage.numerator}/${coverage.denominator}` +
     ` (${coverage.ppm} ppm)\n`,
   );
+  if (generated.direct.tbEntries > 0) {
+    process.stdout.write(
+      `  direct tb_entries=${generated.direct.tbEntries}` +
+      ` generated_executed=${generated.direct.generatedExecuted}` +
+      ` generated_dispatches=${generated.direct.generatedDispatches}` +
+      ` tci_fallbacks=${generated.direct.tciFallbacks}\n`,
+    );
+  }
   if (summary.failures.compile.length > 0) {
     process.stdout.write(
       `  compile_failures=${summary.failures.compile

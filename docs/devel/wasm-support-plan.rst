@@ -4090,11 +4090,11 @@ wrote:
 That result JSON SHA-256 is
 ``4b6158690b25ea18387ae9997eb8aeb33c1ff56c5c4a1e0a69d9353440cfb7c8``.
 
-The next QEMU execution item must therefore change the structural hot path:
-generated-available TBs need to execute from the wasm64 backend without
-re-entering ``tcg_tci_qemu_tb_exec()`` for the same TB, while preserving strict
-TCI fallback.  Adding more individual opcodes or enabling more guest CPUs is
-not the next evidence-backed path.
+The follow-up W2m-j diagnostic did change that structural boundary, but it
+still did not move the wall-clock gate.  That result is recorded below and
+supersedes this paragraph as the next-step decision.  Adding more individual
+opcodes, enabling more guest CPUs, or treating C-side direct subset execution
+as compiled WebAssembly execution is not the next evidence-backed path.
 
 QEMU startup preinitialization is allowed for future measurement if it does
 not skip Linux boot or the multi-user readiness proof.  Current generic-smoke
@@ -7257,3 +7257,96 @@ failures, and no runtime fallback.  Generated coverage was
 ``lookup_tb_ptr`` candidate-loss mechanism and justifies rerunning W3.  It is
 not a W3 result: the generic smoke did not run to the success marker, and no
 same-commit default-TCI comparison was made in this diagnostic.
+
+W2m-j direct-boundary negative result
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The W2m-j slice moved generated-available TB attempts into
+``tcg_wasm64_tb_exec()`` before the one-TB TCI fallback and added direct
+coverage counters.  The implementation distinguishes direct TB entries,
+direct generated executions, generated dispatches, and TCI fallbacks, and it
+fixes two accounting hazards found during the run:
+
+* a raw next-TB dispatch pointer is now distinguished from an encoded
+  ``exit_tb`` return instead of guessing from the low bit; and
+* browser summary reporting reads ``QEMU_WASM64_TCG_REPORT*`` from the
+  existing ``/qemu-tci-env`` file and accumulates direct counters across outer
+  ``tcg_qemu_tb_exec()`` calls.
+
+Checks:
+
+* ``git diff --check``
+* ``node --check scripts/ci/wasm-backend-diagnostic-summary.mjs``
+* ``node --check scripts/ci/wasm-backend-diagnostic-runner.mjs``
+* ``node --check scripts/ci/wasm-browser-smoke.mjs``
+* ``node scripts/ci/wasm-generated-output-equivalence-test.mjs``
+
+The backend artifact was built with::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-j-cumulative-direct-artifacts \
+    --jobs auto \
+    --configure-arg=--disable-tcg-interpreter \
+    --configure-arg=--enable-tcg-wasm64-backend
+
+Artifact hashes:
+
+* ``qemu-system-x86_64.js``:
+  ``59b3d130ac0a17188a10003e46d095c4d9d4e5334b848b158892222bdf8a97b8``
+* ``qemu-system-x86_64.wasm``:
+  ``ba2c7cec6c3b9c084e276d026df2e96f5fdf55a90e4e0d188d8ec5d9c4ef8119``
+* manifest:
+  ``d5ea3e337f650cfbf5eef95d65fa397863e4b8a4f9589609ec5f770395bf0909``
+
+A short Chromium ``149.0.7827.55`` diagnostic used::
+
+  /usr/bin/env PATH=/home/coding-agent/coding-agent/git/busdk/agent-supervisor/projects/busdk/busdk.com/tmp/playwright-smoke/node_modules/.bin:$PATH \
+    QEMU_WASM_CHROMIUM_EXECUTABLE=/home/coding-agent/coding-agent/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome \
+    node scripts/ci/wasm-backend-diagnostic-runner.mjs \
+      --artifact-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-j-cumulative-direct-artifacts \
+      --guest-manifest /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-default-tci-smoke/wasm-browser-smoke-guest/tuxboot-browser-smoke-guest.json \
+      --out-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-j-cumulative-direct-diagnostic-interval100 \
+      --timeout-ms 12000 \
+      --port 8201 \
+      --smoke-arg --tci-wasm-subset-interval \
+      --smoke-arg 100
+
+It timed out before the marker at ``12415`` ms and wrote:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-j-cumulative-direct-diagnostic-interval100/wasm-browser-smoke-result.json``
+
+The diagnostic summary showed the direct loop was active:
+``direct_tb_entries=627001``, ``direct_generated_executed=626920``,
+``direct_generated_dispatches=34``, and ``direct_tci_fallbacks=81``.
+
+A longer Chromium run with the same artifact used::
+
+  /usr/bin/env PATH=/home/coding-agent/coding-agent/git/busdk/agent-supervisor/projects/busdk/busdk.com/tmp/playwright-smoke/node_modules/.bin:$PATH \
+    QEMU_WASM_CHROMIUM_EXECUTABLE=/home/coding-agent/coding-agent/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome \
+    node scripts/ci/wasm-backend-diagnostic-runner.mjs \
+      --artifact-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-j-cumulative-direct-artifacts \
+      --guest-manifest /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-default-tci-smoke/wasm-browser-smoke-guest/tuxboot-browser-smoke-guest.json \
+      --out-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-j-cumulative-direct-full-smoke \
+      --timeout-ms 180000 \
+      --port 8202 \
+      --smoke-arg --tci-wasm-subset-interval \
+      --smoke-arg 1000000
+
+It timed out at ``180252`` ms without reaching
+``QEMU_WASM_LINUX_BOOT_OK`` and wrote:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-j-cumulative-direct-full-smoke/wasm-browser-smoke-result.json``
+
+The long run reported ``direct_tb_entries=44000001``,
+``direct_generated_executed=43960181``,
+``direct_generated_dispatches=1664``, and
+``direct_tci_fallbacks=39820``.  This is a useful negative result: very high
+direct coverage through the current C-side TCI generated-subset evaluator is
+still worse than the same-commit default-TCI generic smoke.  The true compiled
+generated-block counters remained at ``generated_compiled=0``,
+``generated_executed=0``, and ``generated_cache_hits=0``.
+
+The next W2 work must therefore execute translated hot TBs or hotsets as
+actual WebAssembly functions through an accelerator-shaped run-until-exit
+contract.  Its gate metric is true compiled-block execution coverage and
+same-commit wall-clock improvement, not W2m-j ``direct_generated_executed``.

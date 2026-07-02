@@ -250,6 +250,14 @@ function printSummary(options, summary, smokeExit) {
     ` coverage=${coverage.numerator}/${coverage.denominator}` +
     ` (${coverage.ppm} ppm)\n`,
   );
+  if (generated.direct.tbEntries > 0) {
+    process.stdout.write(
+      `  direct tb_entries=${generated.direct.tbEntries}` +
+      ` generated_executed=${generated.direct.generatedExecuted}` +
+      ` generated_dispatches=${generated.direct.generatedDispatches}` +
+      ` tci_fallbacks=${generated.direct.tciFallbacks}\n`,
+    );
+  }
   for (const [name, hash] of Object.entries(summary.artifacts.hashes)) {
     process.stdout.write(`  sha256 ${name} ${hash}\n`);
   }

@@ -46,6 +46,8 @@ const OPS = {
 
 const STATUS_EXIT = 1n;
 const STATUS_DISPATCH = 2n;
+const TCG_WASM64_CONTEXT_REGS_OFFSET = 48;
+const TCG_WASM64_CONTEXT_RET_OFFSET = 56;
 
 function vector(items) {
   return [...encodeU32(items.length), ...items.flat()];
@@ -304,8 +306,10 @@ function compileGeneratedOutputModule(words, relativeBase) {
   const ops = [];
   let terminal = null;
 
-  instructions.push(...localSet(1, i32WrapI64(i64Load(localGet(0), 0))));
-  instructions.push(...localSet(2, i32WrapI64(i64Load(localGet(0), 8))));
+  instructions.push(...localSet(1, i32WrapI64(
+    i64Load(localGet(0), TCG_WASM64_CONTEXT_REGS_OFFSET))));
+  instructions.push(...localSet(2, i32WrapI64(
+    i64Load(localGet(0), TCG_WASM64_CONTEXT_RET_OFFSET))));
   for (let reg = 0; reg < 16; reg++) {
     instructions.push(...localSet(regLocal(reg), i64Load(localGet(1), reg * 8)));
   }
@@ -796,8 +800,10 @@ function createState(relativeBase, words, seed) {
   regs[5] = 0n;
   regs[13] = 0n;
   regs[14] = BigInt(dataBase + 16);
-  view.setBigUint64(ctxPtr, BigInt(regsPtr), true);
-  view.setBigUint64(ctxPtr + 8, BigInt(retPtr), true);
+  view.setBigUint64(ctxPtr + TCG_WASM64_CONTEXT_REGS_OFFSET,
+                    BigInt(regsPtr), true);
+  view.setBigUint64(ctxPtr + TCG_WASM64_CONTEXT_RET_OFFSET,
+                    BigInt(retPtr), true);
   view.setUint32(dataBase, seed % 2 === 0 ? 0xffffffff : 7, true);
   view.setBigUint64(dataBase + 0x10, BigInt(0x400000000 + seed), true);
   view.setBigUint64(

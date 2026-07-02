@@ -2969,6 +2969,37 @@ static TCIWasmSubsetStatus tci_wasm_subset_try_exec(const uint32_t *tb_start,
 #endif
 }
 
+#ifdef CONFIG_TCG_WASM64_BACKEND
+int tcg_wasm64_tci_generated_try_exec(const uint32_t *tb_start,
+                                      uintptr_t regs_ptr, uintptr_t ret_ptr)
+{
+    TCIWasmSubsetEntry *entry;
+    const TCGWasm64TBMetadata *metadata;
+    const uint32_t *code_start;
+    uint64_t code_ops;
+
+    if (!tb_start || !regs_ptr || !ret_ptr) {
+        return TCI_WASM_SUBSET_UNSUPPORTED;
+    }
+
+    metadata = tcg_wasm64_translate_lookup(tb_start);
+    if (!tcg_wasm64_translate_generated_output_available(metadata)) {
+        return TCI_WASM_SUBSET_UNSUPPORTED;
+    }
+    code_start = metadata->generated_output;
+    code_ops = metadata->generated_output_op_count;
+    if (code_ops == 0) {
+        return TCI_WASM_SUBSET_UNSUPPORTED;
+    }
+
+    entry = tci_wasm_subset_entry(tb_start);
+    entry->hits++;
+    return tci_wasm_generated_try_exec(entry, tb_start, code_start, code_ops,
+                                       (tcg_target_ulong *)regs_ptr,
+                                       (uintptr_t *)ret_ptr, true);
+}
+#endif
+
 #else
 typedef enum TCIWasmSubsetStatus {
     TCI_WASM_SUBSET_UNSUPPORTED,
@@ -3000,8 +3031,9 @@ static TCIWasmSubsetStatus tci_wasm_subset_try_exec(const uint32_t *tb_start,
 #define TCI_QEMU_TB_EXEC tcg_qemu_tb_exec
 #endif
 
-uintptr_t QEMU_DISABLE_CFI TCI_QEMU_TB_EXEC(CPUArchState *env,
-                                            const void *v_tb_ptr)
+static uintptr_t QEMU_DISABLE_CFI
+tci_qemu_tb_exec_internal(CPUArchState *env, const void *v_tb_ptr,
+                          bool stop_at_dispatch, bool *dispatched)
 {
     const uint32_t *tb_ptr = v_tb_ptr;
     tcg_target_ulong regs[TCG_TARGET_NB_REGS];
@@ -3014,7 +3046,8 @@ uintptr_t QEMU_DISABLE_CFI TCI_QEMU_TB_EXEC(CPUArchState *env,
     bool fast_gates = tci_fast_gates_enabled();
     bool perf_attrib_active = qemu_perf_attrib_enabled();
     bool progress_active = fast_gates && tci_progress_enabled();
-    bool wasm_subset_active = fast_gates && tci_wasm_subset_enabled();
+    bool wasm_subset_active =
+        !stop_at_dispatch && fast_gates && tci_wasm_subset_enabled();
 
     regs[TCG_AREG0] = (tcg_target_ulong)env;
     regs[TCG_REG_CALL_STACK] = (uintptr_t)stack;
@@ -3059,7 +3092,7 @@ uintptr_t QEMU_DISABLE_CFI TCI_QEMU_TB_EXEC(CPUArchState *env,
                     }
                 }
                 at_tb_start = false;
-            } else {
+            } else if (!stop_at_dispatch) {
                 tci_progress_tb_entry(tb_ptr);
                 switch (tci_wasm_subset_try_exec(tb_ptr, regs, &subset_ret)) {
                 case TCI_WASM_SUBSET_EXIT:
@@ -3075,6 +3108,9 @@ uintptr_t QEMU_DISABLE_CFI TCI_QEMU_TB_EXEC(CPUArchState *env,
                 default:
                     g_assert_not_reached();
                 }
+            } else {
+                tci_progress_tb_entry(tb_ptr);
+                at_tb_start = false;
             }
         }
 
@@ -3488,6 +3524,12 @@ uintptr_t QEMU_DISABLE_CFI TCI_QEMU_TB_EXEC(CPUArchState *env,
         case INDEX_op_goto_tb:
             tci_args_l(insn, tb_ptr, &ptr);
             tb_ptr = *(void **)ptr;
+            if (stop_at_dispatch) {
+                if (dispatched) {
+                    *dispatched = true;
+                }
+                return (uintptr_t)tb_ptr;
+            }
             if (progress_active) {
                 tci_progress_dispatch_active();
             } else if (!fast_gates) {
@@ -3506,6 +3548,12 @@ uintptr_t QEMU_DISABLE_CFI TCI_QEMU_TB_EXEC(CPUArchState *env,
                 return 0;
             }
             tb_ptr = ptr;
+            if (stop_at_dispatch) {
+                if (dispatched) {
+                    *dispatched = true;
+                }
+                return (uintptr_t)tb_ptr;
+            }
             if (progress_active) {
                 tci_progress_dispatch_active();
             } else if (!fast_gates) {
@@ -3562,6 +3610,24 @@ uintptr_t QEMU_DISABLE_CFI TCI_QEMU_TB_EXEC(CPUArchState *env,
         }
     }
 }
+
+uintptr_t QEMU_DISABLE_CFI TCI_QEMU_TB_EXEC(CPUArchState *env,
+                                            const void *v_tb_ptr)
+{
+    return tci_qemu_tb_exec_internal(env, v_tb_ptr, false, NULL);
+}
+
+#ifdef CONFIG_TCG_WASM64_BACKEND
+uintptr_t QEMU_DISABLE_CFI tcg_tci_qemu_tb_exec_one(CPUArchState *env,
+                                                    const void *v_tb_ptr,
+                                                    bool *dispatched)
+{
+    if (dispatched) {
+        *dispatched = false;
+    }
+    return tci_qemu_tb_exec_internal(env, v_tb_ptr, true, dispatched);
+}
+#endif
 
 /*
  * Disassembler that matches the interpreter

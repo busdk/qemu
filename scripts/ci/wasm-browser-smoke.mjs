@@ -2123,6 +2123,8 @@ async function run() {
     } : {}),
     ...(config.tciWasmSubset ? {
       QEMU_TCI_WASM_SUBSET: "1",
+      QEMU_WASM64_TCG_REPORT: "1",
+      QEMU_WASM64_TCG_REPORT_INTERVAL: String(config.tciWasmSubsetInterval),
       ...(config.tciWasmGeneratedOnly ? {
         QEMU_TCI_WASM_GENERATED_ONLY: "1",
       } : {}),

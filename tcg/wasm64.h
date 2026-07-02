@@ -29,6 +29,10 @@ typedef struct TCGWasm64Counters {
     uint64_t generated_cache_hits;
     uint64_t generated_coverage_numerator;
     uint64_t generated_coverage_denominator;
+    uint64_t direct_tb_entries;
+    uint64_t direct_generated_executed;
+    uint64_t direct_generated_dispatches;
+    uint64_t direct_tci_fallbacks;
     uint64_t translated_tbs;
     uint64_t translated_ops;
     uint64_t translated_fallback_markers;
@@ -144,6 +148,10 @@ bool tcg_wasm64_translate_generated_output_available(
     const TCGWasm64TBMetadata *metadata);
 bool tcg_wasm64_backend_available(void);
 uintptr_t tcg_tci_qemu_tb_exec(CPUArchState *env, const void *tb_ptr);
+uintptr_t tcg_tci_qemu_tb_exec_one(CPUArchState *env, const void *tb_ptr,
+                                   bool *dispatched);
+int tcg_wasm64_tci_generated_try_exec(const uint32_t *tb_start,
+                                       uintptr_t regs, uintptr_t ret);
 
 /*
  * Context shared between QEMU and a generated WebAssembly TB function.

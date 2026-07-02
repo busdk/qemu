@@ -1053,7 +1053,7 @@ Engineering rules for this goal:
   The command did expose two guest CPUs, but it was slower than the
   single-vCPU default smoke. Do not pursue SMP/MTTCG as the next W3 path
   without new attribution.
-- [ ] W2m-j - Replace or bypass the TCI-routed generated-subset hot path
+- [x] W2m-j - Replace or bypass the TCI-routed generated-subset hot path
   before another W3 browser speed gate. DoD: either generated-available TBs
   enter from `tcg_wasm64_tb_exec()` without calling `tcg_tci_qemu_tb_exec()`
   for those TBs, or the plan records concrete evidence that this direct
@@ -1066,6 +1066,59 @@ Engineering rules for this goal:
   because W2m-i showed high narrow-subset execution counts but only `1.8%`
   W3 wall-clock improvement; the missing mechanism is replacing the hot TCI
   dispatch path, not adding another opcode to the subset.
+  Accepted negative evidence: the direct backend loop now attempts
+  generated-available TBs from `tcg_wasm64_tb_exec()` before falling back to
+  one-TB TCI execution, reports direct TB entries, direct generated
+  executions, direct dispatches, and direct TCI fallbacks, and distinguishes
+  raw next-TB dispatch pointers from encoded `exit_tb` returns. The slice also
+  made wasm64 summary reporting work in the browser by reading
+  `QEMU_WASM64_TCG_REPORT*` from the existing `/qemu-tci-env` file and by
+  accumulating direct counters across outer `tcg_qemu_tb_exec()` calls.
+  Deterministic checks passed: `git diff --check`,
+  `node --check scripts/ci/wasm-backend-diagnostic-summary.mjs`,
+  `node --check scripts/ci/wasm-backend-diagnostic-runner.mjs`,
+  `node --check scripts/ci/wasm-browser-smoke.mjs`, and
+  `node scripts/ci/wasm-generated-output-equivalence-test.mjs`.
+  The backend artifact build command was:
+  `python3 scripts/ci/wasm-build-artifacts-local.py --out
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-j-cumulative-direct-artifacts
+  --jobs auto --configure-arg=--disable-tcg-interpreter
+  --configure-arg=--enable-tcg-wasm64-backend`. It wrote hashes: JS
+  `59b3d130ac0a17188a10003e46d095c4d9d4e5334b848b158892222bdf8a97b8`,
+  WASM `ba2c7cec6c3b9c084e276d026df2e96f5fdf55a90e4e0d188d8ec5d9c4ef8119`,
+  manifest `d5ea3e337f650cfbf5eef95d65fa397863e4b8a4f9589609ec5f770395bf0909`.
+  A short Chromium `149.0.7827.55` diagnostic timed out at `12415` ms before
+  the generic marker, but proved that the direct boundary was active:
+  `direct_tb_entries=627001`, `direct_generated_executed=626920`,
+  `direct_generated_dispatches=34`, and `direct_tci_fallbacks=81`. Result
+  JSON:
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-j-cumulative-direct-diagnostic-interval100/wasm-browser-smoke-result.json`.
+  A longer Chromium diagnostic with the same artifact timed out at
+  `180252` ms without reaching `QEMU_WASM_LINUX_BOOT_OK`, while reporting
+  `direct_tb_entries=44000001`, `direct_generated_executed=43960181`,
+  `direct_generated_dispatches=1664`, and `direct_tci_fallbacks=39820`.
+  Result JSON:
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-j-cumulative-direct-full-smoke/wasm-browser-smoke-result.json`.
+  This completes W2m-j as a negative diagnostic. High direct coverage through
+  the current C-side TCI generated-subset evaluator does not move the W3
+  wall-clock gate; the summary still reports `generated_compiled=0`,
+  `generated_executed=0`, and `generated_cache_hits=0` for true compiled
+  generated blocks. W2 remains open.
+- [ ] W2m-l - Re-plan and start the real accelerator-shaped generated-Wasm
+  execution path. DoD: replace the W2m-j C-side subset evaluator as the
+  candidate speed path with a design and first implementation slice that
+  executes translated hot TBs or hotsets as actual WebAssembly functions, with
+  a QEMU-internal run-until-exit contract, explicit synthetic exit reasons,
+  strict TCI fallback, and counters that distinguish compiled WebAssembly
+  block execution from direct C-side subset execution. Before any browser W3
+  run, deterministic tests must prove the generated function ABI, exit-frame
+  encoding, dispatch result handling, and fallback marker behavior. The
+  prediction for W3 must be based on true compiled-block execution coverage,
+  not `direct_generated_executed` from the W2m-j evaluator. The first
+  implementation slice should also name whether the memory path is still
+  helper-based or starts an inline soft-MMU/TLB fast path; broad helper,
+  hotset, worker, or multi-vCPU work stays deferred until a single-vCPU
+  compiled-block path can beat the same-commit generic TCI baseline.
 - [ ] W2m-k - Measure QEMU startup preinitialization only if a cheap
   harness-level measurement shows startup is material on the Bus Engine OS
   path. Preinitialized QEMU state is allowed for this goal only when it does
