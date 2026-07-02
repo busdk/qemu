@@ -1188,6 +1188,22 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     gate before any Bus Engine OS long proof is started. If this gate does not
     beat strict TCI, record it as rejected evidence and pick a different
     measured implementation direction.
+    - [x] Add a machine-readable hot-block coverage gate:
+      DoD is a deterministic helper that reads browser smoke result JSON,
+      extracts the latest `qemu-tcg-hotblocks` summary, compares measured
+      `top_tci_ops` against a named lowering profile, reports supported and
+      unsupported top-op counts, and fails when the selected profile does not
+      meet a configured minimum ratio. Accepted implementation on 2026-07-02:
+      `scripts/ci/wasm-tcg-coverage-gate.mjs` provides `deterministic` and
+      `planned-hotblock` profiles. The deterministic profile tracks the
+      executable backend-shaped lowering probe; the planned-hotblock profile
+      tracks the broader operation family from the recorded Bus Engine OS hot
+      block evidence (`tci_movi`, `st`, `ld`, `add`, `brcond`, `mb`, related
+      load/store, set-condition, and QEMU load/store operations). Verification:
+      `node --check scripts/ci/wasm-tcg-coverage-gate.mjs`, `node --check
+      scripts/ci/wasm-tcg-coverage-gate-test.mjs`, and `node
+      scripts/ci/wasm-tcg-coverage-gate-test.mjs` passed. This is a planning
+      and proof gate, not a performance fix.
     - [x] Inspect the `ktock/qemu-wasm` `origin/wasm64-tcg-b` backend
       architecture without copying it wholesale:
       DoD is a short note naming the reference files, the runtime boundary,
@@ -1276,6 +1292,19 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
       scripts/ci/wasm-tb-module-emitter-test.mjs`, and `node
       scripts/ci/wasm-tb-module-emitter.mjs` passed. This item remains open
       until C backend integration exists.
+      Follow-up partial implementation on 2026-07-02: the deterministic
+      emitter now includes direct imported-memory `ld_mem_i64` and
+      `st_mem_i64` operations plus a no-op `mb` lowering. The generated and
+      interpreted paths agree for both existing branch cases, store and reload
+      `0x1122334455667788`, and report `directLoadOps=2`,
+      `directStoreOps=2`, and `memoryBarrierOps=2`. The deterministic
+      coverage-gate profile now counts measured hot `ld`, `st`, and `mb`
+      operations because this executable differential coverage exists.
+      Verification: `node --check scripts/ci/wasm-tb-module-emitter.mjs`,
+      `node --check scripts/ci/wasm-tb-module-emitter-test.mjs`, `node
+      scripts/ci/wasm-tb-module-emitter-test.mjs`, `node --check
+      scripts/ci/wasm-tcg-coverage-gate-test.mjs`, and `node
+      scripts/ci/wasm-tcg-coverage-gate-test.mjs` passed.
     - [ ] Add helper-call and guest-memory fallback boundaries before long
       browser proofs:
       DoD is helper import generation for calls that cannot be inlined,

@@ -111,6 +111,7 @@ assert.equal(interpretedResult.toString(), "25769803818");
 assert.equal(interpretedView.getBigUint64(80, true).toString(), "42");
 assert.equal(interpretedView.getBigUint64(88, true).toString(), "25769803818");
 assert.equal(interpretedView.getBigUint64(96, true).toString(), "1");
+assert.equal(interpretedView.getBigUint64(112, true).toString(), "1234605616436508552");
 assert.deepEqual(interpretedHelperCalls, []);
 
 const loweringProbe = await runLoweringSubsetProbe();
@@ -124,6 +125,9 @@ assert.deepEqual(loweringProbe.counters, {
   helperFallbacks: 1,
   qemuLoadFallbacks: 2,
   qemuStoreFallbacks: 2,
+  directLoadOps: 2,
+  directStoreOps: 2,
+  memoryBarrierOps: 2,
 });
 
 const branchTaken = loweringProbe.cases.find((entry) =>
@@ -136,6 +140,7 @@ assert.deepEqual(branchTaken.generatedContext, {
   24: "25769803818",
   32: "1",
   40: "4294967314",
+  48: "1234605616436508552",
 });
 assert.deepEqual(branchTaken.generatedHelperCalls, []);
 assert.deepEqual(branchTaken.interpretedHelperCalls, []);
@@ -168,6 +173,7 @@ assert.deepEqual(branchNotTaken.generatedContext, {
   24: "25769803819",
   32: "0",
   40: "4294967314",
+  48: "1234605616436508552",
 });
 assert.deepEqual(branchNotTaken.generatedHelperCalls, [
   {

@@ -4877,6 +4877,58 @@ generic slowdown is not relevant to the Bus Engine OS boot path.  A
 paravirtual or browser-API patch must be tied to a measured QEMU device or
 backend boundary rather than to plausible browser technology alone.
 
+Coverage Gate For Backend Proofs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The branch now includes a small machine-readable coverage gate for deciding
+whether a wasm64 backend profile covers enough measured hot-block work to
+justify a browser proof.  ``scripts/ci/wasm-tcg-coverage-gate.mjs`` reads a
+browser smoke result JSON file, extracts the latest ``qemu-tcg-hotblocks``
+summary, compares ``top_tci_ops`` against a named lowering profile, and reports
+supported and unsupported top-op counts plus a supported ratio.
+
+Two profiles are currently defined:
+
+* ``deterministic`` tracks the executable backend-shaped lowering probe in
+  ``wasm-tb-module-emitter.mjs``.
+* ``planned-hotblock`` tracks the broader operation family from the recorded
+  Bus Engine OS hot-block evidence: ``tci_movi``, ``st``, ``ld``, ``add``,
+  ``brcond``, ``mb``, related load/store and set-condition operations, and QEMU
+  load/store fallback operations.  This profile is a planning gate, not a
+  claim that the live backend already lowers every operation.
+
+Verification on 2026-07-02:
+
+.. code-block:: console
+
+  node --check scripts/ci/wasm-tcg-coverage-gate.mjs
+  node --check scripts/ci/wasm-tcg-coverage-gate-test.mjs
+  node scripts/ci/wasm-tcg-coverage-gate-test.mjs
+
+This utility does not accelerate QEMU by itself.  It prevents the next browser
+proof from being selected by intuition alone: a backend slice should first show
+that its named lowering profile covers the current measured hot-op family, then
+the rebuilt artifact must still pass the strict default generic Chromium smoke
+and beat the opt-in generic speed gate before a long Bus Engine OS proof is
+meaningful.
+
+The deterministic emitter also gained executable differential coverage for raw
+imported-memory load/store and memory-barrier shapes from the measured hot-op
+set.  The generated and interpreted paths now agree for ``ld_mem_i64``,
+``st_mem_i64``, and a no-op ``mb`` lowering in both existing branch cases.  The
+probe stores and reloads ``0x1122334455667788`` and reports
+``directLoadOps=2``, ``directStoreOps=2``, and ``memoryBarrierOps=2``.  That is
+why the deterministic coverage profile can count measured hot ``ld``, ``st``,
+and ``mb`` operations.  Verification:
+
+.. code-block:: console
+
+  node --check scripts/ci/wasm-tb-module-emitter.mjs
+  node --check scripts/ci/wasm-tb-module-emitter-test.mjs
+  node scripts/ci/wasm-tb-module-emitter-test.mjs
+  node --check scripts/ci/wasm-tcg-coverage-gate-test.mjs
+  node scripts/ci/wasm-tcg-coverage-gate-test.mjs
+
 A later opt-in C interpreter peephole fused the adjacent
 ``tci_setcond32``/``brcond`` shape because that pair was known to be hot.  The
 experiment preserved the ``tci_setcond32`` destination register, skipped only
