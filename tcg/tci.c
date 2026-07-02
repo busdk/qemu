@@ -57,6 +57,9 @@ static bool tci_progress;
 static bool tci_wasm_subset;
 static bool tci_wasm_generated_only;
 static bool tci_wasm_generated_trace;
+#ifdef CONFIG_TCG_WASM64_BACKEND
+static bool tci_wasm64_generated;
+#endif
 static uint64_t tci_progress_interval;
 static uint64_t tci_progress_next_report;
 static uint64_t tci_progress_tb_entries;
@@ -287,6 +290,26 @@ static bool tci_fast_gates_enabled(void)
     return tci_fast_gates;
 }
 
+static bool tci_wasm64_generated_enabled(void)
+{
+#ifdef CONFIG_TCG_WASM64_BACKEND
+    static gsize initialized;
+
+    if (unlikely(g_once_init_enter(&initialized))) {
+        char *owned;
+        const char *raw = tci_getenv("QEMU_WASM64_TCG_GENERATED", &owned);
+
+        tci_wasm64_generated = tci_parse_bool_env(raw);
+        free(owned);
+        g_once_init_leave(&initialized, 1);
+    }
+
+    return tci_wasm64_generated;
+#else
+    return false;
+#endif
+}
+
 static bool tci_wasm_subset_enabled(void)
 {
     static gsize initialized;
@@ -297,6 +320,11 @@ static bool tci_wasm_subset_enabled(void)
 
         tci_wasm_subset = tci_parse_bool_env(raw);
         free(owned);
+#ifdef CONFIG_TCG_WASM64_BACKEND
+        if (!tci_wasm_subset && tci_wasm64_generated_enabled()) {
+            tci_wasm_subset = true;
+        }
+#endif
         tci_wasm_subset_threshold =
             tci_parse_u64_env("QEMU_TCI_WASM_SUBSET_THRESHOLD", 1024);
         tci_wasm_subset_max_ops =
@@ -442,6 +470,11 @@ static inline bool tci_progress_enabled(void)
 }
 
 static inline bool tci_wasm_subset_enabled(void)
+{
+    return false;
+}
+
+static inline bool tci_wasm64_generated_enabled(void)
 {
     return false;
 }
@@ -2878,7 +2911,8 @@ uintptr_t QEMU_DISABLE_CFI TCI_QEMU_TB_EXEC(CPUArchState *env,
     const uint32_t *current_tb_start = tb_ptr;
     bool at_tb_start = true;
     bool carry = false;
-    bool fast_gates = tci_fast_gates_enabled();
+    bool wasm64_generated = tci_wasm64_generated_enabled();
+    bool fast_gates = wasm64_generated || tci_fast_gates_enabled();
     bool perf_attrib_active = qemu_perf_attrib_enabled();
     bool progress_active = fast_gates && tci_progress_enabled();
     bool wasm_subset_active = fast_gates && tci_wasm_subset_enabled();

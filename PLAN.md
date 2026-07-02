@@ -174,6 +174,37 @@ run that reaches a weaker marker than normal multi-user readiness.
     `c455ba71fbac1c911b77183810b354959b180455a4e8d2d8ef8d9bf43c6b1cad`.
     The slice does not enable generated guest execution yet; it creates the
     clean selectable artifact path required before running backend smokes.
+  - [x] R3c - Add an explicit backend-generated execution gate for browser
+    smoke runs. DoD: backend-built artifacts can request generated wasm64 TCG
+    attempts with a backend-named option instead of relying on the older
+    TCI-subset flag shape, default TCI behavior remains unchanged, the browser
+    smoke result records the requested mode, and a full backend artifact build
+    compiles the C path. Accepted 2026-07-03:
+    `QEMU_WASM64_TCG_GENERATED=1` now makes `CONFIG_TCG_WASM64_BACKEND`
+    artifacts take the fast-gated generated-output attempt path; non-backend
+    builds ignore the gate. `scripts/ci/wasm-browser-smoke-runner.mjs` exposes
+    `--wasm64-tcg-generated`, the browser smoke page forwards
+    `QEMU_WASM64_TCG_GENERATED=1`, and the result JSON records
+    `wasm64TcgGenerated`. Checks:
+    `node --check scripts/ci/wasm-browser-smoke-runner.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke.mjs`,
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+    `node scripts/ci/wasm-browser-smoke-args-test.mjs`,
+    `python3 scripts/ci/wasm-build-artifacts-local-test.py`,
+    `git diff --check`, and
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-backend-r3c-generated-flag
+    --target riscv64 --tcg-wasm64-backend` passed. Meson reported
+    `TCG backend: experimental wasm64 with TCI fallback`; `tcg_tci.c`
+    compiled cleanly. Artifact hashes: `qemu-system-riscv64.js`
+    `17ee104776f21e46a6ab83ca7f9fd1f7052df625ad1f2b0931ccba7f97201b39`,
+    `qemu-system-riscv64.wasm`
+    `7d0cb03fa22115c019684f09ea21feabf85fb071f37bd26f7f78dfa10183afcd`,
+    manifest
+    `c69bce1a579501c6f306487f3c1453a5b9264cb53d08be273926cc4333db70d0`.
+    This slice does not prove speed or nonzero generated execution in a guest;
+    the next R3 slice must run a backend browser smoke with this gate and
+    inspect generated/fallback counters.
 - [ ] R4 - Prove performance before Bus Engine OS long runs. DoD: a same-commit
   Chromium generic RISC-V accelerator smoke is at least 25% faster than
   default RISC-V TCI, and microbenchmarks show at least 3x over RISC-V TCI for

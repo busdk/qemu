@@ -1513,6 +1513,7 @@ function buildConfig() {
     tcgHotblocksOpSample: numberOption("tcgHotblocksOpSample", 1),
     tcgHotblocksTop: numberOption("tcgHotblocksTop", 12),
     tciFastGates: boolOption("tciFastGates", false),
+    wasm64TcgGenerated: boolOption("wasm64TcgGenerated", false),
     tciRelaxedMb: boolOption("tciRelaxedMb", false),
     tciProgress: boolOption("tciProgress", false),
     tciProgressInterval: numberOption("tciProgressInterval", 100000),
@@ -1707,6 +1708,12 @@ async function run() {
       last: null,
     },
     wasm64Tcg: {
+      generated: {
+        enabled: Boolean(config.wasm64TcgGenerated),
+        env: config.wasm64TcgGenerated ? {
+          QEMU_WASM64_TCG_GENERATED: "1",
+        } : null,
+      },
       maxSummaries: 16,
       summaryCount: 0,
       summaries: [],
@@ -1741,11 +1748,15 @@ async function run() {
         summaries: [],
         lastSummary: null,
       },
-      env: (config.tciFastGates || config.tciRelaxedMb ||
+      env: (config.tciFastGates || config.wasm64TcgGenerated ||
+          config.tciRelaxedMb ||
           config.tciProgress ||
           config.tciWasmSubset ||
           config.tciWasmGeneratedTrace) ? {
         ...(config.tciFastGates ? { QEMU_TCI_FAST_GATES: "1" } : {}),
+        ...(config.wasm64TcgGenerated ? {
+          QEMU_WASM64_TCG_GENERATED: "1",
+        } : {}),
         ...(config.tciRelaxedMb ? { QEMU_TCI_RELAXED_MB: "1" } : {}),
         ...(config.tciProgress ? {
           QEMU_TCI_PROGRESS: "1",
@@ -2117,6 +2128,9 @@ async function run() {
   } : {};
   const tciEnv = {
     ...(config.tciFastGates ? { QEMU_TCI_FAST_GATES: "1" } : {}),
+    ...(config.wasm64TcgGenerated ? {
+      QEMU_WASM64_TCG_GENERATED: "1",
+    } : {}),
     ...(config.tciRelaxedMb ? { QEMU_TCI_RELAXED_MB: "1" } : {}),
     ...(config.tciProgress ? {
       QEMU_TCI_PROGRESS: "1",

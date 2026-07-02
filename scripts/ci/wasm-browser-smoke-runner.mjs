@@ -154,6 +154,9 @@ Options:
   --tcg-hotblocks-top N
                      Maximum hotspot entries per summary (default: 12)
   --tci-fast-gates  Enable opt-in TCI translated-block feature-gate caching
+  --wasm64-tcg-generated
+                    Enable experimental wasm64 TCG backend generated execution
+                    attempts in backend-built artifacts
   --tci-relaxed-mb  Enable the Emscripten/TCI-only relaxed memory-barrier
                     experiment; default QEMU execution remains strict
   --tci-progress    Enable opt-in TCI translation-block progress summaries
@@ -272,6 +275,7 @@ function parseArgs(argv) {
     tcgHotblocksOpSample: 1,
     tcgHotblocksTop: 12,
     tciFastGates: false,
+    wasm64TcgGenerated: false,
     tciRelaxedMb: false,
     tciProgress: false,
     tciProgressInterval: 100000,
@@ -487,6 +491,9 @@ function parseArgs(argv) {
     } else if (arg === "--tci-fast-gates") {
       options.tciFastGates = true;
       explicit.add("tciFastGates");
+    } else if (arg === "--wasm64-tcg-generated") {
+      options.wasm64TcgGenerated = true;
+      explicit.add("wasm64TcgGenerated");
     } else if (arg === "--tci-relaxed-mb") {
       options.tciRelaxedMb = true;
       explicit.add("tciRelaxedMb");
@@ -552,6 +559,7 @@ function parseArgs(argv) {
       "screenshotFullPage",
       "tcgHotblocks",
       "tciFastGates",
+      "wasm64TcgGenerated",
       "tciRelaxedMb",
       "tciProgress",
       "tciWasmSubset",
@@ -1448,6 +1456,9 @@ export function browserSmokeUrl(options) {
   if (options.tciFastGates) {
     url.searchParams.set("tciFastGates", "1");
   }
+  if (options.wasm64TcgGenerated) {
+    url.searchParams.set("wasm64TcgGenerated", "1");
+  }
   if (options.tciProgress) {
     url.searchParams.set("tciProgress", "1");
     url.searchParams.set(
@@ -1588,6 +1599,7 @@ export function initialSmokeResult(options, browserVersion) {
       ? options.tcgHotblocksTop
       : 12,
     tciFastGates: Boolean(options.tciFastGates),
+    wasm64TcgGenerated: Boolean(options.wasm64TcgGenerated),
     tciRelaxedMb: Boolean(options.tciRelaxedMb),
     tciProgress: Boolean(options.tciProgress),
     tciProgressInterval: Number.isInteger(options.tciProgressInterval)
