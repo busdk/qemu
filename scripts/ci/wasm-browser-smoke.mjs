@@ -299,23 +299,6 @@ export function perfAttributionSummary(line) {
   }
 }
 
-export function tciWasmSubsetSummary(line) {
-  const prefix = "qemu-tci-wasm-subset: ";
-
-  if (!line.startsWith(prefix)) {
-    return null;
-  }
-  try {
-    const summary = JSON.parse(line.slice(prefix.length));
-    if (summary === null || typeof summary !== "object" || Array.isArray(summary)) {
-      return null;
-    }
-    return summary;
-  } catch {
-    return null;
-  }
-}
-
 export function tciWasmGeneratedTrace(line) {
   const prefix = "qemu-tci-wasm-generated-trace: ";
 
@@ -403,38 +386,16 @@ export function recordHotBlockSummary(state, line, elapsedMs) {
   }
 }
 
-export function recordTciWasmSubsetSummary(state, line, elapsedMs) {
-  if (!state || !state.tci || !state.tci.wasmSubset ||
-      !state.tci.wasmSubset.enabled) {
-    return;
-  }
-  const summary = tciWasmSubsetSummary(line);
-  if (summary === null) {
-    return;
-  }
-  state.tci.wasmSubset.summaryCount += 1;
-  state.tci.wasmSubset.lastSummary = {
-    elapsedMs,
-    ...summary,
-  };
-  state.tci.wasmSubset.summaries.push(state.tci.wasmSubset.lastSummary);
-  if (state.tci.wasmSubset.summaries.length >
-      state.tci.wasmSubset.maxSummaries) {
-    state.tci.wasmSubset.summaries.shift();
-  }
-}
-
 export function recordTciWasmGeneratedTrace(state, line, elapsedMs) {
-  if (!state || !state.tci || !state.tci.wasmSubset ||
-      !state.tci.wasmSubset.generatedTrace ||
-      !state.tci.wasmSubset.generatedTrace.enabled) {
+  if (!state || !state.tci || !state.tci.generatedTrace ||
+      !state.tci.generatedTrace.enabled) {
     return;
   }
   const trace = tciWasmGeneratedTrace(line);
   if (trace === null) {
     return;
   }
-  const generatedTrace = state.tci.wasmSubset.generatedTrace;
+  const generatedTrace = state.tci.generatedTrace;
 
   generatedTrace.count += 1;
   generatedTrace.last = {
@@ -1513,17 +1474,11 @@ function buildConfig() {
     tcgHotblocksOpSample: numberOption("tcgHotblocksOpSample", 1),
     tcgHotblocksTop: numberOption("tcgHotblocksTop", 12),
     tciFastGates: boolOption("tciFastGates", false),
-    tciRelaxedMb: boolOption("tciRelaxedMb", false),
     tciProgress: boolOption("tciProgress", false),
     tciProgressInterval: numberOption("tciProgressInterval", 100000),
-    tciWasmSubset: boolOption("tciWasmSubset", false),
-    tciWasmGeneratedOnly: boolOption("tciWasmGeneratedOnly", false),
     tciWasmGeneratedTrace: boolOption("tciWasmGeneratedTrace", false),
     tciWasmGeneratedTraceLimit:
       nonNegativeNumberOption("tciWasmGeneratedTraceLimit", 64),
-    tciWasmSubsetInterval: numberOption("tciWasmSubsetInterval", 100000),
-    tciWasmSubsetMaxOps: numberOption("tciWasmSubsetMaxOps", 512),
-    tciWasmSubsetThreshold: numberOption("tciWasmSubsetThreshold", 1024),
     timeoutMs: numberOption("timeoutMs", 180000),
     visualMarker: option("visualMarker", ""),
     wasm: option("wasm", "/artifacts/qemu-system-x86_64.wasm"),
@@ -1713,7 +1668,6 @@ async function run() {
     },
     tci: {
       fastGates: Boolean(config.tciFastGates),
-      relaxedMb: Boolean(config.tciRelaxedMb),
       progress: {
         enabled: Boolean(config.tciProgress),
         interval: config.tciProgressInterval,
@@ -1722,42 +1676,20 @@ async function run() {
         summaries: [],
         lastSummary: null,
       },
-      wasmSubset: {
-        enabled: Boolean(config.tciWasmSubset),
-        generatedOnly: Boolean(config.tciWasmGeneratedOnly),
-        interval: config.tciWasmSubsetInterval,
-        maxOps: config.tciWasmSubsetMaxOps,
-        threshold: config.tciWasmSubsetThreshold,
-        generatedTrace: {
-          enabled: Boolean(config.tciWasmGeneratedTrace),
-          limit: config.tciWasmGeneratedTraceLimit,
-          count: 0,
-          entries: [],
-          last: null,
-        },
-        maxSummaries: 16,
-        summaryCount: 0,
-        summaries: [],
-        lastSummary: null,
+      generatedTrace: {
+        enabled: Boolean(config.tciWasmGeneratedTrace),
+        limit: config.tciWasmGeneratedTraceLimit,
+        count: 0,
+        entries: [],
+        last: null,
       },
-      env: (config.tciFastGates || config.tciRelaxedMb ||
+      env: (config.tciFastGates ||
           config.tciProgress ||
-          config.tciWasmSubset ||
           config.tciWasmGeneratedTrace) ? {
         ...(config.tciFastGates ? { QEMU_TCI_FAST_GATES: "1" } : {}),
-        ...(config.tciRelaxedMb ? { QEMU_TCI_RELAXED_MB: "1" } : {}),
         ...(config.tciProgress ? {
           QEMU_TCI_PROGRESS: "1",
           QEMU_TCI_PROGRESS_INTERVAL: String(config.tciProgressInterval),
-        } : {}),
-        ...(config.tciWasmSubset ? {
-          QEMU_TCI_WASM_SUBSET: "1",
-          ...(config.tciWasmGeneratedOnly ? {
-            QEMU_TCI_WASM_GENERATED_ONLY: "1",
-          } : {}),
-          QEMU_TCI_WASM_SUBSET_INTERVAL: String(config.tciWasmSubsetInterval),
-          QEMU_TCI_WASM_SUBSET_MAX_OPS: String(config.tciWasmSubsetMaxOps),
-          QEMU_TCI_WASM_SUBSET_THRESHOLD: String(config.tciWasmSubsetThreshold),
         } : {}),
         ...(config.tciWasmGeneratedTrace ? {
           QEMU_TCI_WASM_GENERATED_TRACE: "1",
@@ -1971,7 +1903,6 @@ async function run() {
       return false;
     }
     return !(
-      line.startsWith("qemu-tci-wasm-subset:") ||
       line.startsWith("qemu-tci-wasm-generated-trace:") ||
       line.startsWith("qemu-tci-progress:") ||
       line.startsWith("qemu-fw-cfg-trace:") ||
@@ -2009,11 +1940,6 @@ async function run() {
       Math.round(performance.now() - startTime),
     );
     recordPerfAttributionSummary(
-      smokeState,
-      line,
-      Math.round(performance.now() - startTime),
-    );
-    recordTciWasmSubsetSummary(
       smokeState,
       line,
       Math.round(performance.now() - startTime),
@@ -2116,19 +2042,9 @@ async function run() {
   } : {};
   const tciEnv = {
     ...(config.tciFastGates ? { QEMU_TCI_FAST_GATES: "1" } : {}),
-    ...(config.tciRelaxedMb ? { QEMU_TCI_RELAXED_MB: "1" } : {}),
     ...(config.tciProgress ? {
       QEMU_TCI_PROGRESS: "1",
       QEMU_TCI_PROGRESS_INTERVAL: String(config.tciProgressInterval),
-    } : {}),
-    ...(config.tciWasmSubset ? {
-      QEMU_TCI_WASM_SUBSET: "1",
-      ...(config.tciWasmGeneratedOnly ? {
-        QEMU_TCI_WASM_GENERATED_ONLY: "1",
-      } : {}),
-      QEMU_TCI_WASM_SUBSET_INTERVAL: String(config.tciWasmSubsetInterval),
-      QEMU_TCI_WASM_SUBSET_MAX_OPS: String(config.tciWasmSubsetMaxOps),
-      QEMU_TCI_WASM_SUBSET_THRESHOLD: String(config.tciWasmSubsetThreshold),
     } : {}),
     ...(config.tciWasmGeneratedTrace ? {
       QEMU_TCI_WASM_GENERATED_TRACE: "1",
@@ -2193,8 +2109,7 @@ async function run() {
             .join("\n") + "\n";
           module.FS.writeFile("/qemu-fw-cfg-env", lines);
         }
-        if (config.tciRelaxedMb || config.tciProgress ||
-            config.tciWasmSubset || config.tciWasmGeneratedTrace) {
+        if (config.tciProgress || config.tciWasmGeneratedTrace) {
           const lines = Object.entries(tciEnv)
             .map(([key, value]) => `${key}=${value}`)
             .join("\n") + "\n";

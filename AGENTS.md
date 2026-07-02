@@ -109,6 +109,15 @@ generated executions plus generated cache hits over total eligible TB
 executions for the measured path. Rejection lists are diagnostics only; they
 must not steer another one-opcode browser loop.
 
+Do not treat boundary-entry coverage as a performance metric. Millions of
+calls into a generated wrapper usually mean the accelerator is returning to
+QEMU too often. A browser-Wasm accelerator proof must show useful guest work
+inside generated Wasm bodies: generated instruction retirement, long
+run-loop residency, internal TB chaining or hotset dispatch, inline RAM/TLB
+hit handling, and rare synthetic exits. If a path crosses the QEMU/generated
+boundary once per TB, it is not accepted as the W2 performance shape even if
+the boundary counter is near 100%.
+
 Do not report the goal complete from a generic Linux smoke alone. The generic
 smoke proves QEMU infrastructure; Bus Engine OS remains the downstream guest
 proof target.
