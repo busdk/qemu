@@ -7153,3 +7153,54 @@ unsupported helper, or budget expiry.  The first acceptance gate is not Linux
 boot; it is a deterministic micro-hotset where one entry into generated Wasm
 executes a large counted guest-instruction budget before returning, with
 multiple-times speedup over TCI on ALU/branch and TLB-hit RAM microbenches.
+
+W2n run/exit model
+~~~~~~~~~~~~~~~~~~
+
+The W2n design pivot is to treat generated browser-Wasm execution as an
+accelerator run/exit engine, not as a per-TB wrapper around the existing TCI
+interpreter.  The minimum useful shape is:
+
+* one exported ``wasmjit_run(ctx, budget)`` entrypoint;
+* imported guest/QEMU memory only, with no helper-function imports in the hot
+  micro-hotset gate;
+* internal dispatch or direct branch flow between generated hot TB bodies;
+* inline RAM/TLB-hit load/store operations for ordinary guest RAM;
+* counters for generated guest-instruction retirement, generated chain length,
+  inline RAM accesses, helper calls, ``qemu_ld`` calls, and ``qemu_st`` calls;
+* explicit synthetic exit reasons, starting with budget expiry;
+* compatibility fallback outside the performance gate, and no-silent-fallback
+  behavior for unsupported hot TBs during performance proof.
+
+The deterministic model lives in
+``scripts/ci/wasmjit-runloop-model.mjs`` and is tested by
+``scripts/ci/wasmjit-runloop-model-test.mjs``.  It is deliberately not wired
+into QEMU execution yet; it is the shape gate that prevents W2 from falling
+back to the rejected direct-boundary pattern.
+
+The accepted W2n proof was:
+
+.. code-block:: text
+
+  node --check scripts/ci/wasmjit-runloop-model.mjs
+  node --check scripts/ci/wasmjit-runloop-model-test.mjs
+  node scripts/ci/wasmjit-runloop-model-test.mjs
+  git diff --check
+
+For one call with ``budget=1000000`` the model records:
+
+.. code-block:: text
+
+  generatedGuestInstructions=4000000
+  generatedChainLength=1000000
+  tlbHitAccesses=2000000
+  helperCalls=0
+  qemuLoadCalls=0
+  qemuStoreCalls=0
+  tb0Executions=500000
+  tb1Executions=500000
+
+The next W2 step is QEMU-facing integration of this contract plus measured
+ALU/branch and TLB-hit RAM microbenches against a TCI-like baseline.  A
+generic Linux or Bus Engine OS browser speed gate must not run again until
+that microbench gate shows a multiple-times win from the run/exit shape.
