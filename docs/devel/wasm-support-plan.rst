@@ -4917,9 +4917,12 @@ imported-memory load/store and memory-barrier shapes from the measured hot-op
 set.  The generated and interpreted paths now agree for ``ld_mem_i64``,
 ``st_mem_i64``, and a no-op ``mb`` lowering in both existing branch cases.  The
 probe stores and reloads ``0x1122334455667788`` and reports
-``directLoadOps=2``, ``directStoreOps=2``, and ``memoryBarrierOps=2``.  That is
-why the deterministic coverage profile can count measured hot ``ld``, ``st``,
-and ``mb`` operations.  Verification:
+``directLoadOps=2``, ``directStoreOps=2``, and ``memoryBarrierOps=2``.
+Follow-up coverage added ``setcond_i32`` lowering for the measured
+``tci_setcond32`` family.  The probe compares ``0x100000001`` with ``1`` to
+prove 32-bit truncation and reports ``setcond32Ops=2``.  That is why the
+deterministic coverage profile can count measured hot ``ld``, ``st``, ``mb``,
+and ``tci_setcond32`` operations.  Verification:
 
 .. code-block:: console
 

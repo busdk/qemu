@@ -229,6 +229,19 @@ function emitLoweringOp(op, labelStack) {
       0xad,
       ...localSet(i64Local(op.dst)),
     ];
+  case "setcond_i32":
+    if (!["eq", "ne"].includes(op.cond)) {
+      throw new Error(`unsupported setcond_i32 condition: ${op.cond}`);
+    }
+    return [
+      ...localGet(i64Local(op.lhs)),
+      0xa7,                   /* i32.wrap_i64 */
+      ...localGet(i64Local(op.rhs)),
+      0xa7,                   /* i32.wrap_i64 */
+      op.cond === "eq" ? 0x46 : 0x47,
+      0xad,
+      ...localSet(i64Local(op.dst)),
+    ];
   case "helper_i64":
     return [
       ...i32Const(op.opcode),
@@ -314,6 +327,10 @@ export const LOWERING_SUBSET_BLOCK = [
   { op: "st_mem_i64", addr: 11, value: 12, offset: 0 },
   { op: "ld_mem_i64", dst: 13, addr: 11, offset: 0 },
   { op: "st_ctx_i64", src: 13, offset: 48 },
+  { op: "const_i64", dst: 14, value: 0x100000001n },
+  { op: "const_i64", dst: 15, value: 1n },
+  { op: "setcond_i32", cond: "eq", dst: 16, lhs: 14, rhs: 15 },
+  { op: "st_ctx_i64", src: 16, offset: 56 },
   { op: "mb" },
   { op: "exit_i64", boundary: "tb-dispatch", src: 8 },
 ];
@@ -588,6 +605,19 @@ export function interpretLoweringSubset(ops, view, contextPointer, helper) {
         throw new Error(`unsupported setcond_i64 condition: ${op.cond}`);
       }
       break;
+    case "setcond_i32": {
+      const lhs = Number(regs[op.lhs] & 0xffffffffn) >>> 0;
+      const rhs = Number(regs[op.rhs] & 0xffffffffn) >>> 0;
+
+      if (op.cond === "eq") {
+        regs[op.dst] = lhs === rhs ? 1n : 0n;
+      } else if (op.cond === "ne") {
+        regs[op.dst] = lhs !== rhs ? 1n : 0n;
+      } else {
+        throw new Error(`unsupported setcond_i32 condition: ${op.cond}`);
+      }
+      break;
+    }
     case "helper_i64":
       regs[op.dst] = helper.helper0(op.opcode, regs[op.value]);
       break;
@@ -705,7 +735,7 @@ export async function runLoweringSubsetProbe(ops = LOWERING_SUBSET_BLOCK) {
         qemuSt: qemuSt(interpretedQemuStoreCalls),
       },
     );
-    const contextOffsets = [16, 24, 32, 40, 48];
+    const contextOffsets = [16, 24, 32, 40, 48, 56];
     const contextMatches = contextOffsets.every((offset) =>
       readCtxI64(generatedView, contextPointer, offset) ===
       readCtxI64(interpretedView, contextPointer, offset));
@@ -751,6 +781,7 @@ export async function runLoweringSubsetProbe(ops = LOWERING_SUBSET_BLOCK) {
     qemuStoreFallbacks: 0,
     directLoadOps: ops.filter((op) => op.op === "ld_mem_i64").length * cases.length,
     directStoreOps: ops.filter((op) => op.op === "st_mem_i64").length * cases.length,
+    setcond32Ops: ops.filter((op) => op.op === "setcond_i32").length * cases.length,
     memoryBarrierOps: ops.filter((op) => op.op === "mb").length * cases.length,
   });
 

@@ -1297,9 +1297,13 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
       `st_mem_i64` operations plus a no-op `mb` lowering. The generated and
       interpreted paths agree for both existing branch cases, store and reload
       `0x1122334455667788`, and report `directLoadOps=2`,
-      `directStoreOps=2`, and `memoryBarrierOps=2`. The deterministic
-      coverage-gate profile now counts measured hot `ld`, `st`, and `mb`
-      operations because this executable differential coverage exists.
+      `directStoreOps=2`, and `memoryBarrierOps=2`.
+      Follow-up tightening on 2026-07-02 added executable `setcond_i32`
+      coverage for the measured `tci_setcond32` family; it verifies 32-bit
+      truncation by comparing `0x100000001` with `1` and reports
+      `setcond32Ops=2`. The deterministic coverage-gate profile now counts
+      measured hot `ld`, `st`, `mb`, and `tci_setcond32` operations because
+      this executable differential coverage exists.
       Verification: `node --check scripts/ci/wasm-tb-module-emitter.mjs`,
       `node --check scripts/ci/wasm-tb-module-emitter-test.mjs`, `node
       scripts/ci/wasm-tb-module-emitter-test.mjs`, `node --check
