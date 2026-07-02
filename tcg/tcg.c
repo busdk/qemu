@@ -2499,7 +2499,7 @@ bool tcg_op_deposit_valid(TCGType type, unsigned ofs, unsigned len)
 
 static TCGOp *tcg_op_alloc(TCGOpcode opc, unsigned nargs);
 
-#ifdef CONFIG_TCG_WASM64_BACKEND
+#if defined(CONFIG_EMSCRIPTEN) || defined(CONFIG_TCG_WASM64_BACKEND)
 static GHashTable *tcg_helper_trace_infos;
 static GMutex tcg_helper_trace_lock;
 
@@ -2548,7 +2548,7 @@ static void tcg_gen_callN(void *func, TCGHelperInfo *info,
         init_call_layout(info);
         g_once_init_leave(HELPER_INFO_INIT(info), HELPER_INFO_INIT_VAL(info));
     }
-#ifdef CONFIG_TCG_WASM64_BACKEND
+#if defined(CONFIG_EMSCRIPTEN) || defined(CONFIG_TCG_WASM64_BACKEND)
     tcg_register_helper_trace_info(func, info);
 #endif
 

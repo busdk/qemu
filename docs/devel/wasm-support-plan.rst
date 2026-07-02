@@ -4030,6 +4030,78 @@ performance-attribution summaries because the tiny initramfs smoke path did
 not exercise the instrumented virtio block, RNG, serial, display, input, or
 network paths before reaching the marker.
 
+Current W3 Gate Result
+----------------------
+
+The 2026-07-02 W2m-i same-source W3 gate did not pass.  The default-TCI
+artifact and the backend artifact were built from the same worktree after the
+Emscripten helper-trace registry fix.  Chromium ``149.0.7827.55`` ran the
+same generic TuxBoot browser smoke for both artifacts.
+
+Default TCI artifact hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``80d9f6d454cf6db67be94e4ad1959bfbd1c8d528e9fa40bfb01f081430ca0354``.
+* ``qemu-system-x86_64.wasm`` =
+  ``3dc2eb2be0621c7b0529d46548919da15de78cec93590a04ca379f5ecf4d92a3``.
+* manifest =
+  ``e04afedae3f7c4d1f3bf564a8939e2dc9fd18f085a623fb454a3ca65f5b95f3a``.
+
+Backend artifact hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``e0427b20588b21713f707f356d4a953612af2a96e86c15cc8098a96b42b6f705``.
+* ``qemu-system-x86_64.wasm`` =
+  ``65a859799606b69409336187b3b5aabe913357e7c62fb0514223bf6b81f5f442``.
+* manifest =
+  ``2d4955657d0ca37d47a44c4899d6fd29e09b5f3301b8e32c6d3d191a8c7e833b``.
+
+The default-TCI smoke reached ``QEMU_WASM_LINUX_BOOT_OK`` in ``100668`` ms
+and wrote:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-dispatch-default-tci-smoke/wasm-browser-smoke-result.json``
+
+That result JSON SHA-256 is
+``637e55f945536cf6cd0ca2196718945f84bd832ee1e98393904719c8e63bbe55``.
+
+The backend smoke reached the same marker in ``98845`` ms and wrote:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-dispatch-backend-smoke2/wasm-browser-smoke-result.json``
+
+That result JSON SHA-256 is
+``e89ffa1686d1b30101da0cd0e8bc27e826e795802f4f213b1b626356b53f2a9f``.
+
+The backend was only about ``1.8%`` faster than default TCI.  The gate
+requires at least ``25%``.  A longer backend diagnostic from the same artifact
+timed out under instrumentation but reported ``generated_compiled=1270``,
+``generated_executed=42761657``, and ``generated_cache_hits=42760432`` within
+the narrow ``generated_executed/subset_attempts`` basis.  That basis no longer
+predicts wall-clock speed: the generated path still routes through the TCI
+execution boundary instead of replacing enough hot translation-block execution.
+
+A structural SMP check was also slower.  The default artifact with ``-smp 2``
+and the smoke runner's default ``tcg,thread=single`` reached the marker in
+``115290`` ms.  The same artifact with an overriding
+``-accel tcg,thread=multi -smp 2`` reached the marker in ``117638`` ms and
+wrote:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-structural-smp2-mttcg-default-smoke/wasm-browser-smoke-result.json``
+
+That result JSON SHA-256 is
+``4b6158690b25ea18387ae9997eb8aeb33c1ff56c5c4a1e0a69d9353440cfb7c8``.
+
+The next QEMU execution item must therefore change the structural hot path:
+generated-available TBs need to execute from the wasm64 backend without
+re-entering ``tcg_tci_qemu_tb_exec()`` for the same TB, while preserving strict
+TCI fallback.  Adding more individual opcodes or enabling more guest CPUs is
+not the next evidence-backed path.
+
+QEMU startup preinitialization is allowed for future measurement if it does
+not skip Linux boot or the multi-user readiness proof.  Current generic-smoke
+measurements show ``import-qemu-module`` plus ``start-qemu`` below one second,
+so preinitializing QEMU startup state is not the next high-leverage patch
+unless Bus Engine OS-specific measurements show a different startup profile.
+
 Generated WebAssembly Execution Design
 --------------------------------------
 

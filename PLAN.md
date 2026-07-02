@@ -1011,6 +1011,70 @@ Engineering rules for this goal:
   wall-clock boot. This historical failure is superseded by W2m-i coverage
   evidence; rerun W3 next with current same-commit default-TCI and backend
   artifacts.
+  Current W2m-i gate attempt, 2026-07-02, also failed. The current backend
+  artifact was rebuilt after the default-TCI helper-trace build fix and
+  produced the same hashes as W2m-i: JS
+  `e0427b20588b21713f707f356d4a953612af2a96e86c15cc8098a96b42b6f705`,
+  WASM `65a859799606b69409336187b3b5aabe913357e7c62fb0514223bf6b81f5f442`,
+  manifest
+  `2d4955657d0ca37d47a44c4899d6fd29e09b5f3301b8e32c6d3d191a8c7e833b`.
+  The same-source default-TCI artifact hashes were JS
+  `80d9f6d454cf6db67be94e4ad1959bfbd1c8d528e9fa40bfb01f081430ca0354`,
+  WASM `3dc2eb2be0621c7b0529d46548919da15de78cec93590a04ca379f5ecf4d92a3`,
+  manifest
+  `e04afedae3f7c4d1f3bf564a8939e2dc9fd18f085a623fb454a3ca65f5b95f3a`.
+  Both ran in Chromium `149.0.7827.55` using the generic TuxBoot smoke
+  manifest. Default TCI reached `QEMU_WASM_LINUX_BOOT_OK` in `100668` ms
+  with result JSON
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-dispatch-default-tci-smoke/wasm-browser-smoke-result.json`
+  and SHA-256
+  `637e55f945536cf6cd0ca2196718945f84bd832ee1e98393904719c8e63bbe55`.
+  The backend reached the same marker in `98845` ms with result JSON
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-dispatch-backend-smoke2/wasm-browser-smoke-result.json`
+  and SHA-256
+  `e89ffa1686d1b30101da0cd0e8bc27e826e795802f4f213b1b626356b53f2a9f`.
+  That is only about `1.8%` faster, not the required `25%` faster. The
+  backend diagnostic from the same artifact timed out under instrumentation
+  but reported `generated_compiled=1270`, `generated_executed=42761657`,
+  and `generated_cache_hits=42760432` within its narrow
+  `generated_executed/subset_attempts` basis. This proves the current
+  generated-subset accounting is not the W3 gate metric: the backend still
+  does not move enough wall-clock time because generated execution is reached
+  through the TCI-routed path rather than replacing the hot TB execution path
+  broadly enough.
+  A structural SMP probe also rejected parallel guest CPUs as an immediate
+  generic-smoke fix. The default artifact with `-smp 2` and the runner's
+  default `tcg,thread=single` reached the marker in `115290` ms. The same
+  artifact with an overriding `-accel tcg,thread=multi -smp 2` reached the
+  marker in `117638` ms with result JSON
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-structural-smp2-mttcg-default-smoke/wasm-browser-smoke-result.json`
+  and SHA-256
+  `4b6158690b25ea18387ae9997eb8aeb33c1ff56c5c4a1e0a69d9353440cfb7c8`.
+  The command did expose two guest CPUs, but it was slower than the
+  single-vCPU default smoke. Do not pursue SMP/MTTCG as the next W3 path
+  without new attribution.
+- [ ] W2m-j - Replace or bypass the TCI-routed generated-subset hot path
+  before another W3 browser speed gate. DoD: either generated-available TBs
+  enter from `tcg_wasm64_tb_exec()` without calling `tcg_tci_qemu_tb_exec()`
+  for those TBs, or the plan records concrete evidence that this direct
+  boundary cannot preserve guest-visible semantics. Strict fallback remains:
+  unsupported, invalidated, compile-failed, or runtime-failed TBs must execute
+  through TCI. The result JSON must report total TB entries, direct generated
+  TB executions, TCI fallback executions, generated compile/cache counts, and
+  per-reason fallback counts using a denominator that predicts wall-clock
+  movement. Prediction: this is the next QEMU-side path with measured leverage
+  because W2m-i showed high narrow-subset execution counts but only `1.8%`
+  W3 wall-clock improvement; the missing mechanism is replacing the hot TCI
+  dispatch path, not adding another opcode to the subset.
+- [ ] W2m-k - Measure QEMU startup preinitialization only if a cheap
+  harness-level measurement shows startup is material on the Bus Engine OS
+  path. Preinitialized QEMU state is allowed for this goal only when it does
+  not skip the Linux boot or multi-user readiness proof. Do not use
+  hibernation, post-boot guest snapshots, or service-ready VM images for the
+  current five-minute cold-boot goal. Current generic-smoke evidence shows
+  `import-qemu-module` plus `start-qemu` below one second, so QEMU startup
+  preserialization is not the next implementation lane unless Bus Engine OS
+  measurements contradict that.
 - [ ] W4 - Run the Bus Engine OS `virtual-server` browser proof from the
   gated backend artifact.
   DoD: Chrome/Chromium proof with the accepted `virtual-server` kernel and
