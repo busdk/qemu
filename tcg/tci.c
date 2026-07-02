@@ -763,6 +763,7 @@ static bool tci_wasm_generated_opcode_supported(TCGOpcode opc)
     case INDEX_op_xor:
     case INDEX_op_ld32u:
     case INDEX_op_tci_setcond32:
+    case INDEX_op_brcond:
     case INDEX_op_exit_tb:
     case INDEX_op_goto_tb:
         return true;
@@ -784,6 +785,17 @@ static bool tci_wasm_generated_prevalidate(TCIWasmSubsetEntry *entry,
         if (!tci_wasm_generated_opcode_supported(opc)) {
             return tci_wasm_generated_mark_unsupported(entry, opc);
         }
+        if (opc == INDEX_op_brcond) {
+            const uint32_t *tb_ptr = insn_ptr + 1;
+            TCGReg r0;
+            void *ptr;
+
+            tci_args_rl(insn, tb_ptr, &r0, &ptr);
+            if (!tci_wasm_subset_target_ok(tb_start, ptr) ||
+                ptr <= (void *)insn_ptr) {
+                return tci_wasm_generated_mark_unsupported(entry, opc);
+            }
+        }
         if (opc == INDEX_op_exit_tb || opc == INDEX_op_goto_tb) {
             return true;
         }
@@ -795,8 +807,9 @@ static bool tci_wasm_generated_prevalidate(TCIWasmSubsetEntry *entry,
 EM_JS(uintptr_t, tci_wasm_generated_compile_js,
       (uintptr_t tb_arg, uint64_t max_ops_arg, int op_mov, int op_movi,
        int op_movl, int op_add, int op_sub, int op_mul, int op_and, int op_or,
-       int op_xor, int op_ld32u, int op_setcond32, int op_exit_tb,
-       int op_goto_tb, int ctx_regs_offset, int ctx_ret_offset),
+       int op_xor, int op_ld32u, int op_setcond32, int op_brcond,
+       int op_exit_tb, int op_goto_tb, int ctx_regs_offset,
+       int ctx_ret_offset),
 {
     const tb = Number(tb_arg);
     const maxOps = Number(max_ops_arg);
@@ -903,6 +916,18 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
         return [...expr, 0xad];
     }
 
+    function block(body) {
+        return [0x02, 0x40, ...body, 0x0b];
+    }
+
+    function brIf(depth, condition) {
+        return [...condition, 0x0d, ...encodeU32(depth)];
+    }
+
+    function i64Truthy(expr) {
+        return [...expr, 0x50, 0x45];
+    }
+
     function i32Compare(lhs, rhs, condition) {
         switch (condition) {
         case 0: /* TCG_COND_NEVER */
@@ -957,12 +982,22 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
         return HEAPU64[Number(address) >> 3];
     }
 
+    function targetIndexFromPtr(ptr) {
+        const offset = Number(ptr) - tb;
+
+        if (offset < 0 || offset % 4 !== 0) {
+            return -1;
+        }
+        return offset / 4;
+    }
+
     function regLocal(reg) {
         return 3 + Number(reg);
     }
 
     function compileFunction() {
         const instructions = [];
+        const ops = [];
         let terminal = null;
 
         instructions.push(...localSet(1, i64Load(localGet(0), ctx_regs_offset)));
@@ -982,62 +1017,7 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
             const r1 = bits(insn, 12, 4);
             const r2 = bits(insn, 16, 4);
 
-            if (opc === op_mov) {
-                instructions.push(...localSet(regLocal(r0),
-                                              localGet(regLocal(r1))));
-            } else if (opc === op_movi) {
-                instructions.push(...localSet(regLocal(r0),
-                                              i64Const(sextract(insn, 12, 20))));
-            } else if (opc === op_movl) {
-                const ptr = BigInt(tbPtr + sextract(insn, 12, 20));
-                instructions.push(...localSet(regLocal(r0),
-                                              i64Const(readU64(ptr))));
-            } else if (opc === op_add || opc === op_sub || opc === op_mul ||
-                       opc === op_and || opc === op_or || opc === op_xor) {
-                instructions.push(...localGet(regLocal(r1)),
-                                  ...localGet(regLocal(r2)));
-                if (opc === op_add) {
-                    instructions.push(0x7c); /* i64.add */
-                } else if (opc === op_sub) {
-                    instructions.push(0x7d); /* i64.sub */
-                } else if (opc === op_mul) {
-                    instructions.push(0x7e); /* i64.mul */
-                } else if (opc === op_and) {
-                    instructions.push(0x83); /* i64.and */
-                } else if (opc === op_or) {
-                    instructions.push(0x84); /* i64.or */
-                } else {
-                    instructions.push(0x85); /* i64.xor */
-                }
-                instructions.push(0x21, ...encodeU32(regLocal(r0)));
-            } else if (opc === op_ld32u) {
-                const ofs = sextract(insn, 16, 16);
-
-                instructions.push(
-                    ...localSet(regLocal(r0), [
-                        ...i32Load([
-                            ...localGet(regLocal(r1)),
-                            ...i64Const(ofs),
-                            0x7c, /* i64.add */
-                        ], 0),
-                        0xad, /* i64.extend_i32_u */
-                    ])
-                );
-            } else if (opc === op_setcond32) {
-                const condition = bits(insn, 20, 4);
-                const comparison = i32Compare(
-                    i32WrapI64(localGet(regLocal(r1))),
-                    i32WrapI64(localGet(regLocal(r2))),
-                    condition
-                );
-
-                if (comparison === null) {
-                    return 0;
-                }
-                instructions.push(
-                    ...localSet(regLocal(r0), i64ExtendI32U(comparison))
-                );
-            } else if (opc === op_exit_tb || opc === op_goto_tb) {
+            if (opc === op_exit_tb || opc === op_goto_tb) {
                 const ptr = BigInt(tbPtr + sextract(insn, 12, 20));
                 terminal = {
                     kind: opc === op_goto_tb ? "goto_tb" : "exit_tb",
@@ -1046,12 +1026,128 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
                 };
                 break;
             } else {
-                return 0;
+                ops.push({
+                    index,
+                    insn,
+                    tbPtr,
+                    opc,
+                    r0,
+                    r1,
+                    r2,
+                });
             }
         }
 
         if (terminal === null) {
             return 0;
+        }
+
+        function compileOp(op) {
+            const { insn, tbPtr, opc, r0, r1, r2 } = op;
+
+            if (opc === op_mov) {
+                return localSet(regLocal(r0), localGet(regLocal(r1)));
+            } else if (opc === op_movi) {
+                return localSet(regLocal(r0),
+                                i64Const(sextract(insn, 12, 20)));
+            } else if (opc === op_movl) {
+                const ptr = BigInt(tbPtr + sextract(insn, 12, 20));
+                return localSet(regLocal(r0), i64Const(readU64(ptr)));
+            } else if (opc === op_add || opc === op_sub || opc === op_mul ||
+                       opc === op_and || opc === op_or || opc === op_xor) {
+                const code = [
+                    ...localGet(regLocal(r1)),
+                    ...localGet(regLocal(r2)),
+                ];
+
+                if (opc === op_add) {
+                    code.push(0x7c); /* i64.add */
+                } else if (opc === op_sub) {
+                    code.push(0x7d); /* i64.sub */
+                } else if (opc === op_mul) {
+                    code.push(0x7e); /* i64.mul */
+                } else if (opc === op_and) {
+                    code.push(0x83); /* i64.and */
+                } else if (opc === op_or) {
+                    code.push(0x84); /* i64.or */
+                } else {
+                    code.push(0x85); /* i64.xor */
+                }
+                code.push(0x21, ...encodeU32(regLocal(r0)));
+                return code;
+            } else if (opc === op_ld32u) {
+                const ofs = sextract(insn, 16, 16);
+
+                return localSet(regLocal(r0), [
+                    ...i32Load([
+                        ...localGet(regLocal(r1)),
+                        ...i64Const(ofs),
+                        0x7c, /* i64.add */
+                    ], 0),
+                    0xad, /* i64.extend_i32_u */
+                ]);
+            } else if (opc === op_setcond32) {
+                const condition = bits(insn, 20, 4);
+                const comparison = i32Compare(
+                    i32WrapI64(localGet(regLocal(r1))),
+                    i32WrapI64(localGet(regLocal(r2))),
+                    condition
+                );
+
+                return comparison === null
+                    ? null
+                    : localSet(regLocal(r0), i64ExtendI32U(comparison));
+            }
+            return null;
+        }
+
+        function compileRange(start, end) {
+            const code = [];
+
+            for (let index = start; index < end;) {
+                const op = ops[index];
+
+                if (op === undefined || op.index !== index) {
+                    return null;
+                }
+                if (op.opc === op_brcond) {
+                    const targetPtr = op.tbPtr + sextract(op.insn, 12, 20);
+                    const targetIndex = targetIndexFromPtr(targetPtr);
+
+                    if (targetIndex <= index || targetIndex > end) {
+                        return null;
+                    }
+                    const body = compileRange(index + 1, targetIndex);
+
+                    if (body === null) {
+                        return null;
+                    }
+                    code.push(...block([
+                        ...brIf(0, i64Truthy(localGet(regLocal(op.r0)))),
+                        ...body,
+                    ]));
+                    index = targetIndex;
+                    continue;
+                }
+
+                const compiled = compileOp(op);
+
+                if (compiled === null) {
+                    return null;
+                }
+                code.push(...compiled);
+                index++;
+            }
+            return code;
+        }
+
+        {
+            const body = compileRange(0, ops.length);
+
+            if (body === null) {
+                return 0;
+            }
+            instructions.push(...body);
         }
 
         for (let reg = 0; reg < 16; reg++) {
@@ -1462,7 +1558,7 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
             INDEX_op_tci_movi, INDEX_op_tci_movl, INDEX_op_add,
             INDEX_op_sub, INDEX_op_mul, INDEX_op_and, INDEX_op_or,
             INDEX_op_xor, INDEX_op_ld32u, INDEX_op_tci_setcond32,
-            INDEX_op_exit_tb, INDEX_op_goto_tb,
+            INDEX_op_brcond, INDEX_op_exit_tb, INDEX_op_goto_tb,
             (int)TCI_WASM_GENERATED_CTX_REGS_OFFSET,
             (int)TCI_WASM_GENERATED_CTX_RET_OFFSET);
         if (entry->generated_func == 0) {

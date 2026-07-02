@@ -296,11 +296,35 @@ Engineering rules for this goal:
   Live rejection moved to `brcond=2934` and `st8=1`; wall-clock time did not
   improve enough for W3, so the next work remains lowering coverage rather
   than a Bus Engine OS proof.
-- [ ] W2f - Lower live generated `brcond` without weakening fallback
+- [x] W2f - Lower live generated `brcond` without weakening fallback
   semantics. DoD: implement only the forward-branch forms that can be
   represented safely in the generated WebAssembly block, keep unsupported or
   complex branch shapes on TCI fallback, run the generated-only generic
   Chromium smoke, and record the next `top_generated_unsupported_ops` list.
+  Accepted evidence: the backend artifact at
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2g-brcond`
+  was built with `--enable-tcg-wasm64-backend` and
+  `--disable-tcg-interpreter`. Artifact hashes: JS
+  `9e947c2eefeb5c1cc4ce1e46493bd49c7b39cce52c0b49fbcdd5a004a429350b`,
+  WASM `128b432fdf4c4304372af8f6317ebfaf3fcb1cf0d7c3dc54d0967fa1d3cfca29`,
+  manifest
+  `e356c7050b6e11e5acab057a8cf7b42d83ad08fe36aa45cd0fb1557eafdaeefe`.
+  Chromium `141.0.7390.37` reached `QEMU_WASM_LINUX_BOOT_OK` in
+  `106628` ms with generated-only subset reporting enabled. Result JSON:
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2g-brcond-subset-live/wasm-browser-smoke-result.json`
+  (SHA-256
+  `f1079cc23fd69d35d334368bc62bf5a765047d12353d878ad761b265c0cff7bd`).
+  The final generated summary reported `generated_compiled=4`,
+  `generated_executed=15519`, `generated_cache_hits=15515`,
+  `generated_compile_failed=0`, and the next live rejection list moved to
+  `st8=2273` plus `brcond=2`. This accepts the forward-branch lowering
+  slice but does not complete W2 or W3.
+- [ ] W2g - Lower live generated `st8` while preserving strict fallback
+  semantics. DoD: implement byte-store lowering only for address forms that
+  can use the existing generated memory path safely, keep unsupported store
+  shapes on TCI fallback, run the generated-only generic Chromium smoke, and
+  record the next `top_generated_unsupported_ops` list before deciding
+  whether to expand lowering or rerun W3.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and
@@ -332,7 +356,7 @@ Engineering rules for this goal:
   nonzero generated counters (`generated_compiled=5`,
   `generated_executed=15363`, `generated_cache_hits=15358`,
   `fallback_unsupported=2510`), but coverage is too small to improve
-  wall-clock boot. Current live attribution now points to W2f.
+  wall-clock boot. Current live attribution now points to W2g.
 - [ ] W4 - Run the Bus Engine OS `virtual-server` browser proof from the
   gated backend artifact.
   DoD: Chrome/Chromium proof with the accepted `virtual-server` kernel and

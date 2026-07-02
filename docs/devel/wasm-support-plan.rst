@@ -6078,3 +6078,45 @@ closed to Bus Engine OS long proof.  The next generated lowering target is
 ``brcond``, limited to branch shapes that can be represented safely in the
 generated WebAssembly block while preserving TCI fallback for every unsupported
 or complex case.
+
+Forward brcond generated lowering
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The next accepted slice added conservative generated ``brcond`` lowering for
+forward branch shapes that can be represented as structured WebAssembly
+``block``/``br_if`` control flow.  Backward, malformed, and out-of-range branch
+targets continue to fall back to the TCI interpreter before code generation.
+
+The artifact was built with:
+
+.. code-block:: console
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2g-brcond \
+    --jobs auto \
+    --configure-arg=--disable-tcg-interpreter \
+    --configure-arg=--enable-tcg-wasm64-backend
+
+Hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``9e947c2eefeb5c1cc4ce1e46493bd49c7b39cce52c0b49fbcdd5a004a429350b``
+* ``qemu-system-x86_64.wasm`` =
+  ``128b432fdf4c4304372af8f6317ebfaf3fcb1cf0d7c3dc54d0967fa1d3cfca29``
+* manifest =
+  ``e356c7050b6e11e5acab057a8cf7b42d83ad08fe36aa45cd0fb1557eafdaeefe``
+
+The generated-only Chromium smoke used Chromium ``141.0.7390.37`` and reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``106628`` ms.  Result JSON:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2g-brcond-subset-live/wasm-browser-smoke-result.json``
+
+Result SHA-256:
+``f1079cc23fd69d35d334368bc62bf5a765047d12353d878ad761b265c0cff7bd``.
+
+The final generated summary reported ``generated_compiled=4``,
+``generated_executed=15519``, ``generated_cache_hits=15515``, and
+``generated_compile_failed=0``.  Live generated rejection moved from
+``brcond=2934`` to ``st8=2273`` plus ``brcond=2``.  This confirms the forward
+``brcond`` slice is safe enough for the generic smoke, but W2 and W3 remain
+open.  The next measured lowering target is ``st8``.
