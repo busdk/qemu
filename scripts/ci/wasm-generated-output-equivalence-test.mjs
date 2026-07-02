@@ -31,6 +31,8 @@ const OPS = {
   tci_movi: 125,
   tci_movl: 126,
   tci_setcond32: 136,
+  tci_qemu_ld_rrr: 138,
+  tci_qemu_st_rrr: 139,
 };
 
 const STATUS_EXIT = 1n;
@@ -110,6 +112,10 @@ function i32Store8(address, value, offset = 0) {
 
 function block(body) {
   return [0x02, 0x40, ...body, 0x0b];
+}
+
+function callFunc(index, args) {
+  return [...args.flat(), 0x10, ...encodeU32(index)];
 }
 
 function brIf(depth, condition) {
@@ -374,6 +380,23 @@ function compileGeneratedOutputModule(words, relativeBase) {
       return comparison === null ? null
         : localSet(regLocal(r0), i64ExtendI32U(comparison));
     }
+    if (opc === OPS.tci_qemu_ld_rrr) {
+      return localSet(regLocal(r0), callFunc(0, [
+        localGet(regLocal(14)),
+        localGet(regLocal(r1)),
+        localGet(regLocal(r2)),
+        i64Const(op.tbPtr),
+      ]));
+    }
+    if (opc === OPS.tci_qemu_st_rrr) {
+      return callFunc(1, [
+        localGet(regLocal(14)),
+        localGet(regLocal(r1)),
+        localGet(regLocal(r0)),
+        localGet(regLocal(r2)),
+        i64Const(op.tbPtr),
+      ]);
+    }
     return null;
   }
 
@@ -436,10 +459,20 @@ function compileGeneratedOutputModule(words, relativeBase) {
   return Uint8Array.from([
     0x00, 0x61, 0x73, 0x6d,
     0x01, 0x00, 0x00, 0x00,
-    ...section(1, vector([functionType([VALUE_I32], [VALUE_I64])])),
-    ...section(2, vector([[...name("env"), ...name("memory"), 0x02, 0x00, 0x01]])),
+    ...section(1, vector([
+      functionType([VALUE_I32], [VALUE_I64]),
+      functionType([VALUE_I64, VALUE_I64, VALUE_I64, VALUE_I64],
+                   [VALUE_I64]),
+      functionType([VALUE_I64, VALUE_I64, VALUE_I64, VALUE_I64, VALUE_I64],
+                   []),
+    ])),
+    ...section(2, vector([
+      [...name("env"), ...name("memory"), 0x02, 0x00, 0x01],
+      [...name("env"), ...name("qemu_ld_rrr"), 0x00, ...encodeU32(1)],
+      [...name("env"), ...name("qemu_st_rrr"), 0x00, ...encodeU32(2)],
+    ])),
     ...section(3, vector([[0x00]])),
-    ...section(7, vector([[...name("run"), 0x00, ...encodeU32(0)]])),
+    ...section(7, vector([[...name("run"), 0x00, ...encodeU32(2)]])),
     ...section(10, vector([functionBody(
       instructions,
       [{ count: 2, type: VALUE_I32 }, { count: 16, type: VALUE_I64 }],
@@ -483,6 +516,16 @@ function interpretGeneratedOutput(words, state, relativeBase) {
       const condition = bits(insn, 20, 4);
       regs[r0] = compare32(regs[r1], regs[r2], condition);
       index++;
+    } else if (opc === OPS.tci_qemu_ld_rrr) {
+      const taddr = regs[r1];
+      const oi = regs[r2];
+      regs[r0] = state.helpers.qemuLd(regs[14], taddr, oi, BigInt(tbPtr));
+      index++;
+    } else if (opc === OPS.tci_qemu_st_rrr) {
+      const taddr = regs[r1];
+      const oi = regs[r2];
+      state.helpers.qemuSt(regs[14], taddr, regs[r0], oi, BigInt(tbPtr));
+      index++;
     } else if (opc === OPS.brcond) {
       const ptr = tbPtr + sextract(insn, 12, 20);
       index = regs[r0] !== 0n ? targetIndexFromPtr(ptr, relativeBase)
@@ -522,6 +565,44 @@ function interpretGeneratedOutput(words, state, relativeBase) {
   }
 }
 
+function createHelpers(view) {
+  const calls = [];
+
+  return {
+    calls,
+    qemuLd(env, taddr, oi, tbPtr) {
+      const address = Number(taddr);
+      const value = view.getBigUint64(address, true);
+      const result = toU64(value ^ env ^ (oi << 8n) ^ tbPtr);
+
+      calls.push({
+        kind: "ld",
+        env: env.toString(),
+        taddr: taddr.toString(),
+        oi: oi.toString(),
+        tbPtr: tbPtr.toString(),
+        result: result.toString(),
+      });
+      return result;
+    },
+    qemuSt(env, taddr, val, oi, tbPtr) {
+      const address = Number(taddr);
+      const stored = toU64(val ^ env ^ (oi << 8n) ^ tbPtr);
+
+      view.setBigUint64(address, stored, true);
+      calls.push({
+        kind: "st",
+        env: env.toString(),
+        taddr: taddr.toString(),
+        val: val.toString(),
+        oi: oi.toString(),
+        tbPtr: tbPtr.toString(),
+        stored: stored.toString(),
+      });
+    },
+  };
+}
+
 function createState(relativeBase, words, seed) {
   const memory = new WebAssembly.Memory({ initial: 1 });
   const view = new DataView(memory.buffer);
@@ -539,6 +620,7 @@ function createState(relativeBase, words, seed) {
   view.setBigUint64(ctxPtr, BigInt(regsPtr), true);
   view.setBigUint64(ctxPtr + 8, BigInt(retPtr), true);
   view.setUint32(dataBase, seed % 2 === 0 ? 0xffffffff : 7, true);
+  view.setBigUint64(dataBase + 0x10, BigInt(0x400000000 + seed), true);
   view.setBigUint64(dataBase + 0x100, BigInt(0x100000000 + seed), true);
   view.setBigUint64(dataBase + 0x110, BigInt(0x200000000 + seed), true);
   view.setBigUint64(dataBase + 0x118, BigInt(0x300000000 + seed), true);
@@ -555,20 +637,35 @@ function createState(relativeBase, words, seed) {
     view.setBigUint64(regsPtr + reg * 8, regs[reg], true);
   }
 
-  return { memory, view, ctxPtr, regsPtr, retPtr, dataBase, regs };
+  return {
+    memory,
+    view,
+    ctxPtr,
+    regsPtr,
+    retPtr,
+    dataBase,
+    regs,
+    helpers: createHelpers(view),
+  };
 }
 
-function captureState(view, regsPtr, retPtr, dataBase) {
+function captureState(view, regsPtr, retPtr, dataBase, helpers) {
   return {
     regs: Array.from({ length: 16 }, (_, reg) =>
       view.getBigUint64(regsPtr + reg * 8, true).toString()),
     ret: view.getBigUint64(retPtr, true).toString(),
     data: [
       view.getUint32(dataBase, true),
+      view.getBigUint64(dataBase + 0x10, true).toString(),
       view.getBigUint64(dataBase + 0x100, true).toString(),
       view.getBigUint64(dataBase + 0x110, true).toString(),
       view.getBigUint64(dataBase + 0x118, true).toString(),
     ],
+    helpers: {
+      calls: helpers.calls,
+      loads: helpers.calls.filter((call) => call.kind === "ld").length,
+      stores: helpers.calls.filter((call) => call.kind === "st").length,
+    },
   };
 }
 
@@ -580,11 +677,16 @@ async function runFixture(fixture, seed) {
   const moduleBytes = compileGeneratedOutputModule(fixture.words, relativeBase);
   const compiled = await WebAssembly.compile(moduleBytes);
   const instance = await WebAssembly.instantiate(compiled, {
-    env: { memory: generated.memory },
+    env: {
+      memory: generated.memory,
+      qemu_ld_rrr: generated.helpers.qemuLd,
+      qemu_st_rrr: generated.helpers.qemuSt,
+    },
   });
   const status = instance.exports.run(generated.ctxPtr);
   const generatedState = captureState(generated.view, generated.regsPtr,
-                                      generated.retPtr, generated.dataBase);
+                                      generated.retPtr, generated.dataBase,
+                                      generated.helpers);
 
   for (let reg = 0; reg < expected.regs.length; reg++) {
     reference.view.setBigUint64(reference.regsPtr + reg * 8,
@@ -592,7 +694,8 @@ async function runFixture(fixture, seed) {
   }
   reference.view.setBigUint64(reference.retPtr, expected.ret, true);
   const referenceState = captureState(reference.view, reference.regsPtr,
-                                      reference.retPtr, reference.dataBase);
+                                      reference.retPtr, reference.dataBase,
+                                      reference.helpers);
 
   assert.equal(status, expected.status, `${fixture.name} status mismatch`);
   assert.deepEqual(generatedState, referenceState,
@@ -603,6 +706,7 @@ async function runFixture(fixture, seed) {
     seed,
     status: status.toString(),
     ret: generatedState.ret,
+    helpers: generatedState.helpers,
   };
 }
 
@@ -638,9 +742,33 @@ const fixtures = [
       0x0000147d, 0xfff4e435, 0xfff10048,
     ],
   },
+  {
+    name: "qemu-ld-st-helper-boundary",
+    terminal: "exit_tb",
+    relativeBase: 0x5400,
+    words: [
+      OPS.tci_qemu_ld_rrr | (3 << 8) | (14 << 12) | (13 << 16),
+      OPS.add | (3 << 8) | (3 << 12) | (5 << 16),
+      OPS.tci_qemu_st_rrr | (3 << 8) | (14 << 12) | (13 << 16),
+      OPS.exit_tb,
+    ],
+  },
+];
+
+const unsupportedFixtures = [
+  {
+    name: "qemu-helper-mixed-unsupported-fallback",
+    relativeBase: 0x5800,
+    words: [
+      OPS.tci_qemu_ld_rrr | (3 << 8) | (14 << 12) | (13 << 16),
+      OPS.call,
+      OPS.exit_tb,
+    ],
+  },
 ];
 
 const results = [];
+const unsupportedResults = [];
 
 for (const fixture of fixtures) {
   for (const seed of [1, 2]) {
@@ -648,13 +776,32 @@ for (const fixture of fixtures) {
   }
 }
 
-assert.equal(results.length, 6);
+for (const fixture of unsupportedFixtures) {
+  assert.throws(
+    () => compileGeneratedOutputModule(fixture.words, fixture.relativeBase),
+    /unsupported generated-output shape/,
+    `${fixture.name} should fail closed`,
+  );
+  unsupportedResults.push(fixture.name);
+}
+
+assert.equal(results.length, 8);
 assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 4);
-assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 2);
+assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 4);
+const helperBoundaryResults = results.filter((entry) =>
+  entry.helpers.loads > 0 || entry.helpers.stores > 0);
 console.log(JSON.stringify({
   format: 1,
   event: "generated-output-equivalence",
   fixtures: results.length,
+  unsupportedFixtures: unsupportedResults.length,
+  helperBoundaryFixtures: helperBoundaryResults.length,
+  helperCalls: {
+    loads: helperBoundaryResults.reduce((count, entry) =>
+      count + entry.helpers.loads, 0),
+    stores: helperBoundaryResults.reduce((count, entry) =>
+      count + entry.helpers.stores, 0),
+  },
   terminals: {
     goto_tb: results.filter((entry) => entry.terminal === "goto_tb").length,
     exit_tb: results.filter((entry) => entry.terminal === "exit_tb").length,

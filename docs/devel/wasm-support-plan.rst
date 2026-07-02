@@ -6852,3 +6852,64 @@ for ``tci_qemu_ld_rrr`` and ``tci_qemu_st_rrr`` before any Chromium
 measurement.  The local test should compare generated helper calls with a
 reference interpreter for trace-shaped qemu memory blocks, including helper
 call counts, register updates, memory side effects, and fallback results.
+
+W2m-e deterministic qemu memory helper boundary
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The deterministic generated-output gate now models the qemu memory helper
+boundary used by ``tci_qemu_ld_rrr`` and ``tci_qemu_st_rrr``.  The local
+generated WebAssembly module imports two helper functions,
+``qemu_ld_rrr`` and ``qemu_st_rrr``, and calls them with the translated
+``env`` pointer, guest address, store value when applicable, ``MemOpIdx``,
+and TB return address.  The reference interpreter uses the same helper model.
+
+The local gate compares:
+
+* generated status;
+* return target;
+* the 16 TCI registers;
+* helper call traces;
+* helper load/store counts;
+* helper-modeled memory side effects;
+* representative memory touched by the block.
+
+The same test also includes a mixed unsupported block so unsupported helper
+output fails closed before execution.
+
+Checks:
+
+.. code-block:: console
+
+  node --check scripts/ci/wasm-generated-output-equivalence-test.mjs
+  node scripts/ci/wasm-generated-output-equivalence-test.mjs
+
+Accepted output:
+
+.. code-block:: json
+
+  {
+    "format": 1,
+    "event": "generated-output-equivalence",
+    "fixtures": 8,
+    "unsupportedFixtures": 1,
+    "helperBoundaryFixtures": 2,
+    "helperCalls": {
+      "loads": 2,
+      "stores": 2
+    },
+    "terminals": {
+      "goto_tb": 4,
+      "exit_tb": 4
+    }
+  }
+
+This slice is a semantic safety gate, not a speed result.  The runtime
+prediction remains the W2m-d attribution: qemu load/store helper support is
+the measured blocker for ``293 / 302`` unavailable generated-output TBs.
+If the runtime implementation preserves this boundary and fallback behavior,
+early generated-output candidate coverage can plausibly move from
+``13 / 315`` TBs, or ``4.1%``, toward roughly ``306 / 315`` TBs, or
+``97.1%``.  The accepted fallback baseline remains ``93186`` ms for the
+generic smoke, projecting Bus Engine OS browser multi-user readiness at
+roughly ``34.7`` to ``45.8`` minutes until runtime generated coverage
+actually increases.

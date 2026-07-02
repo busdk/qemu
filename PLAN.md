@@ -778,14 +778,41 @@ Engineering rules for this goal:
   `306 / 315` TBs (`97.1%`) if implemented with correct fallback. That is the
   next high-leverage mechanism; single-opcode arithmetic work remains
   rejected.
-- [ ] W2m-e - Add a deterministic generated QEMU memory helper boundary for
+- [x] W2m-e - Add a deterministic generated QEMU memory helper boundary for
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` before runtime browser execution.
   DoD: a local generated-output equivalence test models generated calls to
   qemu load/store helpers, compares the resulting registers, memory side
   effects, helper-call counts, and fallback behavior against the reference
   interpreter for trace-shaped qemu memory blocks, and records the predicted
   candidate coverage increase from the W2m-d data. No Chromium run is allowed
-  until this deterministic helper boundary passes.
+  until this deterministic helper boundary passes. Accepted evidence:
+  `scripts/ci/wasm-generated-output-equivalence-test.mjs` now imports
+  generated `qemu_ld_rrr` and `qemu_st_rrr` helper functions into the local
+  generated WebAssembly module, executes a trace-shaped qemu memory block,
+  and compares helper call traces, helper call counts, register state, memory
+  side effects, terminal status, and return target against the reference
+  interpreter. The test also verifies an unsupported mixed helper block fails
+  closed before execution. Checks:
+  `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs` and
+  `node scripts/ci/wasm-generated-output-equivalence-test.mjs`. The accepted
+  output was `8` positive fixture executions, `1` unsupported fail-closed
+  fixture, `2` helper-boundary executions, `2` modeled qemu loads, and `2`
+  modeled qemu stores. This is a deterministic safety gate only. The runtime
+  prediction remains from W2m-d: qemu load/store helper support is the
+  measured blocker for `293 / 302` unavailable generated-output TBs, so the
+  next runtime slice can plausibly move early generated-output candidate
+  coverage from `13 / 315` TBs (`4.1%`) toward roughly `306 / 315` TBs
+  (`97.1%`), subject to compile/runtime fallback.
+- [ ] W2m-f - Wire the runtime generated qemu load/store helper boundary.
+  DoD: the Emscripten generated compiler accepts `tci_qemu_ld_rrr` and
+  `tci_qemu_st_rrr` by calling a narrow helper boundary with
+  `env`, guest address, value for stores, `MemOpIdx`, and TB return address;
+  unsupported helper compilation or runtime failures still fall back through
+  the interpreter with counters. The implementation must pass the
+  deterministic generated-output equivalence test, metadata tests, syntax
+  checks, and a build artifact check before any Chromium run. A Chromium
+  diagnostic run is allowed only after those gates pass and must report
+  generated coverage share, compiled block count, and fallback counts.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and
