@@ -119,6 +119,9 @@ Options:
                      Interval for smoke progress samples in result JSON
   --progress-sample-limit N
                      Maximum smoke progress samples to keep
+  --perf-attribution-tci-interval N
+                     TCI TB-entry interval between CPU attribution summaries
+                     (default: 1000000)
   --qemu-arg ARG     Extra QEMU argument appended to the smoke command
   --require-display-output
                      Require non-black browser display pixels before success
@@ -228,6 +231,7 @@ function parseArgs(argv) {
     pageTextTailBytes: DEFAULT_PAGE_TEXT_TAIL_BYTES,
     performanceAttribution: false,
     performanceAttributionInterval: 10000,
+    performanceAttributionTciInterval: 1000000,
     port: 8010,
     program: "qemu-system-x86_64.js",
     progressSampleIntervalMs: DEFAULT_PROGRESS_SAMPLE_INTERVAL_MS,
@@ -383,6 +387,9 @@ function parseArgs(argv) {
     } else if (arg === "--perf-attribution-interval") {
       options.performanceAttributionInterval = Number(argv[++i]);
       explicit.add("performanceAttributionInterval");
+    } else if (arg === "--perf-attribution-tci-interval") {
+      options.performanceAttributionTciInterval = Number(argv[++i]);
+      explicit.add("performanceAttributionTciInterval");
     } else if (arg === "--port") {
       options.port = Number(argv[++i]);
       explicit.add("port");
@@ -527,6 +534,7 @@ function parseArgs(argv) {
       "pageTextTailBytes",
       "persistentDiskSizeBytes",
       "performanceAttributionInterval",
+      "performanceAttributionTciInterval",
       "port",
       "preKeyboardWaitMs",
       "postKeyboardWaitMs",
@@ -701,6 +709,13 @@ function parseArgs(argv) {
     options.performanceAttributionInterval <= 0
   ) {
     console.error("--perf-attribution-interval must be a positive integer");
+    usage(2);
+  }
+  if (
+    !Number.isInteger(options.performanceAttributionTciInterval) ||
+    options.performanceAttributionTciInterval <= 0
+  ) {
+    console.error("--perf-attribution-tci-interval must be a positive integer");
     usage(2);
   }
   if (!Number.isInteger(options.progressSampleIntervalMs) || options.progressSampleIntervalMs <= 0) {
@@ -1344,6 +1359,10 @@ export function browserSmokeUrl(options) {
       "performanceAttributionInterval",
       String(options.performanceAttributionInterval),
     );
+    url.searchParams.set(
+      "performanceAttributionTciInterval",
+      String(options.performanceAttributionTciInterval),
+    );
   }
   if (tcgHotblocks) {
     url.searchParams.set("tcgHotblocks", "1");
@@ -1447,6 +1466,9 @@ export function initialSmokeResult(options, browserVersion) {
     performanceAttributionInterval: Number.isInteger(options.performanceAttributionInterval)
       ? options.performanceAttributionInterval
       : 10000,
+    performanceAttributionTciInterval: Number.isInteger(options.performanceAttributionTciInterval)
+      ? options.performanceAttributionTciInterval
+      : 1000000,
     guestIdleAfterText: options.guestIdleAfterText,
     guestIdleTimeoutMs: options.guestIdleTimeoutMs,
     progressSampleIntervalMs: options.progressSampleIntervalMs,

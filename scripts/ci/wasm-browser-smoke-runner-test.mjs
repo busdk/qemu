@@ -373,12 +373,22 @@ for (const status of [
       writes: 1,
       write_bytes: 4096,
     },
+    tci: {
+      tb_entries: 1000000,
+      dispatches: 992311,
+      helper_calls: 17,
+      qemu_loads: 23,
+      qemu_stores: 5,
+    },
   });
   const parsed = perfAttributionSummary(line);
   assert.equal(parsed.event, "summary");
   assert.equal(parsed.events, 200);
   assert.equal(parsed.virtio.block.kicks, 4);
   assert.equal(parsed.block.read_bytes, 12288);
+  assert.equal(parsed.tci.tb_entries, 1000000);
+  assert.equal(parsed.tci.dispatches, 992311);
+  assert.equal(parsed.tci.qemu_loads, 23);
   assert.equal(perfAttributionSummary("ordinary serial line"), null);
   assert.equal(perfAttributionSummary("qemu-wasm-perf-attrib: not-json"), null);
 }
@@ -851,6 +861,7 @@ for (const status of [
     network: "none",
     performanceAttribution: true,
     performanceAttributionInterval: 25,
+    performanceAttributionTciInterval: 250000,
     port: 8020,
     powerOperation: "",
     powerTimeoutMs: 30000,
@@ -863,6 +874,7 @@ for (const status of [
 
   assert.equal(url.searchParams.get("performanceAttribution"), "1");
   assert.equal(url.searchParams.get("performanceAttributionInterval"), "25");
+  assert.equal(url.searchParams.get("performanceAttributionTciInterval"), "250000");
 }
 
 {
@@ -1029,6 +1041,7 @@ for (const status of [
     persistentDiskSizeBytes: 33554432,
     performanceAttribution: true,
     performanceAttributionInterval: 25,
+    performanceAttributionTciInterval: 250000,
     preKeyboardWaitMs: 500,
     postKeyboardWaitMs: 250,
     powerOperation: "shutdown",
@@ -1093,6 +1106,7 @@ for (const status of [
   assert.equal(result.idleTimeoutMs, 0);
   assert.equal(result.performanceAttribution, true);
   assert.equal(result.performanceAttributionInterval, 25);
+  assert.equal(result.performanceAttributionTciInterval, 250000);
   assert.equal(result.requireDisplayOutput, true);
   assert.equal(result.displayMinNonblackPixels, 4);
   assert.equal(result.rootfsDevice, "virtio-pci");

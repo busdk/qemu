@@ -13,6 +13,7 @@
 #endif
 
 #define PERF_ATTRIB_DEFAULT_INTERVAL 10000
+#define PERF_ATTRIB_DEFAULT_TCI_INTERVAL 1000000
 #define PERF_ATTRIB_DEFAULT_TIME_INTERVAL_MS 30000
 #define PERF_ATTRIB_WASM_ENV_FILE "/qemu-wasm-perf-attrib-env"
 
@@ -27,6 +28,8 @@ typedef struct PerfAttribState {
     bool enabled;
     uint64_t interval;
     uint64_t next_report;
+    uint64_t tci_interval;
+    uint64_t next_tci_report;
     uint64_t time_interval_ms;
     int64_t next_time_report_ns;
     int64_t started_ns;
@@ -54,6 +57,11 @@ typedef struct PerfAttribState {
     uint64_t display_frames;
     uint64_t display_frame_bytes;
     uint64_t display_key_events;
+    uint64_t tci_tb_entries;
+    uint64_t tci_dispatches;
+    uint64_t tci_helper_calls;
+    uint64_t tci_qemu_loads;
+    uint64_t tci_qemu_stores;
 } PerfAttribState;
 
 static PerfAttribState perf_attrib;
@@ -188,6 +196,10 @@ static void perf_attrib_init(void)
         parse_u64_env("QEMU_WASM_PERF_ATTRIBUTION_INTERVAL",
                       PERF_ATTRIB_DEFAULT_INTERVAL, 1, UINT64_MAX / 2);
     perf_attrib.next_report = perf_attrib.interval;
+    perf_attrib.tci_interval =
+        parse_u64_env("QEMU_WASM_PERF_ATTRIBUTION_TCI_INTERVAL",
+                      PERF_ATTRIB_DEFAULT_TCI_INTERVAL, 1, UINT64_MAX / 2);
+    perf_attrib.next_tci_report = perf_attrib.tci_interval;
     perf_attrib.time_interval_ms =
         parse_u64_env("QEMU_WASM_PERF_ATTRIBUTION_TIME_INTERVAL_MS",
                       PERF_ATTRIB_DEFAULT_TIME_INTERVAL_MS, 1,
@@ -380,6 +392,51 @@ void qemu_perf_attrib_display_key_event(void)
     perf_attrib_count_event();
 }
 
+void qemu_perf_attrib_tci_tb_entry(void)
+{
+    if (!qemu_perf_attrib_enabled()) {
+        return;
+    }
+    perf_attrib.tci_tb_entries++;
+    if (perf_attrib.tci_tb_entries >= perf_attrib.next_tci_report) {
+        perf_attrib_report("tci");
+        perf_attrib.next_tci_report =
+            perf_attrib.tci_tb_entries + perf_attrib.tci_interval;
+    }
+}
+
+void qemu_perf_attrib_tci_dispatch(void)
+{
+    if (!qemu_perf_attrib_enabled()) {
+        return;
+    }
+    perf_attrib.tci_dispatches++;
+}
+
+void qemu_perf_attrib_tci_helper_call(void)
+{
+    if (!qemu_perf_attrib_enabled()) {
+        return;
+    }
+    perf_attrib.tci_helper_calls++;
+}
+
+void qemu_perf_attrib_tci_qemu_load(void)
+{
+    if (!qemu_perf_attrib_enabled()) {
+        return;
+    }
+    perf_attrib.tci_qemu_loads++;
+}
+
+void qemu_perf_attrib_tci_qemu_store(void)
+{
+    if (!qemu_perf_attrib_enabled()) {
+        return;
+    }
+    perf_attrib.tci_qemu_stores++;
+}
+
 static void report_virtio_counter(const char *name,
                                   const PerfAttribVirtioCounters *counters)
 {
@@ -438,7 +495,12 @@ static void perf_attrib_report(const char *reason)
             ",\"guest_to_host\":%" PRIu64
             ",\"guest_to_host_bytes\":%" PRIu64 "},"
             "\"display\":{\"frames\":%" PRIu64
-            ",\"frame_bytes\":%" PRIu64 ",\"key_events\":%" PRIu64 "}}\n",
+            ",\"frame_bytes\":%" PRIu64 ",\"key_events\":%" PRIu64 "},"
+            "\"tci\":{\"tb_entries\":%" PRIu64
+            ",\"dispatches\":%" PRIu64
+            ",\"helper_calls\":%" PRIu64
+            ",\"qemu_loads\":%" PRIu64
+            ",\"qemu_stores\":%" PRIu64 "}}\n",
             perf_attrib.block_reads,
             perf_attrib.block_read_bytes,
             perf_attrib.block_writes,
@@ -453,5 +515,10 @@ static void perf_attrib_report(const char *reason)
             perf_attrib.serial_guest_to_host_bytes,
             perf_attrib.display_frames,
             perf_attrib.display_frame_bytes,
-            perf_attrib.display_key_events);
+            perf_attrib.display_key_events,
+            perf_attrib.tci_tb_entries,
+            perf_attrib.tci_dispatches,
+            perf_attrib.tci_helper_calls,
+            perf_attrib.tci_qemu_loads,
+            perf_attrib.tci_qemu_stores);
 }

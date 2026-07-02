@@ -61,6 +61,13 @@ weaker marker than normal multi-user readiness.
 ## Active Work Items
 
 - [x] Keep `PLAN.md` limited to the current five-minute multi-user boot goal and keep unrelated work in `BACKLOG.md`.
+- [x] Add opt-in TCI CPU attribution counters and smoke-runner plumbing for
+  translation-block entries, dispatches, helper calls, and QEMU load/store
+  counts. Validated with `git diff --check`,
+  `node --check scripts/ci/wasm-browser-smoke-runner.mjs`,
+  `node --check scripts/ci/wasm-browser-smoke.mjs`, and
+  `node scripts/ci/wasm-browser-smoke-runner-test.mjs` outside the sandbox
+  because sandboxed child-process spawning returns `EPERM`.
 - [ ] Build current QEMU WASM artifacts from this branch and record JavaScript/WebAssembly SHA-256 hashes.
 - [ ] Run the generic Linux Chrome/Chromium browser smoke with the current artifact family and record the result.
 - [ ] Run the Bus Engine OS `virtual-server` Chrome/Chromium browser proof with the accepted kernel/rootfs and record result JSON, screenshot, serial state, and boot milestone timings.

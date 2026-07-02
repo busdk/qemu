@@ -1820,6 +1820,7 @@ uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
     bool at_tb_start = true;
     bool carry = false;
     bool fast_gates = tci_fast_gates_enabled();
+    bool perf_attrib_active = qemu_perf_attrib_enabled();
     bool progress_active = fast_gates && tci_progress_enabled();
     bool wasm_subset_active = fast_gates && tci_wasm_subset_enabled();
 
@@ -1841,6 +1842,9 @@ uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
         void *ptr;
 
         if (at_tb_start) {
+            if (perf_attrib_active) {
+                qemu_perf_attrib_tci_tb_entry();
+            }
             if (fast_gates) {
                 if (progress_active) {
                     tci_progress_tb_entry_active(tb_ptr);
@@ -1902,6 +1906,9 @@ uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
 
                 /* Helper functions may need to access the "return address" */
                 tci_tb_ptr = (uintptr_t)tb_ptr;
+                if (perf_attrib_active) {
+                    qemu_perf_attrib_tci_helper_call();
+                }
                 ffi_call(cif, func, stack, call_slots);
             }
 
@@ -2280,6 +2287,9 @@ uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
             } else if (!fast_gates) {
                 tci_progress_dispatch();
             }
+            if (perf_attrib_active) {
+                qemu_perf_attrib_tci_dispatch();
+            }
             at_tb_start = true;
             break;
 
@@ -2295,30 +2305,45 @@ uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
             } else if (!fast_gates) {
                 tci_progress_dispatch();
             }
+            if (perf_attrib_active) {
+                qemu_perf_attrib_tci_dispatch();
+            }
             at_tb_start = true;
             break;
 
         case INDEX_op_qemu_ld:
             tci_args_rrm(insn, &r0, &r1, &oi);
             taddr = regs[r1];
+            if (perf_attrib_active) {
+                qemu_perf_attrib_tci_qemu_load();
+            }
             regs[r0] = tci_qemu_ld(env, taddr, oi, tb_ptr);
             break;
         case INDEX_op_tci_qemu_ld_rrr:
             tci_args_rrr(insn, &r0, &r1, &r2);
             taddr = regs[r1];
             oi = regs[r2];
+            if (perf_attrib_active) {
+                qemu_perf_attrib_tci_qemu_load();
+            }
             regs[r0] = tci_qemu_ld(env, taddr, oi, tb_ptr);
             break;
 
         case INDEX_op_qemu_st:
             tci_args_rrm(insn, &r0, &r1, &oi);
             taddr = regs[r1];
+            if (perf_attrib_active) {
+                qemu_perf_attrib_tci_qemu_store();
+            }
             tci_qemu_st(env, taddr, regs[r0], oi, tb_ptr);
             break;
         case INDEX_op_tci_qemu_st_rrr:
             tci_args_rrr(insn, &r0, &r1, &r2);
             taddr = regs[r1];
             oi = regs[r2];
+            if (perf_attrib_active) {
+                qemu_perf_attrib_tci_qemu_store();
+            }
             tci_qemu_st(env, taddr, regs[r0], oi, tb_ptr);
             break;
 

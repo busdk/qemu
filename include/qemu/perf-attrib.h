@@ -22,5 +22,10 @@ void qemu_perf_attrib_virtio_serial_host_to_guest(uint64_t bytes);
 void qemu_perf_attrib_virtio_serial_guest_to_host(uint64_t bytes);
 void qemu_perf_attrib_display_frame(uint64_t bytes);
 void qemu_perf_attrib_display_key_event(void);
+void qemu_perf_attrib_tci_tb_entry(void);
+void qemu_perf_attrib_tci_dispatch(void);
+void qemu_perf_attrib_tci_helper_call(void);
+void qemu_perf_attrib_tci_qemu_load(void);
+void qemu_perf_attrib_tci_qemu_store(void);
 
 #endif /* QEMU_PERF_ATTRIB_H */

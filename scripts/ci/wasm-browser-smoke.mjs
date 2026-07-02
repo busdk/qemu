@@ -1391,6 +1391,7 @@ function buildConfig() {
     powerTimeoutMs: numberOption("powerTimeoutMs", 30000),
     performanceAttribution: boolOption("performanceAttribution", false),
     performanceAttributionInterval: numberOption("performanceAttributionInterval", 10000),
+    performanceAttributionTciInterval: numberOption("performanceAttributionTciInterval", 1000000),
     serviceBridge: jsonObjectOption("serviceBridge", null),
     tcgHotblocks: boolOption("tcgHotblocks", false),
     tcgHotblocksInterval: numberOption("tcgHotblocksInterval", 10000),
@@ -1573,6 +1574,7 @@ async function run() {
       env: config.performanceAttribution ? {
         QEMU_WASM_PERF_ATTRIBUTION: "1",
         QEMU_WASM_PERF_ATTRIBUTION_INTERVAL: String(config.performanceAttributionInterval),
+        QEMU_WASM_PERF_ATTRIBUTION_TCI_INTERVAL: String(config.performanceAttributionTciInterval),
       } : null,
       maxSummaries: 16,
       summaryCount: 0,
@@ -1945,6 +1947,7 @@ async function run() {
   const performanceAttributionEnv = config.performanceAttribution ? {
     QEMU_WASM_PERF_ATTRIBUTION: "1",
     QEMU_WASM_PERF_ATTRIBUTION_INTERVAL: String(config.performanceAttributionInterval),
+    QEMU_WASM_PERF_ATTRIBUTION_TCI_INTERVAL: String(config.performanceAttributionTciInterval),
   } : {};
   const tciEnv = {
     ...(config.tciFastGates ? { QEMU_TCI_FAST_GATES: "1" } : {}),
