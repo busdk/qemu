@@ -333,6 +333,23 @@ export function tciProgressSummary(line) {
   }
 }
 
+export function wasm64TcgSummary(line) {
+  const prefix = "qemu-wasm64-tcg: ";
+
+  if (!line.startsWith(prefix)) {
+    return null;
+  }
+  try {
+    const summary = JSON.parse(line.slice(prefix.length));
+    if (summary === null || typeof summary !== "object" || Array.isArray(summary)) {
+      return null;
+    }
+    return summary;
+  } catch {
+    return null;
+  }
+}
+
 export function recordHotBlockSummary(state, line, elapsedMs) {
   if (!state || !state.hotBlocks || !state.hotBlocks.enabled) {
     return;
@@ -370,6 +387,25 @@ export function recordTciWasmSubsetSummary(state, line, elapsedMs) {
   if (state.tci.wasmSubset.summaries.length >
       state.tci.wasmSubset.maxSummaries) {
     state.tci.wasmSubset.summaries.shift();
+  }
+}
+
+export function recordWasm64TcgSummary(state, line, elapsedMs) {
+  if (!state || !state.wasm64Tcg) {
+    return;
+  }
+  const summary = wasm64TcgSummary(line);
+  if (summary === null) {
+    return;
+  }
+  state.wasm64Tcg.summaryCount += 1;
+  state.wasm64Tcg.lastSummary = {
+    elapsedMs,
+    ...summary,
+  };
+  state.wasm64Tcg.summaries.push(state.wasm64Tcg.lastSummary);
+  if (state.wasm64Tcg.summaries.length > state.wasm64Tcg.maxSummaries) {
+    state.wasm64Tcg.summaries.shift();
   }
 }
 
@@ -1581,6 +1617,12 @@ async function run() {
       summaries: [],
       lastSummary: null,
     },
+    wasm64Tcg: {
+      maxSummaries: 16,
+      summaryCount: 0,
+      summaries: [],
+      lastSummary: null,
+    },
     tci: {
       fastGates: Boolean(config.tciFastGates),
       relaxedMb: Boolean(config.tciRelaxedMb),
@@ -1831,6 +1873,7 @@ async function run() {
       line.startsWith("qemu-tci-wasm-subset:") ||
       line.startsWith("qemu-tci-progress:") ||
       line.startsWith("qemu-tcg-hotblocks:") ||
+      line.startsWith("qemu-wasm64-tcg:") ||
       line.startsWith("qemu-wasm-perf-attrib:") ||
       line.startsWith("qemu-wasm-perf-attribution:") ||
       line.startsWith("wasm-browser-smoke:") ||
@@ -1873,6 +1916,11 @@ async function run() {
       Math.round(performance.now() - startTime),
     );
     recordTciProgressSummary(
+      smokeState,
+      line,
+      Math.round(performance.now() - startTime),
+    );
+    recordWasm64TcgSummary(
       smokeState,
       line,
       Math.round(performance.now() - startTime),

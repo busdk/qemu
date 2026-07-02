@@ -179,12 +179,43 @@ Engineering rules for this goal:
   This slice does not complete W2 because generated WebAssembly blocks are
   not compiled or executed yet and backend counters are not exported to the
   browser result JSON.
-- [ ] W2b - Implement the first real generated WebAssembly TB instance path
+- [x] W2b - Implement the first real generated WebAssembly TB instance path
   behind the W2a boundary. DoD: a backend artifact executes nonzero generated
   blocks through the C-callable `TCGWasm64Context` boundary, preserves TCI
   fallback for unsupported TBs, and exports nonzero
   `TCGWasm64Counters` generated/fallback fields in the generic browser smoke
-  result JSON.
+  result JSON. Accepted slice evidence: the backend now exposes the active
+  `TCGWasm64Counters` to the fallback TCI executor, uses the
+  `TCGWasm64Context` pointer shape for the live generated-block call, and
+  reports bounded `qemu-wasm64-tcg` summaries into browser result JSON. The
+  build command was:
+  `python3 scripts/ci/wasm-build-artifacts-local.py --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2b-context-counters --jobs auto --configure-arg=--disable-tcg-interpreter --configure-arg=--enable-tcg-wasm64-backend`.
+  Artifact hashes: `qemu-system-x86_64.js`
+  `07dfe2c64a7626d9107a0778094eff428d0a26de99849ff442deb2e15f458846`,
+  `qemu-system-x86_64.wasm`
+  `e8d48e5a64cedf342549d5cfd84f036752ba2275c35132804a69a5f3cb540418`,
+  manifest
+  `d0fee6ae386cb3607c11ef74064efc92369b3ceca5a2f22cf17ad4287b425e7c`.
+  Checks: `git diff --check`,
+  `node --check scripts/ci/wasm-browser-smoke.mjs`,
+  `node --check scripts/ci/wasm-browser-smoke-runner.mjs`,
+  `node --check scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+  `node --check scripts/ci/wasm-tb-module-emitter.mjs`,
+  `node --check scripts/ci/wasm-generated-block-prototype.mjs`,
+  `node scripts/ci/wasm-browser-smoke-runner-test.mjs` outside the sandbox
+  because sandboxed child-process spawning returns `EPERM`,
+  `node scripts/ci/wasm-tb-module-emitter-test.mjs`, and
+  `node scripts/ci/wasm-generated-block-prototype-test.mjs`. Chromium
+  `141.0.7390.37` reached `QEMU_WASM_LINUX_BOOT_OK` in `101122` ms with
+  result JSON at
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2b-context-counters-smoke/wasm-browser-smoke-result.json`.
+  The last exported `wasm64Tcg` summary reported
+  `generated_attempts=18469`, `generated_compiled=3`,
+  `generated_executed=16023`, `generated_cache_hits=16020`, and
+  `fallback_unsupported=2446`, with runtime/helper/load/store fallback
+  counts at zero. This completes W2b only; W2 remains open until the
+  lowering coverage gate and the full same-artifact generic smoke evidence
+  are accepted.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and

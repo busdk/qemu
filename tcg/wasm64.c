@@ -13,6 +13,8 @@
 
 uintptr_t tcg_tci_qemu_tb_exec(CPUArchState *env, const void *tb_ptr);
 
+static __thread TCGWasm64Counters *active_counters;
+
 void tcg_wasm64_counters_reset(TCGWasm64Counters *counters)
 {
     if (counters) {
@@ -71,27 +73,64 @@ bool tcg_wasm64_backend_available(void)
     return true;
 }
 
+TCGWasm64Counters *tcg_wasm64_active_counters(void)
+{
+    return active_counters;
+}
+
+void tcg_wasm64_report_summary(const char *reason,
+                               const TCGWasm64Counters *counters)
+{
+    if (!counters) {
+        return;
+    }
+
+    fprintf(stderr,
+            "qemu-wasm64-tcg: {\"format\":1,\"event\":\"summary\","
+            "\"reason\":\"%s\","
+            "\"generated_attempts\":%" PRIu64 ","
+            "\"generated_compiled\":%" PRIu64 ","
+            "\"generated_executed\":%" PRIu64 ","
+            "\"generated_cache_hits\":%" PRIu64 ","
+            "\"fallback_unsupported\":%" PRIu64 ","
+            "\"fallback_helper\":%" PRIu64 ","
+            "\"fallback_qemu_load\":%" PRIu64 ","
+            "\"fallback_qemu_store\":%" PRIu64 ","
+            "\"fallback_runtime\":%" PRIu64 "}\n",
+            reason ? reason : "unknown",
+            counters->generated_attempts,
+            counters->generated_compiled,
+            counters->generated_executed,
+            counters->generated_cache_hits,
+            counters->fallback_unsupported,
+            counters->fallback_helper,
+            counters->fallback_qemu_load,
+            counters->fallback_qemu_store,
+            counters->fallback_runtime);
+}
+
 uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
                              TCGWasm64Counters *counters)
 {
+    TCGWasm64Counters *previous_counters = active_counters;
+    uintptr_t ret;
     TCGWasm64Context ctx = {
         .tb_ptr = (void *)tb_ptr,
         .env = env,
         .counters = counters,
     };
 
-    if (counters) {
-        counters->generated_attempts++;
-    }
-
     /*
-     * Native wasm64 lowering is intentionally not accepted yet. This boundary
-     * is where a compiled WebAssembly TB instance will be called; until then,
-     * every TB has a precise unsupported fallback to TCI.
+     * Native wasm64 lowering grows behind this boundary.  The TCI fallback
+     * owns live register state today, so it receives the active counter
+     * contract and may execute generated WebAssembly blocks only after it has
+     * validated the TCI bytecode shape.
      */
     (void)ctx;
-    tcg_wasm64_count_fallback(counters, TCG_WASM64_FALLBACK_UNSUPPORTED);
-    return tcg_tci_qemu_tb_exec(env, tb_ptr);
+    active_counters = counters;
+    ret = tcg_tci_qemu_tb_exec(env, tb_ptr);
+    active_counters = previous_counters;
+    return ret;
 }
 
 uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,

@@ -35,8 +35,10 @@ import {
   recordPerfAttributionSummary,
   recordTciProgressSummary,
   recordTciWasmSubsetSummary,
+  recordWasm64TcgSummary,
   tciProgressSummary,
   tciWasmSubsetSummary,
+  wasm64TcgSummary,
 } from "./wasm-browser-smoke.mjs";
 
 const marker = "QEMU_WASM_LINUX_BOOT_OK";
@@ -153,6 +155,13 @@ for (const status of [
         events: 200,
       },
     },
+    wasm64Tcg: {
+      summaryCount: 1,
+      lastSummary: {
+        event: "summary",
+        generated_executed: 12,
+      },
+    },
     tci: {
       progress: {
         enabled: true,
@@ -221,6 +230,13 @@ for (const status of [
     lastSummary: {
       event: "summary",
       events: 200,
+    },
+  });
+  assert.deepEqual(result.wasm64Tcg, {
+    summaryCount: 1,
+    lastSummary: {
+      event: "summary",
+      generated_executed: 12,
     },
   });
   assert.deepEqual(result.tci, {
@@ -502,6 +518,48 @@ for (const status of [
   assert.equal(state.tci.progress.summaries.length, 2);
   assert.equal(state.tci.progress.summaries[0].tb_entries, 2);
   assert.equal(state.tci.progress.lastSummary.elapsedMs, 30);
+}
+
+{
+  const line = "qemu-wasm64-tcg: " + JSON.stringify({
+    format: 1,
+    event: "summary",
+    reason: "interval",
+    generated_attempts: 100,
+    generated_compiled: 3,
+    generated_executed: 12,
+    generated_cache_hits: 9,
+    fallback_unsupported: 88,
+    fallback_runtime: 1,
+  });
+  const parsed = wasm64TcgSummary(line);
+  assert.equal(parsed.event, "summary");
+  assert.equal(parsed.generated_executed, 12);
+  assert.equal(parsed.fallback_unsupported, 88);
+  assert.equal(wasm64TcgSummary("ordinary serial line"), null);
+  assert.equal(wasm64TcgSummary("qemu-wasm64-tcg: not-json"), null);
+}
+
+{
+  const state = {
+    wasm64Tcg: {
+      maxSummaries: 2,
+      summaryCount: 0,
+      summaries: [],
+      lastSummary: null,
+    },
+  };
+  for (const value of [1, 2, 3]) {
+    recordWasm64TcgSummary(
+      state,
+      `qemu-wasm64-tcg: {"format":1,"event":"summary","generated_executed":${value}}`,
+      value * 10,
+    );
+  }
+  assert.equal(state.wasm64Tcg.summaryCount, 3);
+  assert.equal(state.wasm64Tcg.summaries.length, 2);
+  assert.equal(state.wasm64Tcg.summaries[0].generated_executed, 2);
+  assert.equal(state.wasm64Tcg.lastSummary.elapsedMs, 30);
 }
 
 {

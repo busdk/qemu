@@ -1306,6 +1306,7 @@ export function promoteSmokeState(result, smokeState) {
   result.serviceBridgeState = smokeState.serviceBridge || null;
   result.hotBlocks = smokeState.hotBlocks || null;
   result.performanceAttribution = smokeState.performanceAttribution || null;
+  result.wasm64Tcg = smokeState.wasm64Tcg || null;
   result.tci = smokeState.tci || null;
 }
 

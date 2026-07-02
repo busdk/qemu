@@ -63,6 +63,8 @@ typedef struct TCGWasm64Context {
     uint64_t *stack;
     void *ret128;
     TCGWasm64Counters *counters;
+    uintptr_t regs;
+    uintptr_t ret;
     uint32_t flags;
 } TCGWasm64Context;
 
@@ -91,5 +93,8 @@ typedef struct TCGWasm64TBHeader {
 
 uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
                              TCGWasm64Counters *counters);
+TCGWasm64Counters *tcg_wasm64_active_counters(void);
+void tcg_wasm64_report_summary(const char *reason,
+                               const TCGWasm64Counters *counters);
 
 #endif /* TCG_WASM64_H */

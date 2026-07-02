@@ -25,6 +25,9 @@
 #include "qemu/perf-attrib.h"
 #include "disas/dis-asm.h"
 #include "tcg-has.h"
+#ifdef CONFIG_TCG_WASM64_BACKEND
+#include "tcg/wasm64.h"
+#endif
 #include <ffi.h>
 
 #ifdef CONFIG_EMSCRIPTEN
@@ -72,10 +75,22 @@ typedef struct TCIWasmSubsetEntry {
     bool generated_unsupported;
 } TCIWasmSubsetEntry;
 
+#ifndef CONFIG_TCG_WASM64_BACKEND
 typedef struct TCIWasmGeneratedContext {
     uintptr_t regs;
     uintptr_t ret;
 } TCIWasmGeneratedContext;
+#endif
+
+#ifdef CONFIG_TCG_WASM64_BACKEND
+#define TCI_WASM_GENERATED_CTX_REGS_OFFSET offsetof(TCGWasm64Context, regs)
+#define TCI_WASM_GENERATED_CTX_RET_OFFSET offsetof(TCGWasm64Context, ret)
+#else
+#define TCI_WASM_GENERATED_CTX_REGS_OFFSET \
+    offsetof(TCIWasmGeneratedContext, regs)
+#define TCI_WASM_GENERATED_CTX_RET_OFFSET \
+    offsetof(TCIWasmGeneratedContext, ret)
+#endif
 
 typedef uintptr_t (*TCIWasmGeneratedFunc)(uintptr_t ctx);
 
@@ -241,7 +256,11 @@ static bool tci_wasm_subset_enabled(void)
         char *owned;
         const char *raw = tci_getenv("QEMU_TCI_WASM_SUBSET", &owned);
 
+#ifdef CONFIG_TCG_WASM64_BACKEND
+        tci_wasm_subset = raw == NULL ? true : tci_parse_bool_env(raw);
+#else
         tci_wasm_subset = tci_parse_bool_env(raw);
+#endif
         free(owned);
         tci_wasm_subset_threshold =
             tci_parse_u64_env("QEMU_TCI_WASM_SUBSET_THRESHOLD", 1024);
@@ -774,7 +793,8 @@ static bool tci_wasm_generated_prevalidate(TCIWasmSubsetEntry *entry,
 EM_JS(uintptr_t, tci_wasm_generated_compile_js,
       (uintptr_t tb_arg, uint64_t max_ops_arg, int op_mov, int op_movi,
        int op_movl, int op_add, int op_sub, int op_mul, int op_and, int op_or,
-       int op_xor, int op_exit_tb, int op_goto_tb),
+       int op_xor, int op_exit_tb, int op_goto_tb, int ctx_regs_offset,
+       int ctx_ret_offset),
 {
     const tb = Number(tb_arg);
     const maxOps = Number(max_ops_arg);
@@ -896,8 +916,8 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
         const instructions = [];
         let terminal = null;
 
-        instructions.push(...localSet(1, i64Load(localGet(0), 0)));
-        instructions.push(...localSet(2, i64Load(localGet(0), 8)));
+        instructions.push(...localSet(1, i64Load(localGet(0), ctx_regs_offset)));
+        instructions.push(...localSet(2, i64Load(localGet(0), ctx_ret_offset)));
         for (let reg = 0; reg < 16; reg++) {
             instructions.push(
                 ...localSet(regLocal(reg), i64Load(localGet(1), reg * 8))
@@ -1011,6 +1031,16 @@ static void tci_wasm_subset_report(const char *reason)
 {
     TCGOpcode top_ops[8] = { 0 };
     TCGOpcode top_generated_ops[8] = { 0 };
+#ifdef CONFIG_TCG_WASM64_BACKEND
+    TCGWasm64Counters wasm64_counters = {
+        .generated_attempts = tci_wasm_generated_attempts,
+        .generated_compiled = tci_wasm_generated_compiled,
+        .generated_executed = tci_wasm_generated_executed,
+        .generated_cache_hits = tci_wasm_generated_cache_hits,
+        .fallback_unsupported = tci_wasm_generated_fallback_unsupported,
+        .fallback_runtime = tci_wasm_generated_compile_failed,
+    };
+#endif
 
     for (TCGOpcode opc = 0; opc < NB_OPS; opc++) {
         uint64_t count = tci_wasm_subset_unsupported_ops[opc];
@@ -1102,6 +1132,10 @@ static void tci_wasm_subset_report(const char *reason)
                 count);
     }
     fprintf(stderr, "]}\n");
+
+#ifdef CONFIG_TCG_WASM64_BACKEND
+    tcg_wasm64_report_summary(reason, &wasm64_counters);
+#endif
 }
 
 static TCIWasmSubsetEntry *tci_wasm_subset_entry(const uint32_t *tb_ptr)
@@ -1301,10 +1335,21 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
                             tcg_target_ulong *regs, uintptr_t *ret)
 {
     uint64_t signature = tci_wasm_generated_signature(tb_start);
+#ifdef CONFIG_TCG_WASM64_BACKEND
+    TCGWasm64Counters *wasm64_counters = tcg_wasm64_active_counters();
+    TCGWasm64Context ctx = {
+        .tb_ptr = (void *)tb_start,
+        .env = (void *)regs[TCG_AREG0],
+        .regs = (uintptr_t)regs,
+        .ret = (uintptr_t)ret,
+        .counters = wasm64_counters,
+    };
+#else
     TCIWasmGeneratedContext ctx = {
         .regs = (uintptr_t)regs,
         .ret = (uintptr_t)ret,
     };
+#endif
     int status;
 
     if (!entry->generated_signature_valid ||
@@ -1322,7 +1367,16 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
     }
 
     tci_wasm_generated_attempts++;
+#ifdef CONFIG_TCG_WASM64_BACKEND
+    if (wasm64_counters) {
+        wasm64_counters->generated_attempts++;
+    }
+#endif
     if (!tci_wasm_generated_prevalidate(entry, tb_start)) {
+#ifdef CONFIG_TCG_WASM64_BACKEND
+        tcg_wasm64_count_fallback(wasm64_counters,
+                                  TCG_WASM64_FALLBACK_UNSUPPORTED);
+#endif
         return TCI_WASM_SUBSET_UNSUPPORTED;
     }
 
@@ -1331,15 +1385,31 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
             (uintptr_t)tb_start, tci_wasm_subset_max_ops, INDEX_op_mov,
             INDEX_op_tci_movi, INDEX_op_tci_movl, INDEX_op_add,
             INDEX_op_sub, INDEX_op_mul, INDEX_op_and, INDEX_op_or,
-            INDEX_op_xor, INDEX_op_exit_tb, INDEX_op_goto_tb);
+            INDEX_op_xor, INDEX_op_exit_tb, INDEX_op_goto_tb,
+            (int)TCI_WASM_GENERATED_CTX_REGS_OFFSET,
+            (int)TCI_WASM_GENERATED_CTX_RET_OFFSET);
         if (entry->generated_func == 0) {
             entry->generated_unsupported = true;
             tci_wasm_generated_compile_failed++;
+#ifdef CONFIG_TCG_WASM64_BACKEND
+            tcg_wasm64_count_fallback(wasm64_counters,
+                                      TCG_WASM64_FALLBACK_RUNTIME);
+#endif
             return TCI_WASM_SUBSET_UNSUPPORTED;
         }
         tci_wasm_generated_compiled++;
+#ifdef CONFIG_TCG_WASM64_BACKEND
+        if (wasm64_counters) {
+            wasm64_counters->generated_compiled++;
+        }
+#endif
     } else {
         tci_wasm_generated_cache_hits++;
+#ifdef CONFIG_TCG_WASM64_BACKEND
+        if (wasm64_counters) {
+            wasm64_counters->generated_cache_hits++;
+        }
+#endif
     }
 
     status = ((TCIWasmGeneratedFunc)entry->generated_func)((uintptr_t)&ctx);
@@ -1347,18 +1417,36 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
     if (status <= 0) {
         entry->generated_unsupported = true;
         tci_wasm_generated_compile_failed++;
+#ifdef CONFIG_TCG_WASM64_BACKEND
+        tcg_wasm64_count_fallback(wasm64_counters,
+                                  TCG_WASM64_FALLBACK_RUNTIME);
+#endif
         return TCI_WASM_SUBSET_UNSUPPORTED;
     }
 
     switch (status) {
     case TCI_WASM_SUBSET_EXIT:
         tci_wasm_generated_executed++;
+#ifdef CONFIG_TCG_WASM64_BACKEND
+        if (wasm64_counters) {
+            wasm64_counters->generated_executed++;
+        }
+#endif
         return TCI_WASM_SUBSET_EXIT;
     case TCI_WASM_SUBSET_DISPATCH:
         tci_wasm_generated_executed++;
+#ifdef CONFIG_TCG_WASM64_BACKEND
+        if (wasm64_counters) {
+            wasm64_counters->generated_executed++;
+        }
+#endif
         return TCI_WASM_SUBSET_DISPATCH;
     default:
         tci_wasm_generated_compile_failed++;
+#ifdef CONFIG_TCG_WASM64_BACKEND
+        tcg_wasm64_count_fallback(wasm64_counters,
+                                  TCG_WASM64_FALLBACK_RUNTIME);
+#endif
         return TCI_WASM_SUBSET_UNSUPPORTED;
     }
 }
