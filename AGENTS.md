@@ -88,7 +88,9 @@ through the repository's normal sync flow.
 
 Use the supervisor/workspace `./tmp` area for large WebAssembly artifacts,
 browser smoke outputs, guest images, and evidence bundles. Host `/tmp` is a
-small partition and should only hold small throwaway files.
+small partition and should only hold small throwaway files. If an artifact may
+later be inspected, archived, or promoted from the supervisor workspace, write
+it under workspace `./tmp` from the start instead of staging it in host `/tmp`.
 
 ## Evidence
 
