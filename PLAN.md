@@ -332,6 +332,16 @@ Engineering rules for this goal:
     most `414` ppm generated coverage when coverage accounting existed, and
     every generated-only browser smoke was slower than the same-commit W3
     default TCI baseline.
+  - The direct generated-boundary path is also rejected as a performance
+    candidate. The W2m-j diagnostic reached near-total boundary coverage
+    (`direct_tb_entries=44,000,001`,
+    `direct_generated_executed=43,960,181`), but failed the generic marker
+    after `180252` ms while the same family of default TCI smokes reached the
+    marker around `100` s. Boundary-entry coverage only proves that QEMU
+    crossed a generated wrapper frequently; it does not prove generated
+    instruction retirement, internal TB chaining, inline SoftMMU/TLB hits, or
+    rare synthetic exits. Treat millions of generated-boundary entries as a
+    warning sign, not a success metric.
   - Guest-side Bus Engine OS trimming is useful but secondary. Even an
     aggressive native boot reduction from `44` seconds to `20` seconds would
     still project to about `17` minutes at the current browser/native ratio.
@@ -902,11 +912,11 @@ Engineering rules for this goal:
   before `QEMU_WASM_LINUX_BOOT_OK`. The generated path compiled only `12`
   blocks and had `fallback_runtime=1`; that is useful failure evidence, not
   meaningful generated coverage. The pointer-width ABI correction from
-  `addFunction(..., "ii")` to `addFunction(..., "jj")` is retained, and
-  deterministic tests now guard it. Because generated execution is still too
-  narrow and unsafe for the gate, backend builds now keep
-  `QEMU_TCI_WASM_SUBSET` opt-in instead of enabling generated/subset
-  execution by default. The final opt-in-guarded artifact hashes are JS
+  `addFunction(..., "ii")` to `addFunction(..., "jj")` was useful evidence
+  at the time, but the generated-subset runtime path is not retained because
+  later W2m-j evidence disproved the direct-boundary shape as a performance
+  fix. The final opt-in-guarded artifact hashes for the historical attempt
+  were JS
   `d02596846580898d9a062dd1bf3a0ee04b727447e669733e3662283fb458846`,
   WASM `b70c7ec5bda838094487700cd766197283cb796af723d9e1675ce68dcd541342`,
   manifest `b1d667d55fff5be892a609f833bb9a5b2a1bfad52705ee0785d5e863b20a1c49`.
@@ -1121,15 +1131,50 @@ Engineering rules for this goal:
   CPU/device side effects, and `tci_tb_ptr` return-address state. The
   measured gate-moving target is not broad helper flattening; it is the
   generated-block dispatch boundary around `lookup_tb_ptr`.
-- [ ] W2m-i - Implement or reject a generated-block dispatch boundary around
-  the measured `lookup_tb_ptr` helper shape. DoD: use the W2m-h classifier
-  output and QEMU TCI dispatch semantics to design the narrow boundary before
-  code. Either implement deterministic tests showing generated blocks can
-  return the same next-TB decision as the TCI `lookup_tb_ptr` path without
-  re-entering the generic libffi helper on the hot path, or record why the
-  dispatch helper must remain fallback. A browser run is allowed only if the
-  local evidence predicts at least an order-of-magnitude generated coverage
-  share increase or removes the dominant `lookup_tb_ptr` candidate loss.
+- [x] W2m-i - Reject the per-TB generated-block dispatch boundary as the W2
+  performance candidate. Accepted evidence: W2m-j proved the narrower
+  `lookup_tb_ptr`/direct-boundary family can report near-total boundary
+  coverage and still be slower than default TCI. The long diagnostic reported
+  `direct_tb_entries=44,000,001`,
+  `direct_generated_executed=43,960,181`,
+  `direct_generated_dispatches=1664`, and
+  `direct_tci_fallbacks=39820`, then failed the generic marker after
+  `180252` ms. True compiled generated-block counters remained
+  `generated_compiled=0`, `generated_executed=0`, and
+  `generated_cache_hits=0`. Conclusion: a generated wrapper that returns to
+  QEMU after each TB, flushes CPU state through memory, calls helpers for
+  common memory operations, and relies on QEMU main-loop lookup is the wrong
+  abstraction. The implementation code for the direct-boundary experiment is
+  removed from the live tree; the evidence remains here so the path is not
+  reopened under a new name.
+- [ ] W2n - Design the real browser-Wasm accelerator run/exit path before
+  writing another execution optimization. DoD: add a short design note and
+  deterministic prototype plan for a long-running `wasmjit_run()`-style
+  entrypoint that stays inside generated Wasm until a synthetic VM exit
+  occurs. Required gates:
+  - Metrics replace boundary-entry coverage with guest instructions retired
+    through generated Wasm bodies, guest instructions retired through
+    TCI/fallback, wall time in generated bodies, wall time in TCI dispatch,
+    wall time in TB lookup/main loop, wall time in helper calls, wall time in
+    `qemu_ld`/`qemu_st`, compile/instantiate time, generated-body chain
+    length, and synthetic exit reasons.
+  - A performance-proof mode exists in the design: unsupported hot TBs fail
+    loudly with reason, while compatibility mode may still fall back to TCI.
+  - The first prototype target is not Linux boot. It is a deterministic
+    micro-hotset where one call into the generated run loop executes at least
+    `1,000,000` guest instructions or an equivalent counted instruction
+    budget before returning for budget expiry, with no per-TB QEMU main-loop
+    return.
+  - Common RAM load/store TLB-hit paths are planned as inline generated Wasm
+    operations. Calling `qemu_ld`/`qemu_st` for every generated load/store is
+    explicitly a failed-performance shape unless measurement later proves
+    otherwise.
+  - Direct hot branches are planned as intra-module control transfer or
+    dispatch-table flow inside the generated run loop. Per-TB function calls
+    back through QEMU do not satisfy W2n.
+  - No W3 browser speed gate may run from W2n until the deterministic
+    micro-hotset gate proves the new shape is multiple-times faster than TCI
+    on ALU/branch and TLB-hit RAM microbenches.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and

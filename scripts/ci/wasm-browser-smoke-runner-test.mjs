@@ -37,11 +37,9 @@ import {
   recordPerfAttributionSummary,
   recordTciProgressSummary,
   recordTciWasmGeneratedTrace,
-  recordTciWasmSubsetSummary,
   recordWasm64TcgSummary,
   tciProgressSummary,
   tciWasmGeneratedTrace,
-  tciWasmSubsetSummary,
   wasm64TcgSummary,
 } from "./wasm-browser-smoke.mjs";
 
@@ -192,23 +190,21 @@ for (const status of [
           tb_entries: 300,
         },
       },
-      wasmSubset: {
-        generatedTrace: {
-          enabled: true,
-          limit: 4,
-          count: 1,
-          entries: [
-            {
-              event: "generated-trace",
-              reason: "compile",
-              signature: "0x1234",
-            },
-          ],
-          last: {
+      generatedTrace: {
+        enabled: true,
+        limit: 4,
+        count: 1,
+        entries: [
+          {
             event: "generated-trace",
             reason: "compile",
             signature: "0x1234",
           },
+        ],
+        last: {
+          event: "generated-trace",
+          reason: "compile",
+          signature: "0x1234",
         },
       },
     },
@@ -288,23 +284,21 @@ for (const status of [
         tb_entries: 300,
       },
     },
-    wasmSubset: {
-      generatedTrace: {
-        enabled: true,
-        limit: 4,
-        count: 1,
-        entries: [
-          {
-            event: "generated-trace",
-            reason: "compile",
-            signature: "0x1234",
-          },
-        ],
-        last: {
+    generatedTrace: {
+      enabled: true,
+      limit: 4,
+      count: 1,
+      entries: [
+        {
           event: "generated-trace",
           reason: "compile",
           signature: "0x1234",
         },
+      ],
+      last: {
+        event: "generated-trace",
+        reason: "compile",
+        signature: "0x1234",
       },
     },
   });
@@ -540,64 +534,6 @@ for (const status of [
 }
 
 {
-  const line = "qemu-tci-wasm-subset: " + JSON.stringify({
-    format: 1,
-    event: "summary",
-    reason: "interval",
-    attempts: 1000,
-    executed: 12,
-    fallback_cold: 900,
-    fallback_unsupported: 88,
-    max_ops_rejected: 1,
-    generated_compile_zero: 2,
-    generated_status_nonpositive: 3,
-    generated_status_unknown: 4,
-    generated_coverage_basis: "subset_attempts",
-    generated_coverage_numerator: 21,
-    generated_coverage_denominator: 1000,
-    generated_coverage_ppm: 21000,
-  });
-  const parsed = tciWasmSubsetSummary(line);
-  assert.equal(parsed.event, "summary");
-  assert.equal(parsed.executed, 12);
-  assert.equal(parsed.fallback_unsupported, 88);
-  assert.equal(parsed.generated_compile_zero, 2);
-  assert.equal(parsed.generated_status_nonpositive, 3);
-  assert.equal(parsed.generated_status_unknown, 4);
-  assert.equal(parsed.generated_coverage_basis, "subset_attempts");
-  assert.equal(parsed.generated_coverage_numerator, 21);
-  assert.equal(parsed.generated_coverage_denominator, 1000);
-  assert.equal(parsed.generated_coverage_ppm, 21000);
-  assert.equal(tciWasmSubsetSummary("ordinary serial line"), null);
-  assert.equal(tciWasmSubsetSummary("qemu-tci-wasm-subset: not-json"), null);
-}
-
-{
-  const state = {
-    tci: {
-      wasmSubset: {
-        enabled: true,
-        maxSummaries: 2,
-        summaryCount: 0,
-        summaries: [],
-        lastSummary: null,
-      },
-    },
-  };
-  for (const value of [1, 2, 3]) {
-    recordTciWasmSubsetSummary(
-      state,
-      `qemu-tci-wasm-subset: {"format":1,"event":"summary","executed":${value}}`,
-      value * 10,
-    );
-  }
-  assert.equal(state.tci.wasmSubset.summaryCount, 3);
-  assert.equal(state.tci.wasmSubset.summaries.length, 2);
-  assert.equal(state.tci.wasmSubset.summaries[0].executed, 2);
-  assert.equal(state.tci.wasmSubset.lastSummary.elapsedMs, 30);
-}
-
-{
   const line = "qemu-tci-wasm-generated-trace: " + JSON.stringify({
     format: 1,
     event: "generated-trace",
@@ -628,14 +564,12 @@ for (const status of [
 {
   const state = {
     tci: {
-      wasmSubset: {
-        generatedTrace: {
-          enabled: true,
-          limit: 2,
-          count: 0,
-          entries: [],
-          last: null,
-        },
+      generatedTrace: {
+        enabled: true,
+        limit: 2,
+        count: 0,
+        entries: [],
+        last: null,
       },
     },
   };
@@ -651,10 +585,10 @@ for (const status of [
       value * 10,
     );
   }
-  assert.equal(state.tci.wasmSubset.generatedTrace.count, 3);
-  assert.equal(state.tci.wasmSubset.generatedTrace.entries.length, 2);
-  assert.equal(state.tci.wasmSubset.generatedTrace.entries[0].signature, "0x2");
-  assert.equal(state.tci.wasmSubset.generatedTrace.last.elapsedMs, 30);
+  assert.equal(state.tci.generatedTrace.count, 3);
+  assert.equal(state.tci.generatedTrace.entries.length, 2);
+  assert.equal(state.tci.generatedTrace.entries[0].signature, "0x2");
+  assert.equal(state.tci.generatedTrace.last.elapsedMs, 30);
 }
 
 {
@@ -1108,24 +1042,16 @@ for (const status of [
     qemuArgs: [],
     rootfs: null,
     rootfsDevice: "virtio-mmio",
-    tciWasmSubset: true,
-    tciWasmGeneratedOnly: true,
     tciWasmGeneratedTrace: true,
     tciWasmGeneratedTraceLimit: 7,
-    tciWasmSubsetInterval: 10000,
-    tciWasmSubsetMaxOps: 64,
-    tciWasmSubsetThreshold: 4,
     timeoutMs: 30000,
     visualMarker: "",
   });
 
-  assert.equal(url.searchParams.get("tciWasmSubset"), "1");
-  assert.equal(url.searchParams.get("tciWasmGeneratedOnly"), "1");
   assert.equal(url.searchParams.get("tciWasmGeneratedTrace"), "1");
   assert.equal(url.searchParams.get("tciWasmGeneratedTraceLimit"), "7");
-  assert.equal(url.searchParams.get("tciWasmSubsetInterval"), "10000");
-  assert.equal(url.searchParams.get("tciWasmSubsetMaxOps"), "64");
-  assert.equal(url.searchParams.get("tciWasmSubsetThreshold"), "4");
+  assert.equal(url.searchParams.has("tciWasmSubset"), false);
+  assert.equal(url.searchParams.has("tciWasmGeneratedOnly"), false);
 }
 
 {
@@ -1359,13 +1285,8 @@ for (const status of [
     wasm64TcgGenerated: true,
     tciProgress: true,
     tciProgressInterval: 2000000,
-    tciWasmSubset: true,
-    tciWasmGeneratedOnly: true,
     tciWasmGeneratedTrace: true,
     tciWasmGeneratedTraceLimit: 7,
-    tciWasmSubsetInterval: 10000,
-    tciWasmSubsetMaxOps: 64,
-    tciWasmSubsetThreshold: 4,
     userDataDir: "/tmp/qemu-wasm-profile",
     visualMarker: "login",
   }, "HeadlessChrome/141.0.7390.37");
@@ -1406,13 +1327,10 @@ for (const status of [
   assert.equal(result.wasm64TcgGenerated, true);
   assert.equal(result.tciProgress, true);
   assert.equal(result.tciProgressInterval, 2000000);
-  assert.equal(result.tciWasmSubset, true);
-  assert.equal(result.tciWasmGeneratedOnly, true);
   assert.equal(result.tciWasmGeneratedTrace, true);
   assert.equal(result.tciWasmGeneratedTraceLimit, 7);
-  assert.equal(result.tciWasmSubsetInterval, 10000);
-  assert.equal(result.tciWasmSubsetMaxOps, 64);
-  assert.equal(result.tciWasmSubsetThreshold, 4);
+  assert.equal(Object.hasOwn(result, "tciWasmSubset"), false);
+  assert.equal(Object.hasOwn(result, "tciWasmGeneratedOnly"), false);
   assert.equal(result.userDataDir, "/tmp/qemu-wasm-profile");
   assert.equal(result.visualMarker, "login");
   assert.deepEqual(result.serviceBridge, {
