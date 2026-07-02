@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 
 import {
+  atomicFence,
   buildTBModule,
   buildLoweringSubsetModule,
   encodeU32,
@@ -20,6 +21,16 @@ import {
   validateTBModuleContract,
 } from "./wasm-tb-module-emitter.mjs";
 
+function countSubsequence(bytes, needle) {
+  let count = 0;
+  for (let i = 0; i <= bytes.length - needle.length; i++) {
+    if (needle.every((value, offset) => bytes[i + offset] === value)) {
+      count++;
+    }
+  }
+  return count;
+}
+
 assert.deepEqual(encodeU32(0), [0]);
 assert.deepEqual(encodeU32(127), [127]);
 assert.deepEqual(encodeU32(128), [128, 1]);
@@ -27,6 +38,7 @@ assert.deepEqual(encodeU32(624485), [229, 142, 38]);
 assert.deepEqual(encodeS64(0n), [0]);
 assert.deepEqual(encodeS64(42n), [42]);
 assert.deepEqual(encodeS64(-1n), [127]);
+assert.deepEqual(atomicFence(), [0xfe, 0x03, 0x00]);
 
 const moduleBytes = buildTBModule();
 assert.equal(WebAssembly.validate(moduleBytes), true);
@@ -85,6 +97,10 @@ assert.deepEqual(probe.helperCalls, [
 const loweringModuleBytes = buildLoweringSubsetModule();
 assert.equal(WebAssembly.validate(loweringModuleBytes), true);
 validateTBModuleContract(loweringModuleBytes);
+assert.equal(
+  countSubsequence(loweringModuleBytes, atomicFence()),
+  LOWERING_SUBSET_BLOCK.filter((op) => op.op === "mb").length,
+);
 
 const interpretedMemory = new WebAssembly.Memory({ initial: 1 });
 const interpretedView = new DataView(interpretedMemory.buffer);

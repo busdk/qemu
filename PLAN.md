@@ -513,6 +513,24 @@ Engineering rules for this goal:
   family that W2k exposes. Do not run Chrome/Chromium for a single opcode.
   The browser measurement is accepted only if it records generated coverage
   share and compiled-block count and plausibly answers whether W3 can pass.
+- [x] W2l-a - Prove the `mb` memory-barrier encoding in the deterministic
+  module emitter under Node before any browser speed run. Accepted slice
+  evidence: `scripts/ci/wasm-tb-module-emitter.mjs` now emits the WebAssembly
+  threads `atomic.fence` instruction bytes `0xFE 0x03 0x00` for `mb` instead
+  of a no-op. `scripts/ci/wasm-tb-module-emitter-test.mjs` asserts the exact
+  bytes and asserts that the generated lowering-subset module contains one
+  fence per `mb` lowering op. Checks: `git diff --check`,
+  `node --check scripts/ci/wasm-tb-module-emitter.mjs`,
+  `node --check scripts/ci/wasm-tb-module-emitter-test.mjs`,
+  `node scripts/ci/wasm-tb-module-emitter-test.mjs`,
+  `node --check scripts/ci/wasm-generated-block-prototype-test.mjs`,
+  `node scripts/ci/wasm-generated-block-prototype-test.mjs`, and
+  `node scripts/ci/wasm-tb-module-emitter.mjs`. The lowering subset validates
+  and executes under Node with result JSON
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2l-a/wasm-tb-module-emitter.json`,
+  `memoryBarrierOps=2`, and module size `321` bytes. This does not complete
+  W2l because Chromium validation and batched backend lowering with generated
+  coverage evidence remain open.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and

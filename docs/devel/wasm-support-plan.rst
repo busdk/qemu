@@ -6382,3 +6382,33 @@ Hashes:
 This completes W2k only.  W2 remains open until generated TBs execute through
 the translation-time backend, exported counters show meaningful generated
 coverage, and the generic W3 speed gate passes.
+
+W2l-a: deterministic ``atomic.fence`` lowering proof
+----------------------------------------------------
+
+On 2026-07-02, the deterministic generated-TB module emitter gained an
+explicit WebAssembly threads ``atomic.fence`` byte emitter for the QEMU memory
+barrier lowering operation.  The emitted bytes are ``0xFE 0x03 0x00``.  This
+replaces the previous no-op representation in the deterministic model only;
+it does not by itself complete W2l, move generated coverage share, or justify
+a browser speed-gate run.
+
+Checks:
+
+* ``git diff --check``
+* ``node --check scripts/ci/wasm-tb-module-emitter.mjs``
+* ``node --check scripts/ci/wasm-tb-module-emitter-test.mjs``
+* ``node scripts/ci/wasm-tb-module-emitter-test.mjs``
+* ``node --check scripts/ci/wasm-generated-block-prototype-test.mjs``
+* ``node scripts/ci/wasm-generated-block-prototype-test.mjs``
+* ``node scripts/ci/wasm-tb-module-emitter.mjs``
+
+The test asserts the exact ``atomic.fence`` bytes and asserts that the
+generated lowering-subset module contains one fence per ``mb`` op.  The module
+validated and executed under Node with ``memoryBarrierOps=2`` and module size
+``321`` bytes.  The emitted probe JSON is:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2l-a/wasm-tb-module-emitter.json``
+
+Chromium validation and batched backend lowering remain open before W2l can be
+accepted.

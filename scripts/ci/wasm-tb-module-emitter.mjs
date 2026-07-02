@@ -116,6 +116,10 @@ function memArg(align, offset) {
   return [...encodeU32(align), ...encodeU32(offset)];
 }
 
+export function atomicFence() {
+  return [0xfe, 0x03, 0x00];
+}
+
 function packDispatchResult(status, value) {
   return (BigInt(status >>> 0) << 32n) | BigInt(value >>> 0);
 }
@@ -278,7 +282,7 @@ function emitLoweringOp(op, labelStack) {
       0x37, ...memArg(3, op.offset),
     ];
   case "mb":
-    return [];
+    return atomicFence();
   case "pack_dispatch_i64":
     return [
       ...packDispatchResultBytes(op.status, op.value),
