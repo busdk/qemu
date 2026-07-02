@@ -19,6 +19,7 @@
 
 #include "qemu/osdep.h"
 #include "tcg/tcg.h"
+#include "tcg/tcg-internal.h"
 #include "tcg/hotblocks.h"
 #include "tcg/helper-info.h"
 #include "tcg/tcg-ldst.h"
@@ -124,7 +125,29 @@ static uint64_t tci_wasm_generated_status_nonpositive;
 static uint64_t tci_wasm_generated_status_unknown;
 static uint64_t tci_wasm_generated_cache_hits;
 static uint64_t tci_wasm_generated_cache_stale;
+static uint64_t tci_wasm_generated_compile_prereq_failed;
+static uint64_t tci_wasm_generated_compile_no_terminal;
+static uint64_t tci_wasm_generated_compile_lowering_failed;
+static uint64_t tci_wasm_generated_compile_module_failed;
+static uint64_t tci_wasm_generated_compile_table_failed;
+static uint64_t tci_wasm_generated_compile_instance_failed;
+static uint64_t tci_wasm_generated_compile_add_function_failed;
+static uint64_t tci_wasm_generated_compile_exception_failed;
+static uint64_t tci_wasm_generated_compile_unknown_failed;
 static uint64_t tci_wasm_generated_unsupported_ops[NB_OPS];
+
+typedef enum TCIWasmGeneratedCompileStatus {
+    TCI_WASM_GENERATED_COMPILE_OK = 0,
+    TCI_WASM_GENERATED_COMPILE_PREREQ_FAILED = 1,
+    TCI_WASM_GENERATED_COMPILE_NO_TERMINAL = 2,
+    TCI_WASM_GENERATED_COMPILE_LOWERING_FAILED = 3,
+    TCI_WASM_GENERATED_COMPILE_MODULE_FAILED = 4,
+    TCI_WASM_GENERATED_COMPILE_TABLE_FAILED = 5,
+    TCI_WASM_GENERATED_COMPILE_INSTANCE_FAILED = 6,
+    TCI_WASM_GENERATED_COMPILE_ADD_FUNCTION_FAILED = 7,
+    TCI_WASM_GENERATED_COMPILE_EXCEPTION_FAILED = 8,
+    TCI_WASM_GENERATED_COMPILE_UNKNOWN_FAILED = 9,
+} TCIWasmGeneratedCompileStatus;
 
 static uint64_t tci_wasm_coverage_ppm(uint64_t numerator,
                                       uint64_t denominator)
@@ -756,12 +779,15 @@ static uint64_t tci_wasm_generated_signature(const uint32_t *code_start,
         hash ^= insn;
         hash *= 0x100000001b3ULL;
 
-        if (opc == INDEX_op_exit_tb || opc == INDEX_op_goto_tb) {
+        if (opc == INDEX_op_exit_tb || opc == INDEX_op_goto_tb ||
+            opc == INDEX_op_goto_ptr) {
             void *ptr;
 
-            tci_args_l(insn, tb_ptr, &ptr);
-            hash ^= (uintptr_t)ptr;
-            hash *= 0x100000001b3ULL;
+            if (opc != INDEX_op_goto_ptr) {
+                tci_args_l(insn, tb_ptr, &ptr);
+                hash ^= (uintptr_t)ptr;
+                hash *= 0x100000001b3ULL;
+            }
             break;
         }
     }
@@ -777,6 +803,19 @@ static const char *tci_wasm_op_name(TCGOpcode opc)
     return "unknown";
 }
 
+static void tci_wasm_generated_trace_op(const uint32_t *code_start,
+                                        uint64_t index,
+                                        bool leading_comma)
+{
+    TCGOpcode opc = extract32(code_start[index], 0, 8);
+
+    fprintf(stderr,
+            "%s{\"index\":%" PRIu64 ",\"op\":%u,"
+            "\"name\":\"%s\",\"insn\":\"0x%08x\"}",
+            leading_comma ? "," : "", index, opc,
+            tci_wasm_op_name(opc), code_start[index]);
+}
+
 static void tci_wasm_generated_trace_event(const char *reason,
                                            const uint32_t *tb_start,
                                            const uint32_t *code_start,
@@ -785,7 +824,9 @@ static void tci_wasm_generated_trace_event(const char *reason,
                                            int status)
 {
     const char *terminal = "none";
+    uint64_t terminal_index = UINT64_MAX;
     uint64_t trace_ops;
+    uint64_t tail_start = 0;
 
     if (!tci_wasm_generated_trace_enabled() ||
         tci_wasm_generated_trace_events >= tci_wasm_generated_trace_limit) {
@@ -799,12 +840,22 @@ static void tci_wasm_generated_trace_event(const char *reason,
 
         if (opc == INDEX_op_exit_tb) {
             terminal = "exit_tb";
+            terminal_index = index;
             break;
         }
         if (opc == INDEX_op_goto_tb) {
             terminal = "goto_tb";
+            terminal_index = index;
             break;
         }
+        if (opc == INDEX_op_goto_ptr) {
+            terminal = "goto_ptr";
+            terminal_index = index;
+            break;
+        }
+    }
+    if (code_ops > 16) {
+        tail_start = code_ops - 16;
     }
 
     fprintf(stderr,
@@ -814,19 +865,131 @@ static void tci_wasm_generated_trace_event(const char *reason,
             "\"code_ptr\":\"0x%" PRIxPTR "\","
             "\"signature\":\"0x%" PRIx64 "\","
             "\"code_ops\":%" PRIu64 ",\"terminal\":\"%s\","
-            "\"status\":%d,\"ops\":[",
+            "\"terminal_index\":",
             reason, (uintptr_t)tb_start, (uintptr_t)code_start, signature,
-            code_ops, terminal, status);
+            code_ops, terminal);
+    if (terminal_index == UINT64_MAX) {
+        fprintf(stderr, "null");
+    } else {
+        fprintf(stderr, "%" PRIu64, terminal_index);
+    }
+    fprintf(stderr,
+            ",\"status\":%d,\"ops_truncated\":%s,"
+            "\"ops\":[",
+            status, code_ops > trace_ops ? "true" : "false");
     for (uint64_t index = 0; index < trace_ops; index++) {
+        tci_wasm_generated_trace_op(code_start, index, index != 0);
+    }
+    fprintf(stderr, "]");
+    if (tail_start > trace_ops) {
+        fprintf(stderr, ",\"tail_ops\":[");
+        for (uint64_t index = tail_start; index < code_ops; index++) {
+            tci_wasm_generated_trace_op(code_start, index,
+                                        index != tail_start);
+        }
+        fprintf(stderr, "]");
+    }
+    fprintf(stderr, "}\n");
+}
+
+static uint64_t tci_wasm_generated_trace_code_ops(const uint32_t *code_start,
+                                                  uint64_t max_ops)
+{
+    for (uint64_t index = 0; index < max_ops; index++) {
         TCGOpcode opc = extract32(code_start[index], 0, 8);
 
-        fprintf(stderr,
-                "%s{\"index\":%" PRIu64 ",\"op\":%u,"
-                "\"name\":\"%s\",\"insn\":\"0x%08x\"}",
-                index == 0 ? "" : ",", index, opc,
-                tci_wasm_op_name(opc), code_start[index]);
+        if (opc == INDEX_op_exit_tb || opc == INDEX_op_goto_tb ||
+            opc == INDEX_op_goto_ptr) {
+            return index + 1;
+        }
     }
-    fprintf(stderr, "]}\n");
+    return max_ops;
+}
+
+static void tci_wasm_generated_trace_tci_block(const char *reason,
+                                               const uint32_t *tb_start)
+{
+    uint64_t code_ops;
+    uint64_t signature;
+
+    if (!tci_wasm_generated_trace_enabled()) {
+        return;
+    }
+
+    code_ops = tci_wasm_generated_trace_code_ops(tb_start,
+                                                 tci_wasm_subset_max_ops);
+    signature = tci_wasm_generated_signature(tb_start, tb_start, code_ops);
+    tci_wasm_generated_trace_event(reason, tb_start, tb_start, code_ops,
+                                   signature, 0);
+}
+
+static void tci_wasm_generated_trace_call_event(const char *reason,
+                                                const uint32_t *tb_start,
+                                                const uint32_t *insn_ptr,
+                                                uint32_t insn,
+                                                const void *func,
+                                                const ffi_cif *cif,
+                                                void *const *call_slots)
+{
+    TCGOpcode opc = extract32(insn, 0, 8);
+    const TCGHelperInfo *helper_info = tcg_lookup_helper_trace_info(func);
+    const char *helper_name = helper_info != NULL ? helper_info->name : "";
+    unsigned helper_flags = helper_info != NULL ? helper_info->flags : 0;
+    uint64_t args[4] = { 0, 0, 0, 0 };
+    unsigned nargs = cif != NULL ? cif->nargs : 0;
+    unsigned ntrace = MIN(nargs, (unsigned)ARRAY_SIZE(args));
+    int64_t op_index = -1;
+
+    if (!tci_wasm_generated_trace_enabled() ||
+        tci_wasm_generated_trace_events >= tci_wasm_generated_trace_limit) {
+        return;
+    }
+
+    for (unsigned i = 0; i < ntrace; i++) {
+        ffi_type *type = cif->arg_types[i];
+
+        switch (type->size) {
+        case 1:
+            args[i] = *(uint8_t *)call_slots[i];
+            break;
+        case 2:
+            args[i] = *(uint16_t *)call_slots[i];
+            break;
+        case 4:
+            args[i] = *(uint32_t *)call_slots[i];
+            break;
+        case 8:
+            args[i] = *(uint64_t *)call_slots[i];
+            break;
+        default:
+            args[i] = (uintptr_t)call_slots[i];
+            break;
+        }
+    }
+
+    if (insn_ptr >= tb_start) {
+        op_index = insn_ptr - tb_start;
+    }
+
+    tci_wasm_generated_trace_events++;
+    fprintf(stderr,
+            "qemu-tci-wasm-generated-trace: {\"format\":1,"
+            "\"event\":\"generated-trace\",\"reason\":\"%s\","
+            "\"tb_ptr\":\"0x%" PRIxPTR "\","
+            "\"code_ptr\":\"0x%" PRIxPTR "\","
+            "\"op_index\":%" PRId64 ","
+            "\"op\":%u,\"name\":\"%s\","
+            "\"insn\":\"0x%08x\",\"func\":\"0x%" PRIxPTR "\","
+            "\"helper\":\"%s\",\"helper_flags\":%u,"
+            "\"helper_no_return\":%s,"
+            "\"nargs\":%u,\"arg0\":\"0x%" PRIx64 "\","
+            "\"arg1\":\"0x%" PRIx64 "\",\"arg2\":\"0x%" PRIx64 "\","
+            "\"arg3\":\"0x%" PRIx64 "\"}\n",
+            reason, (uintptr_t)tb_start, (uintptr_t)insn_ptr,
+            op_index, opc, tci_wasm_op_name(opc), insn,
+            (uintptr_t)func, helper_name, helper_flags,
+            (helper_flags & TCG_CALL_NO_RETURN) ? "true" : "false",
+            nargs, args[0], args[1], args[2], args[3]);
 }
 
 static bool tci_wasm_generated_mark_unsupported(TCIWasmSubsetEntry *entry,
@@ -838,6 +1001,41 @@ static bool tci_wasm_generated_mark_unsupported(TCIWasmSubsetEntry *entry,
         tci_wasm_generated_unsupported_ops[opc]++;
     }
     return false;
+}
+
+static void tci_wasm_generated_count_compile_status(uint32_t status)
+{
+    switch ((TCIWasmGeneratedCompileStatus)status) {
+    case TCI_WASM_GENERATED_COMPILE_PREREQ_FAILED:
+        tci_wasm_generated_compile_prereq_failed++;
+        break;
+    case TCI_WASM_GENERATED_COMPILE_NO_TERMINAL:
+        tci_wasm_generated_compile_no_terminal++;
+        break;
+    case TCI_WASM_GENERATED_COMPILE_LOWERING_FAILED:
+        tci_wasm_generated_compile_lowering_failed++;
+        break;
+    case TCI_WASM_GENERATED_COMPILE_MODULE_FAILED:
+        tci_wasm_generated_compile_module_failed++;
+        break;
+    case TCI_WASM_GENERATED_COMPILE_TABLE_FAILED:
+        tci_wasm_generated_compile_table_failed++;
+        break;
+    case TCI_WASM_GENERATED_COMPILE_INSTANCE_FAILED:
+        tci_wasm_generated_compile_instance_failed++;
+        break;
+    case TCI_WASM_GENERATED_COMPILE_ADD_FUNCTION_FAILED:
+        tci_wasm_generated_compile_add_function_failed++;
+        break;
+    case TCI_WASM_GENERATED_COMPILE_EXCEPTION_FAILED:
+        tci_wasm_generated_compile_exception_failed++;
+        break;
+    case TCI_WASM_GENERATED_COMPILE_UNKNOWN_FAILED:
+    case TCI_WASM_GENERATED_COMPILE_OK:
+    default:
+        tci_wasm_generated_compile_unknown_failed++;
+        break;
+    }
 }
 
 static bool tci_wasm_generated_opcode_supported(TCGOpcode opc)
@@ -854,17 +1052,22 @@ static bool tci_wasm_generated_opcode_supported(TCGOpcode opc)
     case INDEX_op_xor:
     case INDEX_op_ld:
     case INDEX_op_ld32u:
+    case INDEX_op_ld32s:
     case INDEX_op_mb:
+    case INDEX_op_deposit:
     case INDEX_op_st8:
     case INDEX_op_st32:
     case INDEX_op_st:
     case INDEX_op_setcond:
     case INDEX_op_movcond:
+    case INDEX_op_neg:
     case INDEX_op_shl:
     case INDEX_op_shr:
     case INDEX_op_extract:
     case INDEX_op_sextract:
     case INDEX_op_tci_setcond32:
+    case INDEX_op_tci_qemu_ld_rrr:
+    case INDEX_op_tci_qemu_st_rrr:
     case INDEX_op_brcond:
     case INDEX_op_exit_tb:
     case INDEX_op_goto_tb:
@@ -906,20 +1109,77 @@ static bool tci_wasm_generated_prevalidate(TCIWasmSubsetEntry *entry,
     return tci_wasm_generated_mark_unsupported(entry, NB_OPS);
 }
 
+static uint64_t tci_wasm_generated_qemu_ld_rrr(uint64_t env, uint64_t taddr,
+                                               uint64_t oi, uint64_t tb_ptr)
+{
+    return tci_qemu_ld((CPUArchState *)(uintptr_t)env, taddr,
+                       (MemOpIdx)oi, (const void *)(uintptr_t)tb_ptr);
+}
+
+static void tci_wasm_generated_qemu_st_rrr(uint64_t env, uint64_t taddr,
+                                           uint64_t val, uint64_t oi,
+                                           uint64_t tb_ptr)
+{
+    tci_qemu_st((CPUArchState *)(uintptr_t)env, taddr, val, (MemOpIdx)oi,
+                (const void *)(uintptr_t)tb_ptr);
+}
+
 EM_JS(uintptr_t, tci_wasm_generated_compile_js,
       (uintptr_t code_arg, uintptr_t relative_base_arg, uint64_t max_ops_arg,
        int op_mov, int op_movi, int op_movl, int op_add, int op_sub,
        int op_mul, int op_and, int op_or,
-       int op_xor, int op_ld, int op_ld32u, int op_st8, int op_st32,
+       int op_xor, int op_ld, int op_ld32u, int op_ld32s, int op_st8,
+       int op_st32,
        int op_st, int op_setcond, int op_movcond, int op_shl, int op_shr,
-       int op_extract, int op_sextract, int op_setcond32, int op_brcond,
-       int op_mb, int op_exit_tb, int op_goto_tb,
-       int ctx_regs_offset, int ctx_ret_offset),
+       int op_extract, int op_sextract, int op_deposit, int op_neg,
+       int op_setcond32, int op_brcond, int op_qemu_ld_rrr,
+       int op_qemu_st_rrr, int op_mb, int op_exit_tb,
+       int op_goto_tb, int ctx_regs_offset, int ctx_ret_offset,
+       uintptr_t qemu_ld_rrr_func_arg, uintptr_t qemu_st_rrr_func_arg,
+       uintptr_t compile_status_arg),
 {
     const code = Number(code_arg);
     const relativeBase = Number(relative_base_arg);
     const maxOps = Number(max_ops_arg);
+    const qemuLdRrrFuncIndex = BigInt(qemu_ld_rrr_func_arg);
+    const qemuStRrrFuncIndex = BigInt(qemu_st_rrr_func_arg);
+    const compileStatus = Number(compile_status_arg);
     const valueI64 = 0x7e;
+    const statusOk = 0;
+    const statusPrereqFailed = 1;
+    const statusNoTerminal = 2;
+    const statusLoweringFailed = 3;
+    const statusModuleFailed = 4;
+    const statusTableFailed = 5;
+    const statusInstanceFailed = 6;
+    const statusAddFunctionFailed = 7;
+    const statusExceptionFailed = 8;
+
+    function setStatus(status) {
+        if (compileStatus !== 0) {
+            HEAPU32[compileStatus >> 2] = status;
+        }
+    }
+
+    function reportCompileError(status, phase, error, detail = {}) {
+        const key = "__qemuTciWasmGeneratedCompileErrorCount";
+        const count = Number(globalThis[key] || 0);
+
+        globalThis[key] = count + 1;
+        if (count >= 16) {
+            return;
+        }
+        console.warn("qemu-tci-wasm-generated-compile-error: " +
+            JSON.stringify({
+                format: 1,
+                event: "generated-compile-error",
+                status,
+                phase,
+                message: error && error.message ? String(error.message)
+                                                 : String(error || ""),
+                ...detail,
+            }));
+    }
 
     function encodeU32(value) {
         const bytes = [];
@@ -1046,8 +1306,16 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
         return [...expr, 0xad];
     }
 
+    function i64ExtendI32S(expr) {
+        return [...expr, 0xac];
+    }
+
     function block(body) {
         return [0x02, 0x40, ...body, 0x0b];
+    }
+
+    function callFunc(index, args) {
+        return [...args.flat(), 0x10, ...encodeU32(index)];
     }
 
     function brIf(depth, condition) {
@@ -1204,6 +1472,7 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
         }
 
         if (terminal === null) {
+            setStatus(statusNoTerminal);
             return 0;
         }
 
@@ -1240,7 +1509,7 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
                 }
                 code.push(0x21, ...encodeU32(regLocal(r0)));
                 return code;
-            } else if (opc === op_ld32u) {
+            } else if (opc === op_ld32u || opc === op_ld32s) {
                 const ofs = sextract(insn, 16, 16);
 
                 return localSet(regLocal(r0), [
@@ -1249,7 +1518,7 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
                         ...i64Const(ofs),
                         0x7c, /* i64.add */
                     ], 0),
-                    0xad, /* i64.extend_i32_u */
+                    opc === op_ld32u ? 0xad : 0xac,
                 ]);
             } else if (opc === op_ld) {
                 const ofs = sextract(insn, 16, 16);
@@ -1310,10 +1579,16 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
                     ...comparison,
                     0x1b, /* select */
                 ]);
+            } else if (opc === op_neg) {
+                return localSet(regLocal(r0), [
+                    ...i64Const(0),
+                    ...localGet(regLocal(r1)),
+                    0x7d, /* i64.sub */
+                ]);
             } else if (opc === op_shl || opc === op_shr) {
                 return localSet(regLocal(r0), [
                     ...localGet(regLocal(r1)),
-                    ...i32WrapI64(localGet(regLocal(r2))),
+                    ...localGet(regLocal(r2)),
                     opc === op_shl ? 0x86 : 0x88,
                 ]);
             } else if (opc === op_extract || opc === op_sextract) {
@@ -1328,7 +1603,7 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
 
                     return localSet(regLocal(r0), [
                         ...localGet(regLocal(r1)),
-                        ...i32Const(pos),
+                        ...i64Const(pos),
                         0x88, /* i64.shr_u */
                         ...i64Const(mask),
                         0x83, /* i64.and */
@@ -1338,12 +1613,34 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
 
                     return localSet(regLocal(r0), [
                         ...localGet(regLocal(r1)),
-                        ...i32Const(shift),
+                        ...i64Const(shift),
                         0x86, /* i64.shl */
-                        ...i32Const(shift),
+                        ...i64Const(shift),
                         0x87, /* i64.shr_s */
                     ]);
                 }
+            } else if (opc === op_deposit) {
+                const pos = bits(insn, 20, 6);
+                const len = bits(insn, 26, 6);
+
+                if (len === 0 || pos + len > 64) {
+                    return null;
+                }
+                const mask = len === 64 ? -1n : ((1n << BigInt(len)) - 1n);
+                const clearMask = BigInt.asUintN(
+                    64, ~(BigInt.asUintN(64, mask) << BigInt(pos)));
+
+                return localSet(regLocal(r0), [
+                    ...localGet(regLocal(r1)),
+                    ...i64Const(clearMask),
+                    0x83, /* i64.and */
+                    ...localGet(regLocal(r2)),
+                    ...i64Const(mask),
+                    0x83, /* i64.and */
+                    ...i64Const(pos),
+                    0x86, /* i64.shl */
+                    0x84, /* i64.or */
+                ]);
             } else if (opc === op_setcond32) {
                 const condition = bits(insn, 20, 4);
                 const comparison = i32Compare(
@@ -1355,6 +1652,21 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
                 return comparison === null
                     ? null
                     : localSet(regLocal(r0), i64ExtendI32U(comparison));
+            } else if (opc === op_qemu_ld_rrr) {
+                return localSet(regLocal(r0), callFunc(0, [
+                    localGet(regLocal(14)),
+                    localGet(regLocal(r1)),
+                    localGet(regLocal(r2)),
+                    i64Const(tbPtr),
+                ]));
+            } else if (opc === op_qemu_st_rrr) {
+                return callFunc(1, [
+                    localGet(regLocal(14)),
+                    localGet(regLocal(r1)),
+                    localGet(regLocal(r0)),
+                    localGet(regLocal(r2)),
+                    i64Const(tbPtr),
+                ]);
             } else if (opc === op_mb) {
                 return [0xfe, 0x03, 0x00]; /* atomic.fence */
             }
@@ -1405,6 +1717,7 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
             const body = compileRange(0, ops.length);
 
             if (body === null) {
+                setStatus(statusLoweringFailed);
                 return 0;
             }
             instructions.push(...body);
@@ -1426,35 +1739,119 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
         const bytes = [
             0x00, 0x61, 0x73, 0x6d,
             0x01, 0x00, 0x00, 0x00,
-            ...section(1, vector([functionType([valueI64], [valueI64])])),
-            ...section(2, vector([[
-                ...name("env"),
-                ...name("memory"),
-                0x02, 0x07, 0x00, 0x80, 0x80, 0x10,
-            ]])),
+            ...section(1, vector([
+                functionType([valueI64], [valueI64]),
+                functionType([valueI64, valueI64, valueI64, valueI64],
+                             [valueI64]),
+                functionType([valueI64, valueI64, valueI64, valueI64,
+                              valueI64], []),
+            ])),
+            ...section(2, vector([
+                [
+                    ...name("env"),
+                    ...name("memory"),
+                    0x02, 0x07, 0x00, 0x80, 0x80, 0x10,
+                ],
+                [
+                    ...name("env"),
+                    ...name("qemu_ld_rrr"),
+                    0x00,
+                    ...encodeU32(1),
+                ],
+                [
+                    ...name("env"),
+                    ...name("qemu_st_rrr"),
+                    0x00,
+                    ...encodeU32(2),
+                ],
+            ])),
             ...section(3, vector([[0x00]])),
-            ...section(7, vector([[...name("run"), 0x00, ...encodeU32(0)]])),
+            ...section(7, vector([[...name("run"), 0x00, ...encodeU32(2)]])),
             ...section(10, vector([functionBody(
                 instructions,
                 [{ count: 18, type: valueI64 }]
             )])),
         ];
-        const module = new WebAssembly.Module(Uint8Array.from(bytes));
-        const instance = new WebAssembly.Instance(module, {
-            env: { memory: wasmMemory },
-        });
+        let module;
+        let qemuLdRrrFunc;
+        let qemuStRrrFunc;
+        let instance;
+        let func;
 
-        return addFunction(instance.exports.run, "jj");
+        try {
+            module = new WebAssembly.Module(Uint8Array.from(bytes));
+        } catch (error) {
+            setStatus(statusModuleFailed);
+            reportCompileError(statusModuleFailed, "module", error, {
+                codeOps: ops.length + 1,
+                terminal: terminal.kind,
+                byteLength: bytes.length,
+                bytePrefix: bytes.slice(0, 96).map((byte) =>
+                    byte.toString(16).padStart(2, "0")).join(""),
+            });
+            return 0;
+        }
+        try {
+            qemuLdRrrFunc = wasmTable.get(qemuLdRrrFuncIndex);
+            qemuStRrrFunc = wasmTable.get(qemuStRrrFuncIndex);
+            if (typeof qemuLdRrrFunc !== "function" ||
+                typeof qemuStRrrFunc !== "function") {
+                setStatus(statusTableFailed);
+                reportCompileError(statusTableFailed, "table", null, {
+                    loadType: typeof qemuLdRrrFunc,
+                    storeType: typeof qemuStRrrFunc,
+                });
+                return 0;
+            }
+        } catch (error) {
+            setStatus(statusTableFailed);
+            reportCompileError(statusTableFailed, "table", error);
+            return 0;
+        }
+        try {
+            instance = new WebAssembly.Instance(module, {
+                env: {
+                    memory: wasmMemory,
+                    qemu_ld_rrr: qemuLdRrrFunc,
+                    qemu_st_rrr: qemuStRrrFunc,
+                },
+            });
+        } catch (error) {
+            setStatus(statusInstanceFailed);
+            reportCompileError(statusInstanceFailed, "instance", error);
+            return 0;
+        }
+        try {
+            func = addFunction(instance.exports.run, "jj");
+        } catch (error) {
+            setStatus(statusAddFunctionFailed);
+            reportCompileError(statusAddFunctionFailed, "addFunction", error);
+            return 0;
+        }
+        if (!func) {
+            setStatus(statusAddFunctionFailed);
+            reportCompileError(statusAddFunctionFailed, "addFunction", null);
+            return 0;
+        }
+        setStatus(statusOk);
+        return func;
     }
 
     try {
+        setStatus(statusExceptionFailed);
         if (typeof wasmMemory === "undefined" ||
-            typeof addFunction !== "function") {
+            typeof wasmTable === "undefined" ||
+            typeof addFunction !== "function" ||
+            qemuLdRrrFuncIndex <= 0n ||
+            qemuStRrrFuncIndex <= 0n) {
+            setStatus(statusPrereqFailed);
             return 0n;
         }
         const func = compileFunction();
         return func ? BigInt(func) : 0n;
     } catch (error) {
+        setStatus(statusExceptionFailed);
+        reportCompileError(statusExceptionFailed, "exception", error);
         return 0n;
     }
 });
@@ -1478,6 +1875,24 @@ static void tci_wasm_subset_report(const char *reason)
         .generated_coverage_denominator = generated_coverage_denominator,
         .fallback_unsupported = tci_wasm_generated_fallback_unsupported,
         .fallback_runtime = tci_wasm_generated_compile_failed,
+        .generated_compile_prereq_failed =
+            tci_wasm_generated_compile_prereq_failed,
+        .generated_compile_no_terminal =
+            tci_wasm_generated_compile_no_terminal,
+        .generated_compile_lowering_failed =
+            tci_wasm_generated_compile_lowering_failed,
+        .generated_compile_module_failed =
+            tci_wasm_generated_compile_module_failed,
+        .generated_compile_table_failed =
+            tci_wasm_generated_compile_table_failed,
+        .generated_compile_instance_failed =
+            tci_wasm_generated_compile_instance_failed,
+        .generated_compile_add_function_failed =
+            tci_wasm_generated_compile_add_function_failed,
+        .generated_compile_exception_failed =
+            tci_wasm_generated_compile_exception_failed,
+        .generated_compile_unknown_failed =
+            tci_wasm_generated_compile_unknown_failed,
     };
 #endif
 
@@ -1529,6 +1944,15 @@ static void tci_wasm_subset_report(const char *reason)
             "\"generated_fallback_unsupported\":%" PRIu64 ","
             "\"generated_compile_failed\":%" PRIu64 ","
             "\"generated_compile_zero\":%" PRIu64 ","
+            "\"generated_compile_prereq_failed\":%" PRIu64 ","
+            "\"generated_compile_no_terminal\":%" PRIu64 ","
+            "\"generated_compile_lowering_failed\":%" PRIu64 ","
+            "\"generated_compile_module_failed\":%" PRIu64 ","
+            "\"generated_compile_table_failed\":%" PRIu64 ","
+            "\"generated_compile_instance_failed\":%" PRIu64 ","
+            "\"generated_compile_add_function_failed\":%" PRIu64 ","
+            "\"generated_compile_exception_failed\":%" PRIu64 ","
+            "\"generated_compile_unknown_failed\":%" PRIu64 ","
             "\"generated_status_nonpositive\":%" PRIu64 ","
             "\"generated_status_unknown\":%" PRIu64 ","
             "\"generated_cache_hits\":%" PRIu64 ","
@@ -1551,6 +1975,15 @@ static void tci_wasm_subset_report(const char *reason)
             tci_wasm_generated_fallback_unsupported,
             tci_wasm_generated_compile_failed,
             tci_wasm_generated_compile_zero,
+            tci_wasm_generated_compile_prereq_failed,
+            tci_wasm_generated_compile_no_terminal,
+            tci_wasm_generated_compile_lowering_failed,
+            tci_wasm_generated_compile_module_failed,
+            tci_wasm_generated_compile_table_failed,
+            tci_wasm_generated_compile_instance_failed,
+            tci_wasm_generated_compile_add_function_failed,
+            tci_wasm_generated_compile_exception_failed,
+            tci_wasm_generated_compile_unknown_failed,
             tci_wasm_generated_status_nonpositive,
             tci_wasm_generated_status_unknown,
             tci_wasm_generated_cache_hits,
@@ -1792,6 +2225,7 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry,
 {
     uint64_t signature = tci_wasm_generated_signature(code_start, tb_start,
                                                       code_ops);
+    uint32_t compile_status = TCI_WASM_GENERATED_COMPILE_OK;
 #ifdef CONFIG_TCG_WASM64_BACKEND
     TCGWasm64Counters *wasm64_counters = tcg_wasm64_active_counters();
     TCGWasm64Context ctx = {
@@ -1839,23 +2273,32 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry,
     }
 
     if (entry->generated_func == 0) {
+        tci_wasm_generated_trace_event("compile-enter", tb_start, code_start,
+                                       code_ops, signature, 0);
         entry->generated_func = tci_wasm_generated_compile_js(
             (uintptr_t)code_start, (uintptr_t)tb_start, code_ops,
             INDEX_op_mov, INDEX_op_tci_movi, INDEX_op_tci_movl, INDEX_op_add,
             INDEX_op_sub, INDEX_op_mul, INDEX_op_and, INDEX_op_or,
-            INDEX_op_xor, INDEX_op_ld, INDEX_op_ld32u, INDEX_op_st8,
-            INDEX_op_st32, INDEX_op_st, INDEX_op_setcond, INDEX_op_movcond,
-            INDEX_op_shl, INDEX_op_shr, INDEX_op_extract, INDEX_op_sextract,
-            INDEX_op_tci_setcond32, INDEX_op_brcond, INDEX_op_mb, INDEX_op_exit_tb,
-            INDEX_op_goto_tb,
+            INDEX_op_xor, INDEX_op_ld, INDEX_op_ld32u, INDEX_op_ld32s,
+            INDEX_op_st8, INDEX_op_st32, INDEX_op_st, INDEX_op_setcond,
+            INDEX_op_movcond, INDEX_op_shl, INDEX_op_shr, INDEX_op_extract,
+            INDEX_op_sextract, INDEX_op_deposit, INDEX_op_neg,
+            INDEX_op_tci_setcond32, INDEX_op_brcond,
+            INDEX_op_tci_qemu_ld_rrr, INDEX_op_tci_qemu_st_rrr, INDEX_op_mb,
+            INDEX_op_exit_tb, INDEX_op_goto_tb,
             (int)TCI_WASM_GENERATED_CTX_REGS_OFFSET,
-            (int)TCI_WASM_GENERATED_CTX_RET_OFFSET);
+            (int)TCI_WASM_GENERATED_CTX_RET_OFFSET,
+            (uintptr_t)tci_wasm_generated_qemu_ld_rrr,
+            (uintptr_t)tci_wasm_generated_qemu_st_rrr,
+            (uintptr_t)&compile_status);
         if (entry->generated_func == 0) {
             entry->generated_unsupported = true;
             tci_wasm_generated_compile_failed++;
             tci_wasm_generated_compile_zero++;
+            tci_wasm_generated_count_compile_status(compile_status);
             tci_wasm_generated_trace_event("compile-zero", tb_start,
-                                           code_start, code_ops, signature, 0);
+                                           code_start, code_ops, signature,
+                                           compile_status);
 #ifdef CONFIG_TCG_WASM64_BACKEND
             tcg_wasm64_count_fallback(wasm64_counters,
                                       TCG_WASM64_FALLBACK_RUNTIME);
@@ -1879,7 +2322,11 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry,
 #endif
     }
 
+    tci_wasm_generated_trace_event("exec-enter", tb_start, code_start,
+                                   code_ops, signature, 0);
     status = ((TCIWasmGeneratedFunc)entry->generated_func)((uintptr_t)&ctx);
+    tci_wasm_generated_trace_event("exec-return", tb_start, code_start,
+                                   code_ops, signature, status);
 
     if (status <= 0) {
         entry->generated_unsupported = true;
@@ -2424,6 +2871,7 @@ uintptr_t QEMU_DISABLE_CFI TCI_QEMU_TB_EXEC(CPUArchState *env,
     uint64_t stack[(TCG_STATIC_CALL_ARGS_SIZE + TCG_STATIC_FRAME_SIZE)
                    / sizeof(uint64_t)];
     uintptr_t subset_ret;
+    const uint32_t *current_tb_start = tb_ptr;
     bool at_tb_start = true;
     bool carry = false;
     bool fast_gates = tci_fast_gates_enabled();
@@ -2449,6 +2897,7 @@ uintptr_t QEMU_DISABLE_CFI TCI_QEMU_TB_EXEC(CPUArchState *env,
         void *ptr;
 
         if (at_tb_start) {
+            current_tb_start = tb_ptr;
             if (perf_attrib_active) {
                 qemu_perf_attrib_tci_tb_entry();
             }
@@ -2465,6 +2914,8 @@ uintptr_t QEMU_DISABLE_CFI TCI_QEMU_TB_EXEC(CPUArchState *env,
                         tb_ptr = (const uint32_t *)subset_ret;
                         continue;
                     case TCI_WASM_SUBSET_UNSUPPORTED:
+                        tci_wasm_generated_trace_tci_block("fallback-enter",
+                                                           tb_ptr);
                         break;
                     default:
                         g_assert_not_reached();
@@ -2480,6 +2931,8 @@ uintptr_t QEMU_DISABLE_CFI TCI_QEMU_TB_EXEC(CPUArchState *env,
                     tb_ptr = (const uint32_t *)subset_ret;
                     continue;
                 case TCI_WASM_SUBSET_UNSUPPORTED:
+                    tci_wasm_generated_trace_tci_block("fallback-enter",
+                                                       tb_ptr);
                     at_tb_start = false;
                     break;
                 default:
@@ -2495,6 +2948,7 @@ uintptr_t QEMU_DISABLE_CFI TCI_QEMU_TB_EXEC(CPUArchState *env,
         switch (opc) {
         case INDEX_op_call:
             {
+                const uint32_t *insn_ptr = tb_ptr - 1;
                 void *call_slots[MAX_CALL_IARGS];
                 ffi_cif *cif;
                 void *func;
@@ -2516,7 +2970,15 @@ uintptr_t QEMU_DISABLE_CFI TCI_QEMU_TB_EXEC(CPUArchState *env,
                 if (perf_attrib_active) {
                     qemu_perf_attrib_tci_helper_call();
                 }
+                tci_wasm_generated_trace_call_event("ffi-call-enter",
+                                                    current_tb_start, insn_ptr,
+                                                    insn, func, cif,
+                                                    call_slots);
                 ffi_call(cif, func, stack, call_slots);
+                tci_wasm_generated_trace_call_event("ffi-call-return",
+                                                    current_tb_start, insn_ptr,
+                                                    insn, func, cif,
+                                                    call_slots);
             }
 
             switch (len) {

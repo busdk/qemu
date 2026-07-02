@@ -333,6 +333,23 @@ export function tciWasmGeneratedTrace(line) {
   }
 }
 
+export function fwCfgTrace(line) {
+  const prefix = "qemu-fw-cfg-trace: ";
+
+  if (!line.startsWith(prefix)) {
+    return null;
+  }
+  try {
+    const trace = JSON.parse(line.slice(prefix.length));
+    if (trace === null || typeof trace !== "object" || Array.isArray(trace)) {
+      return null;
+    }
+    return trace;
+  } catch {
+    return null;
+  }
+}
+
 export function tciProgressSummary(line) {
   const prefix = "qemu-tci-progress: ";
 
@@ -427,6 +444,25 @@ export function recordTciWasmGeneratedTrace(state, line, elapsedMs) {
   generatedTrace.entries.push(generatedTrace.last);
   if (generatedTrace.entries.length > generatedTrace.limit) {
     generatedTrace.entries.shift();
+  }
+}
+
+export function recordFwCfgTrace(state, line, elapsedMs) {
+  if (!state || !state.fwCfgTrace || !state.fwCfgTrace.enabled) {
+    return;
+  }
+  const trace = fwCfgTrace(line);
+  if (trace === null) {
+    return;
+  }
+  state.fwCfgTrace.count += 1;
+  state.fwCfgTrace.last = {
+    elapsedMs,
+    ...trace,
+  };
+  state.fwCfgTrace.entries.push(state.fwCfgTrace.last);
+  if (state.fwCfgTrace.entries.length > state.fwCfgTrace.limit) {
+    state.fwCfgTrace.entries.shift();
   }
 }
 
@@ -1468,6 +1504,8 @@ function buildConfig() {
     performanceAttribution: boolOption("performanceAttribution", false),
     performanceAttributionInterval: numberOption("performanceAttributionInterval", 10000),
     performanceAttributionTciInterval: numberOption("performanceAttributionTciInterval", 1000000),
+    fwCfgTrace: boolOption("fwCfgTrace", false),
+    fwCfgTraceLimit: nonNegativeNumberOption("fwCfgTraceLimit", 256),
     serviceBridge: jsonObjectOption("serviceBridge", null),
     tcgHotblocks: boolOption("tcgHotblocks", false),
     tcgHotblocksInterval: numberOption("tcgHotblocksInterval", 10000),
@@ -1659,6 +1697,13 @@ async function run() {
       summaryCount: 0,
       summaries: [],
       lastSummary: null,
+    },
+    fwCfgTrace: {
+      enabled: Boolean(config.fwCfgTrace),
+      limit: config.fwCfgTraceLimit,
+      count: 0,
+      entries: [],
+      last: null,
     },
     wasm64Tcg: {
       maxSummaries: 16,
@@ -1927,7 +1972,9 @@ async function run() {
     }
     return !(
       line.startsWith("qemu-tci-wasm-subset:") ||
+      line.startsWith("qemu-tci-wasm-generated-trace:") ||
       line.startsWith("qemu-tci-progress:") ||
+      line.startsWith("qemu-fw-cfg-trace:") ||
       line.startsWith("qemu-tcg-hotblocks:") ||
       line.startsWith("qemu-wasm64-tcg:") ||
       line.startsWith("qemu-wasm-perf-attrib:") ||
@@ -1972,6 +2019,11 @@ async function run() {
       Math.round(performance.now() - startTime),
     );
     recordTciWasmGeneratedTrace(
+      smokeState,
+      line,
+      Math.round(performance.now() - startTime),
+    );
+    recordFwCfgTrace(
       smokeState,
       line,
       Math.round(performance.now() - startTime),
@@ -2058,6 +2110,10 @@ async function run() {
     QEMU_WASM_PERF_ATTRIBUTION_INTERVAL: String(config.performanceAttributionInterval),
     QEMU_WASM_PERF_ATTRIBUTION_TCI_INTERVAL: String(config.performanceAttributionTciInterval),
   } : {};
+  const fwCfgTraceEnv = config.fwCfgTrace ? {
+    QEMU_WASM_FW_CFG_TRACE: "1",
+    QEMU_WASM_FW_CFG_TRACE_LIMIT: String(config.fwCfgTraceLimit),
+  } : {};
   const tciEnv = {
     ...(config.tciFastGates ? { QEMU_TCI_FAST_GATES: "1" } : {}),
     ...(config.tciRelaxedMb ? { QEMU_TCI_RELAXED_MB: "1" } : {}),
@@ -2102,9 +2158,10 @@ async function run() {
   };
   const moduleOptions = {
     arguments: generatedQemuArgs,
-    ENV: { ...hotBlocksEnv, ...performanceAttributionEnv, ...tciEnv },
+    ENV: { ...hotBlocksEnv, ...performanceAttributionEnv, ...fwCfgTraceEnv, ...tciEnv },
     qemuWasmHotBlocksEnv: hotBlocksEnv,
     qemuWasmPerfAttribEnv: performanceAttributionEnv,
+    qemuWasmFwCfgEnv: fwCfgTraceEnv,
     qemuWasmTciEnv: tciEnv,
     qemuWasmDisplayCanvas: canvas,
     locateFile(path) {
@@ -2129,6 +2186,12 @@ async function run() {
             .map(([key, value]) => `${key}=${value}`)
             .join("\n") + "\n";
           module.FS.writeFile("/qemu-wasm-perf-attrib-env", lines);
+        }
+        if (config.fwCfgTrace) {
+          const lines = Object.entries(fwCfgTraceEnv)
+            .map(([key, value]) => `${key}=${value}`)
+            .join("\n") + "\n";
+          module.FS.writeFile("/qemu-fw-cfg-env", lines);
         }
         if (config.tciRelaxedMb || config.tciProgress ||
             config.tciWasmSubset || config.tciWasmGeneratedTrace) {

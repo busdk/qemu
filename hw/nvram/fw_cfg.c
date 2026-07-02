@@ -43,6 +43,60 @@
 #include "hw/acpi/aml-build.h"
 #include "hw/core/loader.h"
 
+#ifdef CONFIG_EMSCRIPTEN
+#include <emscripten/emscripten.h>
+
+#define FW_CFG_WASM_ENV_FILE "/qemu-fw-cfg-env"
+
+EM_JS(char *, fw_cfg_wasm_getenv, (const char *name), {
+    const key = UTF8ToString(Number(name));
+    const env = Module["qemuWasmFwCfgEnv"] ||
+        globalThis.qemuWasmFwCfgEnv ||
+        {};
+    const value = env[key];
+
+    if (!value) {
+        return 0n;
+    }
+
+    const text = String(value);
+    const length = lengthBytesUTF8(text) + 1;
+    const pointer = _malloc(length);
+    const pointerNumber = Number(pointer);
+
+    stringToUTF8(text, pointerNumber, length);
+    return BigInt(pointerNumber);
+});
+
+static char *fw_cfg_wasm_file_getenv(const char *name)
+{
+    g_autofree char *contents = NULL;
+    const char *line;
+    size_t name_len = strlen(name);
+
+    if (!g_file_get_contents(FW_CFG_WASM_ENV_FILE, &contents, NULL, NULL)) {
+        return NULL;
+    }
+
+    line = contents;
+    while (*line != '\0') {
+        const char *end = strchr(line, '\n');
+        size_t line_len = end ? end - line : strlen(line);
+
+        if (line_len > name_len && line[name_len] == '=' &&
+            memcmp(line, name, name_len) == 0) {
+            return g_strndup(line + name_len + 1, line_len - name_len - 1);
+        }
+        line += line_len;
+        if (*line == '\n') {
+            line++;
+        }
+    }
+
+    return NULL;
+}
+#endif
+
 #define FW_CFG_FILE_SLOTS_DFLT 0x20
 
 /* FW_CFG_VERSION bits */
@@ -121,6 +175,172 @@ static inline const char *trace_key_name(uint16_t key)
     const char *name = key_name(key);
 
     return name ? name : "unknown";
+}
+
+static const char *fw_cfg_wasm_trace_getenv(const char *name, char **owned)
+{
+    const char *value = g_getenv(name);
+
+    *owned = NULL;
+#ifdef CONFIG_EMSCRIPTEN
+    if (value == NULL) {
+        *owned = fw_cfg_wasm_getenv(name);
+        value = *owned;
+    }
+    if (value == NULL) {
+        *owned = fw_cfg_wasm_file_getenv(name);
+        value = *owned;
+    }
+#endif
+    return value;
+}
+
+static bool fw_cfg_wasm_trace_parse_bool(const char *raw)
+{
+    if (raw == NULL || raw[0] == '\0') {
+        return false;
+    }
+    if (g_ascii_strcasecmp(raw, "0") == 0 ||
+        g_ascii_strcasecmp(raw, "false") == 0 ||
+        g_ascii_strcasecmp(raw, "no") == 0 ||
+        g_ascii_strcasecmp(raw, "off") == 0) {
+        return false;
+    }
+    return true;
+}
+
+static uint64_t fw_cfg_wasm_trace_parse_u64(const char *name,
+                                            uint64_t fallback)
+{
+    g_autofree char *owned = NULL;
+    const char *raw = fw_cfg_wasm_trace_getenv(name, &owned);
+    uint64_t value = fallback;
+
+    if (raw != NULL && raw[0] != '\0') {
+        char *endptr = NULL;
+        unsigned long long parsed = g_ascii_strtoull(raw, &endptr, 10);
+
+        if (endptr != raw && *endptr == '\0') {
+            value = parsed;
+        }
+    }
+
+    return value;
+}
+
+static bool fw_cfg_wasm_trace_enabled(void)
+{
+    static bool enabled;
+    static gsize initialized;
+
+    if (g_once_init_enter(&initialized)) {
+        g_autofree char *owned = NULL;
+
+        enabled = fw_cfg_wasm_trace_parse_bool(
+            fw_cfg_wasm_trace_getenv("QEMU_WASM_FW_CFG_TRACE", &owned));
+        g_once_init_leave(&initialized, 1);
+    }
+
+    return enabled;
+}
+
+static uint64_t fw_cfg_wasm_trace_limit(void)
+{
+    static uint64_t limit;
+    static gsize initialized;
+
+    if (g_once_init_enter(&initialized)) {
+        limit = fw_cfg_wasm_trace_parse_u64("QEMU_WASM_FW_CFG_TRACE_LIMIT",
+                                            256);
+        g_once_init_leave(&initialized, 1);
+    }
+
+    return limit;
+}
+
+static const char *fw_cfg_wasm_trace_file_name(FWCfgState *s, uint16_t key)
+{
+    uint16_t entry = key & FW_CFG_ENTRY_MASK;
+    uint32_t index;
+    uint32_t count;
+
+    if (s->files == NULL || entry < FW_CFG_FILE_FIRST) {
+        return "";
+    }
+
+    index = entry - FW_CFG_FILE_FIRST;
+    count = be32_to_cpu(s->files->count);
+    if (index >= count) {
+        return "";
+    }
+
+    return s->files->f[index].name;
+}
+
+static void fw_cfg_wasm_trace_emit_select(FWCfgState *s, uint16_t key, int ret)
+{
+    static uint64_t events;
+    uint16_t entry = key & FW_CFG_ENTRY_MASK;
+    bool arch = !!(key & FW_CFG_ARCH_LOCAL);
+    FWCfgEntry *e = NULL;
+    const char *file_name;
+    g_autofree char *escaped_file_name = NULL;
+    uint32_t len = 0;
+
+    if (!fw_cfg_wasm_trace_enabled() ||
+        events >= fw_cfg_wasm_trace_limit()) {
+        return;
+    }
+
+    if (ret && entry < FW_CFG_FILE_FIRST + s->file_slots) {
+        e = &s->entries[arch][entry];
+        len = e->len;
+    }
+    file_name = fw_cfg_wasm_trace_file_name(s, key);
+    escaped_file_name = g_strescape(file_name, NULL);
+
+    events++;
+    fprintf(stderr,
+            "qemu-fw-cfg-trace: {\"format\":1,\"event\":\"select\","
+            "\"key\":\"0x%04" PRIx16 "\",\"entry\":\"0x%04" PRIx16 "\","
+            "\"arch\":%s,\"key_name\":\"%s\",\"file\":\"%s\","
+            "\"ret\":%d,\"len\":%" PRIu32 "}\n",
+            key, entry, arch ? "true" : "false", trace_key_name(key),
+            escaped_file_name, ret, len);
+}
+
+static void fw_cfg_wasm_trace_emit_read(FWCfgState *s, uint16_t key,
+                                        uint32_t offset_before,
+                                        uint32_t offset_after,
+                                        uint32_t len,
+                                        unsigned size,
+                                        uint64_t value)
+{
+    static uint64_t events;
+    uint16_t entry = key & FW_CFG_ENTRY_MASK;
+    bool arch = !!(key & FW_CFG_ARCH_LOCAL);
+    const char *file_name;
+    g_autofree char *escaped_file_name = NULL;
+
+    if (!fw_cfg_wasm_trace_enabled() ||
+        events >= fw_cfg_wasm_trace_limit()) {
+        return;
+    }
+
+    file_name = fw_cfg_wasm_trace_file_name(s, key);
+    escaped_file_name = g_strescape(file_name, NULL);
+
+    events++;
+    fprintf(stderr,
+            "qemu-fw-cfg-trace: {\"format\":1,\"event\":\"read\","
+            "\"key\":\"0x%04" PRIx16 "\",\"entry\":\"0x%04" PRIx16 "\","
+            "\"arch\":%s,\"key_name\":\"%s\",\"file\":\"%s\","
+            "\"offset_before\":%" PRIu32 ","
+            "\"offset_after\":%" PRIu32 ",\"len\":%" PRIu32 ","
+            "\"size\":%u,\"value\":\"0x%" PRIx64 "\"}\n",
+            key, entry, arch ? "true" : "false", trace_key_name(key),
+            escaped_file_name, offset_before, offset_after, len, size,
+            value);
 }
 
 #define JPG_FILE 0
@@ -287,6 +507,7 @@ static int fw_cfg_select(FWCfgState *s, uint16_t key)
     }
 
     trace_fw_cfg_select(s, key, trace_key_name(key), ret);
+    fw_cfg_wasm_trace_emit_select(s, key, ret);
     return ret;
 }
 
@@ -296,6 +517,9 @@ static uint64_t fw_cfg_data_read(void *opaque, hwaddr addr, unsigned size)
     int arch = !!(s->cur_entry & FW_CFG_ARCH_LOCAL);
     FWCfgEntry *e = (s->cur_entry == FW_CFG_INVALID) ? NULL :
                     &s->entries[arch][s->cur_entry & FW_CFG_ENTRY_MASK];
+    uint32_t offset_before = s->cur_offset;
+    uint32_t len = e != NULL ? e->len : 0;
+    unsigned read_size = size;
     uint64_t value = 0;
 
     assert(size > 0 && size <= sizeof(value));
@@ -317,6 +541,8 @@ static uint64_t fw_cfg_data_read(void *opaque, hwaddr addr, unsigned size)
     }
 
     trace_fw_cfg_read(s, value);
+    fw_cfg_wasm_trace_emit_read(s, s->cur_entry, offset_before,
+                                s->cur_offset, len, read_size, value);
     return value;
 }
 

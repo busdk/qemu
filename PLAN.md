@@ -803,7 +803,7 @@ Engineering rules for this goal:
   next runtime slice can plausibly move early generated-output candidate
   coverage from `13 / 315` TBs (`4.1%`) toward roughly `306 / 315` TBs
   (`97.1%`), subject to compile/runtime fallback.
-- [ ] W2m-f - Wire the runtime generated qemu load/store helper boundary.
+- [x] W2m-f - Wire the runtime generated qemu load/store helper boundary.
   DoD: the Emscripten generated compiler accepts `tci_qemu_ld_rrr` and
   `tci_qemu_st_rrr` by calling a narrow helper boundary with
   `env`, guest address, value for stores, `MemOpIdx`, and TB return address;
@@ -813,6 +813,94 @@ Engineering rules for this goal:
   checks, and a build artifact check before any Chromium run. A Chromium
   diagnostic run is allowed only after those gates pass and must report
   generated coverage share, compiled block count, and fallback counts.
+  Accepted diagnostic evidence: the backend artifact built with
+  `--disable-tcg-interpreter --enable-tcg-wasm64-backend` and wrote artifacts
+  to
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-fwcfg-exec-counters2-artifacts`.
+  Artifact hashes: JS
+  `47a2d6420be9aebad4d90dddfa90445e715486280a89e5c2094b42f21953b06c`,
+  WASM
+  `dfd36c222faef6c2dcbca69df9b27d4ba89433831a56bfc6660c14538012e14a`,
+  manifest
+  `5d68f476dc8896b5e2aa00cc560bb6d74fe756c7d90a5c1cae24857f55cf0004`.
+  Checks before the browser run:
+  `git diff --check`,
+  `node --check scripts/ci/wasm-browser-smoke.mjs`,
+  `node --check scripts/ci/wasm-browser-smoke-runner.mjs`,
+  `node --check scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+  `node scripts/ci/wasm-generated-output-equivalence-test.mjs`, and
+  `node scripts/ci/wasm64-translate-metadata-test.mjs`. The deterministic
+  equivalence test reported `10` fixtures, `1` unsupported fixture, `2`
+  helper-boundary fixtures, `2` modeled qemu loads, and `2` modeled qemu
+  stores. The short Chromium `149.0.7827.55` diagnostic command used the
+  generic TuxBoot manifest, `--timeout-ms 8000`,
+  `--tci-wasm-subset`, `--tci-wasm-generated-trace`, and
+  `--fw-cfg-trace`; it intentionally timed out before
+  `QEMU_WASM_LINUX_BOOT_OK` and wrote
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-fwcfg-exec-counters2-smoke/wasm-browser-smoke-result.json`
+  with result hash
+  `ace1c5b0c06116455ef8d814e53bcfd0e9e58c3d0d4c9dcbb17de8c13edff1a7`.
+  The last 5.274 s summary reported `generated_compiled=103`,
+  `generated_executed=123`, `generated_cache_hits=20`, and generated
+  coverage `143 / 433` subset attempts (`330254` ppm). The runtime metadata
+  split showed `exec_generated_output_lookup_tbs=220`,
+  `exec_generated_output_available_tbs=110`, and
+  `exec_generated_output_unavailable_tbs=110`; all unavailable execution
+  lookups were missing generated-candidate metadata rather than incomplete
+  byte output. The fw_cfg trace was now visible and small (`11` events), so
+  fw_cfg is not the material stall. The next measured blocker is generic
+  helper-call and remaining deterministic-op candidate loss: first unsupported
+  generated ops were `call=72`, `deposit=32`, `ld32s=5`, and `neg=1`.
+  W2 remains open because this slice is a runtime attribution and safety
+  gate, not a W3 speed improvement.
+- [x] W2m-g - Batch the next generated-output coverage step from the W2m-f
+  evidence. DoD: before another browser run, deterministic tests must model
+  the simple measured ops (`deposit`, `ld32s`, and `neg`) and a generic
+  helper-call boundary or must record why generic calls cannot be safely
+  generated. The browser run is allowed only if local evidence predicts a
+  coverage-share order-of-magnitude change; the accepted result must record
+  generated-output availability, generated executions, helper-call fallback
+  counts, and whether generic helper calls still dominate candidate loss.
+  Accepted deterministic/build evidence: `deposit`, `ld32s`, and `neg` are
+  now part of the generated-output support predicate and the generated
+  compiler. `scripts/ci/wasm-generated-output-equivalence-test.mjs` adds a
+  `simple-gap-ops-validate` fixture covering those operations against the
+  reference interpreter. Checks:
+  `git diff --check`,
+  `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+  `node scripts/ci/wasm-generated-output-equivalence-test.mjs`, and
+  `node scripts/ci/wasm64-translate-metadata-test.mjs`. The equivalence test
+  reported `12` fixtures, `1` unsupported fixture, `2` helper-boundary
+  fixtures, `2` simple-gap fixtures, `2` qemu loads, and `2` qemu stores.
+  The backend artifact built with
+  `--disable-tcg-interpreter --enable-tcg-wasm64-backend` and wrote artifacts
+  to
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-simple-gap-ops-artifacts`.
+  Artifact hashes: JS
+  `6df4acbdb2a09ee976007e6c9a5b62749fec2bbf5aaaacd5f0f4d9d07c5341f2`,
+  WASM
+  `95d39dee08afe39e19d6d0e4d06c04fa501ef4735d7a347f8d032130debde93c`,
+  manifest
+  `e8d81788f895fce9aa01ddc9c3a93e6484417b8fa80ed744f6652e8ebc1e99fd`.
+  No Chromium run was started for this slice because the W2m-f local data
+  predicts only a moderate candidate increase: the simple ops explain
+  `38 / 110` execution-side unavailable generated-output TBs, while
+  `call` explains `72 / 110`. A browser run before solving or classifying
+  generic helper calls would not satisfy the order-of-magnitude coverage
+  rule. Generic `INDEX_op_call` is not safely generated by the current
+  compiler because the TCI path uses libffi with arbitrary helper signatures,
+  stack slot layout, helper return arity, `TCG_CALL_NO_RETURN` flags, and
+  `tci_tb_ptr` return-address state; WebAssembly imports require typed
+  function boundaries. W2 remains open.
+- [ ] W2m-h - Design and prove the generic helper-call boundary or reject it
+  with stronger attribution. DoD: classify the measured helper-call sites by
+  helper name, flags, argument count, return shape, and dynamic frequency from
+  the browser trace; then either add a deterministic generated-output test for
+  a safe C trampoline that exactly preserves TCI libffi helper semantics, or
+  record why helper calls must stay fallback and move to the next structural
+  backend item. No browser run is allowed until the local evidence predicts
+  an order-of-magnitude generated coverage change or names a different
+  measured gate-moving mechanism.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and

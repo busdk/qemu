@@ -47,11 +47,25 @@ typedef struct TCGWasm64Counters {
     uint64_t translated_generated_output_bytes;
     uint64_t translated_generated_output_ops;
     uint64_t translated_generated_output_truncated;
+    uint64_t exec_generated_output_lookup_tbs;
+    uint64_t exec_generated_output_available_tbs;
+    uint64_t exec_generated_output_unavailable_tbs;
+    uint64_t exec_generated_output_missing_candidate_tbs;
+    uint64_t exec_generated_output_incomplete_tbs;
     uint64_t fallback_unsupported;
     uint64_t fallback_helper;
     uint64_t fallback_qemu_load;
     uint64_t fallback_qemu_store;
     uint64_t fallback_runtime;
+    uint64_t generated_compile_prereq_failed;
+    uint64_t generated_compile_no_terminal;
+    uint64_t generated_compile_lowering_failed;
+    uint64_t generated_compile_module_failed;
+    uint64_t generated_compile_table_failed;
+    uint64_t generated_compile_instance_failed;
+    uint64_t generated_compile_add_function_failed;
+    uint64_t generated_compile_exception_failed;
+    uint64_t generated_compile_unknown_failed;
 } TCGWasm64Counters;
 
 typedef enum TCGWasm64FallbackReason {

@@ -72,6 +72,11 @@ static inline TCGv_i64 TCGV128_HIGH(TCGv_i128 t)
 
 bool tcg_target_has_memory_bswap(MemOp memop);
 
+#ifdef CONFIG_TCG_WASM64_BACKEND
+void tcg_register_helper_trace_info(void *func, const TCGHelperInfo *info);
+const TCGHelperInfo *tcg_lookup_helper_trace_info(const void *func);
+#endif
+
 TCGTemp *tcg_temp_new_internal(TCGType type, TCGTempKind kind);
 
 /*

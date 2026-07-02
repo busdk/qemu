@@ -83,11 +83,38 @@ void tcg_wasm64_counters_add(TCGWasm64Counters *dst,
         src->translated_generated_output_ops;
     dst->translated_generated_output_truncated +=
         src->translated_generated_output_truncated;
+    dst->exec_generated_output_lookup_tbs +=
+        src->exec_generated_output_lookup_tbs;
+    dst->exec_generated_output_available_tbs +=
+        src->exec_generated_output_available_tbs;
+    dst->exec_generated_output_unavailable_tbs +=
+        src->exec_generated_output_unavailable_tbs;
+    dst->exec_generated_output_missing_candidate_tbs +=
+        src->exec_generated_output_missing_candidate_tbs;
+    dst->exec_generated_output_incomplete_tbs +=
+        src->exec_generated_output_incomplete_tbs;
     dst->fallback_unsupported += src->fallback_unsupported;
     dst->fallback_helper += src->fallback_helper;
     dst->fallback_qemu_load += src->fallback_qemu_load;
     dst->fallback_qemu_store += src->fallback_qemu_store;
     dst->fallback_runtime += src->fallback_runtime;
+    dst->generated_compile_prereq_failed +=
+        src->generated_compile_prereq_failed;
+    dst->generated_compile_no_terminal += src->generated_compile_no_terminal;
+    dst->generated_compile_lowering_failed +=
+        src->generated_compile_lowering_failed;
+    dst->generated_compile_module_failed +=
+        src->generated_compile_module_failed;
+    dst->generated_compile_table_failed +=
+        src->generated_compile_table_failed;
+    dst->generated_compile_instance_failed +=
+        src->generated_compile_instance_failed;
+    dst->generated_compile_add_function_failed +=
+        src->generated_compile_add_function_failed;
+    dst->generated_compile_exception_failed +=
+        src->generated_compile_exception_failed;
+    dst->generated_compile_unknown_failed +=
+        src->generated_compile_unknown_failed;
 }
 
 static void tcg_wasm64_counters_add_translation(TCGWasm64Counters *dst,
@@ -127,6 +154,16 @@ static void tcg_wasm64_counters_add_translation(TCGWasm64Counters *dst,
         src->translated_generated_output_ops;
     dst->translated_generated_output_truncated +=
         src->translated_generated_output_truncated;
+    dst->exec_generated_output_lookup_tbs +=
+        src->exec_generated_output_lookup_tbs;
+    dst->exec_generated_output_available_tbs +=
+        src->exec_generated_output_available_tbs;
+    dst->exec_generated_output_unavailable_tbs +=
+        src->exec_generated_output_unavailable_tbs;
+    dst->exec_generated_output_missing_candidate_tbs +=
+        src->exec_generated_output_missing_candidate_tbs;
+    dst->exec_generated_output_incomplete_tbs +=
+        src->exec_generated_output_incomplete_tbs;
 }
 
 void tcg_wasm64_count_fallback(TCGWasm64Counters *counters,
@@ -201,14 +238,17 @@ static bool tcg_wasm64_translate_op_generated_supported(uint32_t op)
     case INDEX_op_add:
     case INDEX_op_and:
     case INDEX_op_brcond:
+    case INDEX_op_deposit:
     case INDEX_op_exit_tb:
     case INDEX_op_goto_tb:
     case INDEX_op_ld:
     case INDEX_op_ld32u:
+    case INDEX_op_ld32s:
     case INDEX_op_mb:
     case INDEX_op_mov:
     case INDEX_op_movcond:
     case INDEX_op_mul:
+    case INDEX_op_neg:
     case INDEX_op_or:
     case INDEX_op_setcond:
     case INDEX_op_shl:
@@ -219,6 +259,8 @@ static bool tcg_wasm64_translate_op_generated_supported(uint32_t op)
     case INDEX_op_sub:
     case INDEX_op_tci_movi:
     case INDEX_op_tci_movl:
+    case INDEX_op_tci_qemu_ld_rrr:
+    case INDEX_op_tci_qemu_st_rrr:
     case INDEX_op_tci_setcond32:
     case INDEX_op_extract:
     case INDEX_op_sextract:
@@ -519,11 +561,25 @@ void tcg_wasm64_report_summary(const char *reason,
             "\"translated_generated_output_bytes\":%" PRIu64 ","
             "\"translated_generated_output_ops\":%" PRIu64 ","
             "\"translated_generated_output_truncated\":%" PRIu64 ","
+            "\"exec_generated_output_lookup_tbs\":%" PRIu64 ","
+            "\"exec_generated_output_available_tbs\":%" PRIu64 ","
+            "\"exec_generated_output_unavailable_tbs\":%" PRIu64 ","
+            "\"exec_generated_output_missing_candidate_tbs\":%" PRIu64 ","
+            "\"exec_generated_output_incomplete_tbs\":%" PRIu64 ","
             "\"fallback_unsupported\":%" PRIu64 ","
             "\"fallback_helper\":%" PRIu64 ","
             "\"fallback_qemu_load\":%" PRIu64 ","
             "\"fallback_qemu_store\":%" PRIu64 ","
             "\"fallback_runtime\":%" PRIu64 ","
+            "\"generated_compile_prereq_failed\":%" PRIu64 ","
+            "\"generated_compile_no_terminal\":%" PRIu64 ","
+            "\"generated_compile_lowering_failed\":%" PRIu64 ","
+            "\"generated_compile_module_failed\":%" PRIu64 ","
+            "\"generated_compile_table_failed\":%" PRIu64 ","
+            "\"generated_compile_instance_failed\":%" PRIu64 ","
+            "\"generated_compile_add_function_failed\":%" PRIu64 ","
+            "\"generated_compile_exception_failed\":%" PRIu64 ","
+            "\"generated_compile_unknown_failed\":%" PRIu64 ","
             "\"translated_generated_first_unsupported_ops\":[",
             reason ? reason : "unknown",
             counters->generated_attempts,
@@ -551,11 +607,25 @@ void tcg_wasm64_report_summary(const char *reason,
             counters->translated_generated_output_bytes,
             counters->translated_generated_output_ops,
             counters->translated_generated_output_truncated,
+            counters->exec_generated_output_lookup_tbs,
+            counters->exec_generated_output_available_tbs,
+            counters->exec_generated_output_unavailable_tbs,
+            counters->exec_generated_output_missing_candidate_tbs,
+            counters->exec_generated_output_incomplete_tbs,
             counters->fallback_unsupported,
             counters->fallback_helper,
             counters->fallback_qemu_load,
             counters->fallback_qemu_store,
-            counters->fallback_runtime);
+            counters->fallback_runtime,
+            counters->generated_compile_prereq_failed,
+            counters->generated_compile_no_terminal,
+            counters->generated_compile_lowering_failed,
+            counters->generated_compile_module_failed,
+            counters->generated_compile_table_failed,
+            counters->generated_compile_instance_failed,
+            counters->generated_compile_add_function_failed,
+            counters->generated_compile_exception_failed,
+            counters->generated_compile_unknown_failed);
     tcg_wasm64_print_generated_unsupported_top();
     fprintf(stderr, "]}\n");
 }
@@ -584,6 +654,7 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
         if (metadata) {
             counters->translated_tbs++;
             counters->translated_ops += metadata->op_count;
+            counters->exec_generated_output_lookup_tbs++;
             if (metadata->flags & TCG_WASM64_TB_METADATA_FALLBACK) {
                 counters->translated_fallback_markers++;
             }
@@ -606,17 +677,21 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
                 }
                 if (tcg_wasm64_translate_generated_output_available(
                         metadata)) {
+                    counters->exec_generated_output_available_tbs++;
                     counters->translated_generated_output_tbs++;
                     counters->translated_generated_output_bytes +=
                         metadata->generated_output_size;
                     counters->translated_generated_output_ops +=
                         metadata->generated_output_op_count;
                 } else {
+                    counters->exec_generated_output_unavailable_tbs++;
                     counters->translated_generated_output_unavailable_tbs++;
                     if (!(metadata->flags &
                           TCG_WASM64_TB_METADATA_GENERATED_CANDIDATE)) {
+                        counters->exec_generated_output_missing_candidate_tbs++;
                         counters->translated_generated_output_missing_candidate_tbs++;
                     } else {
+                        counters->exec_generated_output_incomplete_tbs++;
                         counters->translated_generated_output_incomplete_tbs++;
                     }
                     if (metadata->first_generated_unsupported_op != UINT32_MAX) {

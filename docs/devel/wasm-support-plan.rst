@@ -6913,3 +6913,139 @@ early generated-output candidate coverage can plausibly move from
 generic smoke, projecting Bus Engine OS browser multi-user readiness at
 roughly ``34.7`` to ``45.8`` minutes until runtime generated coverage
 actually increases.
+
+W2m-f runtime qemu helper boundary diagnostic
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The runtime qemu load/store helper boundary now compiles and executes through
+the generated-output path with strict fallback preserved.  The accepted
+diagnostic artifact was built with::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-fwcfg-exec-counters2-artifacts \
+    --jobs auto \
+    --configure-arg=--disable-tcg-interpreter \
+    --configure-arg=--enable-tcg-wasm64-backend
+
+Artifact hashes:
+
+* ``qemu-system-x86_64.js``:
+  ``47a2d6420be9aebad4d90dddfa90445e715486280a89e5c2094b42f21953b06c``
+* ``qemu-system-x86_64.wasm``:
+  ``dfd36c222faef6c2dcbca69df9b27d4ba89433831a56bfc6660c14538012e14a``
+* manifest:
+  ``5d68f476dc8896b5e2aa00cc560bb6d74fe756c7d90a5c1cae24857f55cf0004``
+
+The pre-browser checks were:
+
+* ``git diff --check``
+* ``node --check scripts/ci/wasm-browser-smoke.mjs``
+* ``node --check scripts/ci/wasm-browser-smoke-runner.mjs``
+* ``node --check scripts/ci/wasm-browser-smoke-runner-test.mjs``
+* ``node scripts/ci/wasm-generated-output-equivalence-test.mjs``
+* ``node scripts/ci/wasm64-translate-metadata-test.mjs``
+
+The generated-output equivalence test reported ``10`` fixtures, ``1``
+unsupported fail-closed fixture, ``2`` helper-boundary fixtures, ``2`` modeled
+qemu loads, and ``2`` modeled qemu stores.
+
+The short Chromium diagnostic used Chromium ``149.0.7827.55`` and the generic
+TuxBoot manifest with ``--timeout-ms 8000``, ``--tci-wasm-subset``,
+``--tci-wasm-generated-trace``, and ``--fw-cfg-trace``.  It intentionally
+timed out before ``QEMU_WASM_LINUX_BOOT_OK`` and wrote:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-fwcfg-exec-counters2-smoke/wasm-browser-smoke-result.json``
+
+Result JSON hash:
+
+``ace1c5b0c06116455ef8d814e53bcfd0e9e58c3d0d4c9dcbb17de8c13edff1a7``
+
+The last summary at ``5274`` ms reported ``generated_compiled=103``,
+``generated_executed=123``, ``generated_cache_hits=20``, and generated
+coverage ``143 / 433`` subset attempts, or ``330254`` ppm.  The new
+execution-side generated-output counters showed
+``exec_generated_output_lookup_tbs=220``,
+``exec_generated_output_available_tbs=110``, and
+``exec_generated_output_unavailable_tbs=110``.  Every unavailable execution
+lookup was missing generated-candidate metadata; none were missing byte output
+after candidate acceptance.
+
+The same diagnostic also proved that fw_cfg tracing is visible through the
+browser harness and small in this window: ``11`` events, ending with a
+``file_dir`` read at ``5126`` ms.  That rules out fw_cfg environment plumbing
+as the current material stall.
+
+The remaining measured candidate blocker is generic helper-call and simple
+deterministic-op coverage, not qemu load/store helper plumbing.  The first
+unsupported generated ops were ``call=72``, ``deposit=32``, ``ld32s=5``, and
+``neg=1``.  The next W2m work must batch deterministic evidence for those
+shapes before any further browser measurement.
+
+W2m-g simple deterministic gap ops
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The measured simple generated-output blockers ``deposit``, ``ld32s``, and
+``neg`` now lower through the generated compiler and are included in the
+generated-output support predicate.  The deterministic equivalence gate adds a
+``simple-gap-ops-validate`` fixture that compares these operations against the
+reference interpreter before any browser run.
+
+Checks:
+
+* ``git diff --check``
+* ``node --check scripts/ci/wasm-generated-output-equivalence-test.mjs``
+* ``node scripts/ci/wasm-generated-output-equivalence-test.mjs``
+* ``node scripts/ci/wasm64-translate-metadata-test.mjs``
+
+The equivalence test reported:
+
+.. code-block:: json
+
+  {
+    "format": 1,
+    "event": "generated-output-equivalence",
+    "fixtures": 12,
+    "unsupportedFixtures": 1,
+    "helperBoundaryFixtures": 2,
+    "simpleGapFixtures": 2,
+    "helperCalls": {
+      "loads": 2,
+      "stores": 2
+    },
+    "terminals": {
+      "goto_tb": 4,
+      "exit_tb": 8
+    }
+  }
+
+The backend artifact built with::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-simple-gap-ops-artifacts \
+    --jobs auto \
+    --configure-arg=--disable-tcg-interpreter \
+    --configure-arg=--enable-tcg-wasm64-backend
+
+Artifact hashes:
+
+* ``qemu-system-x86_64.js``:
+  ``6df4acbdb2a09ee976007e6c9a5b62749fec2bbf5aaaacd5f0f4d9d07c5341f2``
+* ``qemu-system-x86_64.wasm``:
+  ``95d39dee08afe39e19d6d0e4d06c04fa501ef4735d7a347f8d032130debde93c``
+* manifest:
+  ``e8d81788f895fce9aa01ddc9c3a93e6484417b8fa80ed744f6652e8ebc1e99fd``
+
+No Chromium run was started for this slice.  The W2m-f diagnostic showed that
+the simple ops explain ``38 / 110`` execution-side unavailable
+generated-output TBs, while generic ``call`` explains ``72 / 110``.  That does
+not predict an order-of-magnitude generated-coverage change, so a browser run
+would not answer the speed-gate question.
+
+The current generated compiler also cannot safely generate generic
+``INDEX_op_call`` directly.  TCI helper calls use libffi with arbitrary helper
+signatures, stack slot layout, helper return arity, ``TCG_CALL_NO_RETURN``
+flags, and ``tci_tb_ptr`` return-address state.  WebAssembly imports require a
+typed function boundary, so generic calls need a deliberately designed C
+trampoline or must remain fallback.  The next W2m step is helper-call
+classification and boundary design, not another opcode-only browser
+measurement.

@@ -28,9 +28,11 @@ import {
 } from "./wasm-browser-smoke-runner.mjs";
 import {
   bootMilestoneForLine,
+  fwCfgTrace,
   hotBlockSummary,
   perfAttributionSummary,
   recordBootMilestone,
+  recordFwCfgTrace,
   recordHotBlockSummary,
   recordPerfAttributionSummary,
   recordTciProgressSummary,
@@ -155,6 +157,23 @@ for (const status of [
       lastSummary: {
         event: "summary",
         events: 200,
+      },
+    },
+    fwCfgTrace: {
+      enabled: true,
+      limit: 2,
+      count: 1,
+      entries: [
+        {
+          event: "select",
+          key: "0x0019",
+          key_name: "file_dir",
+        },
+      ],
+      last: {
+        event: "select",
+        key: "0x0019",
+        key_name: "file_dir",
       },
     },
     wasm64Tcg: {
@@ -290,6 +309,54 @@ for (const status of [
     },
   });
   assert.equal(result.phases[1].failedDuring, "fetch-guest-inputs");
+}
+
+{
+  const line = "qemu-fw-cfg-trace: " + JSON.stringify({
+    format: 1,
+    event: "read",
+    key: "0x0019",
+    key_name: "file_dir",
+    offset_before: 0,
+    offset_after: 1,
+    len: 128,
+    size: 1,
+    value: "0x00",
+  });
+  const parsed = fwCfgTrace(line);
+  assert.equal(parsed.event, "read");
+  assert.equal(parsed.key, "0x0019");
+  assert.equal(parsed.key_name, "file_dir");
+  assert.equal(parsed.offset_after, 1);
+  assert.equal(fwCfgTrace("ordinary serial line"), null);
+  assert.equal(fwCfgTrace("qemu-fw-cfg-trace: not-json"), null);
+}
+
+{
+  const state = {
+    fwCfgTrace: {
+      enabled: true,
+      limit: 2,
+      count: 0,
+      entries: [],
+      last: null,
+    },
+  };
+  for (const value of [1, 2, 3]) {
+    recordFwCfgTrace(
+      state,
+      "qemu-fw-cfg-trace: " + JSON.stringify({
+        format: 1,
+        event: "select",
+        key: `0x000${value}`,
+      }),
+      value * 10,
+    );
+  }
+  assert.equal(state.fwCfgTrace.count, 3);
+  assert.equal(state.fwCfgTrace.entries.length, 2);
+  assert.equal(state.fwCfgTrace.entries[0].key, "0x0002");
+  assert.equal(state.fwCfgTrace.last.elapsedMs, 30);
 }
 
 {

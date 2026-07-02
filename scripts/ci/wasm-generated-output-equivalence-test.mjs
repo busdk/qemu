@@ -17,11 +17,19 @@ const VALUE_I32 = 0x7f;
 const VALUE_I64 = 0x7e;
 
 const OPS = {
+  call: 2,
   brcond: 4,
   add: 7,
   and: 8,
+  deposit: 16,
+  extract: 22,
   ld32u: 28,
+  ld32s: 29,
   ld: 30,
+  neg: 38,
+  sextract: 50,
+  shl: 51,
+  shr: 52,
   setcond: 49,
   st8: 53,
   st32: 55,
@@ -79,7 +87,7 @@ function i32Const(value) {
 }
 
 function i64Const(value) {
-  return [0x42, ...encodeS64(value)];
+  return [0x42, ...encodeS64(BigInt.asIntN(64, BigInt(value)))];
 }
 
 function i32WrapI64(expr) {
@@ -88,6 +96,10 @@ function i32WrapI64(expr) {
 
 function i64ExtendI32U(expr) {
   return [...expr, 0xad];
+}
+
+function i64ExtendI32S(expr) {
+  return [...expr, 0xac];
 }
 
 function i64Load(address, offset = 0) {
@@ -325,11 +337,14 @@ function compileGeneratedOutputModule(words, relativeBase) {
       const ptr = op.tbPtr + sextract(insn, 12, 20);
       return localSet(regLocal(r0), i64Load(i32Const(ptr), 0));
     }
-    if (opc === OPS.ld32u) {
+    if (opc === OPS.ld32u || opc === OPS.ld32s) {
       const ofs = sextract(insn, 16, 16);
 
+      const loaded = i32Load(memoryAddress(localGet(regLocal(r1)), ofs));
+
       return localSet(regLocal(r0),
-                      i64ExtendI32U(i32Load(memoryAddress(localGet(regLocal(r1)), ofs))));
+                      opc === OPS.ld32u ? i64ExtendI32U(loaded)
+                                        : i64ExtendI32S(loaded));
     }
     if (opc === OPS.ld) {
       const ofs = sextract(insn, 16, 16);
@@ -360,6 +375,71 @@ function compileGeneratedOutputModule(words, relativeBase) {
         ...localGet(regLocal(r1)),
         ...localGet(regLocal(r2)),
         opc === OPS.add ? 0x7c : 0x83,
+      ]);
+    }
+    if (opc === OPS.neg) {
+      return localSet(regLocal(r0), [
+        ...i64Const(0),
+        ...localGet(regLocal(r1)),
+        0x7d,
+      ]);
+    }
+    if (opc === OPS.shl || opc === OPS.shr) {
+      return localSet(regLocal(r0), [
+        ...localGet(regLocal(r1)),
+        ...localGet(regLocal(r2)),
+        opc === OPS.shl ? 0x86 : 0x88,
+      ]);
+    }
+    if (opc === OPS.extract || opc === OPS.sextract) {
+      const pos = bits(insn, 16, 6);
+      const len = bits(insn, 22, 6);
+
+      if (len === 0 || pos + len > 64) {
+        return null;
+      }
+      if (opc === OPS.extract) {
+        const mask = len === 64 ? -1n : ((1n << BigInt(len)) - 1n);
+
+        return localSet(regLocal(r0), [
+          ...localGet(regLocal(r1)),
+          ...i64Const(pos),
+          0x88,
+          ...i64Const(mask),
+          0x83,
+        ]);
+      }
+      const shift = 64 - pos - len;
+
+      return localSet(regLocal(r0), [
+        ...localGet(regLocal(r1)),
+        ...i64Const(shift),
+        0x86,
+        ...i64Const(shift),
+        0x87,
+      ]);
+    }
+    if (opc === OPS.deposit) {
+      const pos = bits(insn, 20, 6);
+      const len = bits(insn, 26, 6);
+
+      if (len === 0 || pos + len > 64) {
+        return null;
+      }
+      const mask = len === 64 ? -1n : ((1n << BigInt(len)) - 1n);
+      const clearMask = BigInt.asUintN(
+        64, ~(BigInt.asUintN(64, mask) << BigInt(pos)));
+
+      return localSet(regLocal(r0), [
+        ...localGet(regLocal(r1)),
+        ...i64Const(clearMask),
+        0x83,
+        ...localGet(regLocal(r2)),
+        ...i64Const(mask),
+        0x83,
+        ...i64Const(pos),
+        0x86,
+        0x84,
       ]);
     }
     if (opc === OPS.tci_setcond32) {
@@ -497,6 +577,10 @@ function interpretGeneratedOutput(words, state, relativeBase) {
       const ofs = sextract(insn, 16, 16);
       regs[r0] = BigInt(view.getUint32(Number(regs[r1]) + ofs, true));
       index++;
+    } else if (opc === OPS.ld32s) {
+      const ofs = sextract(insn, 16, 16);
+      regs[r0] = toU64(BigInt(view.getInt32(Number(regs[r1]) + ofs, true)));
+      index++;
     } else if (opc === OPS.ld) {
       const ofs = sextract(insn, 16, 16);
       regs[r0] = view.getBigUint64(Number(regs[r1]) + ofs, true);
@@ -548,6 +632,39 @@ function interpretGeneratedOutput(words, state, relativeBase) {
       index++;
     } else if (opc === OPS.and) {
       regs[r0] = toU64(regs[r1] & regs[r2]);
+      index++;
+    } else if (opc === OPS.neg) {
+      regs[r0] = toU64(-regs[r1]);
+      index++;
+    } else if (opc === OPS.shl) {
+      regs[r0] = toU64(regs[r1] << (regs[r2] & 63n));
+      index++;
+    } else if (opc === OPS.shr) {
+      regs[r0] = toU64(regs[r1] >> (regs[r2] & 63n));
+      index++;
+    } else if (opc === OPS.extract) {
+      const pos = bits(insn, 16, 6);
+      const len = bits(insn, 22, 6);
+      const mask = len === 64 ? -1n : ((1n << BigInt(len)) - 1n);
+
+      regs[r0] = toU64((regs[r1] >> BigInt(pos)) & mask);
+      index++;
+    } else if (opc === OPS.sextract) {
+      const pos = bits(insn, 16, 6);
+      const len = bits(insn, 22, 6);
+      const shifted = BigInt.asIntN(64, regs[r1] << BigInt(64 - pos - len));
+
+      regs[r0] = toU64(shifted >> BigInt(64 - len));
+      index++;
+    } else if (opc === OPS.deposit) {
+      const pos = bits(insn, 20, 6);
+      const len = bits(insn, 26, 6);
+      const mask = len === 64 ? -1n : ((1n << BigInt(len)) - 1n);
+      const clearMask = BigInt.asUintN(
+        64, ~(BigInt.asUintN(64, mask) << BigInt(pos)));
+
+      regs[r0] = toU64((regs[r1] & clearMask) |
+                       ((regs[r2] & mask) << BigInt(pos)));
       index++;
     } else if (opc === OPS.exit_tb) {
       const ptr = BigInt(tbPtr + sextract(insn, 12, 20));
@@ -753,6 +870,31 @@ const fixtures = [
       OPS.exit_tb,
     ],
   },
+  {
+    name: "shift-and-extract-validate",
+    terminal: "exit_tb",
+    relativeBase: 0x5600,
+    words: [
+      OPS.tci_movi | (1 << 8) | (3 << 12),
+      OPS.shl | (2 << 8) | (4 << 12) | (1 << 16),
+      OPS.shr | (3 << 8) | (2 << 12) | (1 << 16),
+      OPS.extract | (4 << 8) | (3 << 12) | (4 << 16) | (16 << 22),
+      OPS.sextract | (5 << 8) | (3 << 12) | (4 << 16) | (16 << 22),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "simple-gap-ops-validate",
+    terminal: "exit_tb",
+    relativeBase: 0x5700,
+    words: [
+      OPS.ld32s | (6 << 8) | (14 << 12) | (0xfff0 << 16),
+      OPS.deposit | (7 << 8) | (6 << 12) | (5 << 16) |
+        (8 << 20) | (16 << 26),
+      OPS.neg | (8 << 8) | (7 << 12),
+      OPS.exit_tb,
+    ],
+  },
 ];
 
 const unsupportedFixtures = [
@@ -785,17 +927,20 @@ for (const fixture of unsupportedFixtures) {
   unsupportedResults.push(fixture.name);
 }
 
-assert.equal(results.length, 8);
+assert.equal(results.length, 12);
 assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 4);
-assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 4);
+assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 8);
 const helperBoundaryResults = results.filter((entry) =>
   entry.helpers.loads > 0 || entry.helpers.stores > 0);
+const simpleGapResults = results.filter((entry) =>
+  entry.name === "simple-gap-ops-validate");
 console.log(JSON.stringify({
   format: 1,
   event: "generated-output-equivalence",
   fixtures: results.length,
   unsupportedFixtures: unsupportedResults.length,
   helperBoundaryFixtures: helperBoundaryResults.length,
+  simpleGapFixtures: simpleGapResults.length,
   helperCalls: {
     loads: helperBoundaryResults.reduce((count, entry) =>
       count + entry.helpers.loads, 0),

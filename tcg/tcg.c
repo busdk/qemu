@@ -2499,6 +2499,43 @@ bool tcg_op_deposit_valid(TCGType type, unsigned ofs, unsigned len)
 
 static TCGOp *tcg_op_alloc(TCGOpcode opc, unsigned nargs);
 
+#ifdef CONFIG_TCG_WASM64_BACKEND
+static GHashTable *tcg_helper_trace_infos;
+static GMutex tcg_helper_trace_lock;
+
+void tcg_register_helper_trace_info(void *func, const TCGHelperInfo *info)
+{
+    if (func == NULL || info == NULL || info->name == NULL) {
+        return;
+    }
+
+    g_mutex_lock(&tcg_helper_trace_lock);
+    if (tcg_helper_trace_infos == NULL) {
+        tcg_helper_trace_infos = g_hash_table_new(g_direct_hash,
+                                                  g_direct_equal);
+    }
+    g_hash_table_insert(tcg_helper_trace_infos, func, (gpointer)info);
+    g_mutex_unlock(&tcg_helper_trace_lock);
+}
+
+const TCGHelperInfo *tcg_lookup_helper_trace_info(const void *func)
+{
+    const TCGHelperInfo *info = NULL;
+
+    if (func == NULL) {
+        return NULL;
+    }
+
+    g_mutex_lock(&tcg_helper_trace_lock);
+    if (tcg_helper_trace_infos != NULL) {
+        info = g_hash_table_lookup(tcg_helper_trace_infos, func);
+    }
+    g_mutex_unlock(&tcg_helper_trace_lock);
+
+    return info;
+}
+#endif
+
 static void tcg_gen_callN(void *func, TCGHelperInfo *info,
                           TCGTemp *ret, TCGTemp **args)
 {
@@ -2511,6 +2548,9 @@ static void tcg_gen_callN(void *func, TCGHelperInfo *info,
         init_call_layout(info);
         g_once_init_leave(HELPER_INFO_INIT(info), HELPER_INFO_INIT_VAL(info));
     }
+#ifdef CONFIG_TCG_WASM64_BACKEND
+    tcg_register_helper_trace_info(func, info);
+#endif
 
     total_args = info->nr_out + info->nr_in + 2;
     op = tcg_op_alloc(INDEX_op_call, total_args);

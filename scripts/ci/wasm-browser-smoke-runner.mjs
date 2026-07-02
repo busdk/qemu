@@ -180,6 +180,11 @@ Options:
                     into the smoke result JSON
   --tci-wasm-generated-trace-limit N
                     Maximum generated trace events to keep (default: 64)
+  --fw-cfg-trace
+                    Emit bounded fw_cfg selector/read trace diagnostics into
+                    the smoke result JSON
+  --fw-cfg-trace-limit N
+                    Maximum fw_cfg trace events to keep (default: 256)
   --user-data-dir DIR
                     Browser profile directory reused for OPFS restart proofs
   --visual-marker TEXT
@@ -237,6 +242,8 @@ function parseArgs(argv) {
     performanceAttribution: false,
     performanceAttributionInterval: 10000,
     performanceAttributionTciInterval: 1000000,
+    fwCfgTrace: false,
+    fwCfgTraceLimit: 256,
     port: 8010,
     program: "qemu-system-x86_64.js",
     progressSampleIntervalMs: DEFAULT_PROGRESS_SAMPLE_INTERVAL_MS,
@@ -500,6 +507,12 @@ function parseArgs(argv) {
     } else if (arg === "--tci-wasm-generated-trace-limit") {
       options.tciWasmGeneratedTraceLimit = Number(argv[++i]);
       explicit.add("tciWasmGeneratedTraceLimit");
+    } else if (arg === "--fw-cfg-trace") {
+      options.fwCfgTrace = true;
+      explicit.add("fwCfgTrace");
+    } else if (arg === "--fw-cfg-trace-limit") {
+      options.fwCfgTraceLimit = Number(argv[++i]);
+      explicit.add("fwCfgTraceLimit");
     } else if (arg === "--tci-wasm-subset-interval") {
       options.tciWasmSubsetInterval = Number(argv[++i]);
       explicit.add("tciWasmSubsetInterval");
@@ -693,6 +706,12 @@ function parseArgs(argv) {
       options.tciWasmGeneratedTraceLimit < 0 ||
       options.tciWasmGeneratedTraceLimit > 1024) {
     console.error("--tci-wasm-generated-trace-limit must be an integer from 0 to 1024");
+    usage(2);
+  }
+  if (!Number.isInteger(options.fwCfgTraceLimit) ||
+      options.fwCfgTraceLimit < 0 ||
+      options.fwCfgTraceLimit > 8192) {
+    console.error("--fw-cfg-trace-limit must be an integer from 0 to 8192");
     usage(2);
   }
   if (!Number.isInteger(options.tciWasmSubsetMaxOps) ||
@@ -1329,6 +1348,7 @@ export function promoteSmokeState(result, smokeState) {
   result.serviceBridgeState = smokeState.serviceBridge || null;
   result.hotBlocks = smokeState.hotBlocks || null;
   result.performanceAttribution = smokeState.performanceAttribution || null;
+  result.fwCfgTrace = smokeState.fwCfgTrace || null;
   result.wasm64Tcg = smokeState.wasm64Tcg || null;
   result.tci = smokeState.tci || null;
 }
@@ -1441,6 +1461,10 @@ export function browserSmokeUrl(options) {
   if (options.kernelAppend !== null) {
     url.searchParams.set("kernelAppend", options.kernelAppend);
   }
+  if (options.fwCfgTrace) {
+    url.searchParams.set("fwCfgTrace", "1");
+    url.searchParams.set("fwCfgTraceLimit", String(options.fwCfgTraceLimit));
+  }
   for (const text of options.expectText) {
     url.searchParams.append("expectText", text);
   }
@@ -1500,6 +1524,10 @@ export function initialSmokeResult(options, browserVersion) {
     performanceAttributionTciInterval: Number.isInteger(options.performanceAttributionTciInterval)
       ? options.performanceAttributionTciInterval
       : 1000000,
+    fwCfgTrace: Boolean(options.fwCfgTrace),
+    fwCfgTraceLimit: Number.isInteger(options.fwCfgTraceLimit)
+      ? options.fwCfgTraceLimit
+      : 256,
     guestIdleAfterText: options.guestIdleAfterText,
     guestIdleTimeoutMs: options.guestIdleTimeoutMs,
     progressSampleIntervalMs: options.progressSampleIntervalMs,
