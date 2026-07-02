@@ -12,6 +12,8 @@ import {
   encodeS64,
   encodeU32,
   expectedRunloopValue,
+  runTciLikeRunloopModel,
+  runWasmjitRunloopBenchmark,
   runWasmjitRunloopProbe,
   validateWasmjitRunloopContract,
   WASMJIT_EXIT_BUDGET,
@@ -77,5 +79,30 @@ assert.equal(budgetProbe.tb0Executions, "500000");
 assert.equal(budgetProbe.tb1Executions, "500000");
 assert.equal(budgetProbe.accumulator, budgetProbe.expectedValue);
 assert.equal(budgetProbe.ramValue, budgetProbe.expectedValue);
+
+const tciLike = runTciLikeRunloopModel({ budget: 1_000_000 });
+assert.equal(tciLike.exitReason, WASMJIT_EXIT_BUDGET);
+assert.equal(tciLike.generatedGuestInstructions, 4000000n);
+assert.equal(tciLike.generatedChainLength, 1000000n);
+assert.equal(tciLike.tlbHitAccesses, 2000000n);
+assert.equal(tciLike.helperCalls, 0n);
+assert.equal(tciLike.qemuLoadCalls, 0n);
+assert.equal(tciLike.qemuStoreCalls, 0n);
+assert.equal(tciLike.tb0Executions, 500000n);
+assert.equal(tciLike.tb1Executions, 500000n);
+assert.equal(tciLike.accumulator.toString(), budgetProbe.expectedValue);
+
+const benchmark = await runWasmjitRunloopBenchmark({
+  budget: 1_000_000,
+  rounds: 3,
+});
+assert.equal(benchmark.format, 1);
+assert.equal(benchmark.purpose, "qemu-wasmjit-runloop-model-benchmark");
+assert.equal(benchmark.version, WASMJIT_RUNLOOP_MODEL_VERSION);
+assert.equal(benchmark.wasmTimesMs.length, 3);
+assert.equal(benchmark.tciLikeTimesMs.length, 3);
+assert.equal(benchmark.wasmBestMs > 0, true);
+assert.equal(benchmark.tciLikeBestMs > 0, true);
+assert.equal(benchmark.bestRatio > 1, true);
 
 console.log("wasmjit runloop model: ok");

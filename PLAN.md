@@ -989,17 +989,32 @@ Engineering rules for this goal:
   - No W3 browser speed gate may run from W2n until the deterministic
     micro-hotset gate proves the new shape is multiple-times faster than TCI
     on ALU/branch and TLB-hit RAM microbenches.
-- [ ] W2o - Integrate the run/exit micro-hotset gate with QEMU-facing
-  accelerator scaffolding instead of keeping it only as a JavaScript model.
-  DoD: add a QEMU-owned `wasmjit_run()` contract in the wasm64 backend headers
-  and runtime that mirrors the W2n model's exit reasons, counters, and
-  no-helper-import invariant. Add deterministic tests that instantiate the
-  generated run-loop module through the same ABI shape the C runtime will use,
-  compare it with a TCI-like interpreter for ALU/branch and TLB-hit RAM
-  microbenches, and record wall-time ratios. This is not done until the
-  generated run loop is multiple-times faster than the TCI-like baseline on
-  both microbench families and still executes one `1000000`-step budget before
-  returning for budget expiry.
+- [x] W2o-a - Add the QEMU-facing wasmjit run/exit ABI and deterministic
+  model benchmark. Accepted evidence: `tcg/wasm64.h` now defines
+  `TCGWasm64RunMode`, `TCGWasm64RunExitReason`, `TCGWasm64RunExit`,
+  `TCGWasm64RunCounters`, and `TCGWasm64RunContext`; `tcg/wasm64.c` now has
+  run-counter reset/add helpers, per-exit counters, and reason names. The
+  deterministic model benchmark separates compile/setup from measured run
+  time. On this host, one `budget=1000000` run recorded best Wasm run-loop
+  time `4.127262999999999 ms` versus TCI-like model best
+  `106.78072000000003 ms`, ratio `25.87204159269716`, while preserving
+  `generatedGuestInstructions=4000000`, `generatedChainLength=1000000`,
+  `tlbHitAccesses=2000000`, and zero helper/`qemu_ld`/`qemu_st` calls. Checks:
+  `git diff --check`, `node --check scripts/ci/wasm64-runloop-contract-test.mjs`,
+  `node scripts/ci/wasm64-runloop-contract-test.mjs`,
+  `node --check scripts/ci/wasmjit-runloop-model.mjs`,
+  `node --check scripts/ci/wasmjit-runloop-model-test.mjs`, and
+  `node scripts/ci/wasmjit-runloop-model-test.mjs`.
+- [ ] W2o-b - Replace the model-only run-loop proof with QEMU-integrated
+  wasm64 accelerator scaffolding. DoD: wire the run/exit ABI into the wasm64
+  backend runtime without using the rejected per-TB generated wrapper, add
+  deterministic ALU/branch and TLB-hit RAM microbenches through the same
+  runtime boundary QEMU will use, and report generated/fallback instruction
+  retirement, chain length, exit reasons, helper calls, `qemu_ld`/`qemu_st`
+  calls, and wall-time ratios. This is not done until the generated run loop
+  is multiple-times faster than the TCI-like baseline on both microbench
+  families and still executes one `1000000`-step budget before returning for
+  budget expiry.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and
