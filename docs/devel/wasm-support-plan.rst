@@ -5184,3 +5184,33 @@ in hot blocks, preserves strict TCI fallback, and beats the strict-TCI generic
 Chromium smoke before any Bus Engine OS long proof is meaningful.  If a fresh
 measurement points away from CPU execution, the next optimization must sit
 behind the matching QEMU device or browser-backend boundary.
+
+Next backend-shaped implementation path
+=======================================
+
+The reference ``ktock/qemu-wasm`` ``origin/wasm64-tcg-b`` branch was inspected
+as research material for the next implementation step.  The useful pieces are
+not the exact forked code shape, but the execution boundary:
+
+* ``tcg/wasm64.c`` provides a runtime that keeps a TCI fallback path for cold
+  or unsupported translation blocks.
+* ``tcg/wasm64.h`` defines a ``WasmContext`` passed to generated TB functions
+  and a ``WasmTBHeader`` that stores the TCI pointer, generated WebAssembly
+  bytes, helper imports, execution counters, and per-thread instance records.
+* ``tcg/wasm64/tcg-target.c.inc`` emits WebAssembly modules with
+  ``env.memory``, a ``start(ctx)`` function, helper imports, global register
+  state, label/block patching, memory64-aware load/store encoding, helper-call
+  lowering, and terminal TB dispatch.
+* Hot TBs are instantiated only after a threshold.  The runtime calls them
+  through the browser function table and evicts old instances with
+  ``removeFunction()`` plus GC tracking.
+
+This confirms that the next upstreamable BusDK/QEMU step should be a gated
+``tcg/wasm64`` backend skeleton, not another live TCI-subset opcode shortcut.
+The skeleton should first carry the context/header/lifetime model and
+deterministic module-emitter tests.  Instruction lowering should then advance
+in testable slices: integer ALU and moves, labels and terminal exits,
+host-memory loads/stores for measured hot shapes, helper-call imports, and
+QEMU load/store helper fallback for MMU or fault paths.  The backend remains
+experimental until default generic Chromium smoke is unchanged and the opt-in
+backend path beats the strict-TCI generic smoke gate.

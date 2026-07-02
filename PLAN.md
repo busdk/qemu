@@ -1153,6 +1153,52 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     gate before any Bus Engine OS long proof is started. If this gate does not
     beat strict TCI, record it as rejected evidence and pick a different
     measured implementation direction.
+    - [x] Inspect the `ktock/qemu-wasm` `origin/wasm64-tcg-b` backend
+      architecture without copying it wholesale:
+      DoD is a short note naming the reference files, the runtime boundary,
+      and the pieces that are useful for an upstreamable BusDK/QEMU branch.
+      Accepted evidence on 2026-07-01: the reference branch adds
+      `tcg/wasm64.c`, `tcg/wasm64.h`, and `tcg/wasm64/tcg-target.c.inc`
+      selected from `tcg/meson.build` on Emscripten when TCI is not selected.
+      Its execution boundary is a `WasmContext *` passed to an instantiated
+      TB function, with a `WasmTBHeader` storing TCI bytes, generated wasm
+      bytes, helper import vectors, per-thread execution counters, and
+      per-thread instance records. The runtime interprets cold TBs through a
+      forked TCI path, instantiates hot TBs after a threshold, calls generated
+      TBs through the function table, and evicts old instances with
+      `removeFunction()` plus browser GC tracking. Useful upstreamable pieces
+      are the context/TB-header boundary, per-thread thresholding, helper
+      import table, memory64-aware load/store emission, label/block patching,
+      and strict fallback model; the fork-specific monolithic TCI copy and
+      wholesale backend import should not be copied directly.
+    - [ ] Add a gated `tcg/wasm64` backend skeleton without instruction
+      lowering:
+      DoD is build plumbing and empty backend files that can be selected only
+      by an explicit experimental Emscripten/wasm64 option, carries the
+      context/TB-header types and instance-lifetime plan, fails closed or
+      falls back to TCI when no lowering is available, and keeps the existing
+      TCI wasm64 build and generic Chromium smoke path unchanged.
+    - [ ] Add deterministic module-emitter tests for the backend skeleton:
+      DoD is a host-side test that emits and validates a minimal wasm64 TB
+      module with `env.memory`, a `start(ctx)` function, context loads/stores,
+      and a helper import table shape, without requiring a full QEMU boot.
+    - [ ] Add the first backend-shaped lowering subset behind the gated
+      skeleton:
+      DoD is lowering for integer ALU, constant moves, register moves,
+      `setcond`, internal labels, terminal exits, and direct host-memory
+      loads/stores needed by the measured hot shapes, plus differential tests
+      against the existing TCI semantics.
+    - [ ] Add helper-call and guest-memory fallback boundaries before long
+      browser proofs:
+      DoD is helper import generation for calls that cannot be inlined,
+      memory64-aware QEMU load/store helper calls for MMU/fault paths,
+      structured counters for generated execution versus fallback, and default
+      generic Chromium smoke remaining unchanged.
+    - [ ] Run the broad backend generic speed gate:
+      DoD is a rebuilt wasm64 artifact, default generic Chromium smoke passing,
+      opt-in backend Chromium smoke passing with nonzero generated counters,
+      and opt-in wall time faster than the strict-TCI generic baseline before
+      any Bus Engine OS long proof is attempted.
 
 ## MVP Generic QEMU Work
 
