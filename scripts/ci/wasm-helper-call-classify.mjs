@@ -61,7 +61,7 @@ export function returnShapeFromLen(len) {
 }
 
 export function generatedTraceEntries(result) {
-  const entries = result?.tci?.wasmSubset?.generatedTrace?.entries;
+  const entries = result?.tci?.generatedTrace?.entries;
   return Array.isArray(entries) ? entries : [];
 }
 
@@ -121,7 +121,7 @@ function newGroup(entry) {
 }
 
 export function classifyHelperCalls(result) {
-  const trace = result?.tci?.wasmSubset?.generatedTrace ?? {};
+  const trace = result?.tci?.generatedTrace ?? {};
   const entries = generatedTraceEntries(result);
   const calls = entries.filter(callEvent);
   const returns = entries.filter(callReturnEvent);

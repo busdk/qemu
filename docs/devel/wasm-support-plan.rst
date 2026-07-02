@@ -7171,8 +7171,60 @@ CPU/device state semantics.  A generic libffi trampoline would also still
 cross into C for arbitrary helper signatures, so it would not make generated
 block execution the default.
 
-The measured next structural target is a generated-block dispatch boundary
-around the ``lookup_tb_ptr`` helper shape.  That path accounts for ``95 / 154``
-helper calls in the trace and is the only helper-call category that plausibly
-removes a dominant candidate-loss mechanism without flattening arbitrary
-helpers.
+The measured next structural target was a generated-block dispatch boundary
+around the ``lookup_tb_ptr`` helper shape.  Follow-up W2m-j evidence rejected
+that family as the performance solution: it can produce high boundary-entry
+coverage while still returning to QEMU too often and running slower than
+default TCI.
+
+Rejected TCI subset and direct-boundary paths
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The opt-in TCI wasm subset, generated-only subset, relaxed TCI memory-barrier,
+and direct generated-boundary experiments are retained in this document as
+negative evidence only.  They are not active performance options in the live
+runner or TCI interpreter.
+
+The strongest rejection evidence is the W2m-j direct-boundary diagnostic.  It
+reported near-total boundary coverage:
+
+.. code-block:: text
+
+  direct_tb_entries=44,000,001
+  direct_generated_executed=43,960,181
+  direct_generated_dispatches=1,664
+  direct_tci_fallbacks=39,820
+
+The same run failed to reach ``QEMU_WASM_LINUX_BOOT_OK`` within ``180252`` ms,
+while default TCI generic smokes in the same family reached the marker around
+``100`` seconds.  The true compiled generated-block counters remained zero:
+``generated_compiled=0``, ``generated_executed=0``, and
+``generated_cache_hits=0``.
+
+Conclusion: boundary-entry coverage is not a performance success metric.  It
+only proves that QEMU entered a generated wrapper frequently.  It does not
+prove optimized guest instruction retirement, internal TB chaining, inline
+RAM/SoftMMU TLB hits, or rare synthetic exits.
+
+The live tree therefore removes:
+
+* ``QEMU_TCI_RELAXED_MB`` and the browser runner's ``--tci-relaxed-mb`` flag.
+* ``QEMU_TCI_WASM_SUBSET`` and the browser runner's ``--tci-wasm-subset``
+  flag.
+* ``QEMU_TCI_WASM_GENERATED_ONLY`` and the browser runner's
+  ``--tci-wasm-generated-only`` flag.
+* the TCI generated-subset compiler/executor and the direct-boundary dispatch
+  branch in ``tcg/tci.c``.
+
+The remaining generated trace support is diagnostic only.  It records TCI
+block/helper shapes for future accelerator design and does not change guest
+execution.
+
+The next W2 implementation shape is a browser-Wasm accelerator run/exit model:
+a long-running ``wasmjit_run()``-style entrypoint, internal TB chaining or
+hotset dispatch, inline common RAM/TLB-hit load/store paths, and synthetic
+exits for MMIO, TLB miss/page fault, interrupt, halt, invalidation,
+unsupported helper, or budget expiry.  The first acceptance gate is not Linux
+boot; it is a deterministic micro-hotset where one entry into generated Wasm
+executes a large counted guest-instruction budget before returning, with
+multiple-times speedup over TCI on ALU/branch and TLB-hit RAM microbenches.
