@@ -94,6 +94,21 @@ Engineering rules for this goal:
 3. Every measurement must record artifact SHA-256 hashes, browser version,
    the exact runner command, and the result JSON path, in this file or in
    `docs/devel/wasm-support-plan.rst`.
+4. Generated-Wasm work is steered by gate metrics, not rejection-list churn.
+   Every summary must record generated coverage share as
+   `(generated_executed + generated_cache_hits) / total eligible TB
+   executions` or the exact raw numerator and denominator used. A lowering
+   change that cannot plausibly move coverage share by an order of magnitude
+   does not justify a browser run.
+5. W2 continues by closing the structural backend gap: translation-time
+   lowering through `tcg/wasm64/tcg-target.c.inc`, with TCG ops entering the
+   backend before TCI bytecode exists and per-TB fallback metadata attached to
+   generated output. Runtime revalidation of TCI bytecode and threshold-hot
+   narrow block compilation is diagnostic scaffolding only; it must not remain
+   the hot path for W2.
+6. A failed W3 gate is a re-plan point. Do not run another same-family
+   browser measurement until the plan names the mechanism that should move
+   the same-commit wall-clock gate.
 
 - [x] W1 - Measure the Memory64 cost with the available address-limited
   comparison artifact. Accepted evidence: QEMU's current Emscripten host
@@ -403,13 +418,69 @@ Engineering rules for this goal:
   wall-clock time is still not better than the prior W3 baseline, `mb`
   remains dominant, and compile-failed/runtime fallback is now large enough
   to require reason-level attribution.
-- [ ] W2j - Classify and reduce generated compile/runtime fallback before
-  rerunning W3. DoD: add reason-level diagnostics for generated compile
-  failures and runtime fallback, run the generated-only Chromium smoke, and
-  either fix a proven lowering/encoding bug or record that the remaining
-  accepted blocker is the unsupported `mb` memory-barrier path. Do not lower
-  `mb` unless a deterministic module test proves the exact WebAssembly fence
-  encoding and browser support.
+- [x] W2j - Classify generated compile/runtime fallback and record generated
+  coverage share before any more lowering. DoD: add reason-level diagnostics
+  for the existing `generated_compile_failed` paths (`compile_zero`,
+  `status_nonpositive`, `status_unknown`, and any newly found runtime
+  fallback reason), add generated coverage numerator/denominator/ppm to both
+  `qemu-tci-wasm-subset` and `qemu-wasm64-tcg` summaries, and prove the JSON
+  shape with deterministic tests. If the diagnostics identify an encoding or
+  validation bug in the already-added lowerings, fix that bug and rerun only
+  the deterministic emitter/module tests first. A browser run is allowed only
+  after the deterministic tests show the failing shape is fixed or after the
+  diagnostics are needed to classify a still-unknown runtime fallback. This
+  item does not lower new opcodes and does not rerun W3.
+  Accepted evidence: the diagnostics build configured as
+  `TCG backend: experimental wasm64 with TCI fallback`, compiled, linked, and
+  wrote artifacts to
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2j-fallback-reasons`.
+  Artifact hashes were `qemu-system-x86_64.js`
+  `6cf78909d8fe7092216e9667b0057c3d6e432d7960e7563c20ea04951e7f406a`,
+  `qemu-system-x86_64.wasm`
+  `496ec3451c5a957036cfe2d42e152c4a3f4701e9408f345703d976ffe4043162`,
+  and `qemu-system-wasm-artifacts.json`
+  `a23bad762fee26da34f8bd8bbef13d0cdde8656bf7131a903a13a63b46cb32dd`.
+  Checks passed: `git diff --check`,
+  `node --check scripts/ci/wasm-browser-smoke-runner.mjs`,
+  `node --check scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+  `node scripts/ci/wasm-browser-smoke-runner-test.mjs` outside the sandbox
+  because sandboxed child-process spawning returns `EPERM`,
+  `node --check scripts/ci/wasm-tb-module-emitter-test.mjs`,
+  `node scripts/ci/wasm-tb-module-emitter-test.mjs`,
+  `node --check scripts/ci/wasm-generated-block-prototype-test.mjs`, and
+  `node scripts/ci/wasm-generated-block-prototype-test.mjs`.
+  The generated-only Chromium smoke used Chromium `149.0.7827.55` and reached
+  `QEMU_WASM_LINUX_BOOT_OK` in `104757` ms, writing
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2j-fallback-reasons-subset-live/wasm-browser-smoke-result.json`
+  with SHA-256
+  `acb26aae9c4a0f89100107093e19ae3b10d0e0cc9fca6f5f7d905b9329082d85`.
+  The summary reported `generated_compiled=4`,
+  `generated_executed=15131`, `generated_cache_hits=15127`,
+  `generated_compile_failed=677`, `generated_compile_zero=677`,
+  `generated_status_nonpositive=0`, `generated_status_unknown=0`, and
+  generated coverage `30258 / 73080000` (`414` ppm). This completes W2j but
+  not W2: generated coverage remains far too small, and the next accepted
+  work is W2k translation-time lowering, not another opcode-at-a-time browser
+  run.
+- [ ] W2k - Move the backend toward translation-time lowering instead of the
+  runtime TCI-bytecode subset. DoD: introduce a small translation-time
+  wasm64 lowering skeleton in the backend path, fed from `tcg/wasm64/
+  tcg-target.c.inc` or the equivalent selected target lowering hook, that
+  receives TCG ops before TCI bytecode execution, emits per-TB generated
+  metadata or a per-TB fallback marker, preserves strict fallback semantics,
+  and has deterministic tests for the metadata/fallback contract. This item
+  may leave execution on fallback, but it must remove the current need for a
+  threshold-hot runtime TCI-bytecode revalidation loop for deciding whether a
+  TB is generatable. Record the expected effect on generated coverage share
+  before any browser run.
+- [ ] W2l - Prove and batch the next broad lowering family only after W2j and
+  W2k. DoD: prove WebAssembly memory-barrier lowering in the deterministic
+  emitter first, using the threads `atomic.fence` encoding
+  `0xFE 0x03 0x00` in a module that validates in Node and Chromium; then
+  batch `mb` with any other structurally enabled high-coverage lowering
+  family that W2k exposes. Do not run Chrome/Chromium for a single opcode.
+  The browser measurement is accepted only if it records generated coverage
+  share and compiled-block count and plausibly answers whether W3 can pass.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and

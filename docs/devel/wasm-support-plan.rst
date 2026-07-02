@@ -6255,3 +6255,64 @@ W3 speed-gate rerun: the generic smoke still took longer than the earlier W3
 default-TCI baseline, ``mb`` remains dominant, and generated compile/runtime
 fallback now needs reason-level attribution before the backend can be judged
 again.
+
+Fallback reason and coverage diagnostics
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The next accepted slice added reason-level accounting for the existing
+generated compile-failure paths and added generated coverage fields to both
+``qemu-tci-wasm-subset`` and ``qemu-wasm64-tcg`` summaries.  This was a
+diagnostic accounting slice only: it did not lower another opcode and did not
+rerun the W3 speed gate.
+
+The artifact was built with:
+
+.. code-block:: console
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2j-fallback-reasons \
+    --jobs auto \
+    --configure-arg=--disable-tcg-interpreter \
+    --configure-arg=--enable-tcg-wasm64-backend
+
+Hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``6cf78909d8fe7092216e9667b0057c3d6e432d7960e7563c20ea04951e7f406a``
+* ``qemu-system-x86_64.wasm`` =
+  ``496ec3451c5a957036cfe2d42e152c4a3f4701e9408f345703d976ffe4043162``
+* manifest =
+  ``a23bad762fee26da34f8bd8bbef13d0cdde8656bf7131a903a13a63b46cb32dd``
+
+Checks passed:
+
+* ``git diff --check``
+* ``node --check scripts/ci/wasm-browser-smoke-runner.mjs``
+* ``node --check scripts/ci/wasm-browser-smoke-runner-test.mjs``
+* ``node scripts/ci/wasm-browser-smoke-runner-test.mjs`` outside the sandbox,
+  because sandboxed child-process spawning returns ``EPERM``
+* ``node --check scripts/ci/wasm-tb-module-emitter-test.mjs``
+* ``node scripts/ci/wasm-tb-module-emitter-test.mjs``
+* ``node --check scripts/ci/wasm-generated-block-prototype-test.mjs``
+* ``node scripts/ci/wasm-generated-block-prototype-test.mjs``
+
+The generated-only Chromium smoke used Chromium ``149.0.7827.55`` and reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``104757`` ms.  Result JSON:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2j-fallback-reasons-subset-live/wasm-browser-smoke-result.json``
+
+Result SHA-256:
+``acb26aae9c4a0f89100107093e19ae3b10d0e0cc9fca6f5f7d905b9329082d85``.
+
+The final generated summary reported ``generated_compiled=4``,
+``generated_executed=15131``, ``generated_cache_hits=15127``,
+``generated_compile_failed=677``, ``generated_compile_zero=677``,
+``generated_status_nonpositive=0``, and ``generated_status_unknown=0``.
+Generated coverage was ``30258 / 73080000`` eligible subset attempts, or
+``414`` ppm.
+
+This result makes the next path narrower.  The backend still compiles only a
+handful of blocks, and generated execution covers roughly ``0.0414%`` of
+eligible attempts.  W2 should continue by moving generation toward
+translation-time lowering with per-TB fallback metadata, not by spending
+another browser run on the next live rejection entry.

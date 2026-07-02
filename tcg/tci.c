@@ -116,9 +116,22 @@ static uint64_t tci_wasm_generated_compiled;
 static uint64_t tci_wasm_generated_executed;
 static uint64_t tci_wasm_generated_fallback_unsupported;
 static uint64_t tci_wasm_generated_compile_failed;
+static uint64_t tci_wasm_generated_compile_zero;
+static uint64_t tci_wasm_generated_status_nonpositive;
+static uint64_t tci_wasm_generated_status_unknown;
 static uint64_t tci_wasm_generated_cache_hits;
 static uint64_t tci_wasm_generated_cache_stale;
 static uint64_t tci_wasm_generated_unsupported_ops[NB_OPS];
+
+static uint64_t tci_wasm_coverage_ppm(uint64_t numerator,
+                                      uint64_t denominator)
+{
+    if (denominator == 0) {
+        return 0;
+    }
+
+    return (uint64_t)((__uint128_t)numerator * 1000000u / denominator);
+}
 
 EM_JS(char *, tci_wasm_getenv, (const char *name), {
     const key = UTF8ToString(Number(name));
@@ -1367,12 +1380,19 @@ static void tci_wasm_subset_report(const char *reason)
 {
     TCGOpcode top_ops[8] = { 0 };
     TCGOpcode top_generated_ops[8] = { 0 };
+    uint64_t generated_coverage_numerator =
+        tci_wasm_generated_executed + tci_wasm_generated_cache_hits;
+    uint64_t generated_coverage_denominator = tci_wasm_subset_attempts;
+    uint64_t generated_coverage_ppm = tci_wasm_coverage_ppm(
+        generated_coverage_numerator, generated_coverage_denominator);
 #ifdef CONFIG_TCG_WASM64_BACKEND
     TCGWasm64Counters wasm64_counters = {
         .generated_attempts = tci_wasm_generated_attempts,
         .generated_compiled = tci_wasm_generated_compiled,
         .generated_executed = tci_wasm_generated_executed,
         .generated_cache_hits = tci_wasm_generated_cache_hits,
+        .generated_coverage_numerator = generated_coverage_numerator,
+        .generated_coverage_denominator = generated_coverage_denominator,
         .fallback_unsupported = tci_wasm_generated_fallback_unsupported,
         .fallback_runtime = tci_wasm_generated_compile_failed,
     };
@@ -1425,8 +1445,15 @@ static void tci_wasm_subset_report(const char *reason)
             "\"generated_executed\":%" PRIu64 ","
             "\"generated_fallback_unsupported\":%" PRIu64 ","
             "\"generated_compile_failed\":%" PRIu64 ","
+            "\"generated_compile_zero\":%" PRIu64 ","
+            "\"generated_status_nonpositive\":%" PRIu64 ","
+            "\"generated_status_unknown\":%" PRIu64 ","
             "\"generated_cache_hits\":%" PRIu64 ","
             "\"generated_cache_stale\":%" PRIu64 ","
+            "\"generated_coverage_basis\":\"subset_attempts\","
+            "\"generated_coverage_numerator\":%" PRIu64 ","
+            "\"generated_coverage_denominator\":%" PRIu64 ","
+            "\"generated_coverage_ppm\":%" PRIu64 ","
             "\"top_unsupported_ops\":[",
             reason, tci_wasm_subset_attempts, tci_wasm_subset_executed,
             tci_wasm_subset_fallback_cold,
@@ -1440,8 +1467,14 @@ static void tci_wasm_subset_report(const char *reason)
             tci_wasm_generated_executed,
             tci_wasm_generated_fallback_unsupported,
             tci_wasm_generated_compile_failed,
+            tci_wasm_generated_compile_zero,
+            tci_wasm_generated_status_nonpositive,
+            tci_wasm_generated_status_unknown,
             tci_wasm_generated_cache_hits,
-            tci_wasm_generated_cache_stale);
+            tci_wasm_generated_cache_stale,
+            generated_coverage_numerator,
+            generated_coverage_denominator,
+            generated_coverage_ppm);
     for (size_t i = 0; i < ARRAY_SIZE(top_ops); i++) {
         TCGOpcode opc = top_ops[i];
         uint64_t count = tci_wasm_subset_unsupported_ops[opc];
@@ -1731,6 +1764,7 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
         if (entry->generated_func == 0) {
             entry->generated_unsupported = true;
             tci_wasm_generated_compile_failed++;
+            tci_wasm_generated_compile_zero++;
 #ifdef CONFIG_TCG_WASM64_BACKEND
             tcg_wasm64_count_fallback(wasm64_counters,
                                       TCG_WASM64_FALLBACK_RUNTIME);
@@ -1757,6 +1791,7 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
     if (status <= 0) {
         entry->generated_unsupported = true;
         tci_wasm_generated_compile_failed++;
+        tci_wasm_generated_status_nonpositive++;
 #ifdef CONFIG_TCG_WASM64_BACKEND
         tcg_wasm64_count_fallback(wasm64_counters,
                                   TCG_WASM64_FALLBACK_RUNTIME);
@@ -1783,6 +1818,7 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
         return TCI_WASM_SUBSET_DISPATCH;
     default:
         tci_wasm_generated_compile_failed++;
+        tci_wasm_generated_status_unknown++;
 #ifdef CONFIG_TCG_WASM64_BACKEND
         tcg_wasm64_count_fallback(wasm64_counters,
                                   TCG_WASM64_FALLBACK_RUNTIME);

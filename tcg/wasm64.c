@@ -33,6 +33,8 @@ void tcg_wasm64_counters_add(TCGWasm64Counters *dst,
     dst->generated_compiled += src->generated_compiled;
     dst->generated_executed += src->generated_executed;
     dst->generated_cache_hits += src->generated_cache_hits;
+    dst->generated_coverage_numerator += src->generated_coverage_numerator;
+    dst->generated_coverage_denominator += src->generated_coverage_denominator;
     dst->fallback_unsupported += src->fallback_unsupported;
     dst->fallback_helper += src->fallback_helper;
     dst->fallback_qemu_load += src->fallback_qemu_load;
@@ -81,8 +83,17 @@ TCGWasm64Counters *tcg_wasm64_active_counters(void)
 void tcg_wasm64_report_summary(const char *reason,
                                const TCGWasm64Counters *counters)
 {
+    uint64_t generated_coverage_ppm = 0;
+
     if (!counters) {
         return;
+    }
+
+    if (counters->generated_coverage_denominator != 0) {
+        generated_coverage_ppm =
+            ((uint64_t)((__uint128_t)counters->generated_coverage_numerator *
+                        1000000u /
+                        counters->generated_coverage_denominator));
     }
 
     fprintf(stderr,
@@ -92,6 +103,9 @@ void tcg_wasm64_report_summary(const char *reason,
             "\"generated_compiled\":%" PRIu64 ","
             "\"generated_executed\":%" PRIu64 ","
             "\"generated_cache_hits\":%" PRIu64 ","
+            "\"generated_coverage_numerator\":%" PRIu64 ","
+            "\"generated_coverage_denominator\":%" PRIu64 ","
+            "\"generated_coverage_ppm\":%" PRIu64 ","
             "\"fallback_unsupported\":%" PRIu64 ","
             "\"fallback_helper\":%" PRIu64 ","
             "\"fallback_qemu_load\":%" PRIu64 ","
@@ -102,6 +116,9 @@ void tcg_wasm64_report_summary(const char *reason,
             counters->generated_compiled,
             counters->generated_executed,
             counters->generated_cache_hits,
+            counters->generated_coverage_numerator,
+            counters->generated_coverage_denominator,
+            generated_coverage_ppm,
             counters->fallback_unsupported,
             counters->fallback_helper,
             counters->fallback_qemu_load,

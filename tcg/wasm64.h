@@ -27,6 +27,8 @@ typedef struct TCGWasm64Counters {
     uint64_t generated_compiled;
     uint64_t generated_executed;
     uint64_t generated_cache_hits;
+    uint64_t generated_coverage_numerator;
+    uint64_t generated_coverage_denominator;
     uint64_t fallback_unsupported;
     uint64_t fallback_helper;
     uint64_t fallback_qemu_load;

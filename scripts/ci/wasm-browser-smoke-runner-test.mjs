@@ -442,11 +442,25 @@ for (const status of [
     fallback_cold: 900,
     fallback_unsupported: 88,
     max_ops_rejected: 1,
+    generated_compile_zero: 2,
+    generated_status_nonpositive: 3,
+    generated_status_unknown: 4,
+    generated_coverage_basis: "subset_attempts",
+    generated_coverage_numerator: 21,
+    generated_coverage_denominator: 1000,
+    generated_coverage_ppm: 21000,
   });
   const parsed = tciWasmSubsetSummary(line);
   assert.equal(parsed.event, "summary");
   assert.equal(parsed.executed, 12);
   assert.equal(parsed.fallback_unsupported, 88);
+  assert.equal(parsed.generated_compile_zero, 2);
+  assert.equal(parsed.generated_status_nonpositive, 3);
+  assert.equal(parsed.generated_status_unknown, 4);
+  assert.equal(parsed.generated_coverage_basis, "subset_attempts");
+  assert.equal(parsed.generated_coverage_numerator, 21);
+  assert.equal(parsed.generated_coverage_denominator, 1000);
+  assert.equal(parsed.generated_coverage_ppm, 21000);
   assert.equal(tciWasmSubsetSummary("ordinary serial line"), null);
   assert.equal(tciWasmSubsetSummary("qemu-tci-wasm-subset: not-json"), null);
 }
@@ -529,12 +543,18 @@ for (const status of [
     generated_compiled: 3,
     generated_executed: 12,
     generated_cache_hits: 9,
+    generated_coverage_numerator: 21,
+    generated_coverage_denominator: 1000,
+    generated_coverage_ppm: 21000,
     fallback_unsupported: 88,
     fallback_runtime: 1,
   });
   const parsed = wasm64TcgSummary(line);
   assert.equal(parsed.event, "summary");
   assert.equal(parsed.generated_executed, 12);
+  assert.equal(parsed.generated_coverage_numerator, 21);
+  assert.equal(parsed.generated_coverage_denominator, 1000);
+  assert.equal(parsed.generated_coverage_ppm, 21000);
   assert.equal(parsed.fallback_unsupported, 88);
   assert.equal(wasm64TcgSummary("ordinary serial line"), null);
   assert.equal(wasm64TcgSummary("qemu-wasm64-tcg: not-json"), null);
