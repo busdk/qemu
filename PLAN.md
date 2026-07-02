@@ -1227,14 +1227,19 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
       includes an executable lowering-subset spec from a small TB IR into a
       WebAssembly module. The covered operations are `const_i64`, `mov_i64`,
       `ld_ctx_i64`, `st_ctx_i64`, `add_i64`, `xor_i64`, `setcond_i64`
-      (`eq`/`ne`), `helper_i64`, and `return_i64`. The generated module and a
-      local interpreter agree on result `25769803818`, context writes at
-      offsets `16`, `24`, and `32`, and helper call opcode `7` with value `42`.
-      Verification: `node --check scripts/ci/wasm-tb-module-emitter.mjs`,
-      `node --check scripts/ci/wasm-tb-module-emitter-test.mjs`, `node
+      (`eq`/`ne`), structured `block`, `brcond_i64`, `end_block`,
+      `pack_dispatch_i64`, `helper_i64`, and `exit_i64` through the
+      `tb-dispatch` boundary. The generated module and a local interpreter
+      agree for two control-flow cases: `branch-taken-skip-helper` returns
+      `25769803818`, writes context offsets `16=42`, `24=25769803818`,
+      `32=1`, and makes no helper call; `branch-not-taken-helper` returns
+      `25769803819`, writes offsets `16=43`, `24=25769803819`, `32=0`, and
+      makes helper call opcode `7` with value `43`. Verification: `node
+      --check scripts/ci/wasm-tb-module-emitter.mjs`, `node --check
+      scripts/ci/wasm-tb-module-emitter-test.mjs`, `node
       scripts/ci/wasm-tb-module-emitter-test.mjs`, and `node
       scripts/ci/wasm-tb-module-emitter.mjs` passed. This item remains open
-      until internal label/branch lowering and C backend integration exist.
+      until C backend integration exists.
     - [ ] Add helper-call and guest-memory fallback boundaries before long
       browser proofs:
       DoD is helper import generation for calls that cannot be inlined,

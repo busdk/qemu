@@ -94,25 +94,44 @@ assert.equal(interpretedResult.toString(), "25769803818");
 assert.equal(interpretedView.getBigUint64(80, true).toString(), "42");
 assert.equal(interpretedView.getBigUint64(88, true).toString(), "25769803818");
 assert.equal(interpretedView.getBigUint64(96, true).toString(), "1");
-assert.deepEqual(interpretedHelperCalls, [
-  {
-    opcode: 7,
-    value: "42",
-  },
-]);
+assert.deepEqual(interpretedHelperCalls, []);
 
 const loweringProbe = await runLoweringSubsetProbe();
 assert.equal(loweringProbe.format, 1);
 assert.equal(loweringProbe.purpose, "qemu-wasm64-lowering-subset");
 assert.equal(loweringProbe.ok, true);
 assert.equal(loweringProbe.ops, LOWERING_SUBSET_BLOCK.length);
-assert.equal(loweringProbe.generatedResult, loweringProbe.interpretedResult);
-assert.deepEqual(loweringProbe.generatedContext, loweringProbe.interpretedContext);
-assert.deepEqual(loweringProbe.generatedHelperCalls, loweringProbe.interpretedHelperCalls);
-assert.deepEqual(loweringProbe.generatedContext, {
+assert.equal(loweringProbe.cases.length, 2);
+
+const branchTaken = loweringProbe.cases.find((entry) =>
+  entry.name === "branch-taken-skip-helper");
+assert.equal(branchTaken.ok, true);
+assert.equal(branchTaken.generatedResult, branchTaken.interpretedResult);
+assert.deepEqual(branchTaken.generatedContext, branchTaken.interpretedContext);
+assert.deepEqual(branchTaken.generatedContext, {
   16: "42",
   24: "25769803818",
   32: "1",
 });
+assert.deepEqual(branchTaken.generatedHelperCalls, []);
+assert.deepEqual(branchTaken.interpretedHelperCalls, []);
+
+const branchNotTaken = loweringProbe.cases.find((entry) =>
+  entry.name === "branch-not-taken-helper");
+assert.equal(branchNotTaken.ok, true);
+assert.equal(branchNotTaken.generatedResult, branchNotTaken.interpretedResult);
+assert.deepEqual(branchNotTaken.generatedContext, branchNotTaken.interpretedContext);
+assert.deepEqual(branchNotTaken.generatedContext, {
+  16: "43",
+  24: "25769803819",
+  32: "0",
+});
+assert.deepEqual(branchNotTaken.generatedHelperCalls, [
+  {
+    opcode: 7,
+    value: "43",
+  },
+]);
+assert.deepEqual(branchNotTaken.generatedHelperCalls, branchNotTaken.interpretedHelperCalls);
 
 console.log("wasm-tb-module-emitter-test: ok");

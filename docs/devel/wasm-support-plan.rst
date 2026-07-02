@@ -5293,22 +5293,26 @@ The same helper now includes the first executable lowering-subset spec.  It
 lowers a small TB operation list to WebAssembly and compares the generated
 module against a local interpreter.  The covered operations are ``const_i64``,
 ``mov_i64``, ``ld_ctx_i64``, ``st_ctx_i64``, ``add_i64``, ``xor_i64``,
-``setcond_i64`` for ``eq`` and ``ne``, ``helper_i64``, and ``return_i64``.
-The generated lowering-subset module remains independent from the real QEMU
-backend; it is an executable contract for the next C lowering slice.
+``setcond_i64`` for ``eq`` and ``ne``, structured ``block``, ``brcond_i64``,
+``end_block``, ``pack_dispatch_i64``, ``helper_i64``, and ``exit_i64`` through
+the ``tb-dispatch`` boundary.  The generated lowering-subset module remains
+independent from the real QEMU backend; it is an executable contract for the
+next C lowering slice.
 
 Validation on 2026-07-02:
 
 * ``node scripts/ci/wasm-tb-module-emitter.mjs`` reported lowering probe
   ``ok: true``.
-* The lowering probe module size was 142 bytes.
-* The generated and interpreted results both returned ``25769803818``.
-* Generated and interpreted context writes matched at offsets 16, 24, and 32:
-  sum ``42``, helper dispatch result ``25769803818``, and setcond result ``1``.
-* Generated and interpreted helper calls matched opcode ``7`` with value
-  ``42``.
+* The lowering probe module size was 172 bytes and the lowered operation list
+  contained 18 operations.
+* In the ``branch-taken-skip-helper`` case, generated and interpreted paths
+  both returned ``25769803818``, wrote context offsets 16, 24, and 32 as
+  ``42``, ``25769803818``, and ``1``, and made no helper call.
+* In the ``branch-not-taken-helper`` case, generated and interpreted paths both
+  returned ``25769803819``, wrote context offsets 16, 24, and 32 as ``43``,
+  ``25769803819``, and ``0``, and made helper call opcode ``7`` with value
+  ``43``.
 
 This is still not a runnable wasm64 TCG backend and not a speed improvement.
-Internal label/branch lowering, terminal-dispatch integration, and C backend
-integration remain required before an opt-in generic smoke speed gate is
-meaningful.
+C backend integration remains required before an opt-in generic smoke speed
+gate is meaningful.

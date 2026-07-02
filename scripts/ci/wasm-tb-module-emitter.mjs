@@ -127,7 +127,7 @@ function i64Local(index) {
 function maxRegister(ops) {
   let max = -1;
   for (const op of ops) {
-    for (const key of ["dst", "src", "lhs", "rhs", "value"]) {
+    for (const key of ["condReg", "dst", "src", "lhs", "rhs", "value"]) {
       if (Number.isInteger(op[key])) {
         max = Math.max(max, op[key]);
       }
@@ -136,8 +136,51 @@ function maxRegister(ops) {
   return max;
 }
 
-function emitLoweringOp(op) {
+function packDispatchResultBytes(statusReg, valueReg) {
+  return [
+    ...localGet(i64Local(statusReg)),
+    ...i64Const(32),
+    0x86,                   /* i64.shl */
+    ...localGet(i64Local(valueReg)),
+    0x84,                   /* i64.or */
+  ];
+}
+
+function branchDepth(labelStack, target) {
+  const index = labelStack.lastIndexOf(target);
+  if (index < 0) {
+    throw new Error(`branch target is not an open block label: ${target}`);
+  }
+  return labelStack.length - 1 - index;
+}
+
+function emitLoweringOp(op, labelStack) {
   switch (op.op) {
+  case "block":
+    if (typeof op.label !== "string" || op.label.length === 0) {
+      throw new Error("block requires a non-empty label");
+    }
+    if (labelStack.includes(op.label)) {
+      throw new Error(`duplicate open block label: ${op.label}`);
+    }
+    labelStack.push(op.label);
+    return [
+      0x02, 0x40,            /* block */
+    ];
+  case "end_block":
+    if (labelStack.length === 0) {
+      throw new Error("end_block without block");
+    }
+    labelStack.pop();
+    return [
+      0x0b,                  /* end */
+    ];
+  case "brcond_i64":
+    return [
+      ...localGet(i64Local(op.condReg)),
+      0xa7,                  /* i32.wrap_i64 */
+      0x0d, ...encodeU32(branchDepth(labelStack, op.target)),
+    ];
   case "const_i64":
     return [
       ...i64Const(op.value),
@@ -192,6 +235,18 @@ function emitLoweringOp(op) {
       0x10, ...encodeU32(0),
       ...localSet(i64Local(op.dst)),
     ];
+  case "pack_dispatch_i64":
+    return [
+      ...packDispatchResultBytes(op.status, op.value),
+      ...localSet(i64Local(op.dst)),
+    ];
+  case "exit_i64":
+    if (op.boundary !== "tb-dispatch") {
+      throw new Error("exit_i64 requires boundary tb-dispatch");
+    }
+    return [
+      ...localGet(i64Local(op.src)),
+    ];
   case "return_i64":
     return [
       ...localGet(i64Local(op.src)),
@@ -210,9 +265,16 @@ export const LOWERING_SUBSET_BLOCK = [
   { op: "mov_i64", dst: 5, src: 2 },
   { op: "st_ctx_i64", src: 5, offset: 16 },
   { op: "st_ctx_i64", src: 4, offset: 32 },
+  { op: "const_i64", dst: 6, value: 6n },
+  { op: "const_i64", dst: 7, value: 42n },
+  { op: "pack_dispatch_i64", dst: 8, status: 6, value: 7 },
+  { op: "block", label: "helper-path" },
+  { op: "brcond_i64", condReg: 4, target: "helper-path" },
   { op: "helper_i64", dst: 6, opcode: 7, value: 5 },
-  { op: "st_ctx_i64", src: 6, offset: 24 },
-  { op: "return_i64", src: 6 },
+  { op: "mov_i64", dst: 8, src: 6 },
+  { op: "end_block" },
+  { op: "st_ctx_i64", src: 8, offset: 24 },
+  { op: "exit_i64", boundary: "tb-dispatch", src: 8 },
 ];
 
 export function buildTBModule() {
@@ -261,7 +323,11 @@ export function buildTBModule() {
 
 export function buildLoweringSubsetModule(ops = LOWERING_SUBSET_BLOCK) {
   const registerCount = maxRegister(ops) + 1;
-  const instructions = ops.flatMap(emitLoweringOp);
+  const labelStack = [];
+  const instructions = ops.flatMap((op) => emitLoweringOp(op, labelStack));
+  if (labelStack.length !== 0) {
+    throw new Error(`unclosed block label: ${labelStack[labelStack.length - 1]}`);
+  }
   const bytes = [
     0x00, 0x61, 0x73, 0x6d,
     0x01, 0x00, 0x00, 0x00,
@@ -389,9 +455,43 @@ function writeCtxI64(view, pointer, offset, value) {
 export function interpretLoweringSubset(ops, view, contextPointer, helper) {
   const regs = [];
   let result = 0n;
+  const blockEnds = new Map();
+  const labelToBlock = new Map();
+  const stack = [];
 
-  for (const op of ops) {
+  for (let index = 0; index < ops.length; index++) {
+    const op = ops[index];
+    if (op.op === "block") {
+      stack.push({ label: op.label, index });
+      labelToBlock.set(op.label, index);
+    } else if (op.op === "end_block") {
+      const block = stack.pop();
+      if (!block) {
+        throw new Error("end_block without block");
+      }
+      blockEnds.set(block.index, index);
+    }
+  }
+  if (stack.length !== 0) {
+    throw new Error(`unclosed block label: ${stack[stack.length - 1].label}`);
+  }
+
+  for (let pc = 0; pc < ops.length; pc++) {
+    const op = ops[pc];
     switch (op.op) {
+    case "block":
+    case "end_block":
+      break;
+    case "brcond_i64": {
+      const blockIndex = labelToBlock.get(op.target);
+      if (blockIndex === undefined) {
+        throw new Error(`branch target is not a known label: ${op.target}`);
+      }
+      if (regs[op.condReg] !== 0n) {
+        pc = blockEnds.get(blockIndex);
+      }
+      break;
+    }
     case "const_i64":
       regs[op.dst] = BigInt.asUintN(64, BigInt(op.value));
       break;
@@ -422,6 +522,17 @@ export function interpretLoweringSubset(ops, view, contextPointer, helper) {
     case "helper_i64":
       regs[op.dst] = helper(op.opcode, regs[op.value]);
       break;
+    case "pack_dispatch_i64":
+      regs[op.dst] = BigInt.asUintN(64,
+        (regs[op.status] << 32n) | (regs[op.value] & 0xffffffffn));
+      break;
+    case "exit_i64":
+      if (op.boundary !== "tb-dispatch") {
+        throw new Error("exit_i64 requires boundary tb-dispatch");
+      }
+      result = regs[op.src];
+      pc = ops.length;
+      break;
     case "return_i64":
       result = regs[op.src];
       break;
@@ -437,13 +548,6 @@ export async function runLoweringSubsetProbe(ops = LOWERING_SUBSET_BLOCK) {
   const moduleBytes = buildLoweringSubsetModule(ops);
   const contract = validateTBModuleContract(moduleBytes);
   const compiled = await WebAssembly.compile(moduleBytes);
-  const generatedMemory = new WebAssembly.Memory({ initial: 1 });
-  const interpretedMemory = new WebAssembly.Memory({ initial: 1 });
-  const contextPointer = 64;
-  const generatedView = new DataView(generatedMemory.buffer);
-  const interpretedView = new DataView(interpretedMemory.buffer);
-  const generatedHelperCalls = [];
-  const interpretedHelperCalls = [];
   const helper = (calls) => (opcode, value) => {
     calls.push({
       opcode,
@@ -451,56 +555,78 @@ export async function runLoweringSubsetProbe(ops = LOWERING_SUBSET_BLOCK) {
     });
     return packDispatchResult(6, Number(value & 0xffffffffn));
   };
+  const cases = [];
 
-  for (const view of [generatedView, interpretedView]) {
-    view.setBigUint64(contextPointer, 19n, true);
-    view.setBigUint64(contextPointer + 8, 23n, true);
+  for (const testCase of [
+    { name: "branch-taken-skip-helper", reg0: 19n, reg1: 23n },
+    { name: "branch-not-taken-helper", reg0: 19n, reg1: 24n },
+  ]) {
+    const generatedMemory = new WebAssembly.Memory({ initial: 1 });
+    const interpretedMemory = new WebAssembly.Memory({ initial: 1 });
+    const contextPointer = 64;
+    const generatedView = new DataView(generatedMemory.buffer);
+    const interpretedView = new DataView(interpretedMemory.buffer);
+    const generatedHelperCalls = [];
+    const interpretedHelperCalls = [];
+
+    for (const view of [generatedView, interpretedView]) {
+      view.setBigUint64(contextPointer, testCase.reg0, true);
+      view.setBigUint64(contextPointer + 8, testCase.reg1, true);
+    }
+
+    const instance = await WebAssembly.instantiate(compiled, {
+      env: {
+        memory: generatedMemory,
+      },
+      h: {
+        helper0: helper(generatedHelperCalls),
+      },
+    });
+
+    const generatedResult = instance.exports.start(contextPointer);
+    const interpretedResult = interpretLoweringSubset(
+      ops,
+      interpretedView,
+      contextPointer,
+      helper(interpretedHelperCalls),
+    );
+    const contextOffsets = [16, 24, 32];
+    const contextMatches = contextOffsets.every((offset) =>
+      readCtxI64(generatedView, contextPointer, offset) ===
+      readCtxI64(interpretedView, contextPointer, offset));
+
+    cases.push({
+      name: testCase.name,
+      reg0: testCase.reg0.toString(),
+      reg1: testCase.reg1.toString(),
+      ok: generatedResult === interpretedResult &&
+        contextMatches &&
+        JSON.stringify(generatedHelperCalls) === JSON.stringify(interpretedHelperCalls),
+      generatedResult: generatedResult.toString(),
+      interpretedResult: interpretedResult.toString(),
+      generatedContext: Object.fromEntries(contextOffsets.map((offset) => [
+        String(offset),
+        readCtxI64(generatedView, contextPointer, offset).toString(),
+      ])),
+      interpretedContext: Object.fromEntries(contextOffsets.map((offset) => [
+        String(offset),
+        readCtxI64(interpretedView, contextPointer, offset).toString(),
+      ])),
+      generatedHelperCalls,
+      interpretedHelperCalls,
+    });
   }
-
-  const instance = await WebAssembly.instantiate(compiled, {
-    env: {
-      memory: generatedMemory,
-    },
-    h: {
-      helper0: helper(generatedHelperCalls),
-    },
-  });
-
-  const generatedResult = instance.exports.start(contextPointer);
-  const interpretedResult = interpretLoweringSubset(
-    ops,
-    interpretedView,
-    contextPointer,
-    helper(interpretedHelperCalls),
-  );
-  const contextOffsets = [16, 24, 32];
-  const contextMatches = contextOffsets.every((offset) =>
-    readCtxI64(generatedView, contextPointer, offset) ===
-    readCtxI64(interpretedView, contextPointer, offset));
 
   return {
     format: 1,
     purpose: "qemu-wasm64-lowering-subset",
     version: TB_MODULE_EMITTER_MODEL_VERSION,
-    ok: generatedResult === interpretedResult &&
-      contextMatches &&
-      JSON.stringify(generatedHelperCalls) === JSON.stringify(interpretedHelperCalls),
+    ok: cases.every((entry) => entry.ok),
     moduleBytes: moduleBytes.length,
     imports: contract.imports,
     exports: contract.exports,
     ops: ops.length,
-    generatedResult: generatedResult.toString(),
-    interpretedResult: interpretedResult.toString(),
-    generatedContext: Object.fromEntries(contextOffsets.map((offset) => [
-      String(offset),
-      readCtxI64(generatedView, contextPointer, offset).toString(),
-    ])),
-    interpretedContext: Object.fromEntries(contextOffsets.map((offset) => [
-      String(offset),
-      readCtxI64(interpretedView, contextPointer, offset).toString(),
-    ])),
-    generatedHelperCalls,
-    interpretedHelperCalls,
+    cases,
   };
 }
 
