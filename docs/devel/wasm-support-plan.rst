@@ -7513,3 +7513,98 @@ the same runtime family intended for translated hotsets, while exporting the
 instruction, wall-time, helper, load/store, chain-length, and synthetic-exit
 metrics needed for the accelerator path.  It is not the W3 same-commit speed
 gate and not a Bus Engine OS five-minute proof.
+
+W2q descriptor-backed run/exit smoke
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The runtime smoke now uses a C-owned hotset descriptor instead of a hardcoded
+two-block JavaScript loop.  ``TCGWasm64RunHotset`` points at
+``TCGWasm64RunHotsetTB`` entries, and the Emscripten runtime bridge reads those
+descriptors from live QEMU memory before emitting the generated Wasm run loop.
+The accepted smoke uses three descriptor TBs, internal dispatch/chaining, inline
+RAM add/xor operations, guest-instruction accounting, and a synthetic budget
+exit.  This is still a synthetic runtime ABI proof; it does not attach real
+translated Linux TBs yet.
+
+The first W2q artifact was rejected.  The disabled-smoke path still computed a
+million-iteration expected-value loop before checking
+``QEMU_WASM64_RUNLOOP_SMOKE``, so normal boot paid synthetic smoke cost.  That
+artifact timed out in the descriptor-smoke run at ``180227`` ms and in the
+no-smoke control at ``140180`` ms.  The accepted fix moves all descriptor setup
+and expected-value work behind the environment guard.
+
+The accepted artifact build command was:
+
+.. code-block:: text
+
+  python3 scripts/ci/wasm-build-artifacts-local.py --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2q-hotset-runtime-rebased-artifacts --jobs auto --configure-arg=--disable-tcg-interpreter --configure-arg=--enable-tcg-wasm64-backend
+
+Artifact hashes:
+
+.. code-block:: text
+
+  qemu-system-x86_64.js    363bd6db44bc3808a3f55e17a10d7cd669f70561418f6dfaeea94897a17ee23a
+  qemu-system-x86_64.wasm  c1ed8b634657ffece1d5fe66d7fa2b309b6610aebdb1ec1448aa1b062ef5c855
+  manifest                 916aba9397058fe98da4696a476cbd3abca7d612fda7e72f78232a55a21ccffc
+
+The no-smoke control command was:
+
+.. code-block:: text
+
+  npm exec --yes --package=playwright -- node scripts/ci/wasm-browser-smoke-runner.mjs --artifact-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2q-hotset-runtime-rebased-artifacts --kernel /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-default-tci-smoke/wasm-smoke-cache/tuxboot-x86_64-bzImage --initrd /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-default-tci-smoke/wasm-browser-smoke-guest/tuxboot-smoke-initramfs.cpio.gz --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2q-hotset-runtime-rebased-nosmoke/wasm-browser-smoke-result.json --screenshot /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2q-hotset-runtime-rebased-nosmoke/screenshot.png --port 8104 --timeout-ms 140000
+
+Chromium ``149.0.7827.55`` reached ``QEMU_WASM_LINUX_BOOT_OK`` in
+``91812`` ms in that control run.
+
+The descriptor-smoke command was:
+
+.. code-block:: text
+
+  npm exec --yes --package=playwright -- node scripts/ci/wasm-browser-smoke-runner.mjs --artifact-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2q-hotset-runtime-rebased-artifacts --kernel /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-default-tci-smoke/wasm-smoke-cache/tuxboot-x86_64-bzImage --initrd /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-default-tci-smoke/wasm-browser-smoke-guest/tuxboot-smoke-initramfs.cpio.gz --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2q-hotset-runtime-rebased-smoke/wasm-browser-smoke-result.json --screenshot /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2q-hotset-runtime-rebased-smoke/screenshot.png --port 8105 --timeout-ms 140000 --wasm64-runloop-smoke
+
+Chromium ``149.0.7827.55`` reached ``QEMU_WASM_LINUX_BOOT_OK`` in
+``91203`` ms.  The descriptor runtime summary appeared at elapsed ``2237`` ms
+with:
+
+.. code-block:: text
+
+  ok=true
+  budget=1000000
+  exit_reason=budget
+  generated_guest_instructions=4000000
+  fallback_guest_instructions=0
+  generated_body_time_ns=5230000
+  tci_dispatch_time_ns=0
+  tb_lookup_time_ns=0
+  helper_call_time_ns=0
+  qemu_ld_time_ns=0
+  qemu_st_time_ns=0
+  compile_time_ns=735000
+  instantiate_time_ns=55000
+  generated_chain_length=1000000
+  inline_tlb_hit_loads=1000000
+  inline_tlb_hit_stores=1000000
+  helper_calls=0
+  qemu_ld_calls=0
+  qemu_st_calls=0
+  exits_budget=1
+  exits_mmio=0
+  exits_tlb_miss_or_fault=0
+  exits_interrupt=0
+  exits_helper=0
+  exits_unsupported=0
+  exits_hlt=0
+  exits_invalidated=0
+
+Checks for this slice:
+
+.. code-block:: text
+
+  git diff --check
+  node scripts/ci/wasm64-runloop-contract-test.mjs
+  node scripts/ci/wasmjit-runloop-model-test.mjs
+  node scripts/ci/wasm-browser-smoke-runner-test.mjs
+
+The smoke-runner unit test passed outside the sandbox.  The sandboxed run
+reproduced an existing child-process output capture failure from the base W2p
+worktree, so it was not treated as a W2q regression.

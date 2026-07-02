@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url";
 
 import {
   WASMJIT_COUNTERS,
+  WASMJIT_HOTSET,
+  WASMJIT_HOTSET_TB,
   WASMJIT_RUN_CTX,
   WASMJIT_RUN_EXIT,
 } from "./wasmjit-runloop-model.mjs";
@@ -89,7 +91,7 @@ for (const field of [
 }
 
 assert.match(header, /typedef struct TCGWasm64RunContext/);
-for (const field of ["env", "guest_ram", "budget", "counters", "exit", "mode", "flags"]) {
+for (const field of ["env", "guest_ram", "budget", "counters", "exit", "mode", "flags", "hotset"]) {
   assert.match(header, new RegExp(field));
 }
 assert.equal(macroValue("TCG_WASM64_RUN_CTX_ENV_OFFSET"), WASMJIT_RUN_CTX.env);
@@ -99,6 +101,7 @@ assert.equal(macroValue("TCG_WASM64_RUN_CTX_COUNTERS_OFFSET"), WASMJIT_RUN_CTX.c
 assert.equal(macroValue("TCG_WASM64_RUN_CTX_EXIT_OFFSET"), WASMJIT_RUN_CTX.exit);
 assert.equal(macroValue("TCG_WASM64_RUN_CTX_MODE_OFFSET"), WASMJIT_RUN_CTX.mode);
 assert.equal(macroValue("TCG_WASM64_RUN_CTX_FLAGS_OFFSET"), WASMJIT_RUN_CTX.flags);
+assert.equal(macroValue("TCG_WASM64_RUN_CTX_HOTSET_OFFSET"), WASMJIT_RUN_CTX.hotset);
 assert.equal(macroValue("TCG_WASM64_RUN_CTX_SIZE"), WASMJIT_RUN_CTX.size);
 assert.equal(macroValue("TCG_WASM64_RUN_EXIT_REASON_OFFSET"), WASMJIT_RUN_EXIT.reason);
 assert.equal(macroValue("TCG_WASM64_RUN_EXIT_TB_ID_OFFSET"), WASMJIT_RUN_EXIT.tbId);
@@ -207,6 +210,46 @@ assert.equal(
 );
 assert.equal(macroValue("TCG_WASM64_RUN_COUNTERS_SIZE"), WASMJIT_COUNTERS.size);
 
+assert.match(header, /typedef enum TCGWasm64RunHotsetOp/);
+assert.match(header, /TCG_WASM64_RUN_HOTSET_OP_RAM_ADD_CONST = 1/);
+assert.match(header, /TCG_WASM64_RUN_HOTSET_OP_RAM_XOR_CONST = 2/);
+assert.match(header, /typedef struct TCGWasm64RunHotsetTB/);
+for (const field of ["tb_id", "next_tb_id", "op", "guest_instructions", "immediate"]) {
+  assert.match(header, new RegExp(field));
+}
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_ID_OFFSET"),
+  WASMJIT_HOTSET_TB.tbId,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_NEXT_TB_ID_OFFSET"),
+  WASMJIT_HOTSET_TB.nextTbId,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_OP_OFFSET"),
+  WASMJIT_HOTSET_TB.op,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_GUEST_INSTRUCTIONS_OFFSET"),
+  WASMJIT_HOTSET_TB.guestInstructions,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_IMMEDIATE_OFFSET"),
+  WASMJIT_HOTSET_TB.immediate,
+);
+assert.equal(macroValue("TCG_WASM64_RUN_HOTSET_TB_SIZE"), WASMJIT_HOTSET_TB.size);
+assert.match(header, /typedef struct TCGWasm64RunHotset/);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_COUNT_OFFSET"),
+  WASMJIT_HOTSET.tbCount,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_ENTRY_TB_ID_OFFSET"),
+  WASMJIT_HOTSET.entryTbId,
+);
+assert.equal(macroValue("TCG_WASM64_RUN_HOTSET_TBS_OFFSET"), WASMJIT_HOTSET.tbs);
+assert.equal(macroValue("TCG_WASM64_RUN_HOTSET_SIZE"), WASMJIT_HOTSET.size);
+
 assert.match(runtime, /void tcg_wasm64_run_counters_reset/);
 assert.match(runtime, /void tcg_wasm64_run_counters_add/);
 assert.match(runtime, /void tcg_wasm64_run_count_exit/);
@@ -218,11 +261,20 @@ assert.match(runtime, /QEMU_BUILD_BUG_ON\(offsetof\(TCGWasm64RunContext, env\) !
 assert.match(runtime, /QEMU_BUILD_BUG_ON\(sizeof\(TCGWasm64RunContext\) != TCG_WASM64_RUN_CTX_SIZE\)/);
 assert.match(runtime, /QEMU_BUILD_BUG_ON\(sizeof\(TCGWasm64RunExit\) != TCG_WASM64_RUN_EXIT_SIZE\)/);
 assert.match(runtime, /QEMU_BUILD_BUG_ON\(sizeof\(TCGWasm64RunCounters\) !=/);
+assert.match(runtime, /QEMU_BUILD_BUG_ON\(sizeof\(TCGWasm64RunHotsetTB\) !=/);
+assert.match(runtime, /QEMU_BUILD_BUG_ON\(sizeof\(TCGWasm64RunHotset\) !=/);
 assert.match(runtime, /QEMU_WASM64_RUNLOOP_SMOKE/);
 assert.match(runtime, /qemu-wasm64-runloop: /);
 assert.match(runtime, /tcg_wasm64_runloop_smoke_js/);
+assert.match(runtime, /runCtxHotsetOffset = 48/);
+assert.match(runtime, /hotsetTbSize = 24/);
+assert.match(runtime, /hotsetOpRamAddConst = 1/);
+assert.match(runtime, /hotsetOpRamXorConst = 2/);
+assert.match(runtime, /smoke_hotset/);
+assert.match(runtime, /tcg_wasm64_runloop_hotset_expected_value/);
 assert.match(runtime, /0x02,\s*0x07,\s*0x00,\s*0x80,\s*0x80,\s*0x10/);
 assert.match(runtime, /generated_guest_instructions == budget \* 4/);
 assert.match(runtime, /inline_tlb_hit_loads == budget/);
+assert.match(runtime, /smoke_ram == expected_smoke_ram/);
 
 console.log("wasm64 runloop contract: ok");

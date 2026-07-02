@@ -152,6 +152,7 @@ typedef struct TCGWasm64RunContext {
     TCGWasm64RunExit *exit;
     uint32_t mode;
     uint32_t flags;
+    void *hotset;
 } TCGWasm64RunContext;
 
 #define TCG_WASM64_RUN_CTX_ENV_OFFSET 0u
@@ -161,7 +162,8 @@ typedef struct TCGWasm64RunContext {
 #define TCG_WASM64_RUN_CTX_EXIT_OFFSET 32u
 #define TCG_WASM64_RUN_CTX_MODE_OFFSET 40u
 #define TCG_WASM64_RUN_CTX_FLAGS_OFFSET 44u
-#define TCG_WASM64_RUN_CTX_SIZE 48u
+#define TCG_WASM64_RUN_CTX_HOTSET_OFFSET 48u
+#define TCG_WASM64_RUN_CTX_SIZE 56u
 
 #define TCG_WASM64_RUN_EXIT_REASON_OFFSET 0u
 #define TCG_WASM64_RUN_EXIT_TB_ID_OFFSET 4u
@@ -198,6 +200,37 @@ typedef struct TCGWasm64RunContext {
 #define TCG_WASM64_RUN_COUNTERS_EXITS_HLT_OFFSET 176u
 #define TCG_WASM64_RUN_COUNTERS_EXITS_INVALIDATED_OFFSET 184u
 #define TCG_WASM64_RUN_COUNTERS_SIZE 192u
+
+typedef enum TCGWasm64RunHotsetOp {
+    TCG_WASM64_RUN_HOTSET_OP_RAM_ADD_CONST = 1,
+    TCG_WASM64_RUN_HOTSET_OP_RAM_XOR_CONST = 2,
+} TCGWasm64RunHotsetOp;
+
+typedef struct TCGWasm64RunHotsetTB {
+    uint32_t tb_id;
+    uint32_t next_tb_id;
+    uint32_t op;
+    uint32_t guest_instructions;
+    uint64_t immediate;
+} TCGWasm64RunHotsetTB;
+
+typedef struct TCGWasm64RunHotset {
+    uint32_t tb_count;
+    uint32_t entry_tb_id;
+    const TCGWasm64RunHotsetTB *tbs;
+} TCGWasm64RunHotset;
+
+#define TCG_WASM64_RUN_HOTSET_TB_ID_OFFSET 0u
+#define TCG_WASM64_RUN_HOTSET_TB_NEXT_TB_ID_OFFSET 4u
+#define TCG_WASM64_RUN_HOTSET_TB_OP_OFFSET 8u
+#define TCG_WASM64_RUN_HOTSET_TB_GUEST_INSTRUCTIONS_OFFSET 12u
+#define TCG_WASM64_RUN_HOTSET_TB_IMMEDIATE_OFFSET 16u
+#define TCG_WASM64_RUN_HOTSET_TB_SIZE 24u
+
+#define TCG_WASM64_RUN_HOTSET_TB_COUNT_OFFSET 0u
+#define TCG_WASM64_RUN_HOTSET_ENTRY_TB_ID_OFFSET 4u
+#define TCG_WASM64_RUN_HOTSET_TBS_OFFSET 8u
+#define TCG_WASM64_RUN_HOTSET_SIZE 16u
 
 #define TCG_WASM64_TB_METADATA_MAGIC 0x36574153u /* "SAW6" */
 #define TCG_WASM64_TB_METADATA_VERSION 1u

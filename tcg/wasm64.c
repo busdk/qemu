@@ -33,6 +33,8 @@ QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, mode) !=
                   TCG_WASM64_RUN_CTX_MODE_OFFSET);
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, flags) !=
                   TCG_WASM64_RUN_CTX_FLAGS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, hotset) !=
+                  TCG_WASM64_RUN_CTX_HOTSET_OFFSET);
 QEMU_BUILD_BUG_ON(sizeof(TCGWasm64RunContext) != TCG_WASM64_RUN_CTX_SIZE);
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, reason) !=
                   TCG_WASM64_RUN_EXIT_REASON_OFFSET);
@@ -103,6 +105,25 @@ QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, exits_invalidated) !=
                   TCG_WASM64_RUN_COUNTERS_EXITS_INVALIDATED_OFFSET);
 QEMU_BUILD_BUG_ON(sizeof(TCGWasm64RunCounters) !=
                   TCG_WASM64_RUN_COUNTERS_SIZE);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, tb_id) !=
+                  TCG_WASM64_RUN_HOTSET_TB_ID_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, next_tb_id) !=
+                  TCG_WASM64_RUN_HOTSET_TB_NEXT_TB_ID_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, op) !=
+                  TCG_WASM64_RUN_HOTSET_TB_OP_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, guest_instructions) !=
+                  TCG_WASM64_RUN_HOTSET_TB_GUEST_INSTRUCTIONS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, immediate) !=
+                  TCG_WASM64_RUN_HOTSET_TB_IMMEDIATE_OFFSET);
+QEMU_BUILD_BUG_ON(sizeof(TCGWasm64RunHotsetTB) !=
+                  TCG_WASM64_RUN_HOTSET_TB_SIZE);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotset, tb_count) !=
+                  TCG_WASM64_RUN_HOTSET_TB_COUNT_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotset, entry_tb_id) !=
+                  TCG_WASM64_RUN_HOTSET_ENTRY_TB_ID_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotset, tbs) !=
+                  TCG_WASM64_RUN_HOTSET_TBS_OFFSET);
+QEMU_BUILD_BUG_ON(sizeof(TCGWasm64RunHotset) != TCG_WASM64_RUN_HOTSET_SIZE);
 
 typedef struct TCGWasm64TranslateEntry {
     const void *tb_ptr;
@@ -571,6 +592,51 @@ EM_JS(int, tcg_wasm64_runloop_smoke_js,
         return [...localGet(ptrLocal), ...valueBytes, 0x37, ...memArg(3, offset)];
     }
 
+    function readU64(byteOffset) {
+        return HEAPU64[Number(byteOffset) / 8];
+    }
+
+    const runCtxHotsetOffset = 48;
+    const hotsetTbCountOffset = 0;
+    const hotsetEntryTbIdOffset = 4;
+    const hotsetTbsOffset = 8;
+    const hotsetTbIdOffset = 0;
+    const hotsetTbNextTbIdOffset = 4;
+    const hotsetTbOpOffset = 8;
+    const hotsetTbGuestInstructionsOffset = 12;
+    const hotsetTbImmediateOffset = 16;
+    const hotsetTbSize = 24;
+    const hotsetOpRamAddConst = 1;
+    const hotsetOpRamXorConst = 2;
+    const exitUnsupported = 6;
+    const hotsetPtr = Number(readU64(context + runCtxHotsetOffset));
+    if (!hotsetPtr) {
+        return exitUnsupported;
+    }
+    const tbCount = HEAPU32[(hotsetPtr + hotsetTbCountOffset) / 4];
+    const entryTbId = HEAPU32[(hotsetPtr + hotsetEntryTbIdOffset) / 4];
+    const tbsPtr = Number(readU64(hotsetPtr + hotsetTbsOffset));
+    if (tbCount === 0 || tbCount > 16 || !tbsPtr) {
+        return exitUnsupported;
+    }
+    const tbs = [];
+    for (let index = 0; index < tbCount; index++) {
+        const tbPtr = tbsPtr + index * hotsetTbSize;
+        const tb = {
+            tbId: HEAPU32[(tbPtr + hotsetTbIdOffset) / 4],
+            nextTbId: HEAPU32[(tbPtr + hotsetTbNextTbIdOffset) / 4],
+            op: HEAPU32[(tbPtr + hotsetTbOpOffset) / 4],
+            guestInstructions:
+                HEAPU32[(tbPtr + hotsetTbGuestInstructionsOffset) / 4],
+            immediate: readU64(tbPtr + hotsetTbImmediateOffset),
+        };
+        if (tb.op !== hotsetOpRamAddConst &&
+            tb.op !== hotsetOpRamXorConst) {
+            return exitUnsupported;
+        }
+        tbs.push(tb);
+    }
+
     const remaining = 2;
     const state = 3;
     const countersPtr = 4;
@@ -582,10 +648,68 @@ EM_JS(int, tcg_wasm64_runloop_smoke_js,
     const inlineLoads = 10;
     const inlineStores = 11;
 
+    function hotsetTbBody(tb) {
+        const valueUpdate = tb.op === hotsetOpRamAddConst ? [
+            ...i64LoadAtPtr(guestRamPtr, 0),
+            ...i64Const(tb.immediate),
+            0x7c,                  /* i64.add */
+        ] : [
+            ...i64LoadAtPtr(guestRamPtr, 0),
+            ...i64Const(tb.immediate),
+            0x85,                  /* i64.xor */
+        ];
+
+        return [
+            ...valueUpdate,
+            ...localSet(value),
+            ...i64StoreAtPtr(guestRamPtr, 0, localGet(value)),
+            ...localGet(generatedGuestInstructions),
+            ...i64Const(BigInt(tb.guestInstructions)),
+            0x7c,                  /* i64.add */
+            ...localSet(generatedGuestInstructions),
+            ...localGet(generatedChainLength),
+            ...i64Const(1n),
+            0x7c,                  /* i64.add */
+            ...localSet(generatedChainLength),
+            ...localGet(inlineLoads),
+            ...i64Const(1n),
+            0x7c,                  /* i64.add */
+            ...localSet(inlineLoads),
+            ...localGet(inlineStores),
+            ...i64Const(1n),
+            0x7c,                  /* i64.add */
+            ...localSet(inlineStores),
+            ...i32Const(tb.nextTbId),
+            ...localSet(state),
+        ];
+    }
+
+    function hotsetDispatch() {
+        const out = [];
+        for (const tb of tbs) {
+            out.push(
+                ...localGet(state),
+                ...i32Const(tb.tbId),
+                0x46,              /* i32.eq */
+                0x04, 0x40,        /* if */
+                ...hotsetTbBody(tb),
+                0x0c, ...encodeU32(1), /* br dispatch loop */
+                0x0b,              /* end if */
+            );
+        }
+        out.push(
+            ...i32StoreAtPtr(exitPtr, 0, i32Const(exitUnsupported)),
+            ...i32StoreAtPtr(exitPtr, 4, localGet(state)),
+            ...i32Const(exitUnsupported),
+            0x0f,                  /* return */
+        );
+        return out;
+    }
+
     const instructions = [
         ...localGet(1),
         ...localSet(remaining),
-        ...i32Const(0),
+        ...i32Const(entryTbId),
         ...localSet(state),
         ...i64LoadAtPtr(0, 24),
         ...localSet(countersPtr),
@@ -615,43 +739,7 @@ EM_JS(int, tcg_wasm64_runloop_smoke_js,
         0x7d,                  /* i64.sub */
         ...localSet(remaining),
 
-        ...localGet(state),
-        0x45,                  /* i32.eqz */
-        0x04, 0x40,            /* if tb0 */
-        ...i64LoadAtPtr(guestRamPtr, 0),
-        ...i64Const(1n),
-        0x7c,                  /* i64.add */
-        ...localSet(value),
-        ...i64StoreAtPtr(guestRamPtr, 0, localGet(value)),
-        ...i32Const(1),
-        ...localSet(state),
-        0x05,                  /* else tb1 */
-        ...i64LoadAtPtr(guestRamPtr, 0),
-        ...i64Const(0x5a5an),
-        0x85,                  /* i64.xor */
-        ...localSet(value),
-        ...i64StoreAtPtr(guestRamPtr, 0, localGet(value)),
-        ...i32Const(0),
-        ...localSet(state),
-        0x0b,                  /* end if */
-
-        ...localGet(generatedGuestInstructions),
-        ...i64Const(4n),
-        0x7c,                  /* i64.add */
-        ...localSet(generatedGuestInstructions),
-        ...localGet(generatedChainLength),
-        ...i64Const(1n),
-        0x7c,                  /* i64.add */
-        ...localSet(generatedChainLength),
-        ...localGet(inlineLoads),
-        ...i64Const(1n),
-        0x7c,                  /* i64.add */
-        ...localSet(inlineLoads),
-        ...localGet(inlineStores),
-        ...i64Const(1n),
-        0x7c,                  /* i64.add */
-        ...localSet(inlineStores),
-        0x0c, ...encodeU32(0), /* br dispatch */
+        ...hotsetDispatch(),
         0x0b,                  /* end loop */
         0x0b,                  /* end block */
 
@@ -780,21 +868,51 @@ static void tcg_wasm64_report_runloop_smoke(const TCGWasm64RunCounters *counters
             counters ? counters->exits_invalidated : 0);
 }
 
+static uint64_t tcg_wasm64_runloop_hotset_expected_value(
+    const TCGWasm64RunHotset *hotset, uint64_t initial_value, uint64_t budget)
+{
+    uint64_t value = initial_value;
+    uint32_t tb_id;
+
+    if (!hotset || !hotset->tbs || hotset->tb_count == 0) {
+        return value;
+    }
+
+    tb_id = hotset->entry_tb_id;
+    for (uint64_t index = 0; index < budget; index++) {
+        const TCGWasm64RunHotsetTB *tb = NULL;
+
+        for (uint32_t tb_index = 0; tb_index < hotset->tb_count; tb_index++) {
+            if (hotset->tbs[tb_index].tb_id == tb_id) {
+                tb = &hotset->tbs[tb_index];
+                break;
+            }
+        }
+        if (!tb) {
+            return value;
+        }
+
+        switch (tb->op) {
+        case TCG_WASM64_RUN_HOTSET_OP_RAM_ADD_CONST:
+            value += tb->immediate;
+            break;
+        case TCG_WASM64_RUN_HOTSET_OP_RAM_XOR_CONST:
+            value ^= tb->immediate;
+            break;
+        default:
+            return value;
+        }
+        tb_id = tb->next_tb_id;
+    }
+
+    return value;
+}
+
 static void tcg_wasm64_runloop_smoke_maybe(CPUArchState *env)
 {
     static bool checked;
     TCGWasm64RunCounters counters;
     TCGWasm64RunExit exit;
-    uint64_t smoke_ram = 0;
-    const uint64_t budget = TCG_WASM64_RUNLOOP_SMOKE_BUDGET;
-    TCGWasm64RunContext context = {
-        .env = env,
-        .guest_ram = &smoke_ram,
-        .budget = budget,
-        .counters = &counters,
-        .exit = &exit,
-        .mode = TCG_WASM64_RUN_MODE_PERF_PROOF,
-    };
     TCGWasm64RunExitReason reason = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
     bool ok = false;
 
@@ -805,6 +923,49 @@ static void tcg_wasm64_runloop_smoke_maybe(CPUArchState *env)
     if (!tcg_wasm64_runloop_env_bool("QEMU_WASM64_RUNLOOP_SMOKE")) {
         return;
     }
+
+    const TCGWasm64RunHotsetTB smoke_tbs[] = {
+        {
+            .tb_id = 0,
+            .next_tb_id = 1,
+            .op = TCG_WASM64_RUN_HOTSET_OP_RAM_ADD_CONST,
+            .guest_instructions = 4,
+            .immediate = 1,
+        },
+        {
+            .tb_id = 1,
+            .next_tb_id = 2,
+            .op = TCG_WASM64_RUN_HOTSET_OP_RAM_XOR_CONST,
+            .guest_instructions = 4,
+            .immediate = 0x5a5a,
+        },
+        {
+            .tb_id = 2,
+            .next_tb_id = 0,
+            .op = TCG_WASM64_RUN_HOTSET_OP_RAM_ADD_CONST,
+            .guest_instructions = 4,
+            .immediate = 3,
+        },
+    };
+    const TCGWasm64RunHotset smoke_hotset = {
+        .tb_count = ARRAY_SIZE(smoke_tbs),
+        .entry_tb_id = 0,
+        .tbs = smoke_tbs,
+    };
+    uint64_t smoke_ram = 0;
+    const uint64_t budget = TCG_WASM64_RUNLOOP_SMOKE_BUDGET;
+    const uint64_t expected_smoke_ram =
+        tcg_wasm64_runloop_hotset_expected_value(&smoke_hotset, smoke_ram,
+                                                 budget);
+    TCGWasm64RunContext context = {
+        .env = env,
+        .guest_ram = &smoke_ram,
+        .budget = budget,
+        .counters = &counters,
+        .exit = &exit,
+        .mode = TCG_WASM64_RUN_MODE_PERF_PROOF,
+        .hotset = (void *)&smoke_hotset,
+    };
 
     tcg_wasm64_run_counters_reset(&counters);
     memset(&exit, 0, sizeof(exit));
@@ -823,7 +984,8 @@ static void tcg_wasm64_runloop_smoke_maybe(CPUArchState *env)
          counters.inline_tlb_hit_stores == budget &&
          counters.helper_calls == 0 &&
          counters.qemu_ld_calls == 0 &&
-         counters.qemu_st_calls == 0;
+         counters.qemu_st_calls == 0 &&
+         smoke_ram == expected_smoke_ram;
     tcg_wasm64_report_runloop_smoke(&counters, &exit, budget, ok);
 }
 
