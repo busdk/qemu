@@ -343,13 +343,41 @@ Engineering rules for this goal:
   `generated_compile_failed=0`, and the next live rejection list moved to
   `ld=1606`, `mb=443`, `st=155`, `st32=6`, and `brcond=1`. This accepts the
   byte-store lowering slice but does not complete W2 or W3.
-- [ ] W2h - Lower the next live direct-memory blockers, starting with
-  generated `ld`, while preserving strict fallback semantics. DoD: implement
-  only direct target-long load/store and memory-barrier shapes that can be
-  represented safely in generated WebAssembly, keep unsupported shapes on TCI
-  fallback, run the generated-only generic Chromium smoke, and record whether
-  the remaining live blockers justify rerunning W3 or require another
-  lowering slice.
+- [x] W2h - Lower the next live direct-memory blockers, starting with
+  generated `ld`, `st`, and `st32`, while preserving strict fallback
+  semantics. DoD: implement only direct target-long load/store shapes that can
+  be represented safely in generated WebAssembly, keep unsupported shapes on
+  TCI fallback, do not turn `mb` into a guessed no-op, run the generated-only
+  generic Chromium smoke, and record whether the remaining live blockers
+  justify rerunning W3 or require another lowering slice. Accepted evidence:
+  the backend artifact at
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2i-direct-memory`
+  was built with `--enable-tcg-wasm64-backend` and
+  `--disable-tcg-interpreter`. Artifact hashes: JS
+  `725f5ebc5623b777c1b2bbce86178d4556d1fe059020df72da9d11dcf50373d3`,
+  WASM `e1dc0ce19a3b784f8890d6d21acf596ea0af9fda7ecbd158bdfd0b3d82819d0e`,
+  manifest
+  `26848775127626efac019f8c58af83ef84a3f9c35bd348b241dc30d530acac06`.
+  Chromium `141.0.7390.37` reached `QEMU_WASM_LINUX_BOOT_OK` in
+  `112738` ms with generated-only subset reporting enabled. Result JSON:
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2i-direct-memory-subset-live/wasm-browser-smoke-result.json`
+  (SHA-256
+  `8fae44f75ad68b2bf60343ddb8e02fa977ec6a0eb7ab490b6ee693aa9da2c298`).
+  The final generated summary reported `generated_compiled=6`,
+  `generated_executed=14505`, `generated_cache_hits=14499`,
+  `generated_compile_failed=72`, and the direct memory blockers dropped out.
+  The next live rejection list moved to `mb=1435`, `setcond=366`,
+  `extract=283`, `call=75`, `shl=39`, `shr=15`, `movcond=14`, and
+  `sextract=7`. This accepts the direct load/store slice but does not
+  justify rerunning W3 because wall-clock time regressed and compile-failed
+  fallbacks appeared.
+- [ ] W2i - Investigate and lower the next blocker without guessing memory
+  semantics. DoD: either prove a WebAssembly memory-fence encoding for `mb`
+  with a deterministic module test and then lower `mb`, or leave `mb` on
+  fallback and lower the next safe non-barrier blockers (`setcond` and
+  `extract`). The generated-only Chromium smoke must pass and record
+  `generated_compile_failed`, `top_generated_unsupported_ops`, and whether
+  W3 can be rerun.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and

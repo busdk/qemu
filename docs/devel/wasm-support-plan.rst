@@ -6163,3 +6163,48 @@ The final generated summary reported ``generated_compiled=6``,
 ``ld=1606``, ``mb=443``, ``st=155``, ``st32=6``, and ``brcond=1``.  This
 selected direct target-long load/store and memory-barrier lowering as the next
 work before rerunning W3.
+
+Direct target-long load/store generated lowering
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The next accepted slice added generated ``ld``, ``st``, and ``st32`` support
+for direct host-memory forms.  It deliberately did not lower ``mb`` because
+that needs a real WebAssembly memory-fence representation or must remain on
+fallback.
+
+The artifact was built with:
+
+.. code-block:: console
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2i-direct-memory \
+    --jobs auto \
+    --configure-arg=--disable-tcg-interpreter \
+    --configure-arg=--enable-tcg-wasm64-backend
+
+Hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``725f5ebc5623b777c1b2bbce86178d4556d1fe059020df72da9d11dcf50373d3``
+* ``qemu-system-x86_64.wasm`` =
+  ``e1dc0ce19a3b784f8890d6d21acf596ea0af9fda7ecbd158bdfd0b3d82819d0e``
+* manifest =
+  ``26848775127626efac019f8c58af83ef84a3f9c35bd348b241dc30d530acac06``
+
+The generated-only Chromium smoke used Chromium ``141.0.7390.37`` and reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``112738`` ms.  Result JSON:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2i-direct-memory-subset-live/wasm-browser-smoke-result.json``
+
+Result SHA-256:
+``8fae44f75ad68b2bf60343ddb8e02fa977ec6a0eb7ab490b6ee693aa9da2c298``.
+
+The final generated summary reported ``generated_compiled=6``,
+``generated_executed=14505``, ``generated_cache_hits=14499``, and
+``generated_compile_failed=72``.  Direct memory blockers dropped out of the
+live rejection list, but the run still regressed in wall-clock time.  The next
+live rejection list was ``mb=1435``, ``setcond=366``, ``extract=283``,
+``call=75``, ``shl=39``, ``shr=15``, ``movcond=14``, and ``sextract=7``.
+This is not enough to rerun W3.  The next work must either prove and lower a
+real WebAssembly memory fence for ``mb`` or leave ``mb`` on fallback and lower
+the next safe non-barrier blockers.
