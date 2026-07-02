@@ -6547,3 +6547,92 @@ The next accepted work is a structural backend re-plan: generated output must
 be created from the wasm64 translation path before runtime TCI-bytecode
 revalidation, with strict per-TB fallback preserved.  Another opcode-specific
 browser measurement is not justified by this result.
+
+W2m data-first option ranking
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The remaining five-minute Bus Engine OS boot work is steered by measured gate
+impact, not by the most recent rejection counter.
+
+The current browser TCI path is about ``51x`` slower than native QEMU for the
+same generic TuxBoot marker: the W2l-c browser run reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``100472`` ms, while the matching native QEMU
+command reached the same marker in ``1968`` ms.  Applying that ratio to the
+accepted downstream Bus Engine OS native boot evidence, ``44`` seconds to
+multi-user/login and ``58`` seconds through the boot-audit service, predicts a
+browser TCI boot in the ``37`` to ``49`` minute range.  The five-minute goal
+therefore requires a multiple-times execution-throughput improvement, with
+guest-side boot trimming as a useful parallel lane but not a substitute.
+
+The already-measured alternatives are too small:
+
+* W1's address-limited Memory64 comparison improved generic smoke by only
+  ``5.8%``.
+* Device/browser API attribution has been below one second while TCI dispatch
+  remains active at timeout.
+* The opcode-at-a-time generated-subset path compiled only ``3`` to ``6``
+  generated blocks, reached at most ``414`` ppm generated coverage in the
+  measured runs that exposed coverage, and did not beat the W3 same-commit
+  default TCI baseline.
+
+The high-leverage boundary exposed by W2l-c is translation-time generated
+output.  Translation metadata already sees ``65920`` generated-candidate TBs
+and ``102077`` lowerable TBs out of ``251212`` translated TBs, and the W2c
+hot-block model showed ``92.2%`` supported dynamic op coverage.  The next W2m
+implementation must therefore prove a deterministic translation-time
+generated-output boundary before any further browser measurement.
+
+W2m-a: translation-time generated-output material
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+W2m-a adds the first deterministic generated-output boundary in the wasm64
+target.  The target pairs the existing ``tcg_out_tci_note_op()`` hook with the
+next emitted TCI instruction word through an op-paired ``tcg_out32`` wrapper.
+That avoids the earlier raw-word classifier problem: generated-output material
+is recorded only when an opcode note immediately precedes the emitted
+instruction word.
+
+The runtime stores the translation-time output material in per-TB metadata and
+exports summary fields for ``translated_generated_output_tbs``,
+``translated_generated_output_bytes``, ``translated_generated_output_ops``,
+and ``translated_generated_output_truncated``.  Execution remains strict TCI
+fallback.  This slice does not claim a speed improvement and does not justify
+a browser W3 run by itself; it makes absence of translated generated output a
+deterministic test failure before browser measurement.
+
+Checks:
+
+* ``git diff --check``
+* ``node scripts/ci/wasm64-translate-metadata-test.mjs``
+* ``node scripts/ci/wasm-tb-module-emitter-test.mjs``
+* ``node scripts/ci/wasm-generated-block-prototype-test.mjs``
+* ``node scripts/ci/wasm-browser-smoke-runner-test.mjs`` outside the sandbox
+  because sandboxed child-process assertions return empty stderr
+
+Build command:
+
+.. code-block:: console
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --build-image \
+    --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-translate-output-artifacts \
+    --jobs auto \
+    --configure-arg=--disable-tcg-interpreter \
+    --configure-arg=--enable-tcg-wasm64-backend
+
+The build configured as ``TCG backend: experimental wasm64 with TCI fallback``,
+compiled, linked, and wrote:
+
+* ``qemu-system-x86_64.js`` =
+  ``f19bac59e8c353a254e0a620c3cbc496fd5877eafd36646a9f1951cd689a888f``
+* ``qemu-system-x86_64.wasm`` =
+  ``7c4603c99224cdec56b0d6188061079a4e7591abc5da10a734c3f4b9932fc53b``
+* manifest =
+  ``3caa22a54f8dc3f66ba68d42ec3c6d5298f24f9092443b0eb9073915d4915982``
+* ``SHA256SUMS`` =
+  ``5b921b24c00462dd441cfa5634ca46ca490e2fba85e468b6c552d27bfd82c5c2``
+
+The next W2m slice must convert this translation-time output into a callable
+generated WebAssembly module/function with strict fallback and nonzero
+generated execution.  A browser W3 speed gate remains premature until that
+local execution evidence exists.

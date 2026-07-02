@@ -18,6 +18,7 @@ uintptr_t tcg_tci_qemu_tb_exec(CPUArchState *env, const void *tb_ptr);
 typedef struct TCGWasm64TranslateEntry {
     const void *tb_ptr;
     TCGWasm64TBMetadata metadata;
+    uint8_t generated_output[TCG_WASM64_TRANSLATE_OUTPUT_MAX];
 } TCGWasm64TranslateEntry;
 
 static __thread TCGWasm64Counters *active_counters;
@@ -69,6 +70,14 @@ void tcg_wasm64_counters_add(TCGWasm64Counters *dst,
         src->translated_generated_supported_ops;
     dst->translated_generated_unsupported_ops +=
         src->translated_generated_unsupported_ops;
+    dst->translated_generated_output_tbs +=
+        src->translated_generated_output_tbs;
+    dst->translated_generated_output_bytes +=
+        src->translated_generated_output_bytes;
+    dst->translated_generated_output_ops +=
+        src->translated_generated_output_ops;
+    dst->translated_generated_output_truncated +=
+        src->translated_generated_output_truncated;
     dst->fallback_unsupported += src->fallback_unsupported;
     dst->fallback_helper += src->fallback_helper;
     dst->fallback_qemu_load += src->fallback_qemu_load;
@@ -99,6 +108,14 @@ static void tcg_wasm64_counters_add_translation(TCGWasm64Counters *dst,
         src->translated_generated_supported_ops;
     dst->translated_generated_unsupported_ops +=
         src->translated_generated_unsupported_ops;
+    dst->translated_generated_output_tbs +=
+        src->translated_generated_output_tbs;
+    dst->translated_generated_output_bytes +=
+        src->translated_generated_output_bytes;
+    dst->translated_generated_output_ops +=
+        src->translated_generated_output_ops;
+    dst->translated_generated_output_truncated +=
+        src->translated_generated_output_truncated;
 }
 
 void tcg_wasm64_count_fallback(TCGWasm64Counters *counters,
@@ -213,6 +230,7 @@ void tcg_wasm64_translate_begin(const void *tb_ptr)
     entry = tcg_wasm64_translate_entry(tb_ptr);
     entry->tb_ptr = tb_ptr;
     memset(&entry->metadata, 0, sizeof(entry->metadata));
+    memset(entry->generated_output, 0, sizeof(entry->generated_output));
     entry->metadata.tb_ptr = tb_ptr;
     entry->metadata.magic = TCG_WASM64_TB_METADATA_MAGIC;
     entry->metadata.version = TCG_WASM64_TB_METADATA_VERSION;
@@ -227,6 +245,7 @@ void tcg_wasm64_translate_begin(const void *tb_ptr)
     entry->metadata.fallback_reason =
         TCG_WASM64_TRANSLATE_FALLBACK_NO_WASM_EMITTER;
     entry->metadata.lowering_profile = TCG_WASM64_LOWERING_PROFILE_HOTBLOCK;
+    entry->metadata.generated_output = entry->generated_output;
     active_translate_metadata = &entry->metadata;
 }
 
@@ -269,6 +288,53 @@ void tcg_wasm64_translate_note_tci_op(uint32_t op)
     }
 }
 
+static uint32_t tcg_wasm64_checksum32(uint32_t checksum, uint8_t value)
+{
+    /*
+     * FNV-1a over the translation-time output material.  The checksum is a
+     * deterministic guard for tests and diagnostics; it is not a security
+     * boundary.
+     */
+    if (checksum == 0) {
+        checksum = 2166136261u;
+    }
+    checksum ^= value;
+    checksum *= 16777619u;
+    return checksum;
+}
+
+void tcg_wasm64_translate_note_tci_insn(uint32_t op, uint32_t insn)
+{
+    TCGWasm64TBMetadata *metadata = active_translate_metadata;
+    uint8_t *output;
+    uint32_t size;
+
+    if (!metadata || !tcg_wasm64_translate_op_generated_supported(op)) {
+        return;
+    }
+
+    size = metadata->generated_output_size;
+    if (size + sizeof(insn) > TCG_WASM64_TRANSLATE_OUTPUT_MAX) {
+        metadata->flags |= TCG_WASM64_TB_METADATA_OUTPUT_TRUNCATED;
+        metadata->flags &= ~TCG_WASM64_TB_METADATA_GENERATED_CANDIDATE;
+        return;
+    }
+
+    output = (uint8_t *)metadata->generated_output;
+    output[size++] = (uint8_t)(insn & 0xffu);
+    output[size++] = (uint8_t)((insn >> 8) & 0xffu);
+    output[size++] = (uint8_t)((insn >> 16) & 0xffu);
+    output[size++] = (uint8_t)((insn >> 24) & 0xffu);
+    for (uint32_t i = metadata->generated_output_size; i < size; i++) {
+        metadata->generated_output_checksum =
+            tcg_wasm64_checksum32(metadata->generated_output_checksum,
+                                  output[i]);
+    }
+    metadata->generated_output_size = size;
+    metadata->generated_output_op_count++;
+    metadata->flags |= TCG_WASM64_TB_METADATA_GENERATED_OUTPUT;
+}
+
 const TCGWasm64TBMetadata *tcg_wasm64_translate_lookup(const void *tb_ptr)
 {
     TCGWasm64TranslateEntry *entry;
@@ -301,6 +367,20 @@ bool tcg_wasm64_translate_generated_candidate(
     return (metadata->flags & TCG_WASM64_TB_METADATA_GENERATED_CANDIDATE) &&
            (metadata->flags & TCG_WASM64_TB_METADATA_TERMINAL) &&
            metadata->generated_unsupported_op_count == 0;
+}
+
+bool tcg_wasm64_translate_generated_output_available(
+    const TCGWasm64TBMetadata *metadata)
+{
+    if (!tcg_wasm64_translate_generated_candidate(metadata)) {
+        return false;
+    }
+    if (!(metadata->flags & TCG_WASM64_TB_METADATA_GENERATED_OUTPUT) ||
+        (metadata->flags & TCG_WASM64_TB_METADATA_OUTPUT_TRUNCATED)) {
+        return false;
+    }
+    return metadata->generated_output_size != 0 &&
+           metadata->generated_output != NULL;
 }
 
 bool tcg_wasm64_backend_available(void)
@@ -358,6 +438,10 @@ void tcg_wasm64_report_summary(const char *reason,
             "\"translated_generated_candidate_tbs\":%" PRIu64 ","
             "\"translated_generated_supported_ops\":%" PRIu64 ","
             "\"translated_generated_unsupported_ops\":%" PRIu64 ","
+            "\"translated_generated_output_tbs\":%" PRIu64 ","
+            "\"translated_generated_output_bytes\":%" PRIu64 ","
+            "\"translated_generated_output_ops\":%" PRIu64 ","
+            "\"translated_generated_output_truncated\":%" PRIu64 ","
             "\"fallback_unsupported\":%" PRIu64 ","
             "\"fallback_helper\":%" PRIu64 ","
             "\"fallback_qemu_load\":%" PRIu64 ","
@@ -382,6 +466,10 @@ void tcg_wasm64_report_summary(const char *reason,
             counters->translated_generated_candidate_tbs,
             counters->translated_generated_supported_ops,
             counters->translated_generated_unsupported_ops,
+            counters->translated_generated_output_tbs,
+            counters->translated_generated_output_bytes,
+            counters->translated_generated_output_ops,
+            counters->translated_generated_output_truncated,
             counters->fallback_unsupported,
             counters->fallback_helper,
             counters->fallback_qemu_load,
@@ -432,6 +520,18 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
                     metadata->generated_unsupported_op_count;
                 if (tcg_wasm64_translate_generated_candidate(metadata)) {
                     counters->translated_generated_candidate_tbs++;
+                }
+                if (tcg_wasm64_translate_generated_output_available(
+                        metadata)) {
+                    counters->translated_generated_output_tbs++;
+                    counters->translated_generated_output_bytes +=
+                        metadata->generated_output_size;
+                    counters->translated_generated_output_ops +=
+                        metadata->generated_output_op_count;
+                }
+                if (metadata->flags &
+                    TCG_WASM64_TB_METADATA_OUTPUT_TRUNCATED) {
+                    counters->translated_generated_output_truncated++;
                 }
             }
         } else {

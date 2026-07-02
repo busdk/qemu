@@ -40,6 +40,10 @@ typedef struct TCGWasm64Counters {
     uint64_t translated_generated_candidate_tbs;
     uint64_t translated_generated_supported_ops;
     uint64_t translated_generated_unsupported_ops;
+    uint64_t translated_generated_output_tbs;
+    uint64_t translated_generated_output_bytes;
+    uint64_t translated_generated_output_ops;
+    uint64_t translated_generated_output_truncated;
     uint64_t fallback_unsupported;
     uint64_t fallback_helper;
     uint64_t fallback_qemu_load;
@@ -65,6 +69,8 @@ typedef enum TCGWasm64TBMetadataFlags {
     TCG_WASM64_TB_METADATA_PROFILE_LOWERABLE = 1u << 3,
     TCG_WASM64_TB_METADATA_GENERATED_CANDIDATE = 1u << 4,
     TCG_WASM64_TB_METADATA_TERMINAL = 1u << 5,
+    TCG_WASM64_TB_METADATA_GENERATED_OUTPUT = 1u << 6,
+    TCG_WASM64_TB_METADATA_OUTPUT_TRUNCATED = 1u << 7,
 } TCGWasm64TBMetadataFlags;
 
 typedef enum TCGWasm64TranslateFallbackReason {
@@ -74,6 +80,7 @@ typedef enum TCGWasm64TranslateFallbackReason {
 } TCGWasm64TranslateFallbackReason;
 
 #define TCG_WASM64_LOWERING_PROFILE_HOTBLOCK 1u
+#define TCG_WASM64_TRANSLATE_OUTPUT_MAX 4096u
 
 /*
  * Side-band metadata recorded while the wasm64 target emits the fallback TCI
@@ -96,6 +103,10 @@ typedef struct TCGWasm64TBMetadata {
     uint32_t unsupported_op_count;
     uint32_t generated_supported_op_count;
     uint32_t generated_unsupported_op_count;
+    uint32_t generated_output_size;
+    uint32_t generated_output_op_count;
+    uint32_t generated_output_checksum;
+    const uint8_t *generated_output;
 } TCGWasm64TBMetadata;
 
 void tcg_wasm64_counters_reset(TCGWasm64Counters *counters);
@@ -105,8 +116,11 @@ void tcg_wasm64_count_fallback(TCGWasm64Counters *counters,
                                TCGWasm64FallbackReason reason);
 void tcg_wasm64_translate_begin(const void *tb_ptr);
 void tcg_wasm64_translate_note_tci_op(uint32_t op);
+void tcg_wasm64_translate_note_tci_insn(uint32_t op, uint32_t insn);
 const TCGWasm64TBMetadata *tcg_wasm64_translate_lookup(const void *tb_ptr);
 bool tcg_wasm64_translate_generated_candidate(
+    const TCGWasm64TBMetadata *metadata);
+bool tcg_wasm64_translate_generated_output_available(
     const TCGWasm64TBMetadata *metadata);
 bool tcg_wasm64_backend_available(void);
 
