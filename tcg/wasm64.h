@@ -14,6 +14,39 @@
 #include <stdint.h>
 
 /*
+ * Execution counters reported by the experimental backend.
+ *
+ * These counters are part of the fallback contract: every generated block
+ * attempt must be explainable as a generated execution, a compile/cache event,
+ * or a precise fallback to the existing TCI/native execution path.
+ */
+typedef struct TCGWasm64Counters {
+    uint64_t generated_attempts;
+    uint64_t generated_compiled;
+    uint64_t generated_executed;
+    uint64_t generated_cache_hits;
+    uint64_t fallback_unsupported;
+    uint64_t fallback_helper;
+    uint64_t fallback_qemu_load;
+    uint64_t fallback_qemu_store;
+    uint64_t fallback_runtime;
+} TCGWasm64Counters;
+
+typedef enum TCGWasm64FallbackReason {
+    TCG_WASM64_FALLBACK_UNSUPPORTED,
+    TCG_WASM64_FALLBACK_HELPER,
+    TCG_WASM64_FALLBACK_QEMU_LOAD,
+    TCG_WASM64_FALLBACK_QEMU_STORE,
+    TCG_WASM64_FALLBACK_RUNTIME,
+} TCGWasm64FallbackReason;
+
+void tcg_wasm64_counters_reset(TCGWasm64Counters *counters);
+void tcg_wasm64_counters_add(TCGWasm64Counters *dst,
+                             const TCGWasm64Counters *src);
+void tcg_wasm64_count_fallback(TCGWasm64Counters *counters,
+                               TCGWasm64FallbackReason reason);
+
+/*
  * Context shared between QEMU and a generated WebAssembly TB function.
  *
  * The generated function receives exactly one pointer to this structure.  This
@@ -27,6 +60,7 @@ typedef struct TCGWasm64Context {
     void *env;
     uint64_t *stack;
     void *ret128;
+    TCGWasm64Counters *counters;
     uint32_t flags;
 } TCGWasm64Context;
 

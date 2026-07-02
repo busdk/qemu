@@ -1521,6 +1521,15 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
       match the interpreter. This item remains open until the same fallback
       counters are wired into the C backend and default Chromium smoke is
       re-run from a QEMU artifact.
+      Follow-up C boundary on 2026-07-02: `tcg/wasm64.h` now defines
+      `TCGWasm64Counters` and `TCGWasm64FallbackReason`, and
+      `tcg/wasm64.c` provides reset, add, and fallback-count helpers for
+      generated attempts, compiled blocks, executed blocks, cache hits,
+      unsupported fallbacks, helper fallbacks, QEMU load/store fallbacks, and
+      runtime fallbacks. This is the typed C contract needed before live
+      backend integration can report nonzero generated/fallback counters. The
+      item remains open until generated helper imports and memory fallback
+      calls use these counters in a selectable wasm64 backend artifact.
     - [ ] Run the broad backend generic speed gate:
       DoD is a rebuilt wasm64 artifact, default generic Chromium smoke passing,
       opt-in backend Chromium smoke passing with nonzero generated counters,

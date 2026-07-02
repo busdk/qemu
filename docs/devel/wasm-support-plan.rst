@@ -5481,6 +5481,17 @@ Validation on 2026-07-02:
   called ``qemu_st_i64`` with the same address, result ``25769803819``, and
   operation index ``19``.
 
+The C-side skeleton now carries the matching counter boundary for live backend
+integration.  ``tcg/wasm64.h`` defines ``TCGWasm64Counters`` for generated
+attempts, compiled blocks, executed blocks, cache hits, unsupported fallbacks,
+helper fallbacks, QEMU load/store fallbacks, and runtime fallbacks.  It also
+defines ``TCGWasm64FallbackReason`` and adds a counter pointer to
+``TCGWasm64Context`` so generated TB calls can report execution and fallback
+paths through the same one-pointer context ABI.  ``tcg/wasm64.c`` provides
+reset, aggregate-add, and fallback-count helpers.  This does not make the
+backend selectable yet; it is the C contract needed before helper imports and
+memory fallback calls can produce nonzero counters in a browser artifact.
+
 This is still not a runnable wasm64 TCG backend and not a speed improvement.
 C backend integration remains required before an opt-in generic smoke speed
 gate is meaningful.  The default Chromium smoke gate must be re-run from a
