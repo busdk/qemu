@@ -7049,3 +7049,55 @@ typed function boundary, so generic calls need a deliberately designed C
 trampoline or must remain fallback.  The next W2m step is helper-call
 classification and boundary design, not another opcode-only browser
 measurement.
+
+W2m-h helper-call classification
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The generic helper-call boundary was classified before adding more generated
+lowering or starting another browser run.  The new helper-call classifier reads
+the retained generated trace from a browser smoke result and groups
+``ffi-call-enter`` events by helper name, TCG call flags, argument count, TCI
+return length, return shape, elapsed range, and dynamic share.
+
+Checks:
+
+* ``node --check scripts/ci/wasm-helper-call-classify.mjs``
+* ``node --check scripts/ci/wasm-helper-call-classify-test.mjs``
+* ``node scripts/ci/wasm-helper-call-classify-test.mjs``
+* ``git diff --check``
+
+The W2m-f Chromium ``149.0.7827.55`` trace was classified with::
+
+  node scripts/ci/wasm-helper-call-classify.mjs \
+    --result /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-fwcfg-exec-counters2-smoke/wasm-browser-smoke-result.json \
+    --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-helper-call-boundary/wasm-helper-call-classification.json \
+    --top 16
+
+Classification SHA-256:
+
+``7db15d976ae1811006a6ddf4ad681ec8e34731b4e24c8d8842c3da7b81ef67f8``
+
+The retained trace contained ``1024`` events, ``154`` helper-call entries,
+``153`` helper returns, and ``10`` helper groups.  The dominant helper is
+``lookup_tb_ptr``:
+
+.. code-block:: text
+
+  lookup_tb_ptr count=95 share=0.6169 flags=6(NO_WRITE_GLOBALS|NO_SIDE_EFFECTS) nargs=1 return=uint64
+  outl          count=19 share=0.1234 flags=0(none) nargs=3 return=void
+  outb          count=18 share=0.1169 flags=0(none) nargs=3 return=void
+  inb           count=7  share=0.0455 flags=0(none) nargs=2 return=uint64
+  load_seg      count=5  share=0.0325 flags=0(none) nargs=3 return=void
+
+This rejects broad generic helper-call generation as the next speed path.  The
+non-dispatch helpers are mostly device I/O, segment, jump, or control-register
+helpers with side effects that must preserve the existing TCI/libffi ABI and
+CPU/device state semantics.  A generic libffi trampoline would also still
+cross into C for arbitrary helper signatures, so it would not make generated
+block execution the default.
+
+The measured next structural target is a generated-block dispatch boundary
+around the ``lookup_tb_ptr`` helper shape.  That path accounts for ``95 / 154``
+helper calls in the trace and is the only helper-call category that plausibly
+removes a dominant candidate-loss mechanism without flattening arbitrary
+helpers.

@@ -892,7 +892,7 @@ Engineering rules for this goal:
   stack slot layout, helper return arity, `TCG_CALL_NO_RETURN` flags, and
   `tci_tb_ptr` return-address state; WebAssembly imports require typed
   function boundaries. W2 remains open.
-- [ ] W2m-h - Design and prove the generic helper-call boundary or reject it
+- [x] W2m-h - Design and prove the generic helper-call boundary or reject it
   with stronger attribution. DoD: classify the measured helper-call sites by
   helper name, flags, argument count, return shape, and dynamic frequency from
   the browser trace; then either add a deterministic generated-output test for
@@ -900,7 +900,40 @@ Engineering rules for this goal:
   record why helper calls must stay fallback and move to the next structural
   backend item. No browser run is allowed until the local evidence predicts
   an order-of-magnitude generated coverage change or names a different
-  measured gate-moving mechanism.
+  measured gate-moving mechanism. Accepted classification evidence:
+  `scripts/ci/wasm-helper-call-classify.mjs` and
+  `scripts/ci/wasm-helper-call-classify-test.mjs` classify retained
+  generated-trace helper calls by helper name, TCG call flags, argument count,
+  TCI return length, return shape, elapsed range, and dynamic share. Checks:
+  `node --check scripts/ci/wasm-helper-call-classify.mjs`,
+  `node --check scripts/ci/wasm-helper-call-classify-test.mjs`,
+  `node scripts/ci/wasm-helper-call-classify-test.mjs`, and
+  `git diff --check`. The real W2m-f trace classification was written to
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-helper-call-boundary/wasm-helper-call-classification.json`
+  with SHA-256
+  `7db15d976ae1811006a6ddf4ad681ec8e34731b4e24c8d8842c3da7b81ef67f8`.
+  It classified `154` helper-call entries and `153` returns across `10`
+  groups from Chromium `149.0.7827.55`. The dominant helper is
+  `lookup_tb_ptr` with `95 / 154` entries (`61.69%`), flags
+  `NO_WRITE_GLOBALS|NO_SIDE_EFFECTS`, one argument, and `uint64` return.
+  The remaining helper calls are mostly side-effectful device or x86 state
+  helpers: `outl=19`, `outb=18`, `inb=7`, `load_seg=5`, `inl=3`,
+  `ljmp_protected=3`, `outw=2`, `cc_compute_c=1`, and `write_crN=1`.
+  A generic helper-call trampoline is rejected for this slice because it
+  would still have to preserve TCI's libffi helper ABI, arbitrary helper
+  signatures, stack slot layout, return arity, `TCG_CALL_NO_RETURN`, mutable
+  CPU/device side effects, and `tci_tb_ptr` return-address state. The
+  measured gate-moving target is not broad helper flattening; it is the
+  generated-block dispatch boundary around `lookup_tb_ptr`.
+- [ ] W2m-i - Implement or reject a generated-block dispatch boundary around
+  the measured `lookup_tb_ptr` helper shape. DoD: use the W2m-h classifier
+  output and QEMU TCI dispatch semantics to design the narrow boundary before
+  code. Either implement deterministic tests showing generated blocks can
+  return the same next-TB decision as the TCI `lookup_tb_ptr` path without
+  re-entering the generic libffi helper on the hot path, or record why the
+  dispatch helper must remain fallback. A browser run is allowed only if the
+  local evidence predicts at least an order-of-magnitude generated coverage
+  share increase or removes the dominant `lookup_tb_ptr` candidate loss.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and
