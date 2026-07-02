@@ -540,6 +540,7 @@ void tcg_wasm64_report_summary(const char *reason,
             "\"generated_compiled\":%" PRIu64 ","
             "\"generated_executed\":%" PRIu64 ","
             "\"generated_cache_hits\":%" PRIu64 ","
+            "\"generated_coverage_basis\":\"generated_executed/subset_attempts\","
             "\"generated_coverage_numerator\":%" PRIu64 ","
             "\"generated_coverage_denominator\":%" PRIu64 ","
             "\"generated_coverage_ppm\":%" PRIu64 ","

@@ -36,6 +36,7 @@ const OPS = {
   st: 56,
   exit_tb: 72,
   goto_tb: 73,
+  goto_ptr: 74,
   tci_movi: 125,
   tci_movl: 126,
   tci_setcond32: 136,
@@ -292,6 +293,12 @@ function targetIndexFromPtr(ptr, relativeBase) {
   return offset / 4;
 }
 
+function labelPtr(tbPtr, insn) {
+  const diff = sextract(insn, 12, 20);
+
+  return diff === 0 ? 0 : tbPtr + diff;
+}
+
 function compileGeneratedOutputModule(words, relativeBase) {
   const instructions = [];
   const ops = [];
@@ -312,11 +319,26 @@ function compileGeneratedOutputModule(words, relativeBase) {
     const tbPtr = relativeBase + (index + 1) * 4;
 
     if (opc === OPS.exit_tb || opc === OPS.goto_tb) {
-      const ptr = tbPtr + sextract(insn, 12, 20);
+      const ptr = labelPtr(tbPtr, insn);
+
+      if (opc === OPS.goto_tb && ptr === 0) {
+        throw new Error("goto_tb fixture has null target slot");
+      }
       terminal = {
         kind: opc === OPS.goto_tb ? "goto_tb" : "exit_tb",
         ret: ptr,
         status: opc === OPS.goto_tb ? STATUS_DISPATCH : STATUS_EXIT,
+      };
+      break;
+    }
+    if (opc === OPS.call && bits(insn, 8, 4) === 2 &&
+        words[index + 1] !== undefined &&
+        bits(words[index + 1] >>> 0, 0, 8) === OPS.goto_ptr &&
+        bits(words[index + 1] >>> 0, 8, 4) === 0) {
+      terminal = {
+        kind: "lookup_goto_ptr",
+        ret: null,
+        status: null,
       };
       break;
     }
@@ -525,16 +547,31 @@ function compileGeneratedOutputModule(words, relativeBase) {
     throw new Error("fixture contains unsupported generated-output shape");
   }
   instructions.push(...body);
+  if (terminal.kind === "lookup_goto_ptr") {
+    instructions.push(
+      ...localSet(regLocal(0), callFunc(2, [localGet(regLocal(14))])),
+    );
+  }
   for (let reg = 0; reg < 16; reg++) {
     instructions.push(...i64Store(localGet(1), localGet(regLocal(reg)), reg * 8));
   }
   instructions.push(...i64Store(
     localGet(2),
     terminal.kind === "goto_tb" ? i64Load(i32Const(terminal.ret), 0)
-                                : i64Const(terminal.ret),
+      : terminal.kind === "lookup_goto_ptr" ? localGet(regLocal(0))
+      : i64Const(terminal.ret),
     0,
   ));
-  instructions.push(...i64Const(terminal.status));
+  if (terminal.kind === "lookup_goto_ptr") {
+    instructions.push(
+      ...i64Const(STATUS_DISPATCH),
+      ...i64Const(STATUS_EXIT),
+      ...i64Truthy(localGet(regLocal(0))),
+      0x1b, /* select */
+    );
+  } else {
+    instructions.push(...i64Const(terminal.status));
+  }
 
   return Uint8Array.from([
     0x00, 0x61, 0x73, 0x6d,
@@ -545,14 +582,16 @@ function compileGeneratedOutputModule(words, relativeBase) {
                    [VALUE_I64]),
       functionType([VALUE_I64, VALUE_I64, VALUE_I64, VALUE_I64, VALUE_I64],
                    []),
+      functionType([VALUE_I64], [VALUE_I64]),
     ])),
     ...section(2, vector([
       [...name("env"), ...name("memory"), 0x02, 0x00, 0x01],
       [...name("env"), ...name("qemu_ld_rrr"), 0x00, ...encodeU32(1)],
       [...name("env"), ...name("qemu_st_rrr"), 0x00, ...encodeU32(2)],
+      [...name("env"), ...name("lookup_tb_ptr"), 0x00, ...encodeU32(3)],
     ])),
     ...section(3, vector([[0x00]])),
-    ...section(7, vector([[...name("run"), 0x00, ...encodeU32(2)]])),
+    ...section(7, vector([[...name("run"), 0x00, ...encodeU32(3)]])),
     ...section(10, vector([functionBody(
       instructions,
       [{ count: 2, type: VALUE_I32 }, { count: 16, type: VALUE_I64 }],
@@ -667,13 +706,26 @@ function interpretGeneratedOutput(words, state, relativeBase) {
                        ((regs[r2] & mask) << BigInt(pos)));
       index++;
     } else if (opc === OPS.exit_tb) {
-      const ptr = BigInt(tbPtr + sextract(insn, 12, 20));
+      const ptr = BigInt(labelPtr(tbPtr, insn));
       return { status: STATUS_EXIT, ret: ptr, regs };
     } else if (opc === OPS.goto_tb) {
-      const ptr = tbPtr + sextract(insn, 12, 20);
+      const ptr = labelPtr(tbPtr, insn);
+
+      if (ptr === 0) {
+        throw new Error("goto_tb fixture has null target slot");
+      }
       return {
         status: STATUS_DISPATCH,
         ret: view.getBigUint64(ptr, true),
+        regs,
+      };
+    } else if (opc === OPS.call && bits(insn, 8, 4) === 2 &&
+               bits(words[index + 1] >>> 0, 0, 8) === OPS.goto_ptr &&
+               bits(words[index + 1] >>> 0, 8, 4) === 0) {
+      regs[0] = state.helpers.lookupTbPtr(regs[14]);
+      return {
+        status: regs[0] === 0n ? STATUS_EXIT : STATUS_DISPATCH,
+        ret: regs[0],
         regs,
       };
     } else {
@@ -717,6 +769,16 @@ function createHelpers(view) {
         stored: stored.toString(),
       });
     },
+    lookupTbPtr(env) {
+      const result = view.getBigUint64(Number(env) + 0x100, true);
+
+      calls.push({
+        kind: "lookup_tb_ptr",
+        env: env.toString(),
+        result: result.toString(),
+      });
+      return result;
+    },
   };
 }
 
@@ -738,7 +800,11 @@ function createState(relativeBase, words, seed) {
   view.setBigUint64(ctxPtr + 8, BigInt(retPtr), true);
   view.setUint32(dataBase, seed % 2 === 0 ? 0xffffffff : 7, true);
   view.setBigUint64(dataBase + 0x10, BigInt(0x400000000 + seed), true);
-  view.setBigUint64(dataBase + 0x100, BigInt(0x100000000 + seed), true);
+  view.setBigUint64(
+    dataBase + 0x100,
+    seed % 2 === 0 ? 0n : BigInt(0x100000000 + seed),
+    true,
+  );
   view.setBigUint64(dataBase + 0x110, BigInt(0x200000000 + seed), true);
   view.setBigUint64(dataBase + 0x118, BigInt(0x300000000 + seed), true);
   for (let index = 0; index < words.length; index++) {
@@ -782,6 +848,8 @@ function captureState(view, regsPtr, retPtr, dataBase, helpers) {
       calls: helpers.calls,
       loads: helpers.calls.filter((call) => call.kind === "ld").length,
       stores: helpers.calls.filter((call) => call.kind === "st").length,
+      lookups: helpers.calls.filter((call) =>
+        call.kind === "lookup_tb_ptr").length,
     },
   };
 }
@@ -798,6 +866,7 @@ async function runFixture(fixture, seed) {
       memory: generated.memory,
       qemu_ld_rrr: generated.helpers.qemuLd,
       qemu_st_rrr: generated.helpers.qemuSt,
+      lookup_tb_ptr: generated.helpers.lookupTbPtr,
     },
   });
   const status = instance.exports.run(generated.ctxPtr);
@@ -895,6 +964,15 @@ const fixtures = [
       OPS.exit_tb,
     ],
   },
+  {
+    name: "lookup-goto-ptr-dispatch-terminal",
+    terminal: "lookup_goto_ptr",
+    relativeBase: 0x7800,
+    words: [
+      OPS.call | (2 << 8),
+      OPS.goto_ptr,
+    ],
+  },
 ];
 
 const unsupportedFixtures = [
@@ -927,9 +1005,11 @@ for (const fixture of unsupportedFixtures) {
   unsupportedResults.push(fixture.name);
 }
 
-assert.equal(results.length, 12);
+assert.equal(results.length, 14);
 assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 4);
 assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 8);
+assert.equal(results.filter((entry) =>
+  entry.terminal === "lookup_goto_ptr").length, 2);
 const helperBoundaryResults = results.filter((entry) =>
   entry.helpers.loads > 0 || entry.helpers.stores > 0);
 const simpleGapResults = results.filter((entry) =>
@@ -946,9 +1026,13 @@ console.log(JSON.stringify({
       count + entry.helpers.loads, 0),
     stores: helperBoundaryResults.reduce((count, entry) =>
       count + entry.helpers.stores, 0),
+    lookups: results.reduce((count, entry) =>
+      count + entry.helpers.lookups, 0),
   },
   terminals: {
     goto_tb: results.filter((entry) => entry.terminal === "goto_tb").length,
     exit_tb: results.filter((entry) => entry.terminal === "exit_tb").length,
+    lookup_goto_ptr: results.filter((entry) =>
+      entry.terminal === "lookup_goto_ptr").length,
   },
 }, null, 2));

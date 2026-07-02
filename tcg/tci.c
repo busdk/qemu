@@ -23,6 +23,7 @@
 #include "tcg/hotblocks.h"
 #include "tcg/helper-info.h"
 #include "tcg/tcg-ldst.h"
+#include "exec/helper-proto-common.h"
 #include "qemu/perf-attrib.h"
 #include "disas/dis-asm.h"
 #include "tcg-has.h"
@@ -1077,6 +1078,11 @@ static bool tci_wasm_generated_opcode_supported(TCGOpcode opc)
     }
 }
 
+static bool tci_wasm_generated_lookup_goto_ptr_terminal(uint32_t insn,
+                                                        const uint32_t *tb_start,
+                                                        uint64_t index,
+                                                        uint64_t max_ops);
+
 static bool tci_wasm_generated_prevalidate(TCIWasmSubsetEntry *entry,
                                            const uint32_t *tb_start)
 {
@@ -1087,6 +1093,13 @@ static bool tci_wasm_generated_prevalidate(TCIWasmSubsetEntry *entry,
         uint32_t insn = *insn_ptr;
         TCGOpcode opc = extract32(insn, 0, 8);
 
+        if (opc == INDEX_op_call) {
+            if (tci_wasm_generated_lookup_goto_ptr_terminal(insn, tb_start,
+                                                            index, max_ops)) {
+                return true;
+            }
+            return tci_wasm_generated_mark_unsupported(entry, opc);
+        }
         if (!tci_wasm_generated_opcode_supported(opc)) {
             return tci_wasm_generated_mark_unsupported(entry, opc);
         }
@@ -1124,18 +1137,67 @@ static void tci_wasm_generated_qemu_st_rrr(uint64_t env, uint64_t taddr,
                 (const void *)(uintptr_t)tb_ptr);
 }
 
+static uint64_t tci_wasm_generated_lookup_tb_ptr(uint64_t env)
+{
+    return (uintptr_t)helper_lookup_tb_ptr((CPUArchState *)(uintptr_t)env);
+}
+
+static bool tci_wasm_generated_call_is_lookup_tb_ptr(uint32_t insn,
+                                                     const uint32_t *tb_ptr)
+{
+    uint8_t len;
+    void *ptr;
+    void *func;
+    ffi_cif *cif;
+
+    tci_args_nl(insn, tb_ptr, &len, &ptr);
+    if (len != 2 || ptr == NULL) {
+        return false;
+    }
+
+    func = ((void **)ptr)[0];
+    cif = ((void **)ptr)[1];
+    return func == (void *)helper_lookup_tb_ptr &&
+           cif != NULL && cif->nargs == 1;
+}
+
+static bool tci_wasm_generated_lookup_goto_ptr_terminal(uint32_t insn,
+                                                        const uint32_t *tb_start,
+                                                        uint64_t index,
+                                                        uint64_t max_ops)
+{
+    const uint32_t *tb_ptr = tb_start + index + 1;
+    uint32_t next_insn;
+    TCGReg r0;
+
+    if (!tci_wasm_generated_call_is_lookup_tb_ptr(insn, tb_ptr) ||
+        index + 1 >= max_ops) {
+        return false;
+    }
+
+    next_insn = tb_start[index + 1];
+    if (extract32(next_insn, 0, 8) != INDEX_op_goto_ptr) {
+        return false;
+    }
+    tci_args_r(next_insn, &r0);
+    return r0 == TCG_REG_R0;
+}
+
 EM_JS(uintptr_t, tci_wasm_generated_compile_js,
       (uintptr_t code_arg, uintptr_t relative_base_arg, uint64_t max_ops_arg,
-       int op_mov, int op_movi, int op_movl, int op_add, int op_sub,
-       int op_mul, int op_and, int op_or,
+       int op_call, int op_mov, int op_movi, int op_movl, int op_add,
+       int op_sub, int op_mul, int op_and, int op_or,
        int op_xor, int op_ld, int op_ld32u, int op_ld32s, int op_st8,
        int op_st32,
        int op_st, int op_setcond, int op_movcond, int op_shl, int op_shr,
        int op_extract, int op_sextract, int op_deposit, int op_neg,
        int op_setcond32, int op_brcond, int op_qemu_ld_rrr,
        int op_qemu_st_rrr, int op_mb, int op_exit_tb,
-       int op_goto_tb, int ctx_regs_offset, int ctx_ret_offset,
+       int op_goto_tb, int op_goto_ptr, int ctx_regs_offset,
+       int ctx_ret_offset,
        uintptr_t qemu_ld_rrr_func_arg, uintptr_t qemu_st_rrr_func_arg,
+       uintptr_t lookup_tb_ptr_helper_arg,
+       uintptr_t lookup_tb_ptr_func_arg,
        uintptr_t compile_status_arg),
 {
     const code = Number(code_arg);
@@ -1143,6 +1205,8 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
     const maxOps = Number(max_ops_arg);
     const qemuLdRrrFuncIndex = BigInt(qemu_ld_rrr_func_arg);
     const qemuStRrrFuncIndex = BigInt(qemu_st_rrr_func_arg);
+    const lookupTbPtrHelperIndex = BigInt(lookup_tb_ptr_helper_arg);
+    const lookupTbPtrFuncIndex = BigInt(lookup_tb_ptr_func_arg);
     const compileStatus = Number(compile_status_arg);
     const valueI64 = 0x7e;
     const statusOk = 0;
@@ -1415,6 +1479,15 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
         return HEAPU64[Number(address) >> 3];
     }
 
+    function callPoolFunc(insn, tbPtr) {
+        const ptr = BigInt(tbPtr + sextract(insn, 12, 20));
+
+        if (ptr === 0n) {
+            return 0n;
+        }
+        return readU64(ptr);
+    }
+
     function targetIndexFromPtr(ptr) {
         const offset = Number(ptr) - relativeBase;
 
@@ -1451,13 +1524,42 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
             const r2 = bits(insn, 16, 4);
 
             if (opc === op_exit_tb || opc === op_goto_tb) {
-                const ptr = BigInt(tbPtr + sextract(insn, 12, 20));
+                const diff = sextract(insn, 12, 20);
+                const ptr = diff === 0 ? 0n : BigInt(tbPtr + diff);
+
+                if (opc === op_goto_tb && ptr === 0n) {
+                    setStatus(statusLoweringFailed);
+                    return 0;
+                }
                 terminal = {
                     kind: opc === op_goto_tb ? "goto_tb" : "exit_tb",
                     ret: ptr,
                     status: opc === op_goto_tb ? 2n : 1n,
                 };
                 break;
+            } else if (opc === op_call && bits(insn, 8, 4) === 2) {
+                const nextInsn = HEAPU32[(insnPtr + 4) >> 2];
+                const nextOpc = bits(nextInsn, 0, 8);
+                const nextReg = bits(nextInsn, 8, 4);
+
+                if (nextOpc === op_goto_ptr && nextReg === 0 &&
+                    callPoolFunc(insn, tbPtr) === lookupTbPtrHelperIndex) {
+                    terminal = {
+                        kind: "lookup_goto_ptr",
+                        ret: 0n,
+                        status: 0n,
+                    };
+                    break;
+                }
+                ops.push({
+                    index,
+                    insn,
+                    tbPtr,
+                    opc,
+                    r0,
+                    r1,
+                    r2,
+                });
             } else {
                 ops.push({
                     index,
@@ -1722,6 +1824,11 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
             }
             instructions.push(...body);
         }
+        if (terminal.kind === "lookup_goto_ptr") {
+            instructions.push(
+                ...localSet(regLocal(0), callFunc(2, [localGet(regLocal(14))]))
+            );
+        }
 
         for (let reg = 0; reg < 16; reg++) {
             instructions.push(
@@ -1731,10 +1838,20 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
         instructions.push(...i64Store(
             localGet(2),
             terminal.kind === "goto_tb" ? i64Load(i64Const(terminal.ret), 0)
-                                        : i64Const(terminal.ret),
+                : terminal.kind === "lookup_goto_ptr" ? localGet(regLocal(0))
+                : i64Const(terminal.ret),
             0
         ));
-        instructions.push(...i64Const(terminal.status));
+        if (terminal.kind === "lookup_goto_ptr") {
+            instructions.push(
+                ...i64Const(2),
+                ...i64Const(1),
+                ...i64Truthy(localGet(regLocal(0))),
+                0x1b /* select */
+            );
+        } else {
+            instructions.push(...i64Const(terminal.status));
+        }
 
         const bytes = [
             0x00, 0x61, 0x73, 0x6d,
@@ -1745,6 +1862,7 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
                              [valueI64]),
                 functionType([valueI64, valueI64, valueI64, valueI64,
                               valueI64], []),
+                functionType([valueI64], [valueI64]),
             ])),
             ...section(2, vector([
                 [
@@ -1764,9 +1882,15 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
                     0x00,
                     ...encodeU32(2),
                 ],
+                [
+                    ...name("env"),
+                    ...name("lookup_tb_ptr"),
+                    0x00,
+                    ...encodeU32(3),
+                ],
             ])),
             ...section(3, vector([[0x00]])),
-            ...section(7, vector([[...name("run"), 0x00, ...encodeU32(2)]])),
+            ...section(7, vector([[...name("run"), 0x00, ...encodeU32(3)]])),
             ...section(10, vector([functionBody(
                 instructions,
                 [{ count: 18, type: valueI64 }]
@@ -1775,6 +1899,7 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
         let module;
         let qemuLdRrrFunc;
         let qemuStRrrFunc;
+        let lookupTbPtrFunc;
         let instance;
         let func;
 
@@ -1794,12 +1919,15 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
         try {
             qemuLdRrrFunc = wasmTable.get(qemuLdRrrFuncIndex);
             qemuStRrrFunc = wasmTable.get(qemuStRrrFuncIndex);
+            lookupTbPtrFunc = wasmTable.get(lookupTbPtrFuncIndex);
             if (typeof qemuLdRrrFunc !== "function" ||
-                typeof qemuStRrrFunc !== "function") {
+                typeof qemuStRrrFunc !== "function" ||
+                typeof lookupTbPtrFunc !== "function") {
                 setStatus(statusTableFailed);
                 reportCompileError(statusTableFailed, "table", null, {
                     loadType: typeof qemuLdRrrFunc,
                     storeType: typeof qemuStRrrFunc,
+                    lookupType: typeof lookupTbPtrFunc,
                 });
                 return 0;
             }
@@ -1814,6 +1942,7 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
                     memory: wasmMemory,
                     qemu_ld_rrr: qemuLdRrrFunc,
                     qemu_st_rrr: qemuStRrrFunc,
+                    lookup_tb_ptr: lookupTbPtrFunc,
                 },
             });
         } catch (error) {
@@ -1843,7 +1972,9 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
             typeof wasmTable === "undefined" ||
             typeof addFunction !== "function" ||
             qemuLdRrrFuncIndex <= 0n ||
-            qemuStRrrFuncIndex <= 0n) {
+            qemuStRrrFuncIndex <= 0n ||
+            lookupTbPtrHelperIndex <= 0n ||
+            lookupTbPtrFuncIndex <= 0n) {
             setStatus(statusPrereqFailed);
             return 0n;
         }
@@ -1860,8 +1991,12 @@ static void tci_wasm_subset_report(const char *reason)
 {
     TCGOpcode top_ops[8] = { 0 };
     TCGOpcode top_generated_ops[8] = { 0 };
-    uint64_t generated_coverage_numerator =
-        tci_wasm_generated_executed + tci_wasm_generated_cache_hits;
+    /*
+     * generated_executed already includes executions reached through a cached
+     * generated function.  Keep cache hits as a separate reuse diagnostic so
+     * coverage remains an execution share and cannot exceed 100%.
+     */
+    uint64_t generated_coverage_numerator = tci_wasm_generated_executed;
     uint64_t generated_coverage_denominator = tci_wasm_subset_attempts;
     uint64_t generated_coverage_ppm = tci_wasm_coverage_ppm(
         generated_coverage_numerator, generated_coverage_denominator);
@@ -1957,7 +2092,7 @@ static void tci_wasm_subset_report(const char *reason)
             "\"generated_status_unknown\":%" PRIu64 ","
             "\"generated_cache_hits\":%" PRIu64 ","
             "\"generated_cache_stale\":%" PRIu64 ","
-            "\"generated_coverage_basis\":\"subset_attempts\","
+            "\"generated_coverage_basis\":\"generated_executed/subset_attempts\","
             "\"generated_coverage_numerator\":%" PRIu64 ","
             "\"generated_coverage_denominator\":%" PRIu64 ","
             "\"generated_coverage_ppm\":%" PRIu64 ","
@@ -2277,19 +2412,21 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry,
                                        code_ops, signature, 0);
         entry->generated_func = tci_wasm_generated_compile_js(
             (uintptr_t)code_start, (uintptr_t)tb_start, code_ops,
-            INDEX_op_mov, INDEX_op_tci_movi, INDEX_op_tci_movl, INDEX_op_add,
-            INDEX_op_sub, INDEX_op_mul, INDEX_op_and, INDEX_op_or,
+            INDEX_op_call, INDEX_op_mov, INDEX_op_tci_movi, INDEX_op_tci_movl,
+            INDEX_op_add, INDEX_op_sub, INDEX_op_mul, INDEX_op_and, INDEX_op_or,
             INDEX_op_xor, INDEX_op_ld, INDEX_op_ld32u, INDEX_op_ld32s,
             INDEX_op_st8, INDEX_op_st32, INDEX_op_st, INDEX_op_setcond,
             INDEX_op_movcond, INDEX_op_shl, INDEX_op_shr, INDEX_op_extract,
             INDEX_op_sextract, INDEX_op_deposit, INDEX_op_neg,
             INDEX_op_tci_setcond32, INDEX_op_brcond,
             INDEX_op_tci_qemu_ld_rrr, INDEX_op_tci_qemu_st_rrr, INDEX_op_mb,
-            INDEX_op_exit_tb, INDEX_op_goto_tb,
+            INDEX_op_exit_tb, INDEX_op_goto_tb, INDEX_op_goto_ptr,
             (int)TCI_WASM_GENERATED_CTX_REGS_OFFSET,
             (int)TCI_WASM_GENERATED_CTX_RET_OFFSET,
             (uintptr_t)tci_wasm_generated_qemu_ld_rrr,
             (uintptr_t)tci_wasm_generated_qemu_st_rrr,
+            (uintptr_t)helper_lookup_tb_ptr,
+            (uintptr_t)tci_wasm_generated_lookup_tb_ptr,
             (uintptr_t)&compile_status);
         if (entry->generated_func == 0) {
             entry->generated_unsupported = true;

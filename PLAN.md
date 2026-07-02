@@ -925,7 +925,7 @@ Engineering rules for this goal:
   CPU/device side effects, and `tci_tb_ptr` return-address state. The
   measured gate-moving target is not broad helper flattening; it is the
   generated-block dispatch boundary around `lookup_tb_ptr`.
-- [ ] W2m-i - Implement or reject a generated-block dispatch boundary around
+- [x] W2m-i - Implement or reject a generated-block dispatch boundary around
   the measured `lookup_tb_ptr` helper shape. DoD: use the W2m-h classifier
   output and QEMU TCI dispatch semantics to design the narrow boundary before
   code. Either implement deterministic tests showing generated blocks can
@@ -934,6 +934,49 @@ Engineering rules for this goal:
   dispatch helper must remain fallback. A browser run is allowed only if the
   local evidence predicts at least an order-of-magnitude generated coverage
   share increase or removes the dominant `lookup_tb_ptr` candidate loss.
+  Accepted evidence: the generated compiler now recognizes only the measured
+  `helper_lookup_tb_ptr` followed by `goto_ptr r0` terminal shape, imports a
+  typed `lookup_tb_ptr(env) -> ptr` WebAssembly function, and keeps every
+  other `INDEX_op_call` shape on fallback. The deterministic equivalence gate
+  now covers `lookup_goto_ptr` with both dispatch and null-exit outcomes and
+  also fixed TCI label semantics so `exit_tb 0` returns a true null pointer
+  rather than the current TB address. Checks: `git diff --check`,
+  `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+  `node scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+  `node --check scripts/ci/wasm-backend-diagnostic-runner.mjs`,
+  `node --check scripts/ci/wasm-backend-diagnostic-summary.mjs`,
+  `node scripts/ci/wasm-backend-diagnostic-summary-test.mjs`,
+  `node scripts/ci/wasm-backend-diagnostic-runner-test.mjs`, and
+  `node scripts/ci/wasm-browser-smoke-runner-test.mjs` outside the sandbox
+  because the repository guidance documents sandboxed child-process quirks.
+  A corrected backend artifact was built with:
+  `python3 scripts/ci/wasm-build-artifacts-local.py --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-dispatch-boundary-artifacts6 --jobs auto --configure-arg=--disable-tcg-interpreter --configure-arg=--enable-tcg-wasm64-backend`.
+  Artifact hashes: JS
+  `e0427b20588b21713f707f356d4a953612af2a96e86c15cc8098a96b42b6f705`,
+  WASM `65a859799606b69409336187b3b5aabe913357e7c62fb0514223bf6b81f5f442`,
+  manifest
+  `2d4955657d0ca37d47a44c4899d6fd29e09b5f3301b8e32c6d3d191a8c7e833b`.
+  The scripted Chromium `149.0.7827.55` diagnostic used
+  `scripts/ci/wasm-backend-diagnostic-runner.mjs` with the generic TuxBoot
+  manifest, `--timeout-ms 8000`, and wrote result JSON
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-dispatch-boundary-smoke6/wasm-browser-smoke-result.json`
+  with SHA-256
+  `524ee05de767a8e8b4b9a618f481052a515e81ac5fc2829f05e8fd0078a8af1c`;
+  the diagnostic summary JSON is
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-dispatch-boundary-smoke6/wasm-backend-diagnostic-summary.json`
+  with SHA-256
+  `7279374061721043d32bea5dacbc7506b434fef5ca7dd86cda4f0e675995fc10`.
+  The short diagnostic intentionally timed out before
+  `QEMU_WASM_LINUX_BOOT_OK`, but did not trap and reported
+  `generated_compiled=57`, `generated_executed=1798977`,
+  `generated_cache_hits=1798921`, no compile failures, no runtime fallback,
+  and generated coverage
+  `1798977 / 1800000` (`999431` ppm) with basis
+  `generated_executed/subset_attempts`. This removes the dominant
+  `lookup_tb_ptr` candidate-loss mechanism and justifies W3. It does not
+  complete W2 or W3 because the generic smoke has not yet booted to
+  `QEMU_WASM_LINUX_BOOT_OK` with this artifact, and the same-commit speed
+  gate has not been run.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and
@@ -965,7 +1008,9 @@ Engineering rules for this goal:
   nonzero generated counters (`generated_compiled=5`,
   `generated_executed=15363`, `generated_cache_hits=15358`,
   `fallback_unsupported=2510`), but coverage is too small to improve
-  wall-clock boot. Current live attribution now points to W2g.
+  wall-clock boot. This historical failure is superseded by W2m-i coverage
+  evidence; rerun W3 next with current same-commit default-TCI and backend
+  artifacts.
 - [ ] W4 - Run the Bus Engine OS `virtual-server` browser proof from the
   gated backend artifact.
   DoD: Chrome/Chromium proof with the accepted `virtual-server` kernel and

@@ -710,6 +710,7 @@ for (const status of [
     generated_compiled: 3,
     generated_executed: 12,
     generated_cache_hits: 9,
+    generated_coverage_basis: "generated_executed/subset_attempts",
     generated_coverage_numerator: 21,
     generated_coverage_denominator: 1000,
     generated_coverage_ppm: 21000,
@@ -723,6 +724,7 @@ for (const status of [
   const parsed = wasm64TcgSummary(line);
   assert.equal(parsed.event, "summary");
   assert.equal(parsed.generated_executed, 12);
+  assert.equal(parsed.generated_coverage_basis, "generated_executed/subset_attempts");
   assert.equal(parsed.generated_coverage_numerator, 21);
   assert.equal(parsed.generated_coverage_denominator, 1000);
   assert.equal(parsed.generated_coverage_ppm, 21000);

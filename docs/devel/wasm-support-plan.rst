@@ -7101,3 +7101,87 @@ around the ``lookup_tb_ptr`` helper shape.  That path accounts for ``95 / 154``
 helper calls in the trace and is the only helper-call category that plausibly
 removes a dominant candidate-loss mechanism without flattening arbitrary
 helpers.
+
+W2m-i generated dispatch boundary
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The generated compiler now handles the measured ``helper_lookup_tb_ptr``
+followed by ``goto_ptr r0`` terminal shape through a typed WebAssembly import
+instead of the generic TCI/libffi helper path.  Other ``INDEX_op_call`` shapes
+still fail closed to the existing fallback path.  This keeps the boundary
+narrow: it accelerates the dispatch helper that W2m-h identified as dominant
+without pretending that arbitrary side-effectful helpers are safe generated
+code.
+
+The deterministic equivalence gate was extended with ``lookup_goto_ptr``
+fixtures covering both next-TB dispatch and null-exit results.  The same slice
+also fixed the generated compiler's TCI label semantics: ``exit_tb 0`` now
+returns a true null pointer, matching ``tci_args_l()``, instead of returning
+the current TB address.
+
+Checks:
+
+* ``git diff --check``
+* ``node --check scripts/ci/wasm-generated-output-equivalence-test.mjs``
+* ``node scripts/ci/wasm-generated-output-equivalence-test.mjs``
+* ``node --check scripts/ci/wasm-backend-diagnostic-runner.mjs``
+* ``node --check scripts/ci/wasm-backend-diagnostic-summary.mjs``
+* ``node scripts/ci/wasm-backend-diagnostic-summary-test.mjs``
+* ``node scripts/ci/wasm-backend-diagnostic-runner-test.mjs``
+* ``node scripts/ci/wasm-browser-smoke-runner-test.mjs`` outside the sandbox,
+  because sandboxed child-process behavior is a known unreliable test
+  environment for this script.
+
+The corrected backend artifact was built with::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-dispatch-boundary-artifacts6 \
+    --jobs auto \
+    --configure-arg=--disable-tcg-interpreter \
+    --configure-arg=--enable-tcg-wasm64-backend
+
+Artifact hashes:
+
+* ``qemu-system-x86_64.js``:
+  ``e0427b20588b21713f707f356d4a953612af2a96e86c15cc8098a96b42b6f705``
+* ``qemu-system-x86_64.wasm``:
+  ``65a859799606b69409336187b3b5aabe913357e7c62fb0514223bf6b81f5f442``
+* manifest:
+  ``2d4955657d0ca37d47a44c4899d6fd29e09b5f3301b8e32c6d3d191a8c7e833b``
+
+The short Chromium diagnostic used Chromium ``149.0.7827.55`` and the
+scripted runner::
+
+  /usr/bin/env PATH=/home/coding-agent/coding-agent/git/busdk/agent-supervisor/projects/busdk/busdk.com/tmp/playwright-smoke/node_modules/.bin:$PATH \
+    QEMU_WASM_CHROMIUM_EXECUTABLE=/home/coding-agent/coding-agent/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome \
+    node scripts/ci/wasm-backend-diagnostic-runner.mjs \
+      --artifact-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-dispatch-boundary-artifacts6 \
+      --guest-manifest /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-default-tci-smoke/wasm-browser-smoke-guest/tuxboot-browser-smoke-guest.json \
+      --out-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-dispatch-boundary-smoke6 \
+      --timeout-ms 8000 \
+      --port 8183
+
+It intentionally timed out before ``QEMU_WASM_LINUX_BOOT_OK`` and wrote:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-dispatch-boundary-smoke6/wasm-browser-smoke-result.json``
+
+Result JSON SHA-256:
+
+``524ee05de767a8e8b4b9a618f481052a515e81ac5fc2829f05e8fd0078a8af1c``
+
+Diagnostic summary:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-dispatch-boundary-smoke6/wasm-backend-diagnostic-summary.json``
+
+Diagnostic summary SHA-256:
+
+``7279374061721043d32bea5dacbc7506b434fef5ca7dd86cda4f0e675995fc10``
+
+The result did not trap and reported ``generated_compiled=57``,
+``generated_executed=1798977``, ``generated_cache_hits=1798921``, no compile
+failures, and no runtime fallback.  Generated coverage was
+``1798977 / 1800000`` subset attempts, or ``999431`` ppm, with basis
+``generated_executed/subset_attempts``.  This removes the dominant
+``lookup_tb_ptr`` candidate-loss mechanism and justifies rerunning W3.  It is
+not a W3 result: the generic smoke did not run to the success marker, and no
+same-commit default-TCI comparison was made in this diagnostic.
