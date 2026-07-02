@@ -1223,6 +1223,18 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
       `setcond`, internal labels, terminal exits, and direct host-memory
       loads/stores needed by the measured hot shapes, plus differential tests
       against the existing TCI semantics.
+      Partial implementation on 2026-07-02: the deterministic emitter now
+      includes an executable lowering-subset spec from a small TB IR into a
+      WebAssembly module. The covered operations are `const_i64`, `mov_i64`,
+      `ld_ctx_i64`, `st_ctx_i64`, `add_i64`, `xor_i64`, `setcond_i64`
+      (`eq`/`ne`), `helper_i64`, and `return_i64`. The generated module and a
+      local interpreter agree on result `25769803818`, context writes at
+      offsets `16`, `24`, and `32`, and helper call opcode `7` with value `42`.
+      Verification: `node --check scripts/ci/wasm-tb-module-emitter.mjs`,
+      `node --check scripts/ci/wasm-tb-module-emitter-test.mjs`, `node
+      scripts/ci/wasm-tb-module-emitter-test.mjs`, and `node
+      scripts/ci/wasm-tb-module-emitter.mjs` passed. This item remains open
+      until internal label/branch lowering and C backend integration exist.
     - [ ] Add helper-call and guest-memory fallback boundaries before long
       browser proofs:
       DoD is helper import generation for calls that cannot be inlined,
