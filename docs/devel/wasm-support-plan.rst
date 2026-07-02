@@ -5104,6 +5104,46 @@ Engine OS boot profile that prebuilds or disables unnecessary one-shot
 preparation services, or produce a QEMU CPU execution improvement that beats
 strict TCI on the same marker-to-marker measurements.
 
+The next production-shaped baseline used the non-debug artifact from
+``/tmp/qemu-wasm-generated-only-isolation``.  The artifact hashes were
+``qemu-system-x86_64.js``
+``d08902173814be81e8783530e3537177b96fba6267ef01734de5d13b65a040d5`` and
+``qemu-system-x86_64.wasm``
+``00cd2b141d965607e4836880d4ac8f17014d9178e9115f85466026ba0f1b03a0``.
+The Bus Engine OS fixture used microvm kernel
+``3169668b74ef4fae4ca6a54bc5ad334a47e4eaf0c63c236248c9301af1c17920``,
+PC kernel
+``cdf8945cfc3cef3bcefbc78fe4b82a4b07af0d04da1ac48a8a0013a27899ee0d``,
+and rootfs
+``5452bcc0c6fe0cab89f187e80572bc52174456cc60ed3cb723a8531519a0d22e``.
+
+Chromium ``149.0.7827.55`` still did not reach multi-user/service readiness
+with that artifact.  The ``microvm,acpi=off`` run
+``/tmp/qemu-wasm-generated-only-isolation/bus-engine-os-virtual-server-current-baseline.json``
+reached the kernel line at ``53157`` ms, ``/dev/vda`` at ``74801`` ms, rootfs
+mount at ``95878`` ms, init at ``97268`` ms, and systemd hostname at
+``109431`` ms, then idled until the run failed at ``290450`` ms.  Adding
+``virtio-rng-device`` wrote
+``/tmp/qemu-wasm-generated-only-isolation/bus-engine-os-virtual-server-current-rng-baseline.json``
+and kept the same failure shape, with hostname at ``108412`` ms and timeout at
+``290448`` ms.  The PC/virtio-pci comparison
+``/tmp/qemu-wasm-generated-only-isolation/bus-engine-os-virtual-server-current-pc-baseline.json``
+also idled after hostname, reaching ``/dev/vda`` at ``130119`` ms, rootfs at
+``141655`` ms, init at ``143414`` ms, hostname at ``158334`` ms, and timeout at
+``340481`` ms.
+
+A final ``microvm`` run with hot-block flags wrote
+``/tmp/qemu-wasm-generated-only-isolation/bus-engine-os-virtual-server-current-rng-hotblocks.json``
+and reproduced the same post-hostname idle, with hostname at ``106328`` ms and
+timeout at ``290420`` ms.  It recorded ``summaryCount=0`` because the
+production-shaped artifact does not include the opt-in hot-block
+instrumentation path.  This default-path evidence does not justify another
+guessed optimization.  The next QEMU-side task is focused post-hostname
+progress visibility that works on the non-debug browser artifact and
+distinguishes guest CPU progress from a missing interrupt, timer, block,
+serial, or virtio event without changing guest boot behavior through broad
+systemd console-debug settings.
+
 Guest-progress idle diagnostic
 ==============================
 

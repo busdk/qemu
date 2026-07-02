@@ -47,11 +47,13 @@ This goal is done only when all of the following are true:
 - [ ] The current browser-hosted Bus Engine OS `virtual-server` boot baseline
   is recorded with exact QEMU artifact hashes, guest kernel/rootfs hashes,
   browser version, command line, timeout/readiness state, and final serial
-  marker. Current accepted baseline on 2026-07-01: service readiness time is
-  unknown and greater than `420000` ms because Chromium proof
-  `/tmp/qemu-wasm64-tci-hotblocks-artifacts/bus-engine-os-current-attribution-20260701.json`
-  timed out after `420194` ms without `Reached target Multi-User System.` or
-  `QEMU_WASM_SERVICE_READY`.
+  marker. Current accepted baseline on 2026-07-02: the production-shaped
+  non-debug artifact
+  `/tmp/qemu-wasm-generated-only-isolation/qemu-system-x86_64.{js,wasm}`
+  still does not reach `Reached target Multi-User System.` or
+  `QEMU_WASM_SERVICE_READY`. The `microvm,acpi=off` proof with the accepted
+  `virtual-server` rootfs idled after systemd set the hostname at `106328` ms
+  and failed after `290420` ms.
 - [ ] QEMU-side attribution identifies the dominant measured bottleneck for
   that baseline. The accepted bottleneck must be backed by counters or timing
   evidence, not by intuition.
@@ -734,7 +736,7 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     generated path executes correctly, but it does not beat default TCI and
     should remain measurement tooling until a different architecture can
     remove the per-block generated-module overhead.
-  - [ ] Re-baseline Bus Engine OS `virtual-server` with the current non-debug
+  - [x] Re-baseline Bus Engine OS `virtual-server` with the current non-debug
     QEMU/WASM artifact before selecting the next optimization:
     DoD is a Chromium run using the accepted Bus Engine OS `virtual-server`
     kernel/rootfs fixture and the current QEMU artifact that records kernel
@@ -743,6 +745,47 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     timeout or readiness state. The next implementation item must name the
     measured QEMU-side bottleneck from this run before adding another CPU or
     device optimization.
+    Accepted evidence on 2026-07-02: the current non-debug artifact
+    `/tmp/qemu-wasm-generated-only-isolation/qemu-system-x86_64.js`
+    (`d08902173814be81e8783530e3537177b96fba6267ef01734de5d13b65a040d5`)
+    and `qemu-system-x86_64.wasm`
+    (`00cd2b141d965607e4836880d4ac8f17014d9178e9115f85466026ba0f1b03a0`)
+    still failed the accepted Bus Engine OS `virtual-server` proof in Chromium
+    `149.0.7827.55`. The `microvm,acpi=off` run using kernel
+    `3169668b74ef4fae4ca6a54bc5ad334a47e4eaf0c63c236248c9301af1c17920`
+    and rootfs
+    `5452bcc0c6fe0cab89f187e80572bc52174456cc60ed3cb723a8531519a0d22e`
+    wrote
+    `/tmp/qemu-wasm-generated-only-isolation/bus-engine-os-virtual-server-current-baseline.json`,
+    reached kernel `53157` ms, `/dev/vda` `74801` ms, rootfs `95878` ms,
+    init `97268` ms, hostname `109431` ms, then idled until timeout at
+    `290450` ms. Adding `virtio-rng-device` wrote
+    `/tmp/qemu-wasm-generated-only-isolation/bus-engine-os-virtual-server-current-rng-baseline.json`
+    and did not change the failure shape: hostname at `108412` ms, timeout at
+    `290448` ms. The PC/virtio-pci comparison with kernel
+    `cdf8945cfc3cef3bcefbc78fe4b82a4b07af0d04da1ac48a8a0013a27899ee0d`
+    wrote
+    `/tmp/qemu-wasm-generated-only-isolation/bus-engine-os-virtual-server-current-pc-baseline.json`
+    and also idled after hostname, with `/dev/vda` at `130119` ms, rootfs at
+    `141655` ms, init at `143414` ms, hostname at `158334` ms, and timeout at
+    `340481` ms. A follow-up `microvm` run with hot-block flags wrote
+    `/tmp/qemu-wasm-generated-only-isolation/bus-engine-os-virtual-server-current-rng-hotblocks.json`
+    and reproduced the same idle after hostname at `106328` ms, but recorded
+    `summaryCount=0` because this production-shaped artifact does not include
+    the opt-in hot-block instrumentation path. The current measured failure is
+    therefore stable post-hostname silence across microvm, PC, and virtio RNG;
+    the next task must improve current-path progress visibility before another
+    optimization can be accepted.
+  - [ ] Add focused post-hostname progress visibility for the default
+    production-shaped browser path:
+    DoD is a generic QEMU-side or harness-side diagnostic that works with the
+    non-debug artifact and distinguishes "guest CPU still making progress" from
+    "guest waiting for an interrupt, timer, block, serial, or virtio event"
+    during the silence after `systemd[1]: Hostname set to <bus-engine-os>.`.
+    The diagnostic must not require broad systemd console debug arguments that
+    change guest behavior, and it must produce machine-readable JSON evidence
+    on the accepted Bus Engine OS `virtual-server` fixture before another
+    acceleration patch is selected.
   - [x] Resolve the hot TB dispatch/chaining boundary:
     DoD is a design and implementation for hot blocks that currently fall
     back on `goto_ptr` and `goto_tb`, preserving QEMU's `tcg_qemu_tb_exec`
