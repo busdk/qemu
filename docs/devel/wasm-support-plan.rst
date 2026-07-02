@@ -6120,3 +6120,46 @@ The final generated summary reported ``generated_compiled=4``,
 ``brcond=2934`` to ``st8=2273`` plus ``brcond=2``.  This confirms the forward
 ``brcond`` slice is safe enough for the generic smoke, but W2 and W3 remain
 open.  The next measured lowering target is ``st8``.
+
+Byte-store generated lowering
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The next accepted slice added generated ``st8`` lowering for the direct-memory
+byte-store form used by TCI host-memory operations.  The generated block emits
+``i32.store8`` with the existing wasm-memory address path and wraps the source
+register to ``i32`` for the stored byte.  Other store families remained on
+strict fallback until separately measured.
+
+The artifact was built with:
+
+.. code-block:: console
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2h-st8 \
+    --jobs auto \
+    --configure-arg=--disable-tcg-interpreter \
+    --configure-arg=--enable-tcg-wasm64-backend
+
+Hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``d1e4865debf52a52e80b854d09f4ca365977a9fd84bb93ab9d574613d9e765fe``
+* ``qemu-system-x86_64.wasm`` =
+  ``596d22c1c9c13d3d2b028b4143bfdb1905460786ec200079394e1f7907c158eb``
+* manifest =
+  ``e6c20a3b1e1e080bff4eee7e53fc843052d1ce48bf66d743ef0ec99ba49051b9``
+
+The generated-only Chromium smoke used Chromium ``141.0.7390.37`` and reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``108476`` ms.  Result JSON:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2h-st8-subset-live/wasm-browser-smoke-result.json``
+
+Result SHA-256:
+``912f08b23181016cdf1d945aee035ff39f7a8829951a55abb72d1f835e8b7c93``.
+
+The final generated summary reported ``generated_compiled=6``,
+``generated_executed=14264``, ``generated_cache_hits=14258``, and
+``generated_compile_failed=0``.  The live generated rejection list moved to
+``ld=1606``, ``mb=443``, ``st=155``, ``st32=6``, and ``brcond=1``.  This
+selected direct target-long load/store and memory-barrier lowering as the next
+work before rerunning W3.

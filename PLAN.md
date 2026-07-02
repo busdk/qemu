@@ -319,12 +319,37 @@ Engineering rules for this goal:
   `generated_compile_failed=0`, and the next live rejection list moved to
   `st8=2273` plus `brcond=2`. This accepts the forward-branch lowering
   slice but does not complete W2 or W3.
-- [ ] W2g - Lower live generated `st8` while preserving strict fallback
+- [x] W2g - Lower live generated `st8` while preserving strict fallback
   semantics. DoD: implement byte-store lowering only for address forms that
   can use the existing generated memory path safely, keep unsupported store
   shapes on TCI fallback, run the generated-only generic Chromium smoke, and
   record the next `top_generated_unsupported_ops` list before deciding
-  whether to expand lowering or rerun W3.
+  whether to expand lowering or rerun W3. Accepted evidence: the backend
+  artifact at
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2h-st8`
+  was built with `--enable-tcg-wasm64-backend` and
+  `--disable-tcg-interpreter`. Artifact hashes: JS
+  `d1e4865debf52a52e80b854d09f4ca365977a9fd84bb93ab9d574613d9e765fe`,
+  WASM `596d22c1c9c13d3d2b028b4143bfdb1905460786ec200079394e1f7907c158eb`,
+  manifest
+  `e6c20a3b1e1e080bff4eee7e53fc843052d1ce48bf66d743ef0ec99ba49051b9`.
+  Chromium `141.0.7390.37` reached `QEMU_WASM_LINUX_BOOT_OK` in
+  `108476` ms with generated-only subset reporting enabled. Result JSON:
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2h-st8-subset-live/wasm-browser-smoke-result.json`
+  (SHA-256
+  `912f08b23181016cdf1d945aee035ff39f7a8829951a55abb72d1f835e8b7c93`).
+  The final generated summary reported `generated_compiled=6`,
+  `generated_executed=14264`, `generated_cache_hits=14258`,
+  `generated_compile_failed=0`, and the next live rejection list moved to
+  `ld=1606`, `mb=443`, `st=155`, `st32=6`, and `brcond=1`. This accepts the
+  byte-store lowering slice but does not complete W2 or W3.
+- [ ] W2h - Lower the next live direct-memory blockers, starting with
+  generated `ld`, while preserving strict fallback semantics. DoD: implement
+  only direct target-long load/store and memory-barrier shapes that can be
+  represented safely in generated WebAssembly, keep unsupported shapes on TCI
+  fallback, run the generated-only generic Chromium smoke, and record whether
+  the remaining live blockers justify rerunning W3 or require another
+  lowering slice.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and

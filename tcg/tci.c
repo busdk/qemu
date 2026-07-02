@@ -762,6 +762,7 @@ static bool tci_wasm_generated_opcode_supported(TCGOpcode opc)
     case INDEX_op_or:
     case INDEX_op_xor:
     case INDEX_op_ld32u:
+    case INDEX_op_st8:
     case INDEX_op_tci_setcond32:
     case INDEX_op_brcond:
     case INDEX_op_exit_tb:
@@ -807,9 +808,9 @@ static bool tci_wasm_generated_prevalidate(TCIWasmSubsetEntry *entry,
 EM_JS(uintptr_t, tci_wasm_generated_compile_js,
       (uintptr_t tb_arg, uint64_t max_ops_arg, int op_mov, int op_movi,
        int op_movl, int op_add, int op_sub, int op_mul, int op_and, int op_or,
-       int op_xor, int op_ld32u, int op_setcond32, int op_brcond,
-       int op_exit_tb, int op_goto_tb, int ctx_regs_offset,
-       int ctx_ret_offset),
+       int op_xor, int op_ld32u, int op_st8, int op_setcond32,
+       int op_brcond, int op_exit_tb, int op_goto_tb,
+       int ctx_regs_offset, int ctx_ret_offset),
 {
     const tb = Number(tb_arg);
     const maxOps = Number(max_ops_arg);
@@ -900,6 +901,16 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
             ...value,
             0x37,
             ...encodeU32(3),
+            ...encodeU32(offset),
+        ];
+    }
+
+    function i32Store8(address, value, offset) {
+        return [
+            ...address,
+            ...value,
+            0x3a,
+            ...encodeU32(0),
             ...encodeU32(offset),
         ];
     }
@@ -1086,6 +1097,14 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
                     ], 0),
                     0xad, /* i64.extend_i32_u */
                 ]);
+            } else if (opc === op_st8) {
+                const ofs = sextract(insn, 16, 16);
+
+                return i32Store8([
+                    ...localGet(regLocal(r1)),
+                    ...i64Const(ofs),
+                    0x7c, /* i64.add */
+                ], i32WrapI64(localGet(regLocal(r0))), 0);
             } else if (opc === op_setcond32) {
                 const condition = bits(insn, 20, 4);
                 const comparison = i32Compare(
@@ -1557,8 +1576,9 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
             (uintptr_t)tb_start, tci_wasm_subset_max_ops, INDEX_op_mov,
             INDEX_op_tci_movi, INDEX_op_tci_movl, INDEX_op_add,
             INDEX_op_sub, INDEX_op_mul, INDEX_op_and, INDEX_op_or,
-            INDEX_op_xor, INDEX_op_ld32u, INDEX_op_tci_setcond32,
-            INDEX_op_brcond, INDEX_op_exit_tb, INDEX_op_goto_tb,
+            INDEX_op_xor, INDEX_op_ld32u, INDEX_op_st8,
+            INDEX_op_tci_setcond32, INDEX_op_brcond, INDEX_op_exit_tb,
+            INDEX_op_goto_tb,
             (int)TCI_WASM_GENERATED_CTX_REGS_OFFSET,
             (int)TCI_WASM_GENERATED_CTX_RET_OFFSET);
         if (entry->generated_func == 0) {
