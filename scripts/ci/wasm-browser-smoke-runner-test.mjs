@@ -678,6 +678,7 @@ for (const status of [
     rootfs: null,
     rootfsDevice: "virtio-mmio",
     tciWasmSubset: true,
+    tciWasmGeneratedOnly: true,
     tciWasmSubsetInterval: 10000,
     tciWasmSubsetMaxOps: 64,
     tciWasmSubsetThreshold: 4,
@@ -686,6 +687,7 @@ for (const status of [
   });
 
   assert.equal(url.searchParams.get("tciWasmSubset"), "1");
+  assert.equal(url.searchParams.get("tciWasmGeneratedOnly"), "1");
   assert.equal(url.searchParams.get("tciWasmSubsetInterval"), "10000");
   assert.equal(url.searchParams.get("tciWasmSubsetMaxOps"), "64");
   assert.equal(url.searchParams.get("tciWasmSubsetThreshold"), "4");
@@ -916,6 +918,7 @@ for (const status of [
     },
     timeoutMs: 180000,
     tciWasmSubset: true,
+    tciWasmGeneratedOnly: true,
     tciWasmSubsetInterval: 10000,
     tciWasmSubsetMaxOps: 64,
     tciWasmSubsetThreshold: 4,
@@ -955,6 +958,7 @@ for (const status of [
   assert.equal(result.displayMinNonblackPixels, 4);
   assert.equal(result.rootfsDevice, "virtio-pci");
   assert.equal(result.tciWasmSubset, true);
+  assert.equal(result.tciWasmGeneratedOnly, true);
   assert.equal(result.tciWasmSubsetInterval, 10000);
   assert.equal(result.tciWasmSubsetMaxOps, 64);
   assert.equal(result.tciWasmSubsetThreshold, 4);

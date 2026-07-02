@@ -1361,6 +1361,7 @@ function buildConfig() {
     tcgHotblocksTop: numberOption("tcgHotblocksTop", 12),
     tciRelaxedMb: boolOption("tciRelaxedMb", false),
     tciWasmSubset: boolOption("tciWasmSubset", false),
+    tciWasmGeneratedOnly: boolOption("tciWasmGeneratedOnly", false),
     tciWasmSubsetInterval: numberOption("tciWasmSubsetInterval", 100000),
     tciWasmSubsetMaxOps: numberOption("tciWasmSubsetMaxOps", 512),
     tciWasmSubsetThreshold: numberOption("tciWasmSubsetThreshold", 1024),
@@ -1541,6 +1542,7 @@ async function run() {
       relaxedMb: Boolean(config.tciRelaxedMb),
       wasmSubset: {
         enabled: Boolean(config.tciWasmSubset),
+        generatedOnly: Boolean(config.tciWasmGeneratedOnly),
         interval: config.tciWasmSubsetInterval,
         maxOps: config.tciWasmSubsetMaxOps,
         threshold: config.tciWasmSubsetThreshold,
@@ -1553,6 +1555,9 @@ async function run() {
         ...(config.tciRelaxedMb ? { QEMU_TCI_RELAXED_MB: "1" } : {}),
         ...(config.tciWasmSubset ? {
           QEMU_TCI_WASM_SUBSET: "1",
+          ...(config.tciWasmGeneratedOnly ? {
+            QEMU_TCI_WASM_GENERATED_ONLY: "1",
+          } : {}),
           QEMU_TCI_WASM_SUBSET_INTERVAL: String(config.tciWasmSubsetInterval),
           QEMU_TCI_WASM_SUBSET_MAX_OPS: String(config.tciWasmSubsetMaxOps),
           QEMU_TCI_WASM_SUBSET_THRESHOLD: String(config.tciWasmSubsetThreshold),
@@ -1882,6 +1887,9 @@ async function run() {
     ...(config.tciRelaxedMb ? { QEMU_TCI_RELAXED_MB: "1" } : {}),
     ...(config.tciWasmSubset ? {
       QEMU_TCI_WASM_SUBSET: "1",
+      ...(config.tciWasmGeneratedOnly ? {
+        QEMU_TCI_WASM_GENERATED_ONLY: "1",
+      } : {}),
       QEMU_TCI_WASM_SUBSET_INTERVAL: String(config.tciWasmSubsetInterval),
       QEMU_TCI_WASM_SUBSET_MAX_OPS: String(config.tciWasmSubsetMaxOps),
       QEMU_TCI_WASM_SUBSET_THRESHOLD: String(config.tciWasmSubsetThreshold),

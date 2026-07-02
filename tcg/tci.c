@@ -49,6 +49,7 @@ __thread uintptr_t tci_tb_ptr;
 
 static bool tci_relaxed_mb;
 static bool tci_wasm_subset;
+static bool tci_wasm_generated_only;
 static uint64_t tci_wasm_subset_threshold;
 static uint64_t tci_wasm_subset_max_ops;
 static uint64_t tci_wasm_subset_interval;
@@ -232,6 +233,22 @@ static bool tci_wasm_subset_enabled(void)
     }
 
     return tci_wasm_subset;
+}
+
+static bool tci_wasm_generated_only_enabled(void)
+{
+    static gsize initialized;
+
+    if (unlikely(g_once_init_enter(&initialized))) {
+        char *owned;
+        const char *raw = tci_getenv("QEMU_TCI_WASM_GENERATED_ONLY", &owned);
+
+        tci_wasm_generated_only = tci_parse_bool_env(raw);
+        free(owned);
+        g_once_init_leave(&initialized, 1);
+    }
+
+    return tci_wasm_generated_only;
 }
 
 static inline void tci_mb(void)
@@ -1261,6 +1278,9 @@ static TCIWasmSubsetStatus tci_wasm_subset_try_exec(const uint32_t *tb_start,
         return TCI_WASM_SUBSET_DISPATCH;
     case TCI_WASM_SUBSET_UNSUPPORTED:
         break;
+    }
+    if (tci_wasm_generated_only_enabled()) {
+        return TCI_WASM_SUBSET_UNSUPPORTED;
     }
     if (!entry->validated &&
         !tci_wasm_subset_validate(tb_start, entry)) {

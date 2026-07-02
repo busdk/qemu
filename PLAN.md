@@ -674,6 +674,75 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     followed by `mb`. The live patch was removed because the generic speed
     gate failed and the added direct-memory opcodes did not cover the blocks
     selected in this run.
+  - [x] Reject wiring the deterministic hot-block lowering subset into the
+    current live generated path:
+    DoD is an opt-in `tcg/tci.c` generated-Wasm slice that supports forward,
+    non-crossing `brcond`, local host-memory `ld`/`st` forms, `ld32u`,
+    `st32`, `tci_setcond32`, and `mb` only when the existing relaxed-barrier
+    switch is enabled; rejects unsupported branch or memory shapes before
+    executing generated code; falls back to TCI for every rejected shape; keeps
+    generic Chromium smoke passing; and records whether generated execution
+    coverage and wall-clock time improve enough to justify a downstream Bus
+    Engine OS proof.
+    Rejected evidence on 2026-07-02: an unpromoted runtime slice added
+    forward non-crossing `brcond`, `ld`, `st`, `ld32u`, `st32`,
+    `tci_setcond32`, and relaxed-`mb` lowering to the live EM_JS generated
+    compiler. The artifact built successfully with
+    `scripts/ci/wasm-build-artifacts-local.py` and produced
+    `qemu-system-x86_64.js` SHA-256
+    `c0a5e66e96103172c61e6677de99370a535c67070ae461662c17ef813f481b60`
+    plus `qemu-system-x86_64.wasm` SHA-256
+    `508cbeea55f3561a66066d4c733ce771e5bd53b38f187c52062b6baa0807b8b9`.
+    Generic Chromium smoke with the subset disabled reached
+    `QEMU_WASM_LINUX_BOOT_OK` in `92557` ms
+    (`/tmp/qemu-wasm-generated-hot-subset/generic-browser-smoke-default.json`).
+    The opt-in run with `--tci-wasm-subset --tci-relaxed-mb` reached the same
+    marker in `102346` ms
+    (`/tmp/qemu-wasm-generated-hot-subset/generic-browser-smoke-subset-relaxed-mb.json`)
+    with `executed=76978971`, `generated_compiled=4`,
+    `generated_executed=933`, `generated_compile_failed=0`, and remaining
+    generated fallback `st8=9690`. The runtime patch was removed because it
+    regressed the generic smoke and did not create enough generated-Wasm
+    coverage to justify a downstream Bus Engine OS proof.
+  - [x] Isolate generated-Wasm execution from the slower C subset path before
+    adding more opcode lowering:
+    DoD is an opt-in measurement mode where generated-Wasm eligible blocks may
+    run, but generated-unsupported blocks fall back directly to normal TCI
+    instead of executing the C subset interpreter. Run generic Chromium smokes
+    for default TCI, current subset, and generated-only isolation using the
+    same artifact and guest inputs. If generated-only does not beat default
+    while reporting nonzero generated execution, stop expanding the current
+    per-block EM_JS generated-module path and promote a different measured
+    QEMU-side acceleration approach into this plan.
+    Rejected evidence on 2026-07-02: the opt-in
+    `QEMU_TCI_WASM_GENERATED_ONLY=1` measurement mode was added and keeps
+    generated-Wasm eligible blocks enabled while routing generated-unsupported
+    blocks straight back to normal TCI. The rebuilt non-debug artifact hashes
+    were `qemu-system-x86_64.js`
+    `d08902173814be81e8783530e3537177b96fba6267ef01734de5d13b65a040d5`
+    and `qemu-system-x86_64.wasm`
+    `00cd2b141d965607e4836880d4ac8f17014d9178e9115f85466026ba0f1b03a0`.
+    Generic Chromium smoke with the subset disabled reached
+    `QEMU_WASM_LINUX_BOOT_OK` in `100787` ms
+    (`/tmp/qemu-wasm-generated-only-isolation/generic-browser-smoke-default.json`).
+    The current subset reached the same marker in `117284` ms
+    (`/tmp/qemu-wasm-generated-only-isolation/generic-browser-smoke-subset.json`).
+    Generated-only isolation reached the marker in `110353` ms
+    (`/tmp/qemu-wasm-generated-only-isolation/generic-browser-smoke-generated-only.json`)
+    with `generated_compiled=3`, `generated_executed=1979`,
+    `generated_cache_hits=1976`, and `generated_compile_failed=0`. The
+    generated path executes correctly, but it does not beat default TCI and
+    should remain measurement tooling until a different architecture can
+    remove the per-block generated-module overhead.
+  - [ ] Re-baseline Bus Engine OS `virtual-server` with the current non-debug
+    QEMU/WASM artifact before selecting the next optimization:
+    DoD is a Chromium run using the accepted Bus Engine OS `virtual-server`
+    kernel/rootfs fixture and the current QEMU artifact that records kernel
+    boot milestones, systemd service progress, idle/heartbeat state, rootfs
+    device mode, browser/QEMU attribution summaries, artifact hashes, and final
+    timeout or readiness state. The next implementation item must name the
+    measured QEMU-side bottleneck from this run before adding another CPU or
+    device optimization.
   - [x] Resolve the hot TB dispatch/chaining boundary:
     DoD is a design and implementation for hot blocks that currently fall
     back on `goto_ptr` and `goto_tb`, preserving QEMU's `tcg_qemu_tb_exec`

@@ -153,6 +153,10 @@ Options:
                     experiment; default QEMU execution remains strict
   --tci-wasm-subset
                     Enable the opt-in wasm64 TCI subset execution proof
+  --tci-wasm-generated-only
+                    With --tci-wasm-subset, run generated Wasm blocks when
+                    accepted and fall back directly to normal TCI for
+                    generated-unsupported blocks instead of the C subset
   --tci-wasm-subset-threshold N
                     TB executions before the subset path is attempted
                     (default: 1024)
@@ -245,6 +249,7 @@ function parseArgs(argv) {
     tcgHotblocksTop: 12,
     tciRelaxedMb: false,
     tciWasmSubset: false,
+    tciWasmGeneratedOnly: false,
     tciWasmSubsetInterval: 100000,
     tciWasmSubsetMaxOps: 512,
     tciWasmSubsetThreshold: 1024,
@@ -450,6 +455,11 @@ function parseArgs(argv) {
     } else if (arg === "--tci-wasm-subset") {
       options.tciWasmSubset = true;
       explicit.add("tciWasmSubset");
+    } else if (arg === "--tci-wasm-generated-only") {
+      options.tciWasmGeneratedOnly = true;
+      options.tciWasmSubset = true;
+      explicit.add("tciWasmGeneratedOnly");
+      explicit.add("tciWasmSubset");
     } else if (arg === "--tci-wasm-subset-interval") {
       options.tciWasmSubsetInterval = Number(argv[++i]);
       explicit.add("tciWasmSubsetInterval");
@@ -485,6 +495,7 @@ function parseArgs(argv) {
       "tcgHotblocks",
       "tciRelaxedMb",
       "tciWasmSubset",
+      "tciWasmGeneratedOnly",
     ],
     checksumFields: ["kernel", "initrd", "rootfs"],
     integerFields: [
@@ -1321,6 +1332,9 @@ export function browserSmokeUrl(options) {
   }
   if (options.tciWasmSubset) {
     url.searchParams.set("tciWasmSubset", "1");
+    if (options.tciWasmGeneratedOnly) {
+      url.searchParams.set("tciWasmGeneratedOnly", "1");
+    }
     url.searchParams.set(
       "tciWasmSubsetInterval",
       String(options.tciWasmSubsetInterval),
@@ -1430,6 +1444,7 @@ export function initialSmokeResult(options, browserVersion) {
       : 12,
     tciRelaxedMb: Boolean(options.tciRelaxedMb),
     tciWasmSubset: Boolean(options.tciWasmSubset),
+    tciWasmGeneratedOnly: Boolean(options.tciWasmGeneratedOnly),
     tciWasmSubsetInterval: Number.isInteger(options.tciWasmSubsetInterval)
       ? options.tciWasmSubsetInterval
       : 100000,

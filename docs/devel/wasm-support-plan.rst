@@ -5445,3 +5445,84 @@ This is still not a runnable wasm64 TCG backend and not a speed improvement.
 C backend integration remains required before an opt-in generic smoke speed
 gate is meaningful.  The default Chromium smoke gate must be re-run from a
 QEMU artifact once the C backend starts affecting runtime builds.
+
+Live Generated Lowering Rejection
+---------------------------------
+
+On 2026-07-02, an unpromoted runtime slice wired more of the deterministic
+lowering subset into the existing live ``tcg/tci.c`` generated-Wasm path.  The
+slice added forward non-crossing ``brcond``, local host-memory ``ld``/``st``,
+``ld32u``, ``st32``, ``tci_setcond32``, and ``mb`` only when
+``QEMU_TCI_RELAXED_MB=1`` was explicitly enabled.  Unsupported branch and
+memory shapes still fell back to TCI.
+
+The artifact built successfully with ``scripts/ci/wasm-build-artifacts-local.py``
+and produced:
+
+* ``qemu-system-x86_64.js`` =
+  ``c0a5e66e96103172c61e6677de99370a535c67070ae461662c17ef813f481b60``
+* ``qemu-system-x86_64.wasm`` =
+  ``508cbeea55f3561a66066d4c733ce771e5bd53b38f187c52062b6baa0807b8b9``
+
+Generic Chromium smoke with the subset disabled reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``92557`` ms:
+
+* ``/tmp/qemu-wasm-generated-hot-subset/generic-browser-smoke-default.json``
+* ``/tmp/qemu-wasm-generated-hot-subset/generic-browser-smoke-default.png``
+
+The opt-in run with ``--tci-wasm-subset --tci-relaxed-mb`` reached the same
+marker in ``102346`` ms:
+
+* ``/tmp/qemu-wasm-generated-hot-subset/generic-browser-smoke-subset-relaxed-mb.json``
+* ``/tmp/qemu-wasm-generated-hot-subset/generic-browser-smoke-subset-relaxed-mb.png``
+
+The final subset summary recorded ``executed=76978971``,
+``generated_compiled=4``, ``generated_executed=933``,
+``generated_compile_failed=0``, and remaining generated fallback ``st8=9690``.
+The runtime patch was removed because it regressed the generic smoke and did
+not create enough generated-Wasm coverage to justify a downstream Bus Engine
+OS proof.
+
+The next runtime measurement should isolate generated-Wasm execution from the
+slower C subset interpreter.  In that mode, generated-unsupported blocks should
+fall back directly to normal TCI.  If generated-only execution still does not
+beat default TCI with nonzero generated counters, the current per-block EM_JS
+generated-module path should stop expanding and a different measured QEMU-side
+acceleration approach should be promoted into ``PLAN.md``.
+
+Generated-Only Isolation Rejection
+----------------------------------
+
+On 2026-07-02, the generated-only measurement mode was implemented behind
+``QEMU_TCI_WASM_GENERATED_ONLY=1`` and the browser runner flag
+``--tci-wasm-generated-only``.  The mode still allows generated-Wasm eligible
+blocks to run, but generated-unsupported blocks return directly to the normal
+TCI interpreter instead of using the slower C subset path.
+
+The non-debug wasm64 artifact was rebuilt with
+``scripts/ci/wasm-build-artifacts-local.py`` and produced:
+
+* ``qemu-system-x86_64.js`` =
+  ``d08902173814be81e8783530e3537177b96fba6267ef01734de5d13b65a040d5``
+* ``qemu-system-x86_64.wasm`` =
+  ``00cd2b141d965607e4836880d4ac8f17014d9178e9115f85466026ba0f1b03a0``
+
+Three generic Chromium smokes used the same artifact, Linux kernel,
+initramfs, machine, CPU, memory, and marker:
+
+* default TCI reached ``QEMU_WASM_LINUX_BOOT_OK`` in ``100787`` ms:
+  ``/tmp/qemu-wasm-generated-only-isolation/generic-browser-smoke-default.json``
+* current subset reached the same marker in ``117284`` ms:
+  ``/tmp/qemu-wasm-generated-only-isolation/generic-browser-smoke-subset.json``
+* generated-only isolation reached the same marker in ``110353`` ms:
+  ``/tmp/qemu-wasm-generated-only-isolation/generic-browser-smoke-generated-only.json``
+
+Generated-only isolation recorded ``generated_compiled=3``,
+``generated_executed=1979``, ``generated_cache_hits=1976``, and
+``generated_compile_failed=0``.  This proves the isolated generated path can
+execute safely with fallback, but it still regresses the default smoke.  The
+per-block EM_JS generated-module path should not be expanded as the current
+performance solution.  The next QEMU/WASM performance step should re-baseline
+the Bus Engine OS ``virtual-server`` guest with the current non-debug artifact
+and select the next optimization from measured QEMU/browser attribution rather
+than from additional opcode-lowering guesses.
