@@ -6750,3 +6750,34 @@ attempt are enough to build a local check for early terminal ``goto_tb`` and
 ``exit_tb`` blocks; a browser measurement is not justified until that gate
 passes and the generated coverage prediction moves from tens of executions to
 thousands of executed generated TBs.
+
+W2m-c generated-output equivalence gate
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The deterministic generated-output equivalence gate is now
+``scripts/ci/wasm-generated-output-equivalence-test.mjs``.  It embeds
+trace-shaped TCI instruction words from the W2m-b run, runs a small reference
+interpreter over the same register and memory state, compiles the generated
+output shape into a local WebAssembly function, and compares:
+
+* generated status;
+* return target;
+* the 16 TCI registers;
+* representative memory touched by the trace-shaped block.
+
+This is intentionally a local gate, not a browser benchmark.  It catches
+encoding, ABI, register, memory, and dispatch semantic errors before another
+Chromium run is justified.
+
+Checks:
+
+* ``node --check scripts/ci/wasm-generated-output-equivalence-test.mjs``
+* ``node scripts/ci/wasm-generated-output-equivalence-test.mjs``
+
+The test passed with ``6`` fixture executions: ``4`` ``goto_tb`` terminal
+cases and ``2`` ``exit_tb`` terminal cases.  This completes the deterministic
+safety gate from W2m-c, but it does not improve the current browser estimate.
+The accepted fallback baseline remains the final W2m-b opt-in-guarded
+Chromium smoke at ``93186`` ms, which projects Bus Engine OS browser
+multi-user readiness at roughly ``34.7`` to ``45.8`` minutes until generated
+coverage increases by orders of magnitude.

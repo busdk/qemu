@@ -727,7 +727,7 @@ Engineering rules for this goal:
   and about `45.8` minutes through the `58` second boot-audit marker. The
   five-minute goal still needs roughly a `6.9x` to `9.2x` improvement from
   the current safe fallback path.
-- [ ] W2m-c - Add a deterministic generated-output equivalence gate before
+- [x] W2m-c - Add a deterministic generated-output equivalence gate before
   broad generated execution. DoD: use the W2m-b trace shapes to build a local
   semantic check that compares generated-block register, memory, and dispatch
   effects against the existing TCI interpreter for at least the early
@@ -735,7 +735,24 @@ Engineering rules for this goal:
   for encoding/ABI failures. The next browser measurement is allowed only
   after this deterministic gate passes and the generated coverage prediction
   names how the change can plausibly move from tens of executions to thousands
-  of executed generated TBs.
+  of executed generated TBs. Accepted slice evidence:
+  `scripts/ci/wasm-generated-output-equivalence-test.mjs` now embeds
+  W2m-b trace-shaped TCI instruction words, runs a reference interpreter over
+  the same register/memory state, compiles the generated-output shape into a
+  local WebAssembly function, and compares status, return target, registers,
+  and memory. The local gate passed with `6` fixture executions:
+  `4` `goto_tb` terminal cases and `2` `exit_tb` terminal cases. Checks:
+  `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs` and
+  `node scripts/ci/wasm-generated-output-equivalence-test.mjs`. This completes
+  the deterministic safety gate only; it does not move the current browser
+  estimate of about `34.7` to `45.8` minutes.
+- [ ] W2m-d - Quantify the generated-output availability gap before more
+  backend lowering. DoD: add or extract reason-level data that explains why
+  the W2m-b browser run translated hundreds of TBs but exposed only `13`
+  generated-output TBs and `24` generated attempts, then record a coverage
+  prediction for the next implementation item. A browser run is not allowed
+  for W2m-d unless the local data names a mechanism that can plausibly move
+  generated coverage from tens of executions to thousands.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and
