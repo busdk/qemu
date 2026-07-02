@@ -33,6 +33,10 @@ typedef struct TCGWasm64Counters {
     uint64_t translated_ops;
     uint64_t translated_fallback_markers;
     uint64_t translated_metadata_misses;
+    uint64_t translated_profiled_tbs;
+    uint64_t translated_lowerable_tbs;
+    uint64_t translated_profile_supported_ops;
+    uint64_t translated_profile_unsupported_ops;
     uint64_t fallback_unsupported;
     uint64_t fallback_helper;
     uint64_t fallback_qemu_load;
@@ -54,12 +58,17 @@ typedef enum TCGWasm64FallbackReason {
 typedef enum TCGWasm64TBMetadataFlags {
     TCG_WASM64_TB_METADATA_VALID = 1u << 0,
     TCG_WASM64_TB_METADATA_FALLBACK = 1u << 1,
+    TCG_WASM64_TB_METADATA_LOWERING_PROFILE = 1u << 2,
+    TCG_WASM64_TB_METADATA_PROFILE_LOWERABLE = 1u << 3,
 } TCGWasm64TBMetadataFlags;
 
 typedef enum TCGWasm64TranslateFallbackReason {
     TCG_WASM64_TRANSLATE_FALLBACK_NONE = 0,
     TCG_WASM64_TRANSLATE_FALLBACK_NO_WASM_EMITTER = 1,
+    TCG_WASM64_TRANSLATE_FALLBACK_UNSUPPORTED_OPCODE = 2,
 } TCGWasm64TranslateFallbackReason;
+
+#define TCG_WASM64_LOWERING_PROFILE_HOTBLOCK 1u
 
 /*
  * Side-band metadata recorded while the wasm64 target emits the fallback TCI
@@ -77,6 +86,9 @@ typedef struct TCGWasm64TBMetadata {
     uint32_t last_op;
     uint32_t first_unsupported_op;
     uint32_t fallback_reason;
+    uint32_t lowering_profile;
+    uint32_t supported_op_count;
+    uint32_t unsupported_op_count;
 } TCGWasm64TBMetadata;
 
 void tcg_wasm64_counters_reset(TCGWasm64Counters *counters);

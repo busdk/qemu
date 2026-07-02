@@ -23,15 +23,25 @@ assert.match(target, /tcg_wasm64_translate_note_tci_word\(word\)/);
 
 assert.match(header, /typedef struct TCGWasm64TBMetadata/);
 assert.match(header, /TCG_WASM64_TB_METADATA_FALLBACK/);
+assert.match(header, /TCG_WASM64_TB_METADATA_LOWERING_PROFILE/);
+assert.match(header, /TCG_WASM64_TB_METADATA_PROFILE_LOWERABLE/);
 assert.match(header, /TCG_WASM64_TRANSLATE_FALLBACK_NO_WASM_EMITTER/);
+assert.match(header, /TCG_WASM64_TRANSLATE_FALLBACK_UNSUPPORTED_OPCODE/);
+assert.match(header, /TCG_WASM64_LOWERING_PROFILE_HOTBLOCK/);
 assert.match(header, /tcg_wasm64_translate_lookup\(const void \*tb_ptr\)/);
 
 assert.match(runtime, /TCG_WASM64_TRANSLATE_CACHE_SIZE/);
 assert.match(runtime, /static __thread TCGWasm64TranslateEntry translate_cache/);
+assert.match(runtime, /tcg_wasm64_translate_op_supported/);
+assert.match(runtime, /case INDEX_op_mb:/);
+assert.match(runtime, /case INDEX_op_tci_setcond32:/);
+assert.match(runtime, /case INDEX_op_tci_qemu_ld_rrr:/);
 assert.match(runtime, /void tcg_wasm64_translate_begin\(const void \*tb_ptr\)/);
 assert.match(runtime, /void tcg_wasm64_translate_note_tci_word\(uint32_t word\)/);
 assert.match(runtime, /const TCGWasm64TBMetadata \*tcg_wasm64_translate_lookup/);
 assert.match(runtime, /translated_fallback_markers/);
 assert.match(runtime, /translated_metadata_misses/);
+assert.match(runtime, /translated_profile_supported_ops/);
+assert.match(runtime, /translated_profile_unsupported_ops/);
 
 console.log("wasm64 translate metadata contract: ok");
