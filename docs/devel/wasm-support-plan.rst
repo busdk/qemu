@@ -5618,3 +5618,47 @@ silent.  The next accepted performance patch must therefore improve CPU
 execution throughput for this workload, preserve strict TCI fallback, and beat
 the strict-TCI generic smoke gate before it is treated as a Bus Engine OS boot
 solution.
+
+Opt-In TCI Fast Feature Gates
+-----------------------------
+
+On 2026-07-02, the TCI loop gained an opt-in Emscripten-only fast-gate mode.
+``QEMU_TCI_FAST_GATES=1`` caches the disabled/enabled state for optional
+translation-block boundary diagnostics and generated-subset probes before
+entering the interpreter loop.  With the flag disabled, the default path keeps
+the previous behavior and still calls the existing default-off feature probes
+at each translation-block boundary.  With the flag enabled, disabled optional
+features are skipped without repeatedly checking their environment-backed
+guards.  The browser smoke runner exposes this through ``--tci-fast-gates``.
+
+The measured artifact was built with Emscripten 4.0.10, wasm64,
+``x86_64-softmmu``, TCI, ``-Doptimization=2``, and ``-Ddebug=false``:
+
+* ``qemu-system-x86_64.js`` =
+  ``e462c4f543062b271dfca8f7a50f2e6576f1be490b6c558281541e510847c9c6``
+* ``qemu-system-x86_64.wasm`` =
+  ``f29ecf0bf72cdb5d5fd32bb832d2fb06389bea6d0d1cf5527818fece5a398989``
+* manifest =
+  ``ee222826732a2887d9d0f3a578e05fc09fbe85c3f61e4f26a5bb749ffae0f0f6``
+
+The same-artifact generic Chromium ``149.0.7827.55`` smoke comparison used
+the existing tiny Linux initramfs proof:
+
+* default path:
+  ``/tmp/qemu-wasm-fast-gates/generic-browser-smoke-default.json`` reached
+  ``QEMU_WASM_LINUX_BOOT_OK`` in ``91269`` ms;
+* fast-gates path:
+  ``/tmp/qemu-wasm-fast-gates/generic-browser-smoke-fast-gates.json`` reached
+  the same marker in ``89291`` ms.
+
+This is a small generic CPU-boundary win, so the opt-in fast-gate plumbing is
+kept.  It is not the Bus Engine OS readiness fix.  The downstream Bus Engine
+OS ``virtual-server`` proof with the same artifact and ``--tci-fast-gates``
+wrote
+``/tmp/qemu-wasm-fast-gates/bus-engine-os-virtual-server-fast-gates.json``.
+It reached the kernel at ``59737`` ms, discovered ``/dev/vda`` at ``82765``
+ms, mounted rootfs at ``110854`` ms, started init at ``112311`` ms, set the
+hostname at ``124940`` ms, and then failed the guest-origin idle timeout at
+``310470`` ms with the same final guest line:
+``systemd[1]: Hostname set to <bus-engine-os>.``  The remaining performance
+work is still the post-hostname systemd CPU-throughput gap.

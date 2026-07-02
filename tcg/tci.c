@@ -48,6 +48,7 @@ __thread uintptr_t tci_tb_ptr;
 #define TCI_WASM_SUBSET_CACHE_SIZE 4096
 
 static bool tci_relaxed_mb;
+static bool tci_fast_gates;
 static bool tci_progress;
 static bool tci_wasm_subset;
 static bool tci_wasm_generated_only;
@@ -216,6 +217,22 @@ static bool tci_relaxed_mb_enabled(void)
     return tci_relaxed_mb;
 }
 
+static bool tci_fast_gates_enabled(void)
+{
+    static gsize initialized;
+
+    if (unlikely(g_once_init_enter(&initialized))) {
+        char *owned;
+        const char *raw = tci_getenv("QEMU_TCI_FAST_GATES", &owned);
+
+        tci_fast_gates = tci_parse_bool_env(raw);
+        free(owned);
+        g_once_init_leave(&initialized, 1);
+    }
+
+    return tci_fast_gates;
+}
+
 static bool tci_wasm_subset_enabled(void)
 {
     static gsize initialized;
@@ -305,11 +322,26 @@ static void tci_progress_tb_entry(const uint32_t *tb_ptr)
     }
 }
 
+static void tci_progress_tb_entry_active(const uint32_t *tb_ptr)
+{
+    tci_progress_tb_entries++;
+    if (tci_progress_tb_entries >= tci_progress_next_report) {
+        tci_progress_report("interval", tb_ptr);
+        tci_progress_next_report =
+            tci_progress_tb_entries + tci_progress_interval;
+    }
+}
+
 static void tci_progress_dispatch(void)
 {
     if (unlikely(tci_progress_enabled())) {
         tci_progress_dispatches++;
     }
+}
+
+static void tci_progress_dispatch_active(void)
+{
+    tci_progress_dispatches++;
 }
 
 static inline void tci_mb(void)
@@ -327,12 +359,36 @@ static inline void tci_mb(void)
     smp_mb();
 }
 #else
+static inline bool tci_fast_gates_enabled(void)
+{
+    return false;
+}
+
+static inline bool tci_progress_enabled(void)
+{
+    return false;
+}
+
+static inline bool tci_wasm_subset_enabled(void)
+{
+    return false;
+}
+
 static inline void tci_progress_tb_entry(const uint32_t *tb_ptr)
 {
     (void)tb_ptr;
 }
 
+static inline void tci_progress_tb_entry_active(const uint32_t *tb_ptr)
+{
+    (void)tb_ptr;
+}
+
 static inline void tci_progress_dispatch(void)
+{
+}
+
+static inline void tci_progress_dispatch_active(void)
 {
 }
 
@@ -1727,6 +1783,7 @@ static TCIWasmSubsetStatus tci_wasm_subset_try_exec(const uint32_t *tb_start,
     tci_wasm_subset_unsupported(entry, NB_OPS);
     return TCI_WASM_SUBSET_UNSUPPORTED;
 }
+
 #else
 typedef enum TCIWasmSubsetStatus {
     TCI_WASM_SUBSET_UNSUPPORTED,
@@ -1762,6 +1819,9 @@ uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
     uintptr_t subset_ret;
     bool at_tb_start = true;
     bool carry = false;
+    bool fast_gates = tci_fast_gates_enabled();
+    bool progress_active = fast_gates && tci_progress_enabled();
+    bool wasm_subset_active = fast_gates && tci_wasm_subset_enabled();
 
     regs[TCG_AREG0] = (tcg_target_ulong)env;
     regs[TCG_REG_CALL_STACK] = (uintptr_t)stack;
@@ -1781,18 +1841,39 @@ uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
         void *ptr;
 
         if (at_tb_start) {
-            tci_progress_tb_entry(tb_ptr);
-            switch (tci_wasm_subset_try_exec(tb_ptr, regs, &subset_ret)) {
-            case TCI_WASM_SUBSET_EXIT:
-                return subset_ret;
-            case TCI_WASM_SUBSET_DISPATCH:
-                tb_ptr = (const uint32_t *)subset_ret;
-                continue;
-            case TCI_WASM_SUBSET_UNSUPPORTED:
+            if (fast_gates) {
+                if (progress_active) {
+                    tci_progress_tb_entry_active(tb_ptr);
+                }
+                if (wasm_subset_active) {
+                    switch (tci_wasm_subset_try_exec(tb_ptr, regs,
+                                                     &subset_ret)) {
+                    case TCI_WASM_SUBSET_EXIT:
+                        return subset_ret;
+                    case TCI_WASM_SUBSET_DISPATCH:
+                        tb_ptr = (const uint32_t *)subset_ret;
+                        continue;
+                    case TCI_WASM_SUBSET_UNSUPPORTED:
+                        break;
+                    default:
+                        g_assert_not_reached();
+                    }
+                }
                 at_tb_start = false;
-                break;
-            default:
-                g_assert_not_reached();
+            } else {
+                tci_progress_tb_entry(tb_ptr);
+                switch (tci_wasm_subset_try_exec(tb_ptr, regs, &subset_ret)) {
+                case TCI_WASM_SUBSET_EXIT:
+                    return subset_ret;
+                case TCI_WASM_SUBSET_DISPATCH:
+                    tb_ptr = (const uint32_t *)subset_ret;
+                    continue;
+                case TCI_WASM_SUBSET_UNSUPPORTED:
+                    at_tb_start = false;
+                    break;
+                default:
+                    g_assert_not_reached();
+                }
             }
         }
 
@@ -2194,7 +2275,11 @@ uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
         case INDEX_op_goto_tb:
             tci_args_l(insn, tb_ptr, &ptr);
             tb_ptr = *(void **)ptr;
-            tci_progress_dispatch();
+            if (progress_active) {
+                tci_progress_dispatch_active();
+            } else if (!fast_gates) {
+                tci_progress_dispatch();
+            }
             at_tb_start = true;
             break;
 
@@ -2205,7 +2290,11 @@ uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
                 return 0;
             }
             tb_ptr = ptr;
-            tci_progress_dispatch();
+            if (progress_active) {
+                tci_progress_dispatch_active();
+            } else if (!fast_gates) {
+                tci_progress_dispatch();
+            }
             at_tb_start = true;
             break;
 

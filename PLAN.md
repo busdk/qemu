@@ -519,6 +519,28 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   measured CPU-side bottleneck in this plan. Do not continue the rejected
   per-block `EM_JS` generated-module path unless new evidence shows it can
   beat strict TCI on the generic smoke gate.
+- [x] Measure opt-in TCI fast feature gates:
+  DoD is an Emscripten/wasm64 `x86_64-softmmu` artifact with
+  `QEMU_TCI_FAST_GATES=1` support, runner plumbing through
+  `--tci-fast-gates`, a passing default generic Chromium smoke, a passing
+  generic Chromium smoke with `--tci-fast-gates`, and a timing comparison
+  against the accepted default-path baseline. The implementation must leave
+  default behavior unchanged, keep existing progress/subset diagnostics
+  available when explicitly enabled, and be rejected in this plan if the
+  optimized generic smoke does not beat the same-artifact default path.
+  Accepted evidence on 2026-07-02: artifact
+  `/tmp/qemu-wasm-fast-gates/qemu-system-x86_64.{js,wasm}` was built with
+  `-Doptimization=2 -Ddebug=false`; hashes were
+  `qemu-system-x86_64.js=e462c4f543062b271dfca8f7a50f2e6576f1be490b6c558281541e510847c9c6`
+  and
+  `qemu-system-x86_64.wasm=f29ecf0bf72cdb5d5fd32bb832d2fb06389bea6d0d1cf5527818fece5a398989`.
+  Generic Chromium `149.0.7827.55` smoke reached
+  `QEMU_WASM_LINUX_BOOT_OK` in `91269` ms by default and `89291` ms with
+  `--tci-fast-gates`, so the opt-in gate cache is a small generic win and
+  default behavior remains unchanged. The same artifact still failed the Bus
+  Engine OS `virtual-server` proof with `--tci-fast-gates`, idling after the
+  hostname line at `310470` ms; this does not complete the broader
+  post-hostname CPU-throughput fix.
 - [x] Implement the first evidence-backed acceleration slice:
   DoD is an initial hot-TB WebAssembly translation slice modeled on
   `ktock/qemu-wasm` if CPU interpreter cost is the measured blocker, or the

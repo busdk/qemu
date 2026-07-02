@@ -149,6 +149,7 @@ Options:
                      opcodes; 0 means unlimited (default: 134217728)
   --tcg-hotblocks-top N
                      Maximum hotspot entries per summary (default: 12)
+  --tci-fast-gates  Enable opt-in TCI translated-block feature-gate caching
   --tci-relaxed-mb  Enable the Emscripten/TCI-only relaxed memory-barrier
                     experiment; default QEMU execution remains strict
   --tci-progress    Enable opt-in TCI translation-block progress summaries
@@ -252,6 +253,7 @@ function parseArgs(argv) {
     tcgHotblocksInterval: 10000,
     tcgHotblocksOpSample: 1,
     tcgHotblocksTop: 12,
+    tciFastGates: false,
     tciRelaxedMb: false,
     tciProgress: false,
     tciProgressInterval: 100000,
@@ -456,6 +458,9 @@ function parseArgs(argv) {
     } else if (arg === "--tcg-hotblocks-top") {
       options.tcgHotblocksTop = Number(argv[++i]);
       explicit.add("tcgHotblocksTop");
+    } else if (arg === "--tci-fast-gates") {
+      options.tciFastGates = true;
+      explicit.add("tciFastGates");
     } else if (arg === "--tci-relaxed-mb") {
       options.tciRelaxedMb = true;
       explicit.add("tciRelaxedMb");
@@ -506,6 +511,7 @@ function parseArgs(argv) {
       "requireDisplayOutput",
       "screenshotFullPage",
       "tcgHotblocks",
+      "tciFastGates",
       "tciRelaxedMb",
       "tciProgress",
       "tciWasmSubset",
@@ -1349,6 +1355,9 @@ export function browserSmokeUrl(options) {
   if (options.tciRelaxedMb) {
     url.searchParams.set("tciRelaxedMb", "1");
   }
+  if (options.tciFastGates) {
+    url.searchParams.set("tciFastGates", "1");
+  }
   if (options.tciProgress) {
     url.searchParams.set("tciProgress", "1");
     url.searchParams.set(
@@ -1468,6 +1477,7 @@ export function initialSmokeResult(options, browserVersion) {
     tcgHotblocksTop: Number.isInteger(options.tcgHotblocksTop)
       ? options.tcgHotblocksTop
       : 12,
+    tciFastGates: Boolean(options.tciFastGates),
     tciRelaxedMb: Boolean(options.tciRelaxedMb),
     tciProgress: Boolean(options.tciProgress),
     tciProgressInterval: Number.isInteger(options.tciProgressInterval)

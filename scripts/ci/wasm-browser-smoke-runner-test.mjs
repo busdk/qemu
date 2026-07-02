@@ -743,6 +743,40 @@ for (const status of [
     qemuArgs: [],
     rootfs: null,
     rootfsDevice: "virtio-mmio",
+    tciFastGates: true,
+    timeoutMs: 30000,
+    visualMarker: "",
+  });
+
+  assert.equal(url.searchParams.get("tciFastGates"), "1");
+}
+
+{
+  const url = browserSmokeUrl({
+    allowSerialFallback: true,
+    appendExtra: "",
+    cpu: "Nehalem",
+    display: "none",
+    displayDevice: "default",
+    expectedResolution: "",
+    expectText: [],
+    focusDisplay: false,
+    host: "localhost",
+    initrd: "/tmp/initramfs.cpio.gz",
+    keyboardAfterText: "",
+    keyboardText: "",
+    kernelAppend: null,
+    machine: "microvm,acpi=off",
+    marker,
+    maxOutputBytes: 8192,
+    memory: "256M",
+    network: "none",
+    port: 8020,
+    powerOperation: "",
+    powerTimeoutMs: 30000,
+    qemuArgs: [],
+    rootfs: null,
+    rootfsDevice: "virtio-mmio",
     tciProgress: true,
     tciProgressInterval: 2000000,
     timeoutMs: 30000,
@@ -1019,6 +1053,7 @@ for (const status of [
       interactiveOnly: false,
     },
     timeoutMs: 180000,
+    tciFastGates: true,
     tciProgress: true,
     tciProgressInterval: 2000000,
     tciWasmSubset: true,
@@ -1061,6 +1096,7 @@ for (const status of [
   assert.equal(result.requireDisplayOutput, true);
   assert.equal(result.displayMinNonblackPixels, 4);
   assert.equal(result.rootfsDevice, "virtio-pci");
+  assert.equal(result.tciFastGates, true);
   assert.equal(result.tciProgress, true);
   assert.equal(result.tciProgressInterval, 2000000);
   assert.equal(result.tciWasmSubset, true);

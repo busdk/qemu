@@ -1397,6 +1397,7 @@ function buildConfig() {
     tcgHotblocksOpLimit: numberOption("tcgHotblocksOpLimit", 134217728),
     tcgHotblocksOpSample: numberOption("tcgHotblocksOpSample", 1),
     tcgHotblocksTop: numberOption("tcgHotblocksTop", 12),
+    tciFastGates: boolOption("tciFastGates", false),
     tciRelaxedMb: boolOption("tciRelaxedMb", false),
     tciProgress: boolOption("tciProgress", false),
     tciProgressInterval: numberOption("tciProgressInterval", 100000),
@@ -1579,6 +1580,7 @@ async function run() {
       lastSummary: null,
     },
     tci: {
+      fastGates: Boolean(config.tciFastGates),
       relaxedMb: Boolean(config.tciRelaxedMb),
       progress: {
         enabled: Boolean(config.tciProgress),
@@ -1599,8 +1601,10 @@ async function run() {
         summaries: [],
         lastSummary: null,
       },
-      env: (config.tciRelaxedMb || config.tciProgress ||
+      env: (config.tciFastGates || config.tciRelaxedMb ||
+          config.tciProgress ||
           config.tciWasmSubset) ? {
+        ...(config.tciFastGates ? { QEMU_TCI_FAST_GATES: "1" } : {}),
         ...(config.tciRelaxedMb ? { QEMU_TCI_RELAXED_MB: "1" } : {}),
         ...(config.tciProgress ? {
           QEMU_TCI_PROGRESS: "1",
@@ -1943,6 +1947,7 @@ async function run() {
     QEMU_WASM_PERF_ATTRIBUTION_INTERVAL: String(config.performanceAttributionInterval),
   } : {};
   const tciEnv = {
+    ...(config.tciFastGates ? { QEMU_TCI_FAST_GATES: "1" } : {}),
     ...(config.tciRelaxedMb ? { QEMU_TCI_RELAXED_MB: "1" } : {}),
     ...(config.tciProgress ? {
       QEMU_TCI_PROGRESS: "1",
