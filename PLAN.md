@@ -128,6 +128,26 @@ run that reaches a weaker marker than normal multi-user readiness.
   tests cover supported integer/branch/load/store/CSR exits, counters report
   generated versus fallback execution, and x86_64 TCI browser smoke is not
   regressed.
+  - [x] R3a - Add the fail-closed generated-exit taxonomy to the wasm64
+    backend counter contract before enabling any generated RISC-V execution.
+    DoD: `TCGWasm64Counters` exposes the R2 exit classes, summaries report
+    per-exit counts, parser tests cover the JSON shape, and no execution flow
+    changes or generated hot path are enabled. Accepted 2026-07-03:
+    `tcg/wasm64.h` exposes `TCGWasm64ExitReason` and per-exit counters,
+    `tcg/wasm64.c` reports `generated_exits`, the browser smoke parser test
+    covers the JSON shape, and `tcg/tci.c` keeps helper-name lookup guarded
+    for TCI-only Emscripten builds. Checks:
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+    `git diff --check`, and
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-r3a
+    --target riscv64` passed. Artifact hashes:
+    `qemu-system-riscv64.js`
+    `09661031708135586564f43d6bf879ef49442124b4811eb0c8244943af96a2bf`,
+    `qemu-system-riscv64.wasm`
+    `3caa09ef368be264c1989c0e72fb7a14b67bb6c2bb2ab234b5c5e903e8686b07`,
+    manifest
+    `5b9b0f594e0f85ed6c604a221124c0e0b10114c7bae2d7f8cf546a757868b288`.
 - [ ] R4 - Prove performance before Bus Engine OS long runs. DoD: a same-commit
   Chromium generic RISC-V accelerator smoke is at least 25% faster than
   default RISC-V TCI, and microbenchmarks show at least 3x over RISC-V TCI for

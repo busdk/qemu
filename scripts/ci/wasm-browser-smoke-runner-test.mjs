@@ -713,6 +713,17 @@ for (const status of [
     generated_coverage_numerator: 21,
     generated_coverage_denominator: 1000,
     generated_coverage_ppm: 21000,
+    generated_exits: {
+      budget: 5,
+      mmio: 1,
+      tlb_miss: 2,
+      interrupt: 3,
+      csr: 4,
+      invalid: 0,
+      invalidation: 0,
+      unsupported: 6,
+      fatal: 0,
+    },
     translated_tbs: 8,
     translated_ops: 144,
     translated_fallback_markers: 8,
@@ -726,6 +737,17 @@ for (const status of [
   assert.equal(parsed.generated_coverage_numerator, 21);
   assert.equal(parsed.generated_coverage_denominator, 1000);
   assert.equal(parsed.generated_coverage_ppm, 21000);
+  assert.deepEqual(parsed.generated_exits, {
+    budget: 5,
+    mmio: 1,
+    tlb_miss: 2,
+    interrupt: 3,
+    csr: 4,
+    invalid: 0,
+    invalidation: 0,
+    unsupported: 6,
+    fatal: 0,
+  });
   assert.equal(parsed.translated_tbs, 8);
   assert.equal(parsed.translated_ops, 144);
   assert.equal(parsed.translated_fallback_markers, 8);

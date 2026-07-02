@@ -15,6 +15,19 @@
 
 typedef struct CPUArchState CPUArchState;
 
+typedef enum TCGWasm64ExitReason {
+    TCG_WASM64_EXIT_BUDGET,
+    TCG_WASM64_EXIT_MMIO,
+    TCG_WASM64_EXIT_TLB_MISS,
+    TCG_WASM64_EXIT_INTERRUPT,
+    TCG_WASM64_EXIT_CSR,
+    TCG_WASM64_EXIT_INVALID,
+    TCG_WASM64_EXIT_INVALIDATION,
+    TCG_WASM64_EXIT_UNSUPPORTED,
+    TCG_WASM64_EXIT_FATAL,
+    TCG_WASM64_EXIT__MAX,
+} TCGWasm64ExitReason;
+
 /*
  * Execution counters reported by the experimental backend.
  *
@@ -29,6 +42,7 @@ typedef struct TCGWasm64Counters {
     uint64_t generated_cache_hits;
     uint64_t generated_coverage_numerator;
     uint64_t generated_coverage_denominator;
+    uint64_t generated_exits[TCG_WASM64_EXIT__MAX];
     uint64_t translated_tbs;
     uint64_t translated_ops;
     uint64_t translated_fallback_markers;
@@ -134,6 +148,8 @@ void tcg_wasm64_counters_add(TCGWasm64Counters *dst,
                              const TCGWasm64Counters *src);
 void tcg_wasm64_count_fallback(TCGWasm64Counters *counters,
                                TCGWasm64FallbackReason reason);
+void tcg_wasm64_count_exit(TCGWasm64Counters *counters,
+                           TCGWasm64ExitReason reason);
 void tcg_wasm64_translate_begin(const void *tb_ptr);
 void tcg_wasm64_translate_note_tci_op(uint32_t op);
 void tcg_wasm64_translate_note_tci_insn(uint32_t op, uint32_t insn);

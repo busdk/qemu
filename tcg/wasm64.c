@@ -53,6 +53,9 @@ void tcg_wasm64_counters_add(TCGWasm64Counters *dst,
     dst->generated_cache_hits += src->generated_cache_hits;
     dst->generated_coverage_numerator += src->generated_coverage_numerator;
     dst->generated_coverage_denominator += src->generated_coverage_denominator;
+    for (size_t i = 0; i < ARRAY_SIZE(dst->generated_exits); i++) {
+        dst->generated_exits[i] += src->generated_exits[i];
+    }
     dst->translated_tbs += src->translated_tbs;
     dst->translated_ops += src->translated_ops;
     dst->translated_fallback_markers += src->translated_fallback_markers;
@@ -192,6 +195,19 @@ void tcg_wasm64_count_fallback(TCGWasm64Counters *counters,
     default:
         g_assert_not_reached();
     }
+}
+
+void tcg_wasm64_count_exit(TCGWasm64Counters *counters,
+                           TCGWasm64ExitReason reason)
+{
+    if (!counters) {
+        return;
+    }
+    if (reason < 0 || reason >= TCG_WASM64_EXIT__MAX) {
+        counters->generated_exits[TCG_WASM64_EXIT_FATAL]++;
+        return;
+    }
+    counters->generated_exits[reason]++;
 }
 
 static bool tcg_wasm64_translate_op_supported(uint32_t op)
@@ -543,6 +559,11 @@ void tcg_wasm64_report_summary(const char *reason,
             "\"generated_coverage_numerator\":%" PRIu64 ","
             "\"generated_coverage_denominator\":%" PRIu64 ","
             "\"generated_coverage_ppm\":%" PRIu64 ","
+            "\"generated_exits\":{\"budget\":%" PRIu64 ","
+            "\"mmio\":%" PRIu64 ",\"tlb_miss\":%" PRIu64 ","
+            "\"interrupt\":%" PRIu64 ",\"csr\":%" PRIu64 ","
+            "\"invalid\":%" PRIu64 ",\"invalidation\":%" PRIu64 ","
+            "\"unsupported\":%" PRIu64 ",\"fatal\":%" PRIu64 "},"
             "\"translated_tbs\":%" PRIu64 ","
             "\"translated_ops\":%" PRIu64 ","
             "\"translated_fallback_markers\":%" PRIu64 ","
@@ -589,6 +610,15 @@ void tcg_wasm64_report_summary(const char *reason,
             counters->generated_coverage_numerator,
             counters->generated_coverage_denominator,
             generated_coverage_ppm,
+            counters->generated_exits[TCG_WASM64_EXIT_BUDGET],
+            counters->generated_exits[TCG_WASM64_EXIT_MMIO],
+            counters->generated_exits[TCG_WASM64_EXIT_TLB_MISS],
+            counters->generated_exits[TCG_WASM64_EXIT_INTERRUPT],
+            counters->generated_exits[TCG_WASM64_EXIT_CSR],
+            counters->generated_exits[TCG_WASM64_EXIT_INVALID],
+            counters->generated_exits[TCG_WASM64_EXIT_INVALIDATION],
+            counters->generated_exits[TCG_WASM64_EXIT_UNSUPPORTED],
+            counters->generated_exits[TCG_WASM64_EXIT_FATAL],
             counters->translated_tbs,
             counters->translated_ops,
             counters->translated_fallback_markers,

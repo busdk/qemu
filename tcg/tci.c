@@ -932,7 +932,11 @@ static void tci_wasm_generated_trace_call_event(const char *reason,
                                                 void *const *call_slots)
 {
     TCGOpcode opc = extract32(insn, 0, 8);
+#ifdef CONFIG_TCG_WASM64_BACKEND
     const TCGHelperInfo *helper_info = tcg_lookup_helper_trace_info(func);
+#else
+    const TCGHelperInfo *helper_info = NULL;
+#endif
     const char *helper_name = helper_info != NULL ? helper_info->name : "";
     unsigned helper_flags = helper_info != NULL ? helper_info->flags : 0;
     uint64_t args[4] = { 0, 0, 0, 0 };
