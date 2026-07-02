@@ -5257,3 +5257,34 @@ Validation on 2026-07-02:
   ``/tmp/qemu-wasm64-backend-skeleton-tci/generic-browser-smoke-default.json``
   at 80436 ms.  The same run recorded the kernel banner at 31397 ms and init
   at 78824 ms.
+
+Deterministic TB module emitter
+===============================
+
+The next backend-shaped step adds a small deterministic module emitter test
+without making the backend runnable.  ``scripts/ci/wasm-tb-module-emitter.mjs``
+emits a 111-byte generated-TB module with the contract required by the first
+real lowering slice:
+
+* import ``env.memory``;
+* import helper function ``h.helper0``;
+* export ``start(ctx)``;
+* load two i64 fields from the context;
+* store their sum back to the context;
+* call the helper import;
+* store and return the helper dispatch result.
+
+This test is intentionally independent from a full QEMU boot.  It verifies the
+module shape and context/helper boundary that the eventual wasm64 backend
+should emit for supported translation-block fragments, while strict TCI remains
+the only runnable QEMU path.
+
+Validation on 2026-07-02:
+
+* ``node --check scripts/ci/wasm-tb-module-emitter.mjs`` passed.
+* ``node --check scripts/ci/wasm-tb-module-emitter-test.mjs`` passed.
+* ``node scripts/ci/wasm-tb-module-emitter-test.mjs`` passed.
+* ``node scripts/ci/wasm-tb-module-emitter.mjs`` reported ``ok: true``, module
+  size 111 bytes, imports ``h.helper0`` and ``env.memory``, export ``start``,
+  stored sum ``42``, helper opcode ``7`` with value ``42``, and helper dispatch
+  result ``25769803818``.

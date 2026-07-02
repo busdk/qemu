@@ -1202,10 +1202,21 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
       Chromium 141 browser smoke reached `QEMU_WASM_LINUX_BOOT_OK` in
       `/tmp/qemu-wasm64-backend-skeleton-tci/generic-browser-smoke-default.json`
       at 80436 ms, with kernel banner at 31397 ms and init at 78824 ms.
-    - [ ] Add deterministic module-emitter tests for the backend skeleton:
+    - [x] Add deterministic module-emitter tests for the backend skeleton:
       DoD is a host-side test that emits and validates a minimal wasm64 TB
       module with `env.memory`, a `start(ctx)` function, context loads/stores,
       and a helper import table shape, without requiring a full QEMU boot.
+      Accepted implementation on 2026-07-02: `scripts/ci/wasm-tb-module-emitter.mjs`
+      emits a deterministic 111-byte generated-TB module that imports
+      `env.memory`, imports `h.helper0`, exports `start`, loads two i64
+      context fields, stores their sum, calls the helper import, stores the
+      helper result, and returns it. `scripts/ci/wasm-tb-module-emitter-test.mjs`
+      validates the module imports/exports and proves `start(ctx)` stores sum
+      `42`, calls helper opcode `7` with value `42`, and returns/stores
+      dispatch result `25769803818`. Verification: `node --check
+      scripts/ci/wasm-tb-module-emitter.mjs`, `node --check
+      scripts/ci/wasm-tb-module-emitter-test.mjs`, and `node
+      scripts/ci/wasm-tb-module-emitter-test.mjs` passed.
     - [ ] Add the first backend-shaped lowering subset behind the gated
       skeleton:
       DoD is lowering for integer ALU, constant moves, register moves,
