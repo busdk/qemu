@@ -5879,3 +5879,120 @@ The final exported ``wasm64Tcg`` summary in that browser result reported:
 
 This completes the W2b slice only.  The full backend item remains open until
 the lowering coverage gate and the same-commit generic speed gate are accepted.
+
+Same-Commit Backend Speed Gate Failure
+--------------------------------------
+
+On 2026-07-02, W3 was attempted from QEMU commit
+``5f6431526d412aecf36f9d25d6f0a5450f3dc6ca`` using back-to-back generic
+Chromium smoke runs in the same ``mcr.microsoft.com/playwright:v1.56.1-noble``
+container.  Chromium reported ``141.0.7390.37`` for both runs.
+
+The same-commit default TCI artifact was built with::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-default-tci \
+    --jobs auto
+
+It produced:
+
+* ``qemu-system-x86_64.js`` =
+  ``2e4f82e69af410f5eef63fea7def6eb118fb8b3b0bfbe37867feb482382e89d0``
+* ``qemu-system-x86_64.wasm`` =
+  ``819b89f3e4655c49ab826d5760be07a51b29168aadaa7ad6e1967c0655a6fc6c``
+* manifest =
+  ``2266d95988c96fdab4cbba6ff5a73677f678ab2074baf92bac06225331c68bb2``
+
+The default TCI generic TuxBoot smoke reached ``QEMU_WASM_LINUX_BOOT_OK`` in
+``91207`` ms and wrote:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-default-tci-smoke/wasm-browser-smoke-result.json``
+
+The backend artifact from W2b produced:
+
+* ``qemu-system-x86_64.js`` =
+  ``07dfe2c64a7626d9107a0778094eff428d0a26de99849ff442deb2e15f458846``
+* ``qemu-system-x86_64.wasm`` =
+  ``e8d48e5a64cedf342549d5cfd84f036752ba2275c35132804a69a5f3cb540418``
+* manifest =
+  ``d0fee6ae386cb3607c11ef74064efc92369b3ceca5a2f22cf17ad4287b425e7c``
+
+The backend generic TuxBoot smoke reached ``QEMU_WASM_LINUX_BOOT_OK`` in
+``100142`` ms and wrote:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-backend-context-smoke/wasm-browser-smoke-result.json``
+
+The backend run was about ``9.8%`` slower than default TCI, so W3 failed.  The
+backend did execute generated blocks: the final ``wasm64Tcg`` summary reported
+``generated_attempts=17873``, ``generated_compiled=5``,
+``generated_executed=15363``, ``generated_cache_hits=15358``, and
+``fallback_unsupported=2510``.  That is enough to prove the generated context
+path works, but not enough coverage to improve wall-clock boot time.
+
+No Bus Engine OS long browser proof should be started from this artifact.  The
+next accepted step is a fresh backend hot-block run with
+``--enable-tcg-hotblocks`` and the coverage gate so the next lowering work is
+chosen from current backend evidence rather than guessed.
+
+Backend Hot-Block Coverage Gate
+-------------------------------
+
+On 2026-07-02, the backend was rebuilt with hot-block instrumentation so the
+coverage gate could use fresh backend evidence instead of old TCI-only data.
+The build command was::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2c-backend-hotblocks \
+    --jobs auto \
+    --configure-arg=--disable-tcg-interpreter \
+    --configure-arg=--enable-tcg-wasm64-backend \
+    --configure-arg=--enable-tcg-hotblocks
+
+It produced:
+
+* ``qemu-system-x86_64.js`` =
+  ``3325c226fc1d2e53382d7b8f366d372d9bd1a023beedbd2fa832d7a4716f8b64``
+* ``qemu-system-x86_64.wasm`` =
+  ``5a06b0ddf68387fcdb22cddccefcacd1016ee7bdd97695aac44d3f3f00ffdf5f``
+* manifest =
+  ``68737c61a3014fa753e0d8f680ed0aed45b512b856ae880199325cac80f9686c``
+
+The first smoke attempt failed before QEMU boot because the temporary runner
+used invalid ``--tcg-hotblocks-op-limit 0``.  The corrected runner used the
+default positive opcode-sampling limit.  Chromium ``141.0.7390.37`` reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``121568`` ms and wrote:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2c-backend-hotblocks-smoke2/wasm-browser-smoke-result.json``
+
+The final hot-block summary recorded ``tci_ops=134217728``,
+``helper_calls=509064``, ``qemu_loads=4670379``, and
+``qemu_stores=4578049``.  The corresponding coverage-gate output was written
+to:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2c-backend-hotblocks-smoke2/wasm-tcg-coverage-gate.json``
+
+The gate passed the current deterministic model with supported ratio
+``0.922023319087302`` and all required W2 operations present.  The top
+unsupported sampled operations were:
+
+* ``st8=3419640``
+* ``ld32u=1858720``
+* ``st32=1445667``
+* ``extract=1257956``
+* ``call=509064``
+* ``goto_ptr=432366``
+* ``sub=373326``
+* ``shr=336241``
+* ``shl=273473``
+* ``and=250887``
+
+The same run's live backend counters still showed a narrow generated path:
+``generated_attempts=18829``, ``generated_compiled=5``,
+``generated_executed=16100``, ``generated_cache_hits=16095``, and
+``fallback_unsupported=2729``.
+
+The important result is that the model gate is no longer the only blocker.
+The live backend still compiles too few blocks.  The next step is to export
+live generated rejection opcodes from backend runs and then implement the first
+confirmed lowering set, likely starting with ``st8``, ``ld32u``, ``st32``, and
+``extract`` if live rejection counters match the hot-block profile.

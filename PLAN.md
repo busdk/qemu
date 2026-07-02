@@ -216,6 +216,48 @@ Engineering rules for this goal:
   counts at zero. This completes W2b only; W2 remains open until the
   lowering coverage gate and the full same-artifact generic smoke evidence
   are accepted.
+- [x] W2c - Produce the fresh backend hot-block coverage evidence required
+  before expanding generated lowering. DoD: build a backend artifact from
+  the current QEMU commit with `--enable-tcg-wasm64-backend` and
+  `--enable-tcg-hotblocks`, run the generic Chromium smoke with
+  `--tcg-hotblocks`, run `scripts/ci/wasm-tcg-coverage-gate.mjs` against
+  that backend result with the W2 required ops, record the artifact hashes,
+  browser version, result JSON, coverage-gate JSON, supported ratio, and
+  top unsupported ops, then name the next lowering work item from that
+  fresh evidence. Accepted evidence: the artifact was built with
+  `python3 scripts/ci/wasm-build-artifacts-local.py --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2c-backend-hotblocks --jobs auto --configure-arg=--disable-tcg-interpreter --configure-arg=--enable-tcg-wasm64-backend --configure-arg=--enable-tcg-hotblocks`.
+  Artifact hashes: JS
+  `3325c226fc1d2e53382d7b8f366d372d9bd1a023beedbd2fa832d7a4716f8b64`,
+  WASM `5a06b0ddf68387fcdb22cddccefcacd1016ee7bdd97695aac44d3f3f00ffdf5f`,
+  manifest
+  `68737c61a3014fa753e0d8f680ed0aed45b512b856ae880199325cac80f9686c`.
+  The first smoke attempt failed before QEMU boot because the temporary
+  runner passed invalid `--tcg-hotblocks-op-limit 0`; the corrected run used
+  the default positive limit. Chromium `141.0.7390.37` reached
+  `QEMU_WASM_LINUX_BOOT_OK` in `121568` ms with result JSON
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2c-backend-hotblocks-smoke2/wasm-browser-smoke-result.json`.
+  The final hot-block summary recorded `tci_ops=134217728`,
+  `helper_calls=509064`, `qemu_loads=4670379`, and
+  `qemu_stores=4578049`. Coverage gate JSON:
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2c-backend-hotblocks-smoke2/wasm-tcg-coverage-gate.json`.
+  The gate passed its current deterministic model with supported ratio
+  `0.922023319087302` and required ops present. Top unsupported sampled ops
+  were `st8=3419640`, `ld32u=1858720`, `st32=1445667`,
+  `extract=1257956`, `call=509064`, `goto_ptr=432366`,
+  `sub=373326`, `shr=336241`, `shl=273473`, and `and=250887`.
+  The same run's live backend counters still showed narrow execution:
+  `generated_attempts=18829`, `generated_compiled=5`,
+  `generated_executed=16100`, `generated_cache_hits=16095`, and
+  `fallback_unsupported=2729`. This means the next work must improve live
+  generated eligibility/attribution, not merely pass the current model gate.
+- [ ] W2d - Attribute live generated rejection reasons from backend runs
+  before expanding lowering. DoD: a backend generic Chromium smoke records
+  the generated path's top unsupported TCI opcodes in result JSON, not just
+  aggregate `fallback_unsupported` counts, and the next lowering task is
+  selected from those live rejection counters plus the W2c hot-block profile.
+  If the live rejection counters match the W2c hot-block unsupported set,
+  the first lowering implementation task should start with `st8`, `ld32u`,
+  `st32`, and `extract`, while preserving strict TCI fallback.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and
@@ -225,7 +267,29 @@ Engineering rules for this goal:
   and `docs/devel/wasm-support-plan.rst`. If the gate fails, the next
   lowering/optimization work item must be added here with the measured
   blocker named before more implementation; do not spend a long Bus Engine
-  OS run on a failed gate.
+  OS run on a failed gate. Attempt 2026-07-02 from QEMU commit
+  `5f6431526d412aecf36f9d25d6f0a5450f3dc6ca` failed the gate. Default TCI
+  artifact hashes: JS
+  `2e4f82e69af410f5eef63fea7def6eb118fb8b3b0bfbe37867feb482382e89d0`,
+  WASM `819b89f3e4655c49ab826d5760be07a51b29168aadaa7ad6e1967c0655a6fc6c`,
+  manifest
+  `2266d95988c96fdab4cbba6ff5a73677f678ab2074baf92bac06225331c68bb2`.
+  Backend artifact hashes: JS
+  `07dfe2c64a7626d9107a0778094eff428d0a26de99849ff442deb2e15f458846`,
+  WASM `e8d48e5a64cedf342549d5cfd84f036752ba2275c35132804a69a5f3cb540418`,
+  manifest
+  `d0fee6ae386cb3607c11ef74064efc92369b3ceca5a2f22cf17ad4287b425e7c`.
+  Both ran in Chromium `141.0.7390.37` using the same Playwright Noble
+  container and generic TuxBoot smoke. Default TCI reached
+  `QEMU_WASM_LINUX_BOOT_OK` in `91207` ms with result JSON
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-default-tci-smoke/wasm-browser-smoke-result.json`.
+  The backend reached the same marker in `100142` ms with result JSON
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-backend-context-smoke/wasm-browser-smoke-result.json`.
+  That is about `9.8%` slower, not `25%` faster. The backend exported
+  nonzero generated counters (`generated_compiled=5`,
+  `generated_executed=15363`, `generated_cache_hits=15358`,
+  `fallback_unsupported=2510`), but coverage is too small to improve
+  wall-clock boot. Next work is W2c.
 - [ ] W4 - Run the Bus Engine OS `virtual-server` browser proof from the
   gated backend artifact.
   DoD: Chrome/Chromium proof with the accepted `virtual-server` kernel and
