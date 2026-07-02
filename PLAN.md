@@ -9,21 +9,27 @@ file and then implemented.
 
 ## Active Goal
 
-Make the Bus Engine OS `virtual-server` guest reach normal multi-user boot in
-browser-hosted WASM QEMU within five minutes.
+Follow the supervisor-root `GOAL.md` for the active five-minute browser
+multi-user boot goal. The current target is no longer the older x86_64 browser
+TCI proof; it is an accepted Bus Engine OS `riscv64` `virtual-server` guest
+running in browser-hosted QEMU/WASM through an opt-in RISC-V 64 to WebAssembly
+accelerator.
 
 The goal is complete only when the real browser-hosted QEMU/WASM path boots
-the accepted Bus Engine OS `virtual-server` kernel and root filesystem to
-multi-user readiness within `300000` ms.  The proof must use Chrome or
-Chromium, the QEMU WebAssembly artifacts produced by this branch, and the
-standard `virtual-server` boot path.  Shell-only init bypasses, synthetic
-guests, stale artifacts, native-QEMU-only boots, and heavily reduced product
-profiles do not satisfy this goal.
+the accepted package-built Bus Engine OS `riscv64` `virtual-server` kernel and
+root filesystem to multi-user readiness within `300000` ms. The proof must use
+Chrome or Chromium, the QEMU WebAssembly artifacts produced by this branch, and
+the standard `virtual-server` boot path. Shell-only init bypasses, synthetic
+guests, stale artifacts, native-QEMU-only boots, snapshots, hibernate/restore,
+preinitialized RAM, and heavily reduced product profiles do not satisfy this
+goal.
 
-Keep unrelated downstream work out of scope.  Do not take over bus-pkg, OPFS
-persistence, virtio-net, virtual-desktop packaging, Codex packaging, or
-Engine OS package/image work unless a narrow fixture is strictly required to
-prove this boot goal.
+Keep unrelated downstream work out of scope. Do not take over bus-pkg, OPFS
+persistence, virtio-net, virtual-desktop packaging, Codex packaging, or Engine
+OS package/image work except for the narrow Bus Engine OS `riscv64` fixture
+work required to prove this boot goal. Existing x86/x86_64, aarch64, and TCI
+fallback behavior must keep working unless a regression is explicitly recorded
+and accepted.
 
 Every active design note, code change, browser proof, artifact rebuild,
 documentation update, commit, push, and BusDK submodule-pin update for this
@@ -34,10 +40,10 @@ accepted work.
 
 This goal is done only when all of the following are true:
 
-- [ ] Current QEMU WASM artifacts are built from this branch and their
-  JavaScript/WebAssembly SHA-256 hashes are recorded.
-- [ ] The proof uses the accepted Bus Engine OS `virtual-server` kernel and
-  root filesystem, and their SHA-256 hashes are recorded.
+- [ ] Current `riscv64-softmmu` QEMU WASM artifacts are built from this branch
+  and their JavaScript/WebAssembly SHA-256 hashes are recorded.
+- [ ] The proof uses the accepted Bus Engine OS `riscv64` `virtual-server`
+  kernel and root filesystem, and their SHA-256 hashes are recorded.
 - [ ] The proof runs in Chrome or Chromium and records the exact browser
   version, command line, timeout, QEMU arguments, kernel arguments, and result
   JSON path.
@@ -50,8 +56,10 @@ This goal is done only when all of the following are true:
   hostname, journald, or basic target do not satisfy this item.
 - [ ] The result JSON records the boot milestone timings, final readiness
   marker, final serial state, screenshot path, and QEMU artifact hashes.
-- [ ] A generic Linux browser smoke test still passes with the same QEMU WASM
-  artifact family.
+- [ ] A generic RISC-V Linux browser smoke test still passes with the same QEMU
+  WASM artifact family.
+- [ ] Existing x86_64 QEMU/WASM TCI smoke behavior remains working or any
+  deviation is recorded with an explicit acceptance decision.
 - [ ] The accepted evidence is recorded in this file and in
   `docs/devel/wasm-support-plan.rst`.
 - [ ] QEMU `develop` is committed and pushed to `origin/develop`.
@@ -59,11 +67,57 @@ This goal is done only when all of the following are true:
 - [ ] Required BusDK and supervisor submodule pins and memos are committed and
   pushed.
 
-The goal is not done if the only passing proof is native QEMU, a generic
-smoke guest, a shell-only boot, a stale artifact, or a run that reaches a
-weaker marker than normal multi-user readiness.
+The goal is not done if the only passing proof is native QEMU, a generic smoke
+guest, a shell-only boot, a stale artifact, a snapshot/restore shortcut, or a
+run that reaches a weaker marker than normal multi-user readiness.
 
 ## Active Work Items
+
+- [x] R0 - Rebase the active QEMU/WASM plan from the older x86_64 throughput
+  lane to the RISC-V 64 accelerator lane from `GOAL.md`. DoD: `PLAN.md`
+  names `riscv64-softmmu` artifacts and Bus Engine OS `riscv64`
+  `virtual-server` proof as the active gate, preserves the older x86_64
+  evidence as historical context only, and names the first implementation
+  gates for baseline `riscv64-softmmu` WASM boot, RV64 accelerator design, and
+  same-commit generic speed proof. Accepted 2026-07-03: this plan now names
+  the `riscv64-softmmu` artifact family, Bus Engine OS `riscv64`
+  `virtual-server` final proof, strict fallback/non-regression requirements,
+  and R1-R5 gates for baseline, design, first accelerator slice, speed proof,
+  and final Bus Engine OS proof.
+- [ ] R1 - Establish the browser and native RISC-V baselines before
+  acceleration. DoD: build or obtain current `qemu-system-riscv64` native and
+  WASM artifacts, boot a generic RISC-V Linux smoke in Chromium with default
+  TCI, record exact commands, browser version, artifact hashes, result JSON,
+  and compare wall time to native RISC-V QEMU and the previous x86_64 browser
+  evidence.
+- [ ] R2 - Add the RV64-to-WASM accelerator design and fail-closed boundary.
+  DoD: document CPU state layout, register residency, synthetic exits
+  (`BUDGET`, `MMIO`, `TLB_MISS`, `INTERRUPT`, `CSR`, `INVALID`, `FATAL`),
+  inline RAM/TLB-hit handling, invalidation, strict TCI fallback,
+  no-silent-fallback performance mode, counters, and non-regression gates
+  before the hot path is enabled.
+- [ ] R3 - Implement the first selectable `riscv64-softmmu` WASM accelerator
+  slice. DoD: generated RV64 execution is opt-in, unsupported or failed
+  lowering falls back to TCI with identical guest-visible behavior, deterministic
+  tests cover supported integer/branch/load/store/CSR exits, counters report
+  generated versus fallback execution, and x86_64 TCI browser smoke is not
+  regressed.
+- [ ] R4 - Prove performance before Bus Engine OS long runs. DoD: a same-commit
+  Chromium generic RISC-V accelerator smoke is at least 25% faster than
+  default RISC-V TCI, and microbenchmarks show at least 3x over RISC-V TCI for
+  hot ALU/branch and TLB-hit RAM paths with at least 1,000,000
+  guest-instruction-equivalent operations per `wasmjit_run()` call.
+- [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
+  accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
+  cold in browser-hosted QEMU/WASM with the accelerator and reaches
+  `Reached target Multi-User System.` plus login prompt or
+  `QEMU_WASM_SERVICE_READY` within `300000` ms, with all logs and hashes
+  archived.
+
+Historical x86_64/WASM evidence below remains useful for rejected mechanisms,
+measurement discipline, and non-regression checks. Do not execute the old W2
+items as the active implementation path unless they are explicitly rewritten
+for `riscv64-softmmu`.
 
 - [x] Keep `PLAN.md` limited to the current five-minute multi-user boot goal and keep unrelated work in `BACKLOG.md`.
 - [x] Add opt-in TCI CPU attribution counters and smoke-runner plumbing for
