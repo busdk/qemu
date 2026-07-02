@@ -7350,3 +7350,50 @@ The next W2 step is QEMU-facing integration of this contract plus measured
 ALU/branch and TLB-hit RAM microbenches against a TCI-like baseline.  A
 generic Linux or Bus Engine OS browser speed gate must not run again until
 that microbench gate shows a multiple-times win from the run/exit shape.
+
+W2o-a run/exit ABI and model benchmark
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The QEMU-facing scaffolding now has a run/exit ABI in ``tcg/wasm64.h``:
+
+* ``TCGWasm64RunMode`` separates compatibility mode from performance-proof
+  mode.
+* ``TCGWasm64RunExitReason`` names the synthetic exits: budget, MMIO,
+  TLB miss or fault, interrupt, helper, unsupported, HLT, and invalidation.
+* ``TCGWasm64RunExit`` carries the exit payload.
+* ``TCGWasm64RunCounters`` carries the W2 metrics: generated and fallback
+  guest instructions, generated-body time, TCI dispatch time, TB lookup time,
+  helper/``qemu_ld``/``qemu_st`` time and call counts, compile/instantiate
+  time, generated chain length, inline TLB-hit loads and stores, and per-exit
+  counters.
+* ``TCGWasm64RunContext`` is the C-side context for the eventual
+  ``wasmjit_run()`` boundary.
+
+The deterministic model benchmark was updated so measured run time excludes
+module construction, compilation, instantiation, context initialization, and
+expected-value calculation.  The accepted local command was:
+
+.. code-block:: text
+
+  node --input-type=module -e 'import {runWasmjitRunloopBenchmark} from "./scripts/ci/wasmjit-runloop-model.mjs"; console.log(JSON.stringify(await runWasmjitRunloopBenchmark({budget:1000000, rounds:5}), null, 2));'
+
+The result was:
+
+.. code-block:: json
+
+  {
+    "format": 1,
+    "purpose": "qemu-wasmjit-runloop-model-benchmark",
+    "version": 1,
+    "budget": 1000000,
+    "rounds": 5,
+    "wasmBestMs": 4.127262999999999,
+    "tciLikeBestMs": 106.78072000000003,
+    "bestRatio": 25.87204159269716
+  }
+
+This is not a QEMU generic smoke result and not a Bus Engine OS proof.  It is
+the deterministic micro-hotset evidence that the run/exit shape can clear the
+model-level speed gate when setup and bookkeeping are kept out of the measured
+run.  The remaining W2 work is to move this shape into QEMU runtime execution
+without falling back to the rejected per-TB generated wrapper.
