@@ -6208,3 +6208,50 @@ live rejection list was ``mb=1435``, ``setcond=366``, ``extract=283``,
 This is not enough to rerun W3.  The next work must either prove and lower a
 real WebAssembly memory fence for ``mb`` or leave ``mb`` on fallback and lower
 the next safe non-barrier blockers.
+
+Register and extract generated lowering
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The next accepted slice left ``mb`` on strict fallback because no verified
+WebAssembly memory-fence encoding was found locally.  It instead lowered the
+next safe non-barrier blockers seen in the live generated rejection profile:
+``setcond``, ``movcond``, ``shl``, ``shr``, ``extract``, and ``sextract``.
+The emitted WebAssembly uses ``i32`` shift-count operands for ``i64``
+shift/extract instructions.
+
+The artifact was built with:
+
+.. code-block:: console
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2j-register-blockers-fixed \
+    --jobs auto \
+    --configure-arg=--disable-tcg-interpreter \
+    --configure-arg=--enable-tcg-wasm64-backend
+
+Hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``7366a91e196510ec7c4e9e18fbe1cb104c186673f78a7b4c76f79c80e2282804``
+* ``qemu-system-x86_64.wasm`` =
+  ``05ba2b602eec59ea99653d9260febbfbb2669c13984bee103b9f81bc564fa5d2``
+* manifest =
+  ``18d7d3f1d658f1f08ac9645ec3c71fffa8bce1f9bd5eac2a6879a1cde680e807``
+
+The generated-only Chromium smoke used Chromium ``141.0.7390.37`` and reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``111130`` ms.  Result JSON:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2j-register-blockers-fixed-subset-live/wasm-browser-smoke-result.json``
+
+Result SHA-256:
+``48a9acb95004fdc95879081bce96ee71369004a8243f347e81caca198a5871c7``.
+
+The final generated summary reported ``generated_compiled=6``,
+``generated_executed=15192``, ``generated_cache_hits=15186``, and
+``generated_compile_failed=755``.  The live unsupported generated op list was
+``mb=1819``, ``call=63``, ``sar=3``, ``tci_movcond32=3``, ``deposit=2``,
+``muls2=2``, ``brcond=1``, and ``ld32s=1``.  This does not justify a
+W3 speed-gate rerun: the generic smoke still took longer than the earlier W3
+default-TCI baseline, ``mb`` remains dominant, and generated compile/runtime
+fallback now needs reason-level attribution before the backend can be judged
+again.

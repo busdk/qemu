@@ -371,13 +371,45 @@ Engineering rules for this goal:
   `sextract=7`. This accepts the direct load/store slice but does not
   justify rerunning W3 because wall-clock time regressed and compile-failed
   fallbacks appeared.
-- [ ] W2i - Investigate and lower the next blocker without guessing memory
+- [x] W2i - Investigate and lower the next blocker without guessing memory
   semantics. DoD: either prove a WebAssembly memory-fence encoding for `mb`
   with a deterministic module test and then lower `mb`, or leave `mb` on
   fallback and lower the next safe non-barrier blockers (`setcond` and
   `extract`). The generated-only Chromium smoke must pass and record
   `generated_compile_failed`, `top_generated_unsupported_ops`, and whether
-  W3 can be rerun.
+  W3 can be rerun. Accepted evidence: no local verified WebAssembly
+  memory-fence encoding was found, so `mb` stayed on strict fallback. The
+  slice added generated support for the next safe non-barrier blockers:
+  `setcond`, `movcond`, `shl`, `shr`, `extract`, and `sextract`, with
+  WebAssembly `i64` shift/extract counts emitted as `i32` operands. The
+  backend artifact at
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2j-register-blockers-fixed`
+  was built with `--enable-tcg-wasm64-backend` and
+  `--disable-tcg-interpreter`. Artifact hashes: JS
+  `7366a91e196510ec7c4e9e18fbe1cb104c186673f78a7b4c76f79c80e2282804`,
+  WASM `05ba2b602eec59ea99653d9260febbfbb2669c13984bee103b9f81bc564fa5d2`,
+  manifest
+  `18d7d3f1d658f1f08ac9645ec3c71fffa8bce1f9bd5eac2a6879a1cde680e807`.
+  Chromium `141.0.7390.37` reached `QEMU_WASM_LINUX_BOOT_OK` in
+  `111130` ms with generated-only subset reporting enabled. Result JSON:
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2j-register-blockers-fixed-subset-live/wasm-browser-smoke-result.json`
+  (SHA-256
+  `48a9acb95004fdc95879081bce96ee71369004a8243f347e81caca198a5871c7`).
+  The final generated summary reported `generated_compiled=6`,
+  `generated_executed=15192`, `generated_cache_hits=15186`,
+  `generated_compile_failed=755`, and live unsupported generated ops
+  `mb=1819`, `call=63`, `sar=3`, `tci_movcond32=3`, `deposit=2`,
+  `muls2=2`, `brcond=1`, and `ld32s=1`. W3 should not be rerun yet:
+  wall-clock time is still not better than the prior W3 baseline, `mb`
+  remains dominant, and compile-failed/runtime fallback is now large enough
+  to require reason-level attribution.
+- [ ] W2j - Classify and reduce generated compile/runtime fallback before
+  rerunning W3. DoD: add reason-level diagnostics for generated compile
+  failures and runtime fallback, run the generated-only Chromium smoke, and
+  either fix a proven lowering/encoding bug or record that the remaining
+  accepted blocker is the unsupported `mb` memory-barrier path. Do not lower
+  `mb` unless a deterministic module test proves the exact WebAssembly fence
+  encoding and browser support.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and
