@@ -4783,6 +4783,37 @@ wall-clock time and the dominant generated fallback remained
 generated memory loads as the current performance solution unless new
 evidence removes this overhead and improves the same-artifact generic smoke.
 
+One more unpromoted direct-memory variant tested the broader host-memory
+opcode set directly inside the live generated path.  It added generated
+support for ``ld8u``, ``ld8s``, ``ld16u``, ``ld16s``, ``ld32u``, ``ld32s``,
+``ld``, ``st8``, ``st16``, ``st32``, and ``st`` and added deterministic
+signed/unsigned direct-memory prototype coverage.  The rebuilt artifact
+``/tmp/qemu-wasm64-generated-direct-memory`` had hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``5e789189fbf0d251a63578d0b2b866997b22411437cbec3518d3a4c6a57de1ed``
+* ``qemu-system-x86_64.wasm`` =
+  ``ab3d385c4e2745e26c7f3eba9fbe9148816cd6c5968e217fb56fef6987a0fbaf``
+
+Default Chromium ``149.0.7827.55`` smoke reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``79106`` ms and wrote
+``/tmp/qemu-wasm64-generated-direct-memory/generic-browser-smoke-default.json``.
+The opt-in generated subset reached the same marker in ``109920`` ms and
+wrote
+``/tmp/qemu-wasm64-generated-direct-memory/generic-browser-smoke-subset.json``.
+It compiled generated blocks (``generated_compiled=30271``), executed some
+generated blocks (``generated_executed=59544``), and had no generated compile
+failures, but the new direct-memory counters stayed at
+``generated_direct_load_ops=0`` and ``generated_direct_store_ops=0``.  The
+dominant generated fallback was ``tci_setcond32`` with ``5348494``
+classifications, followed by ``mb``.
+
+The patch was removed.  This confirms that direct host-memory opcode support
+is not the current performance fix for the generic smoke gate.  The next
+CPU-side speed work should continue through the broader backend/control-flow
+boundary and should not reintroduce direct-memory shortcuts without fresh hot
+block evidence showing that they are selected and can beat strict TCI.
+
 The next unpromoted variant changed the generated-block ABI from many
 JavaScript ``BigInt`` arguments and result values to direct register-memory
 access.  Generated blocks imported QEMU's shared wasm64 memory and accepted

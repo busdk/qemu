@@ -657,6 +657,23 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     `tci_setcond32`. The live `ld32u` patch was removed; do not promote
     generated memory loads as a performance solution unless new evidence
     removes this overhead and improves the generic smoke.
+    Confirming evidence on 2026-07-02: a broader unpromoted direct
+    host-memory variant added generated support for `ld8u`, `ld8s`, `ld16u`,
+    `ld16s`, `ld32u`, `ld32s`, `ld`, `st8`, `st16`, `st32`, and `st`, plus
+    deterministic signed/unsigned direct-memory prototype coverage. The
+    rebuilt artifact hashes were
+    `qemu-system-x86_64.js=5e789189fbf0d251a63578d0b2b866997b22411437cbec3518d3a4c6a57de1ed`
+    and
+    `qemu-system-x86_64.wasm=ab3d385c4e2745e26c7f3eba9fbe9148816cd6c5968e217fb56fef6987a0fbaf`.
+    Default Chromium `149.0.7827.55` smoke reached
+    `QEMU_WASM_LINUX_BOOT_OK` in `79106` ms. The opt-in subset smoke reached
+    the same marker in `109920` ms with `generated_compiled=30271`,
+    `generated_executed=59544`, `generated_compile_failed=0`, and
+    `generated_direct_load_ops=0`/`generated_direct_store_ops=0`. The dominant
+    generated fallback was `tci_setcond32` with `5348494` classifications,
+    followed by `mb`. The live patch was removed because the generic speed
+    gate failed and the added direct-memory opcodes did not cover the blocks
+    selected in this run.
   - [x] Resolve the hot TB dispatch/chaining boundary:
     DoD is a design and implementation for hot blocks that currently fall
     back on `goto_ptr` and `goto_tb`, preserving QEMU's `tcg_qemu_tb_exec`
