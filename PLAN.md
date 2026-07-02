@@ -250,14 +250,57 @@ Engineering rules for this goal:
   `generated_executed=16100`, `generated_cache_hits=16095`, and
   `fallback_unsupported=2729`. This means the next work must improve live
   generated eligibility/attribution, not merely pass the current model gate.
-- [ ] W2d - Attribute live generated rejection reasons from backend runs
+- [x] W2d - Attribute live generated rejection reasons from backend runs
   before expanding lowering. DoD: a backend generic Chromium smoke records
   the generated path's top unsupported TCI opcodes in result JSON, not just
   aggregate `fallback_unsupported` counts, and the next lowering task is
   selected from those live rejection counters plus the W2c hot-block profile.
-  If the live rejection counters match the W2c hot-block unsupported set,
-  the first lowering implementation task should start with `st8`, `ld32u`,
-  `st32`, and `extract`, while preserving strict TCI fallback.
+  Accepted evidence: the existing W2b backend artifact was rerun in Chromium
+  `141.0.7390.37` with `--tci-wasm-subset`,
+  `--tci-wasm-generated-only`, threshold `1024`, max ops `512`, and interval
+  `10000`. It reached `QEMU_WASM_LINUX_BOOT_OK` in `108966` ms with result
+  JSON
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2d-subset-live/wasm-browser-smoke-result.json`
+  (SHA-256
+  `b85d14ec14afc1c9cce376cff3dad70929162e7cc8383b507822fc3693bb01e3`).
+  The last `top_generated_unsupported_ops` list contained only
+  `ld32u=2292`, so the first live lowering target was `ld32u`.
+- [x] W2e - Lower the first two live generated blockers, `ld32u` and
+  `tci_setcond32`, while preserving strict TCI fallback. DoD: each lowering
+  is selected from a fresh generated-only backend smoke, the artifact builds,
+  the generic Chromium smoke still reaches `QEMU_WASM_LINUX_BOOT_OK`, and the
+  next live blocker is recorded. Accepted evidence: after adding `ld32u`, the
+  backend artifact at
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2e-ld32u`
+  had hashes JS
+  `b0580c89612c11aaaea3fe8fcb44bd084911ed3b7db19f1c17845de3c66d7abf`,
+  WASM `1e3b70085556db0621dd8a81535b18c522bcf1595a33c231d774ef21a593bcdd`,
+  and manifest
+  `6fdcbd6fa1e35f5a683c41bebe66fc387a352b1af5af7b1aa2176dc91ada7a9e`.
+  Chromium reached the marker in `108293` ms with result JSON
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2e-ld32u-subset-live/wasm-browser-smoke-result.json`
+  (SHA-256
+  `922ef5764bcd7246ee911550d2b0521fe7ce61a5c067d8e38a73dc3699387cd8`).
+  Live rejection moved to `tci_setcond32=2425` and `st8=1`. After adding
+  `tci_setcond32`, the backend artifact at
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2f-ld32u-setcond32`
+  had hashes JS
+  `b92c6e7c869bebc0e20b3b85221971d6127df32194124fe634c9c1a3bb5f3463`,
+  WASM `e2f25be24972127c2e69976c1cb3345becf07fca31546d66104cfd5da618b4cc`,
+  and manifest
+  `b5ef7cd5fbbd0c46b823cb83bb24959b77e6f01d0b66b4ed1d3a1ee055499353`.
+  Chromium reached the marker in `110052` ms with result JSON
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2f-ld32u-setcond32-subset-live/wasm-browser-smoke-result.json`
+  (SHA-256
+  `6dbce0cee236654a7942cd63cbdd1836922eec4deb140ef9f0edced1451520db`).
+  Live rejection moved to `brcond=2934` and `st8=1`; wall-clock time did not
+  improve enough for W3, so the next work remains lowering coverage rather
+  than a Bus Engine OS proof.
+- [ ] W2f - Lower live generated `brcond` without weakening fallback
+  semantics. DoD: implement only the forward-branch forms that can be
+  represented safely in the generated WebAssembly block, keep unsupported or
+  complex branch shapes on TCI fallback, run the generated-only generic
+  Chromium smoke, and record the next `top_generated_unsupported_ops` list.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and
@@ -289,7 +332,7 @@ Engineering rules for this goal:
   nonzero generated counters (`generated_compiled=5`,
   `generated_executed=15363`, `generated_cache_hits=15358`,
   `fallback_unsupported=2510`), but coverage is too small to improve
-  wall-clock boot. Next work is W2c.
+  wall-clock boot. Current live attribution now points to W2f.
 - [ ] W4 - Run the Bus Engine OS `virtual-server` browser proof from the
   gated backend artifact.
   DoD: Chrome/Chromium proof with the accepted `virtual-server` kernel and
