@@ -1207,8 +1207,9 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
       module with `env.memory`, a `start(ctx)` function, context loads/stores,
       and a helper import table shape, without requiring a full QEMU boot.
       Accepted implementation on 2026-07-02: `scripts/ci/wasm-tb-module-emitter.mjs`
-      emits a deterministic 111-byte generated-TB module that imports
-      `env.memory`, imports `h.helper0`, exports `start`, loads two i64
+      emits a deterministic 155-byte generated-TB module that imports
+      `env.memory`, imports `h.helper0`, imports `h.qemu_ld_i64` and
+      `h.qemu_st_i64` fallback boundaries, exports `start`, loads two i64
       context fields, stores their sum, calls the helper import, stores the
       helper result, and returns it. `scripts/ci/wasm-tb-module-emitter-test.mjs`
       validates the module imports/exports and proves `start(ctx)` stores sum
@@ -1246,6 +1247,16 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
       memory64-aware QEMU load/store helper calls for MMU/fault paths,
       structured counters for generated execution versus fallback, and default
       generic Chromium smoke remaining unchanged.
+      Partial implementation on 2026-07-02: the deterministic lowering
+      contract now imports `h.qemu_ld_i64` and `h.qemu_st_i64`, passes an i64
+      guest address `0x100000000` through those fallback imports, compares the
+      generated calls with the local interpreter, and reports structured
+      counters: `generatedBlocks=2`, `helperFallbacks=1`,
+      `qemuLoadFallbacks=2`, and `qemuStoreFallbacks=2`. The branch-taken and
+      branch-not-taken cases both use qemu load/store fallback boundaries and
+      match the interpreter. This item remains open until the same fallback
+      counters are wired into the C backend and default Chromium smoke is
+      re-run from a QEMU artifact.
     - [ ] Run the broad backend generic speed gate:
       DoD is a rebuilt wasm64 artifact, default generic Chromium smoke passing,
       opt-in backend Chromium smoke passing with nonzero generated counters,

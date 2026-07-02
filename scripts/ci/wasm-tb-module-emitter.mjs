@@ -127,7 +127,8 @@ function i64Local(index) {
 function maxRegister(ops) {
   let max = -1;
   for (const op of ops) {
-    for (const key of ["condReg", "dst", "src", "lhs", "rhs", "value"]) {
+    for (const key of ["addr", "condReg", "dst", "src", "lhs", "rhs",
+                       "status", "value"]) {
       if (Number.isInteger(op[key])) {
         max = Math.max(max, op[key]);
       }
@@ -235,6 +236,20 @@ function emitLoweringOp(op, labelStack) {
       0x10, ...encodeU32(0),
       ...localSet(i64Local(op.dst)),
     ];
+  case "qemu_ld_i64":
+    return [
+      ...localGet(i64Local(op.addr)),
+      ...i32Const(op.oi),
+      0x10, ...encodeU32(1),
+      ...localSet(i64Local(op.dst)),
+    ];
+  case "qemu_st_i64":
+    return [
+      ...localGet(i64Local(op.addr)),
+      ...localGet(i64Local(op.value)),
+      ...i32Const(op.oi),
+      0x10, ...encodeU32(2),
+    ];
   case "pack_dispatch_i64":
     return [
       ...packDispatchResultBytes(op.status, op.value),
@@ -274,6 +289,10 @@ export const LOWERING_SUBSET_BLOCK = [
   { op: "mov_i64", dst: 8, src: 6 },
   { op: "end_block" },
   { op: "st_ctx_i64", src: 8, offset: 24 },
+  { op: "const_i64", dst: 9, value: 0x100000000n },
+  { op: "qemu_ld_i64", dst: 10, addr: 9, oi: 0x12 },
+  { op: "st_ctx_i64", src: 10, offset: 40 },
+  { op: "qemu_st_i64", addr: 9, value: 8, oi: 0x13 },
   { op: "exit_i64", boundary: "tb-dispatch", src: 8 },
 ];
 
@@ -283,17 +302,21 @@ export function buildTBModule() {
     0x01, 0x00, 0x00, 0x00,
     ...section(1, vector([
       functionType([VALUE_I32, VALUE_I64], [VALUE_I64]),
+      functionType([VALUE_I64, VALUE_I32], [VALUE_I64]),
+      functionType([VALUE_I64, VALUE_I64, VALUE_I32], []),
       functionType([VALUE_I32], [VALUE_I64]),
     ])),
     ...section(2, vector([
       [...name("h"), ...name("helper0"), 0x00, ...encodeU32(0)],
+      [...name("h"), ...name("qemu_ld_i64"), 0x00, ...encodeU32(1)],
+      [...name("h"), ...name("qemu_st_i64"), 0x00, ...encodeU32(2)],
       [...name("env"), ...name("memory"), 0x02, 0x00, ...encodeU32(1)],
     ])),
     ...section(3, vector([
-      [0x01],
+      [0x03],
     ])),
     ...section(7, vector([
-      [...name("start"), 0x00, ...encodeU32(1)],
+      [...name("start"), 0x00, ...encodeU32(3)],
     ])),
     ...section(10, vector([
       functionBody([
@@ -333,17 +356,21 @@ export function buildLoweringSubsetModule(ops = LOWERING_SUBSET_BLOCK) {
     0x01, 0x00, 0x00, 0x00,
     ...section(1, vector([
       functionType([VALUE_I32, VALUE_I64], [VALUE_I64]),
+      functionType([VALUE_I64, VALUE_I32], [VALUE_I64]),
+      functionType([VALUE_I64, VALUE_I64, VALUE_I32], []),
       functionType([VALUE_I32], [VALUE_I64]),
     ])),
     ...section(2, vector([
       [...name("h"), ...name("helper0"), 0x00, ...encodeU32(0)],
+      [...name("h"), ...name("qemu_ld_i64"), 0x00, ...encodeU32(1)],
+      [...name("h"), ...name("qemu_st_i64"), 0x00, ...encodeU32(2)],
       [...name("env"), ...name("memory"), 0x02, 0x00, ...encodeU32(1)],
     ])),
     ...section(3, vector([
-      [0x01],
+      [0x03],
     ])),
     ...section(7, vector([
-      [...name("start"), 0x00, ...encodeU32(1)],
+      [...name("start"), 0x00, ...encodeU32(3)],
     ])),
     ...section(10, vector([
       functionBody(instructions, registerCount > 0
@@ -370,6 +397,14 @@ export function validateTBModuleContract(bytes) {
     entry.module === "h" &&
     entry.name === "helper0" &&
     entry.kind === "function");
+  const hasQemuLoadImport = imports.some((entry) =>
+    entry.module === "h" &&
+    entry.name === "qemu_ld_i64" &&
+    entry.kind === "function");
+  const hasQemuStoreImport = imports.some((entry) =>
+    entry.module === "h" &&
+    entry.name === "qemu_st_i64" &&
+    entry.kind === "function");
   const hasStartExport = exports.some((entry) =>
     entry.name === "start" &&
     entry.kind === "function");
@@ -379,6 +414,12 @@ export function validateTBModuleContract(bytes) {
   }
   if (!hasHelperImport) {
     throw new Error("generated TB module must import h.helper0");
+  }
+  if (!hasQemuLoadImport) {
+    throw new Error("generated TB module must import h.qemu_ld_i64");
+  }
+  if (!hasQemuStoreImport) {
+    throw new Error("generated TB module must import h.qemu_st_i64");
   }
   if (!hasStartExport) {
     throw new Error("generated TB module must export start(ctx)");
@@ -413,6 +454,12 @@ export async function runTBModuleEmitterProbe() {
           value: value.toString(),
         });
         return packDispatchResult(6, Number(value & 0xffffffffn));
+      },
+      qemu_ld_i64() {
+        throw new Error("qemu_ld_i64 should not be used by the basic TB probe");
+      },
+      qemu_st_i64() {
+        throw new Error("qemu_st_i64 should not be used by the basic TB probe");
       },
     },
   });
@@ -520,7 +567,13 @@ export function interpretLoweringSubset(ops, view, contextPointer, helper) {
       }
       break;
     case "helper_i64":
-      regs[op.dst] = helper(op.opcode, regs[op.value]);
+      regs[op.dst] = helper.helper0(op.opcode, regs[op.value]);
+      break;
+    case "qemu_ld_i64":
+      regs[op.dst] = helper.qemuLd(op.addr, regs[op.addr], op.oi);
+      break;
+    case "qemu_st_i64":
+      helper.qemuSt(op.addr, regs[op.addr], regs[op.value], op.oi);
       break;
     case "pack_dispatch_i64":
       regs[op.dst] = BigInt.asUintN(64,
@@ -555,6 +608,24 @@ export async function runLoweringSubsetProbe(ops = LOWERING_SUBSET_BLOCK) {
     });
     return packDispatchResult(6, Number(value & 0xffffffffn));
   };
+  const qemuLd = (calls) => (reg, addr, oi) => {
+    const result = BigInt.asUintN(64, addr ^ BigInt(oi));
+    calls.push({
+      reg,
+      addr: addr.toString(),
+      oi,
+      result: result.toString(),
+    });
+    return result;
+  };
+  const qemuSt = (calls) => (reg, addr, value, oi) => {
+    calls.push({
+      reg,
+      addr: addr.toString(),
+      value: value.toString(),
+      oi,
+    });
+  };
   const cases = [];
 
   for (const testCase of [
@@ -568,6 +639,10 @@ export async function runLoweringSubsetProbe(ops = LOWERING_SUBSET_BLOCK) {
     const interpretedView = new DataView(interpretedMemory.buffer);
     const generatedHelperCalls = [];
     const interpretedHelperCalls = [];
+    const generatedQemuLoadCalls = [];
+    const interpretedQemuLoadCalls = [];
+    const generatedQemuStoreCalls = [];
+    const interpretedQemuStoreCalls = [];
 
     for (const view of [generatedView, interpretedView]) {
       view.setBigUint64(contextPointer, testCase.reg0, true);
@@ -580,6 +655,12 @@ export async function runLoweringSubsetProbe(ops = LOWERING_SUBSET_BLOCK) {
       },
       h: {
         helper0: helper(generatedHelperCalls),
+        qemu_ld_i64(addr, oi) {
+          return qemuLd(generatedQemuLoadCalls)(9, addr, oi);
+        },
+        qemu_st_i64(addr, value, oi) {
+          qemuSt(generatedQemuStoreCalls)(9, addr, value, oi);
+        },
       },
     });
 
@@ -588,9 +669,13 @@ export async function runLoweringSubsetProbe(ops = LOWERING_SUBSET_BLOCK) {
       ops,
       interpretedView,
       contextPointer,
-      helper(interpretedHelperCalls),
+      {
+        helper0: helper(interpretedHelperCalls),
+        qemuLd: qemuLd(interpretedQemuLoadCalls),
+        qemuSt: qemuSt(interpretedQemuStoreCalls),
+      },
     );
-    const contextOffsets = [16, 24, 32];
+    const contextOffsets = [16, 24, 32, 40];
     const contextMatches = contextOffsets.every((offset) =>
       readCtxI64(generatedView, contextPointer, offset) ===
       readCtxI64(interpretedView, contextPointer, offset));
@@ -601,7 +686,9 @@ export async function runLoweringSubsetProbe(ops = LOWERING_SUBSET_BLOCK) {
       reg1: testCase.reg1.toString(),
       ok: generatedResult === interpretedResult &&
         contextMatches &&
-        JSON.stringify(generatedHelperCalls) === JSON.stringify(interpretedHelperCalls),
+        JSON.stringify(generatedHelperCalls) === JSON.stringify(interpretedHelperCalls) &&
+        JSON.stringify(generatedQemuLoadCalls) === JSON.stringify(interpretedQemuLoadCalls) &&
+        JSON.stringify(generatedQemuStoreCalls) === JSON.stringify(interpretedQemuStoreCalls),
       generatedResult: generatedResult.toString(),
       interpretedResult: interpretedResult.toString(),
       generatedContext: Object.fromEntries(contextOffsets.map((offset) => [
@@ -614,8 +701,25 @@ export async function runLoweringSubsetProbe(ops = LOWERING_SUBSET_BLOCK) {
       ])),
       generatedHelperCalls,
       interpretedHelperCalls,
+      generatedQemuLoadCalls,
+      interpretedQemuLoadCalls,
+      generatedQemuStoreCalls,
+      interpretedQemuStoreCalls,
     });
   }
+
+  const counters = cases.reduce((accumulator, entry) => {
+    accumulator.generatedBlocks++;
+    accumulator.helperFallbacks += entry.generatedHelperCalls.length;
+    accumulator.qemuLoadFallbacks += entry.generatedQemuLoadCalls.length;
+    accumulator.qemuStoreFallbacks += entry.generatedQemuStoreCalls.length;
+    return accumulator;
+  }, {
+    generatedBlocks: 0,
+    helperFallbacks: 0,
+    qemuLoadFallbacks: 0,
+    qemuStoreFallbacks: 0,
+  });
 
   return {
     format: 1,
@@ -626,6 +730,7 @@ export async function runLoweringSubsetProbe(ops = LOWERING_SUBSET_BLOCK) {
     imports: contract.imports,
     exports: contract.exports,
     ops: ops.length,
+    counters,
     cases,
   };
 }

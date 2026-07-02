@@ -39,6 +39,16 @@ assert.deepEqual(contract.imports, [
     kind: "function",
   },
   {
+    module: "h",
+    name: "qemu_ld_i64",
+    kind: "function",
+  },
+  {
+    module: "h",
+    name: "qemu_st_i64",
+    kind: "function",
+  },
+  {
     module: "env",
     name: "memory",
     kind: "memory",
@@ -85,9 +95,16 @@ const interpretedResult = interpretLoweringSubset(
   LOWERING_SUBSET_BLOCK,
   interpretedView,
   64,
-  (opcode, value) => {
-    interpretedHelperCalls.push({ opcode, value: value.toString() });
-    return (6n << 32n) | (value & 0xffffffffn);
+  {
+    helper0(opcode, value) {
+      interpretedHelperCalls.push({ opcode, value: value.toString() });
+      return (6n << 32n) | (value & 0xffffffffn);
+    },
+    qemuLd(reg, addr, oi) {
+      return BigInt.asUintN(64, addr ^ BigInt(oi));
+    },
+    qemuSt() {
+    },
   },
 );
 assert.equal(interpretedResult.toString(), "25769803818");
@@ -102,6 +119,12 @@ assert.equal(loweringProbe.purpose, "qemu-wasm64-lowering-subset");
 assert.equal(loweringProbe.ok, true);
 assert.equal(loweringProbe.ops, LOWERING_SUBSET_BLOCK.length);
 assert.equal(loweringProbe.cases.length, 2);
+assert.deepEqual(loweringProbe.counters, {
+  generatedBlocks: 2,
+  helperFallbacks: 1,
+  qemuLoadFallbacks: 2,
+  qemuStoreFallbacks: 2,
+});
 
 const branchTaken = loweringProbe.cases.find((entry) =>
   entry.name === "branch-taken-skip-helper");
@@ -112,9 +135,28 @@ assert.deepEqual(branchTaken.generatedContext, {
   16: "42",
   24: "25769803818",
   32: "1",
+  40: "4294967314",
 });
 assert.deepEqual(branchTaken.generatedHelperCalls, []);
 assert.deepEqual(branchTaken.interpretedHelperCalls, []);
+assert.deepEqual(branchTaken.generatedQemuLoadCalls, [
+  {
+    reg: 9,
+    addr: "4294967296",
+    oi: 18,
+    result: "4294967314",
+  },
+]);
+assert.deepEqual(branchTaken.generatedQemuLoadCalls, branchTaken.interpretedQemuLoadCalls);
+assert.deepEqual(branchTaken.generatedQemuStoreCalls, [
+  {
+    reg: 9,
+    addr: "4294967296",
+    value: "25769803818",
+    oi: 19,
+  },
+]);
+assert.deepEqual(branchTaken.generatedQemuStoreCalls, branchTaken.interpretedQemuStoreCalls);
 
 const branchNotTaken = loweringProbe.cases.find((entry) =>
   entry.name === "branch-not-taken-helper");
@@ -125,6 +167,7 @@ assert.deepEqual(branchNotTaken.generatedContext, {
   16: "43",
   24: "25769803819",
   32: "0",
+  40: "4294967314",
 });
 assert.deepEqual(branchNotTaken.generatedHelperCalls, [
   {
@@ -133,5 +176,23 @@ assert.deepEqual(branchNotTaken.generatedHelperCalls, [
   },
 ]);
 assert.deepEqual(branchNotTaken.generatedHelperCalls, branchNotTaken.interpretedHelperCalls);
+assert.deepEqual(branchNotTaken.generatedQemuLoadCalls, [
+  {
+    reg: 9,
+    addr: "4294967296",
+    oi: 18,
+    result: "4294967314",
+  },
+]);
+assert.deepEqual(branchNotTaken.generatedQemuLoadCalls, branchNotTaken.interpretedQemuLoadCalls);
+assert.deepEqual(branchNotTaken.generatedQemuStoreCalls, [
+  {
+    reg: 9,
+    addr: "4294967296",
+    value: "25769803819",
+    oi: 19,
+  },
+]);
+assert.deepEqual(branchNotTaken.generatedQemuStoreCalls, branchNotTaken.interpretedQemuStoreCalls);
 
 console.log("wasm-tb-module-emitter-test: ok");

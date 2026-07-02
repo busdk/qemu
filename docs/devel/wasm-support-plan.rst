@@ -5263,11 +5263,13 @@ Deterministic TB module emitter
 
 The next backend-shaped step adds a small deterministic module emitter test
 without making the backend runnable.  ``scripts/ci/wasm-tb-module-emitter.mjs``
-emits a 111-byte generated-TB module with the contract required by the first
+emits a 155-byte generated-TB module with the contract required by the first
 real lowering slice:
 
 * import ``env.memory``;
 * import helper function ``h.helper0``;
+* import guest-memory fallback helpers ``h.qemu_ld_i64`` and
+  ``h.qemu_st_i64``;
 * export ``start(ctx)``;
 * load two i64 fields from the context;
 * store their sum back to the context;
@@ -5285,9 +5287,10 @@ Validation on 2026-07-02:
 * ``node --check scripts/ci/wasm-tb-module-emitter-test.mjs`` passed.
 * ``node scripts/ci/wasm-tb-module-emitter-test.mjs`` passed.
 * ``node scripts/ci/wasm-tb-module-emitter.mjs`` reported ``ok: true``, module
-  size 111 bytes, imports ``h.helper0`` and ``env.memory``, export ``start``,
-  stored sum ``42``, helper opcode ``7`` with value ``42``, and helper dispatch
-  result ``25769803818``.
+  size 155 bytes, imports ``h.helper0``, ``h.qemu_ld_i64``,
+  ``h.qemu_st_i64``, and ``env.memory``, export ``start``, stored sum ``42``,
+  helper opcode ``7`` with value ``42``, and helper dispatch result
+  ``25769803818``.
 
 The same helper now includes the first executable lowering-subset spec.  It
 lowers a small TB operation list to WebAssembly and compares the generated
@@ -5303,16 +5306,27 @@ Validation on 2026-07-02:
 
 * ``node scripts/ci/wasm-tb-module-emitter.mjs`` reported lowering probe
   ``ok: true``.
-* The lowering probe module size was 172 bytes and the lowered operation list
-  contained 18 operations.
+* The lowering probe module size was 249 bytes and the lowered operation list
+  contained 22 operations.
+* The lowering probe recorded structured counters:
+  ``generatedBlocks=2``, ``helperFallbacks=1``, ``qemuLoadFallbacks=2``, and
+  ``qemuStoreFallbacks=2``.
 * In the ``branch-taken-skip-helper`` case, generated and interpreted paths
   both returned ``25769803818``, wrote context offsets 16, 24, and 32 as
-  ``42``, ``25769803818``, and ``1``, and made no helper call.
+  ``42``, ``25769803818``, and ``1``, wrote qemu-load fallback result
+  ``4294967314`` to offset 40, made no generic helper call, called
+  ``qemu_ld_i64`` with address ``4294967296`` and operation index ``18``, and
+  called ``qemu_st_i64`` with the same address, result ``25769803818``, and
+  operation index ``19``.
 * In the ``branch-not-taken-helper`` case, generated and interpreted paths both
   returned ``25769803819``, wrote context offsets 16, 24, and 32 as ``43``,
-  ``25769803819``, and ``0``, and made helper call opcode ``7`` with value
-  ``43``.
+  ``25769803819``, and ``0``, wrote qemu-load fallback result ``4294967314``
+  to offset 40, made helper call opcode ``7`` with value ``43``, called
+  ``qemu_ld_i64`` with address ``4294967296`` and operation index ``18``, and
+  called ``qemu_st_i64`` with the same address, result ``25769803819``, and
+  operation index ``19``.
 
 This is still not a runnable wasm64 TCG backend and not a speed improvement.
 C backend integration remains required before an opt-in generic smoke speed
-gate is meaningful.
+gate is meaningful.  The default Chromium smoke gate must be re-run from a
+QEMU artifact once the C backend starts affecting runtime builds.
