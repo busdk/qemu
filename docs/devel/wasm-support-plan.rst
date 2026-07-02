@@ -5698,3 +5698,52 @@ hostname at ``124940`` ms, and then failed the guest-origin idle timeout at
 ``310470`` ms with the same final guest line:
 ``systemd[1]: Hostname set to <bus-engine-os>.``  The remaining performance
 work is still the post-hostname systemd CPU-throughput gap.
+
+Wasm64 Address-Limited Memory Measurement
+-----------------------------------------
+
+On 2026-07-02, the active five-minute Bus Engine OS boot plan measured the
+available Emscripten address-limited comparison mode before starting larger
+backend work.  QEMU's current WebAssembly host support exposes ``wasm64`` as
+the supported CPU family.  The available comparison flag is
+``--wasm64-32bit-address-limit``, which configures Emscripten with
+``-sMEMORY64=2`` while keeping an 8-byte ``void *`` ABI.  This is useful
+memory-mode evidence, but it is not a true ``-sMEMORY64=0`` wasm32 host port.
+
+Two TCI artifacts were built from the same QEMU commit with
+``scripts/ci/wasm-build-artifacts-local.py``:
+
+* default wasm64 artifacts in ``/tmp/qemu-w1-wasm64-current``:
+
+  * ``qemu-system-x86_64.js`` =
+    ``4dcf436f15651d3b06a350636fa6c480399ea41ab9865c4b17547e8beeb650d0``
+  * ``qemu-system-x86_64.wasm`` =
+    ``df7a62f60f8baba2c2440c01aa476c69e511191d42a688c8ae91ed22081a7cf3``
+
+* wasm64 address-limited artifacts in
+  ``/tmp/qemu-w1-wasm64-32bit-address``:
+
+  * ``qemu-system-x86_64.js`` =
+    ``021b10a1aba4417defd1e96fb6e076756fcc7b5da3279b5a7f6d3b0148428dfa``
+  * ``qemu-system-x86_64.wasm`` =
+    ``42c284fb963e36403a33f5298c6c14ec419486651177225e6962fa78a5565a2e``
+
+Both artifacts were run through the same CI-shaped Chromium browser smoke in
+the ``mcr.microsoft.com/playwright:v1.56.1-noble`` image.  Chromium reported
+version ``141.0.7390.37`` and ``crossOriginIsolated: true``.  The browser
+memory probe accepted the same memory cases for both artifacts: ``22`` passed
+and ``10`` failed as expected at the default-address and i64 upper bounds.
+
+The generic Linux smoke used the pinned TuxBoot x86_64 kernel, helper-built
+initramfs, ``Nehalem`` CPU, ``512M`` guest memory, no network, and marker
+``QEMU_WASM_LINUX_BOOT_OK``.  The default wasm64 artifact reached the marker
+in ``97316`` ms and wrote
+``/tmp/qemu-w1-smoke-current/wasm-browser-smoke-result.json``.  The
+address-limited artifact reached the marker in ``91639`` ms and wrote
+``/tmp/qemu-w1-smoke-32bit-address/wasm-browser-smoke-result.json``.
+
+The address-limited mode improved the generic smoke by about ``5.8%``.  That
+is below the active plan's ``20%`` decision gate, so the next backend work
+continues wasm64-first.  This result does not justify a separate wasm32 host
+port as the next step toward the Bus Engine OS five-minute multi-user target,
+and it does not change the default artifact family.

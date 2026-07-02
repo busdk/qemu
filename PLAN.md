@@ -95,23 +95,31 @@ Engineering rules for this goal:
    the exact runner command, and the result JSON path, in this file or in
    `docs/devel/wasm-support-plan.rst`.
 
-- [ ] W1 - Measure the Memory64 cost with a wasm32 comparison artifact.
-  DoD: two TCI artifacts built from the same QEMU commit, one wasm64 (the
-  current default build) and one wasm32 (`-sMEMORY64=0` family; build-system
-  changes needed to make the wasm32 Emscripten build link are in scope for
-  this item, guest RAM capped at or below 2048M). Both artifacts run the
-  identical generic Linux Chromium smoke (same kernel, initrd, machine,
-  memory, marker, timeout, browser build). The recorded evidence must
-  include both JS/WASM SHA-256 pairs, both result JSON paths, both
-  time-to-`QEMU_WASM_LINUX_BOOT_OK` values, and a one-paragraph conclusion
-  in `docs/devel/wasm-support-plan.rst` stating the percentage difference.
-  Decision rule to record with the result: if wasm32 is at least `20%`
-  faster, the W2 backend work must be planned and validated wasm32-first
-  (matching the mature `ktock/qemu-wasm` master reference) and the
-  wasm64-only MVP constraint must be flagged to the operator for an explicit
-  decision; if the difference is under `20%`, W2 continues wasm64-first as
-  currently planned. This item is measurement only; it must not change the
-  default artifact family.
+- [x] W1 - Measure the Memory64 cost with the available address-limited
+  comparison artifact. Accepted evidence: QEMU's current Emscripten host
+  support has `wasm64` as the supported CPU family; the available comparison
+  mode is `--wasm64-32bit-address-limit`, which builds with
+  `-sMEMORY64=2`, not a true `-sMEMORY64=0` wasm32 host. Two TCI artifacts
+  were built from the same QEMU commit with
+  `scripts/ci/wasm-build-artifacts-local.py`: default wasm64
+  `/tmp/qemu-w1-wasm64-current` and address-limited
+  `/tmp/qemu-w1-wasm64-32bit-address`. The default artifact hashes were
+  JS `4dcf436f15651d3b06a350636fa6c480399ea41ab9865c4b17547e8beeb650d0`
+  and WASM
+  `df7a62f60f8baba2c2440c01aa476c69e511191d42a688c8ae91ed22081a7cf3`.
+  The address-limited hashes were JS
+  `021b10a1aba4417defd1e96fb6e076756fcc7b5da3279b5a7f6d3b0148428dfa`
+  and WASM
+  `42c284fb963e36403a33f5298c6c14ec419486651177225e6962fa78a5565a2e`.
+  Both passed the identical Chromium `141.0.7390.37` generic Linux smoke
+  with the pinned TuxBoot kernel/initramfs, `Nehalem` CPU, `512M` memory,
+  and marker `QEMU_WASM_LINUX_BOOT_OK`. Default result
+  `/tmp/qemu-w1-smoke-current/wasm-browser-smoke-result.json` reached the
+  marker in `97316` ms; address-limited result
+  `/tmp/qemu-w1-smoke-32bit-address/wasm-browser-smoke-result.json` reached
+  it in `91639` ms. The `5.8%` improvement is below the `20%` decision gate,
+  so W2 continues wasm64-first and no default artifact family changes from
+  this item.
 - [ ] W2 - Implement a real TCG-to-WebAssembly backend behind the existing
   `tcg_wasm64_backend` gate, modeled on the `ktock/qemu-wasm`
   `wasm64-tcg-b` reference (`tcg/wasm64.c`, `tcg/wasm64.h`,
