@@ -5,17 +5,21 @@ work. Keep changes generic to QEMU unless a task explicitly says otherwise.
 
 ## WebAssembly Goal
 
-The active target is a 64-bit browser MVP:
+The active target is making the 64-bit Bus Engine OS `virtual-server` guest
+reach normal multi-user boot in browser-hosted QEMU/WASM within five minutes.
+Keep the scope narrow:
 
 - Emscripten `wasm64` host builds.
 - `x86_64-softmmu` system emulation.
+- Chrome or Chromium as the first browser acceptance target.
 - TCI console boot must keep working as the regression gate.
-- Browser graphics and keyboard input are part of the active MVP expansion.
-- Native WebAssembly TCG later.
 - Browser execution through modern APIs with cross-origin isolation.
-- Chrome or Chromium as the first browser acceptance target. Treat Firefox
-  and WebKit as compatibility tracking unless maintainers explicitly widen
-  the MVP browser matrix.
+- Generic QEMU changes only; downstream Bus Engine product work stays
+  downstream.
+
+Graphics, keyboard input, native WebAssembly TCG, persistence, networking, and
+other browser runtime features belong in `BACKLOG.md` unless `PLAN.md`
+explicitly promotes them as required for the active boot goal.
 
 Bus Engine OS is the downstream proof guest. Do not add Bus Engine product
 logic, branding, release policy, package selection, or website UI to upstream
@@ -45,7 +49,7 @@ capability needed by that proof.
 
 Finish unchecked `PLAN.md` items before taking new work. If the active plan is
 empty or blocked on a concrete external dependency, move the next
-highest-value item from `FUTURE_WORK.md` into `PLAN.md` before implementing it.
+highest-value item from `BACKLOG.md` into `PLAN.md` before implementing it.
 
 ## Evidence
 
