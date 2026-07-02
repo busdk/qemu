@@ -100,7 +100,7 @@ option('tcg_interpreter', type: 'boolean', value: false,
 option('tcg_hotblocks', type: 'boolean', value: false,
        description: 'TCG hot-block instrumentation')
 option('tcg_wasm64_backend', type: 'boolean', value: false,
-       description: 'experimental wasm64 TCG backend skeleton (not runnable yet)')
+       description: 'experimental wasm64 TCG backend with strict TCI fallback')
 option('safe_stack', type: 'boolean', value: false,
        description: 'SafeStack Stack Smash Protection (requires clang/llvm and coroutine backend ucontext)')
 option('asan', type: 'boolean', value: false,

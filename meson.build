@@ -919,16 +919,13 @@ if have_tcg
   if get_option('tcg_wasm64_backend') and host_arch != 'wasm64'
     error('The experimental wasm64 TCG backend can only be selected on a wasm64 host')
   endif
-  if get_option('tcg_wasm64_backend') and get_option('tcg_interpreter')
-    error('The experimental wasm64 TCG backend and TCG interpreter are mutually exclusive')
-  endif
   if host_arch == 'unknown'
     if not get_option('tcg_interpreter')
       error('Unsupported CPU @0@, try --enable-tcg-interpreter'.format(cpu))
     endif
   elif host_arch == 'wasm64'
     if get_option('tcg_wasm64_backend')
-      error('The experimental wasm64 TCG backend skeleton has no instruction lowering yet; use --enable-tcg-interpreter')
+      tcg_arch = 'wasm64'
     elif not get_option('tcg_interpreter')
       error('WebAssembly host requires --enable-tcg-interpreter')
     endif
@@ -4834,7 +4831,7 @@ endif
 summary_info += {'TCG support':       config_all_accel.has_key('CONFIG_TCG')}
 if config_all_accel.has_key('CONFIG_TCG')
   if get_option('tcg_wasm64_backend')
-    summary_info += {'TCG backend':   'experimental wasm64 skeleton'}
+    summary_info += {'TCG backend':   'experimental wasm64 with TCI fallback'}
   elif get_option('tcg_interpreter')
     summary_info += {'TCG backend':   'TCI (TCG with bytecode interpreter, slow)'}
   else

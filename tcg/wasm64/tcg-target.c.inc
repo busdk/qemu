@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: MIT */
 /*
- * Experimental wasm64 TCG target skeleton.
+ * Experimental wasm64 TCG target.
  *
- * This file intentionally fails closed.  Instruction lowering, helper calls,
- * memory access, and TB lifecycle management must be implemented in small
- * tested slices before the backend can be selected.
+ * This first runnable slice emits the existing TCI bytecode stream as the
+ * strict correctness fallback. Native WebAssembly lowering plugs into the
+ * C-callable boundary in tcg/wasm64.c and must preserve this fallback.
  */
 
-#error "The experimental wasm64 TCG backend skeleton has no instruction lowering yet"
+#include "../tci/tcg-target.c.inc"

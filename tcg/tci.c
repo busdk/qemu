@@ -1809,7 +1809,13 @@ static TCIWasmSubsetStatus tci_wasm_subset_try_exec(const uint32_t *tb_start,
  * One possible operation in the pseudo code is a call to binary code.
  * Therefore, disable CFI checks in the interpreter function
  */
-uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
+#ifdef CONFIG_TCG_WASM64_BACKEND
+#define TCI_QEMU_TB_EXEC tcg_tci_qemu_tb_exec
+#else
+#define TCI_QEMU_TB_EXEC tcg_qemu_tb_exec
+#endif
+
+uintptr_t QEMU_DISABLE_CFI TCI_QEMU_TB_EXEC(CPUArchState *env,
                                             const void *v_tb_ptr)
 {
     const uint32_t *tb_ptr = v_tb_ptr;

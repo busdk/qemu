@@ -25,6 +25,10 @@ if get_option('tcg_interpreter')
   tcg_ss.add(libffi)
   tcg_ss.add(files('tci.c'))
 elif get_option('tcg_wasm64_backend')
+  libffi = dependency('libffi', version: '>=3.0', required: true,
+                      method: 'pkg-config')
+  tcg_ss.add(libffi)
+  tcg_ss.add(files('tci.c'))
   tcg_ss.add(files('wasm64.c'))
 endif
 

@@ -13,6 +13,8 @@
 
 #include <stdint.h>
 
+typedef struct CPUArchState CPUArchState;
+
 /*
  * Execution counters reported by the experimental backend.
  *
@@ -86,5 +88,8 @@ typedef struct TCGWasm64TBHeader {
     int32_t *counters;
     TCGWasm64Instance **instances;
 } TCGWasm64TBHeader;
+
+uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
+                             TCGWasm64Counters *counters);
 
 #endif /* TCG_WASM64_H */

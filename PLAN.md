@@ -153,6 +153,38 @@ Engineering rules for this goal:
     with the backend enabled and with nonzero executed generated blocks.
   This item may land as several commits, but it is not done until all of
   the above hold on one recorded artifact pair.
+- [x] W2a - Open the wasm64 backend build path with an explicit C-callable
+  fallback boundary. Accepted slice evidence: the `--enable-tcg-wasm64-backend`
+  Emscripten build now configures as `TCG backend: experimental wasm64 with
+  TCI fallback`, compiles, links, and writes artifacts to
+  `/tmp/qemu-w2-backend-fallback`. Artifact hashes:
+  `qemu-system-x86_64.js`
+  `5dd87847bcfd34019a2c846bf223646d17a23130191789f880dd5bfcba5c3e8a`,
+  `qemu-system-x86_64.wasm`
+  `20183a4dcd3d577aa62ecc439f9883c977a4d06fa9ba17e7f0b713681d258a40`,
+  manifest
+  `66e2e7260e576153f8914f99564d1c28041348808a9e260cff65a56250329987`.
+  The first build attempt exposed that the reused TCI emitter needs TCI
+  target-private opcodes; `tcg/wasm64/tcg-target-opc.h.inc` now includes the
+  existing TCI opcode list instead of duplicating it. The selected backend
+  owns `tcg_qemu_tb_exec()`, increments a generated-attempt counter, and
+  falls back through the renamed TCI entrypoint for unsupported TBs. Checks:
+  `git diff --check`, `node --check scripts/ci/wasm-browser-smoke-runner.mjs`,
+  `node --check scripts/ci/wasm-browser-smoke.mjs`, and
+  `node scripts/ci/wasm-browser-smoke-runner-test.mjs` outside the sandbox
+  because sandboxed `spawnSync` returns `EPERM`. The backend artifact passed
+  the generic Chromium `141.0.7390.37` TuxBoot smoke and reached
+  `QEMU_WASM_LINUX_BOOT_OK` in `92692` ms, writing
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2-smoke-backend-fallback/wasm-browser-smoke-result.json`.
+  This slice does not complete W2 because generated WebAssembly blocks are
+  not compiled or executed yet and backend counters are not exported to the
+  browser result JSON.
+- [ ] W2b - Implement the first real generated WebAssembly TB instance path
+  behind the W2a boundary. DoD: a backend artifact executes nonzero generated
+  blocks through the C-callable `TCGWasm64Context` boundary, preserves TCI
+  fallback for unsupported TBs, and exports nonzero
+  `TCGWasm64Counters` generated/fallback fields in the generic browser smoke
+  result JSON.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and

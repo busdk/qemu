@@ -5747,3 +5747,67 @@ is below the active plan's ``20%`` decision gate, so the next backend work
 continues wasm64-first.  This result does not justify a separate wasm32 host
 port as the next step toward the Bus Engine OS five-minute multi-user target,
 and it does not change the default artifact family.
+
+Wasm64 Backend Fallback Boundary Build Proof
+--------------------------------------------
+
+On 2026-07-02, the experimental ``tcg_wasm64_backend`` path was opened far
+enough to build and run through the existing TCI correctness fallback.  The
+Meson selection now accepts ``--enable-tcg-wasm64-backend`` on a wasm64 host
+without also enabling the public ``tcg_interpreter`` option.  The target uses
+the TCI bytecode emitter as its fallback format while native generated-block
+lowering grows behind the ``tcg/wasm64.c`` runtime boundary.
+
+The first backend build attempt configured successfully as
+``TCG backend: experimental wasm64 with TCI fallback`` but failed while
+compiling ``tcg/tci.c`` and ``tcg/tcg.c`` because the reused TCI emitter
+referenced TCI target-private opcodes such as ``INDEX_op_tci_movi`` without
+the TCI target opcode list being visible to the wasm64 target.  The fix added
+``tcg/wasm64/tcg-target-opc.h.inc`` as a thin include of the existing
+``tcg/tci/tcg-target-opc.h.inc``.  No duplicate opcode definitions were added.
+
+The accepted build command was::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /tmp/qemu-w2-backend-fallback \
+    --jobs auto \
+    --configure-arg=--disable-tcg-interpreter \
+    --configure-arg=--enable-tcg-wasm64-backend
+
+It produced:
+
+* ``qemu-system-x86_64.js`` =
+  ``5dd87847bcfd34019a2c846bf223646d17a23130191789f880dd5bfcba5c3e8a``
+* ``qemu-system-x86_64.wasm`` =
+  ``20183a4dcd3d577aa62ecc439f9883c977a4d06fa9ba17e7f0b713681d258a40``
+* manifest =
+  ``66e2e7260e576153f8914f99564d1c28041348808a9e260cff65a56250329987``
+
+The backend-owned ``tcg_qemu_tb_exec()`` now calls a C-visible
+``tcg_wasm64_tb_exec()`` boundary with a ``TCGWasm64Context`` shape and then
+falls back through a renamed TCI entrypoint for unsupported blocks.  This is a
+strict fallback proof, not a native generated-block proof: the current
+artifact intentionally records generated attempts and unsupported fallback, but
+does not yet instantiate or execute compiled WebAssembly translation blocks.
+
+Verification for this slice:
+
+* ``git diff --check`` passed.
+* ``node --check scripts/ci/wasm-browser-smoke-runner.mjs`` passed.
+* ``node --check scripts/ci/wasm-browser-smoke.mjs`` passed.
+* ``node scripts/ci/wasm-browser-smoke-runner-test.mjs`` passed outside the
+  sandbox; inside the sandbox, child-process ``spawnSync`` fails with
+  ``EPERM`` and leaves stdout/stderr empty.
+* The backend artifact passed the CI-shaped Chromium generic Linux smoke in
+  ``mcr.microsoft.com/playwright:v1.56.1-noble``.  Chromium reported
+  ``141.0.7390.37`` and ``crossOriginIsolated: true``.  The pinned TuxBoot
+  kernel/initramfs, ``Nehalem`` CPU, ``512M`` memory, and marker
+  ``QEMU_WASM_LINUX_BOOT_OK`` were used.  The marker was reached in
+  ``92692`` ms, with result JSON at
+  ``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2-smoke-backend-fallback/wasm-browser-smoke-result.json``.
+
+This evidence proves backend selectability, compile/link viability, and
+generic smoke preservation with strict fallback.  It does not satisfy the full
+backend goal: the next required step is a real generated WebAssembly TB
+instance path with nonzero generated execution counters in the browser result
+JSON, followed by the same-commit W3 speed gate.

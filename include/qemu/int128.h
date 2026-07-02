@@ -6,7 +6,9 @@
  * But libffi does not support __int128_t, and therefore cannot pass
  * or return values of this type, force use of the Int128 struct.
  */
-#if defined(CONFIG_INT128) && !defined(CONFIG_TCG_INTERPRETER)
+#if defined(CONFIG_INT128) && \
+    !defined(CONFIG_TCG_INTERPRETER) && \
+    !defined(CONFIG_TCG_WASM64_BACKEND)
 typedef __int128_t Int128;
 typedef __int128_t __attribute__((aligned(16))) Int128Aligned;
 

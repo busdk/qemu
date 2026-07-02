@@ -1,15 +1,17 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Experimental wasm64 TCG backend runtime skeleton.
+ * Experimental wasm64 TCG backend runtime.
  *
- * The skeleton is not selected by default and is rejected during configure
- * until instruction lowering exists.  Keep the runtime boundary small and
- * conservative: generated WebAssembly TBs receive one context pointer and
+ * The backend is not selected by default.  Keep the runtime boundary small
+ * and conservative: generated WebAssembly TBs receive one context pointer and
  * unsupported work must continue through a correctness fallback.
  */
 
 #include "qemu/osdep.h"
+#include "tcg/tcg.h"
 #include "tcg/wasm64.h"
+
+uintptr_t tcg_tci_qemu_tb_exec(CPUArchState *env, const void *tb_ptr);
 
 void tcg_wasm64_counters_reset(TCGWasm64Counters *counters)
 {
@@ -66,5 +68,37 @@ void tcg_wasm64_count_fallback(TCGWasm64Counters *counters,
 
 bool tcg_wasm64_backend_available(void)
 {
-    return false;
+    return true;
+}
+
+uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
+                             TCGWasm64Counters *counters)
+{
+    TCGWasm64Context ctx = {
+        .tb_ptr = (void *)tb_ptr,
+        .env = env,
+        .counters = counters,
+    };
+
+    if (counters) {
+        counters->generated_attempts++;
+    }
+
+    /*
+     * Native wasm64 lowering is intentionally not accepted yet. This boundary
+     * is where a compiled WebAssembly TB instance will be called; until then,
+     * every TB has a precise unsupported fallback to TCI.
+     */
+    (void)ctx;
+    tcg_wasm64_count_fallback(counters, TCG_WASM64_FALLBACK_UNSUPPORTED);
+    return tcg_tci_qemu_tb_exec(env, tb_ptr);
+}
+
+uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
+                                            const void *tb_ptr)
+{
+    TCGWasm64Counters counters;
+
+    tcg_wasm64_counters_reset(&counters);
+    return tcg_wasm64_tb_exec(env, tb_ptr, &counters);
 }
