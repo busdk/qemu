@@ -37,6 +37,9 @@ typedef struct TCGWasm64Counters {
     uint64_t translated_lowerable_tbs;
     uint64_t translated_profile_supported_ops;
     uint64_t translated_profile_unsupported_ops;
+    uint64_t translated_generated_candidate_tbs;
+    uint64_t translated_generated_supported_ops;
+    uint64_t translated_generated_unsupported_ops;
     uint64_t fallback_unsupported;
     uint64_t fallback_helper;
     uint64_t fallback_qemu_load;
@@ -60,6 +63,8 @@ typedef enum TCGWasm64TBMetadataFlags {
     TCG_WASM64_TB_METADATA_FALLBACK = 1u << 1,
     TCG_WASM64_TB_METADATA_LOWERING_PROFILE = 1u << 2,
     TCG_WASM64_TB_METADATA_PROFILE_LOWERABLE = 1u << 3,
+    TCG_WASM64_TB_METADATA_GENERATED_CANDIDATE = 1u << 4,
+    TCG_WASM64_TB_METADATA_TERMINAL = 1u << 5,
 } TCGWasm64TBMetadataFlags;
 
 typedef enum TCGWasm64TranslateFallbackReason {
@@ -89,6 +94,8 @@ typedef struct TCGWasm64TBMetadata {
     uint32_t lowering_profile;
     uint32_t supported_op_count;
     uint32_t unsupported_op_count;
+    uint32_t generated_supported_op_count;
+    uint32_t generated_unsupported_op_count;
 } TCGWasm64TBMetadata;
 
 void tcg_wasm64_counters_reset(TCGWasm64Counters *counters);
@@ -97,8 +104,11 @@ void tcg_wasm64_counters_add(TCGWasm64Counters *dst,
 void tcg_wasm64_count_fallback(TCGWasm64Counters *counters,
                                TCGWasm64FallbackReason reason);
 void tcg_wasm64_translate_begin(const void *tb_ptr);
-void tcg_wasm64_translate_note_tci_word(uint32_t word);
+void tcg_wasm64_translate_note_tci_op(uint32_t op);
 const TCGWasm64TBMetadata *tcg_wasm64_translate_lookup(const void *tb_ptr);
+bool tcg_wasm64_translate_generated_candidate(
+    const TCGWasm64TBMetadata *metadata);
+bool tcg_wasm64_backend_available(void);
 
 /*
  * Context shared between QEMU and a generated WebAssembly TB function.

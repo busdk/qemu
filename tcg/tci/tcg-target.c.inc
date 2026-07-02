@@ -111,12 +111,17 @@ static void stack_bounds_check(TCGReg base, intptr_t offset)
     }
 }
 
+#ifndef tcg_out_tci_note_op
+#define tcg_out_tci_note_op(s, op) do { } while (0)
+#endif
+
 static void tcg_out_op_l(TCGContext *s, TCGOpcode op, TCGLabel *l0)
 {
     tcg_insn_unit insn = 0;
 
     tcg_out_reloc(s, s->code_ptr, 20, l0, 0);
     insn = deposit32(insn, 0, 8, op);
+    tcg_out_tci_note_op(s, op);
     tcg_out32(s, insn);
 }
 
@@ -137,6 +142,7 @@ static void tcg_out_op_p(TCGContext *s, TCGOpcode op, void *p0)
     }
     insn = deposit32(insn, 0, 8, op);
     insn = deposit32(insn, 12, 20, diff);
+    tcg_out_tci_note_op(s, op);
     tcg_out32(s, insn);
 }
 
@@ -146,11 +152,13 @@ static void tcg_out_op_r(TCGContext *s, TCGOpcode op, TCGReg r0)
 
     insn = deposit32(insn, 0, 8, op);
     insn = deposit32(insn, 8, 4, r0);
+    tcg_out_tci_note_op(s, op);
     tcg_out32(s, insn);
 }
 
 static void tcg_out_op_v(TCGContext *s, TCGOpcode op)
 {
+    tcg_out_tci_note_op(s, op);
     tcg_out32(s, (uint8_t)op);
 }
 
@@ -162,6 +170,7 @@ static void tcg_out_op_ri(TCGContext *s, TCGOpcode op, TCGReg r0, int32_t i1)
     insn = deposit32(insn, 0, 8, op);
     insn = deposit32(insn, 8, 4, r0);
     insn = deposit32(insn, 12, 20, i1);
+    tcg_out_tci_note_op(s, op);
     tcg_out32(s, insn);
 }
 
@@ -172,6 +181,7 @@ static void tcg_out_op_rl(TCGContext *s, TCGOpcode op, TCGReg r0, TCGLabel *l1)
     tcg_out_reloc(s, s->code_ptr, 20, l1, 0);
     insn = deposit32(insn, 0, 8, op);
     insn = deposit32(insn, 8, 4, r0);
+    tcg_out_tci_note_op(s, op);
     tcg_out32(s, insn);
 }
 
@@ -182,6 +192,7 @@ static void tcg_out_op_rr(TCGContext *s, TCGOpcode op, TCGReg r0, TCGReg r1)
     insn = deposit32(insn, 0, 8, op);
     insn = deposit32(insn, 8, 4, r0);
     insn = deposit32(insn, 12, 4, r1);
+    tcg_out_tci_note_op(s, op);
     tcg_out32(s, insn);
 }
 
@@ -195,6 +206,7 @@ static void tcg_out_op_rrm(TCGContext *s, TCGOpcode op,
     insn = deposit32(insn, 8, 4, r0);
     insn = deposit32(insn, 12, 4, r1);
     insn = deposit32(insn, 16, 16, m2);
+    tcg_out_tci_note_op(s, op);
     tcg_out32(s, insn);
 }
 
@@ -207,6 +219,7 @@ static void tcg_out_op_rrr(TCGContext *s, TCGOpcode op,
     insn = deposit32(insn, 8, 4, r0);
     insn = deposit32(insn, 12, 4, r1);
     insn = deposit32(insn, 16, 4, r2);
+    tcg_out_tci_note_op(s, op);
     tcg_out32(s, insn);
 }
 
@@ -220,6 +233,7 @@ static void tcg_out_op_rrs(TCGContext *s, TCGOpcode op,
     insn = deposit32(insn, 8, 4, r0);
     insn = deposit32(insn, 12, 4, r1);
     insn = deposit32(insn, 16, 16, i2);
+    tcg_out_tci_note_op(s, op);
     tcg_out32(s, insn);
 }
 
@@ -235,6 +249,7 @@ static void tcg_out_op_rrbb(TCGContext *s, TCGOpcode op, TCGReg r0,
     insn = deposit32(insn, 12, 4, r1);
     insn = deposit32(insn, 16, 6, b2);
     insn = deposit32(insn, 22, 6, b3);
+    tcg_out_tci_note_op(s, op);
     tcg_out32(s, insn);
 }
 
@@ -248,6 +263,7 @@ static void tcg_out_op_rrrc(TCGContext *s, TCGOpcode op,
     insn = deposit32(insn, 12, 4, r1);
     insn = deposit32(insn, 16, 4, r2);
     insn = deposit32(insn, 20, 4, c3);
+    tcg_out_tci_note_op(s, op);
     tcg_out32(s, insn);
 }
 
@@ -264,6 +280,7 @@ static void tcg_out_op_rrrbb(TCGContext *s, TCGOpcode op, TCGReg r0,
     insn = deposit32(insn, 16, 4, r2);
     insn = deposit32(insn, 20, 6, b3);
     insn = deposit32(insn, 26, 6, b4);
+    tcg_out_tci_note_op(s, op);
     tcg_out32(s, insn);
 }
 
@@ -277,6 +294,7 @@ static void tcg_out_op_rrrr(TCGContext *s, TCGOpcode op,
     insn = deposit32(insn, 12, 4, r1);
     insn = deposit32(insn, 16, 4, r2);
     insn = deposit32(insn, 20, 4, r3);
+    tcg_out_tci_note_op(s, op);
     tcg_out32(s, insn);
 }
 
@@ -293,6 +311,7 @@ static void tcg_out_op_rrrrrc(TCGContext *s, TCGOpcode op,
     insn = deposit32(insn, 20, 4, r3);
     insn = deposit32(insn, 24, 4, r4);
     insn = deposit32(insn, 28, 4, c5);
+    tcg_out_tci_note_op(s, op);
     tcg_out32(s, insn);
 }
 
@@ -347,6 +366,7 @@ static void tcg_out_movi(TCGContext *s, TCGType type,
         new_pool_label(s, arg, 20, s->code_ptr, 0);
         insn = deposit32(insn, 0, 8, INDEX_op_tci_movl);
         insn = deposit32(insn, 8, 4, ret);
+        tcg_out_tci_note_op(s, INDEX_op_tci_movl);
         tcg_out32(s, insn);
     }
 }
@@ -452,6 +472,7 @@ static void tcg_out_call(TCGContext *s, const tcg_insn_unit *func,
     new_pool_l2(s, 20, s->code_ptr, 0, (uintptr_t)func, (uintptr_t)cif);
     insn = deposit32(insn, 0, 8, INDEX_op_call);
     insn = deposit32(insn, 8, 4, which);
+    tcg_out_tci_note_op(s, INDEX_op_call);
     tcg_out32(s, insn);
 }
 

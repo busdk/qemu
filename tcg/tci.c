@@ -290,7 +290,7 @@ static bool tci_wasm_subset_enabled(void)
     return tci_wasm_subset;
 }
 
-static bool tci_wasm_generated_only_enabled(void)
+static bool G_GNUC_UNUSED tci_wasm_generated_only_enabled(void)
 {
     static gsize initialized;
 
@@ -711,8 +711,8 @@ static bool tci_wasm_subset_target_ok(const uint32_t *base,
            (target_addr - base_addr) % sizeof(*base) == 0;
 }
 
-static bool tci_wasm_subset_compare32(uint32_t lhs, uint32_t rhs,
-                                      TCGCond condition)
+static bool G_GNUC_UNUSED
+tci_wasm_subset_compare32(uint32_t lhs, uint32_t rhs, TCGCond condition)
 {
     switch (condition) {
     case TCG_COND_NEVER:
@@ -776,6 +776,7 @@ static bool tci_wasm_generated_opcode_supported(TCGOpcode opc)
     case INDEX_op_xor:
     case INDEX_op_ld:
     case INDEX_op_ld32u:
+    case INDEX_op_mb:
     case INDEX_op_st8:
     case INDEX_op_st32:
     case INDEX_op_st:
@@ -827,13 +828,26 @@ static bool tci_wasm_generated_prevalidate(TCIWasmSubsetEntry *entry,
     return tci_wasm_generated_mark_unsupported(entry, NB_OPS);
 }
 
+#ifdef CONFIG_TCG_WASM64_BACKEND
+static bool tci_wasm_metadata_generated_candidate(const uint32_t *tb_start)
+{
+    const TCGWasm64TBMetadata *metadata =
+        tcg_wasm64_translate_lookup(tb_start);
+
+    if (!tcg_wasm64_translate_generated_candidate(metadata)) {
+        return false;
+    }
+    return metadata->op_count <= MIN(tci_wasm_subset_max_ops, 512);
+}
+#endif
+
 EM_JS(uintptr_t, tci_wasm_generated_compile_js,
       (uintptr_t tb_arg, uint64_t max_ops_arg, int op_mov, int op_movi,
        int op_movl, int op_add, int op_sub, int op_mul, int op_and, int op_or,
        int op_xor, int op_ld, int op_ld32u, int op_st8, int op_st32,
        int op_st, int op_setcond, int op_movcond, int op_shl, int op_shr,
        int op_extract, int op_sextract, int op_setcond32, int op_brcond,
-       int op_exit_tb, int op_goto_tb,
+       int op_mb, int op_exit_tb, int op_goto_tb,
        int ctx_regs_offset, int ctx_ret_offset),
 {
     const tb = Number(tb_arg);
@@ -1274,6 +1288,8 @@ EM_JS(uintptr_t, tci_wasm_generated_compile_js,
                 return comparison === null
                     ? null
                     : localSet(regLocal(r0), i64ExtendI32U(comparison));
+            } else if (opc === op_mb) {
+                return [0xfe, 0x03, 0x00]; /* atomic.fence */
             }
             return null;
         }
@@ -1611,8 +1627,8 @@ static bool tci_wasm_subset_opcode_supported(TCGOpcode opc)
     }
 }
 
-static bool tci_wasm_subset_validate(const uint32_t *tb_start,
-                                     TCIWasmSubsetEntry *entry)
+static bool G_GNUC_UNUSED
+tci_wasm_subset_validate(const uint32_t *tb_start, TCIWasmSubsetEntry *entry)
 {
     uint64_t max_ops = MIN(tci_wasm_subset_max_ops, 512);
     g_autofree bool *seen = g_new0(bool, max_ops);
@@ -1701,7 +1717,8 @@ static bool tci_wasm_subset_validate(const uint32_t *tb_start,
 
 static TCIWasmSubsetStatus
 tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
-                            tcg_target_ulong *regs, uintptr_t *ret)
+                            tcg_target_ulong *regs, uintptr_t *ret,
+                            bool metadata_prevalidated)
 {
     uint64_t signature = tci_wasm_generated_signature(tb_start);
 #ifdef CONFIG_TCG_WASM64_BACKEND
@@ -1741,7 +1758,8 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
         wasm64_counters->generated_attempts++;
     }
 #endif
-    if (!tci_wasm_generated_prevalidate(entry, tb_start)) {
+    if (!metadata_prevalidated &&
+        !tci_wasm_generated_prevalidate(entry, tb_start)) {
 #ifdef CONFIG_TCG_WASM64_BACKEND
         tcg_wasm64_count_fallback(wasm64_counters,
                                   TCG_WASM64_FALLBACK_UNSUPPORTED);
@@ -1757,7 +1775,7 @@ tci_wasm_generated_try_exec(TCIWasmSubsetEntry *entry, const uint32_t *tb_start,
             INDEX_op_xor, INDEX_op_ld, INDEX_op_ld32u, INDEX_op_st8,
             INDEX_op_st32, INDEX_op_st, INDEX_op_setcond, INDEX_op_movcond,
             INDEX_op_shl, INDEX_op_shr, INDEX_op_extract, INDEX_op_sextract,
-            INDEX_op_tci_setcond32, INDEX_op_brcond, INDEX_op_exit_tb,
+            INDEX_op_tci_setcond32, INDEX_op_brcond, INDEX_op_mb, INDEX_op_exit_tb,
             INDEX_op_goto_tb,
             (int)TCI_WASM_GENERATED_CTX_REGS_OFFSET,
             (int)TCI_WASM_GENERATED_CTX_RET_OFFSET);
@@ -1832,9 +1850,11 @@ static TCIWasmSubsetStatus tci_wasm_subset_try_exec(const uint32_t *tb_start,
                                                     uintptr_t *ret)
 {
     TCIWasmSubsetEntry *entry;
+#ifndef CONFIG_TCG_WASM64_BACKEND
     tcg_target_ulong tmp[TCG_TARGET_NB_REGS];
     const uint32_t *tb_ptr = tb_start;
     uint64_t ops;
+#endif
 
     if (unlikely(!tci_wasm_subset_enabled())) {
         return TCI_WASM_SUBSET_UNSUPPORTED;
@@ -1851,6 +1871,24 @@ static TCIWasmSubsetStatus tci_wasm_subset_try_exec(const uint32_t *tb_start,
 
     entry = tci_wasm_subset_entry(tb_start);
     entry->hits++;
+#ifdef CONFIG_TCG_WASM64_BACKEND
+    if (!tci_wasm_metadata_generated_candidate(tb_start)) {
+        tci_wasm_subset_fallback_unsupported++;
+        return TCI_WASM_SUBSET_UNSUPPORTED;
+    }
+    switch (tci_wasm_generated_try_exec(entry, tb_start, regs, ret, true)) {
+    case TCI_WASM_SUBSET_EXIT:
+        tci_wasm_subset_executed++;
+        return TCI_WASM_SUBSET_EXIT;
+    case TCI_WASM_SUBSET_DISPATCH:
+        tci_wasm_subset_executed++;
+        return TCI_WASM_SUBSET_DISPATCH;
+    case TCI_WASM_SUBSET_UNSUPPORTED:
+        return TCI_WASM_SUBSET_UNSUPPORTED;
+    default:
+        g_assert_not_reached();
+    }
+#else
     if (entry->hits < tci_wasm_subset_threshold) {
         tci_wasm_subset_fallback_cold++;
         return TCI_WASM_SUBSET_UNSUPPORTED;
@@ -1859,7 +1897,7 @@ static TCIWasmSubsetStatus tci_wasm_subset_try_exec(const uint32_t *tb_start,
         tci_wasm_subset_fallback_unsupported++;
         return TCI_WASM_SUBSET_UNSUPPORTED;
     }
-    switch (tci_wasm_generated_try_exec(entry, tb_start, regs, ret)) {
+    switch (tci_wasm_generated_try_exec(entry, tb_start, regs, ret, false)) {
     case TCI_WASM_SUBSET_EXIT:
         tci_wasm_subset_executed++;
         return TCI_WASM_SUBSET_EXIT;
@@ -2246,6 +2284,7 @@ static TCIWasmSubsetStatus tci_wasm_subset_try_exec(const uint32_t *tb_start,
     tci_wasm_subset_max_ops_rejected++;
     tci_wasm_subset_unsupported(entry, NB_OPS);
     return TCI_WASM_SUBSET_UNSUPPORTED;
+#endif
 }
 
 #else

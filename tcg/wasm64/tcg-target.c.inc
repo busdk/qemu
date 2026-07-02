@@ -9,17 +9,17 @@
 
 #include "tcg/wasm64.h"
 
-static void tcg_wasm64_out32(TCGContext *s, uint32_t word)
+static void tcg_wasm64_note_tci_op(TCGContext *s, TCGOpcode op)
 {
-    tcg_wasm64_translate_note_tci_word(word);
-    tcg_out32(s, word);
+    (void)s;
+    tcg_wasm64_translate_note_tci_op(op);
 }
 
-#define tcg_out32 tcg_wasm64_out32
+#define tcg_out_tci_note_op tcg_wasm64_note_tci_op
 #define tcg_out_tb_start tcg_wasm64_tci_out_tb_start
 #include "../tci/tcg-target.c.inc"
 #undef tcg_out_tb_start
-#undef tcg_out32
+#undef tcg_out_tci_note_op
 
 static void tcg_out_tb_start(TCGContext *s)
 {
