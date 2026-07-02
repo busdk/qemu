@@ -42,7 +42,12 @@ This goal is done only when all of the following are true:
   version, command line, timeout, QEMU arguments, kernel arguments, and result
   JSON path.
 - [ ] The browser-hosted QEMU/WASM run reaches normal multi-user readiness
-  within `300000` ms.
+  within `300000` ms of harness start, using the same elapsed-ms clock the
+  harness already records for boot milestones. Normal multi-user readiness
+  means the guest serial output contains the systemd line
+  `Reached target Multi-User System.` followed by a getty login prompt line,
+  or the documented `QEMU_WASM_SERVICE_READY` marker. Weaker markers such as
+  hostname, journald, or basic target do not satisfy this item.
 - [ ] The result JSON records the boot milestone timings, final readiness
   marker, final serial state, screenshot path, and QEMU artifact hashes.
 - [ ] A generic Linux browser smoke test still passes with the same QEMU WASM
@@ -68,8 +73,104 @@ weaker marker than normal multi-user readiness.
   `node --check scripts/ci/wasm-browser-smoke.mjs`, and
   `node scripts/ci/wasm-browser-smoke-runner-test.mjs` outside the sandbox
   because sandboxed child-process spawning returns `EPERM`.
-- [ ] Build current QEMU WASM artifacts from this branch and record JavaScript/WebAssembly SHA-256 hashes.
-- [ ] Run the generic Linux Chrome/Chromium browser smoke with the current artifact family and record the result.
-- [ ] Run the Bus Engine OS `virtual-server` Chrome/Chromium browser proof with the accepted kernel/rootfs and record result JSON, screenshot, serial state, and boot milestone timings.
-- [ ] If the Bus Engine OS proof does not reach multi-user readiness within `300000` ms, identify the next concrete QEMU-side change needed for that boot target and keep it in this plan before implementation.
-- [ ] Commit and push QEMU `develop`, run BusDK `./scripts/sync-submodules.sh`, and commit/push the required BusDK and supervisor pins.
+
+The evidence so far is settled and must not be re-litigated with new
+micro-experiments: device attribution shows virtio/browser handlers account
+for well under one second of a full failed run, the guest is still actively
+dispatching TCI translation blocks at timeout, and roughly a dozen
+interpreter shortcuts (opcode peepholes, generated TCI subsets, EM_JS block
+calls, direct-memory helpers, O3/LTO) were each measured and rejected. The
+remaining gap is CPU execution throughput and it needs a multiple-times
+speedup, not another percent-level tweak.
+
+Engineering rules for this goal:
+
+1. No new single-opcode, peephole, fused-op, or EM_JS-per-block interpreter
+   experiment may be started. Rejected experiment families stay rejected
+   unless fresh attribution evidence names a new dominant boundary.
+2. No Bus Engine OS long proof (over `300000` ms of browser time) may be
+   started from an artifact that has not first beaten the same-commit
+   default-TCI generic Chromium smoke by the gate defined below.
+3. Every measurement must record artifact SHA-256 hashes, browser version,
+   the exact runner command, and the result JSON path, in this file or in
+   `docs/devel/wasm-support-plan.rst`.
+
+- [ ] W1 - Measure the Memory64 cost with a wasm32 comparison artifact.
+  DoD: two TCI artifacts built from the same QEMU commit, one wasm64 (the
+  current default build) and one wasm32 (`-sMEMORY64=0` family; build-system
+  changes needed to make the wasm32 Emscripten build link are in scope for
+  this item, guest RAM capped at or below 2048M). Both artifacts run the
+  identical generic Linux Chromium smoke (same kernel, initrd, machine,
+  memory, marker, timeout, browser build). The recorded evidence must
+  include both JS/WASM SHA-256 pairs, both result JSON paths, both
+  time-to-`QEMU_WASM_LINUX_BOOT_OK` values, and a one-paragraph conclusion
+  in `docs/devel/wasm-support-plan.rst` stating the percentage difference.
+  Decision rule to record with the result: if wasm32 is at least `20%`
+  faster, the W2 backend work must be planned and validated wasm32-first
+  (matching the mature `ktock/qemu-wasm` master reference) and the
+  wasm64-only MVP constraint must be flagged to the operator for an explicit
+  decision; if the difference is under `20%`, W2 continues wasm64-first as
+  currently planned. This item is measurement only; it must not change the
+  default artifact family.
+- [ ] W2 - Implement a real TCG-to-WebAssembly backend behind the existing
+  `tcg_wasm64_backend` gate, modeled on the `ktock/qemu-wasm`
+  `wasm64-tcg-b` reference (`tcg/wasm64.c`, `tcg/wasm64.h`,
+  `tcg/wasm64/tcg-target.c.inc`) without wholesale copying.
+  DoD, all required:
+  - The backend is selectable and buildable: the Emscripten build with
+    `--enable-tcg-wasm64-backend` (or the wasm32 equivalent if W1 selects
+    wasm32-first) configures, compiles, and links a runnable
+    `qemu-system-x86_64` artifact instead of failing closed.
+  - Generated translation blocks execute through a C-callable instantiated
+    WebAssembly function boundary (`WasmContext *` style), not through a
+    per-block `EM_JS`/JavaScript crossing.
+  - Strict fallback is preserved: any TB whose lowering is unsupported, or
+    whose compile/instantiate step fails at runtime, executes through the
+    existing interpreter path with identical guest-visible semantics. The
+    already-committed `TCGWasm64Counters` contract reports nonzero
+    generated attempts, compiled blocks, executed blocks, cache hits, and
+    per-reason fallback counts in the browser smoke result JSON.
+  - Lowering coverage passes `scripts/ci/wasm-tcg-coverage-gate.mjs`
+    against the measured hot-op profile with
+    `--require-op ld --require-op st --require-op mb
+    --require-op tci_setcond32 --require-op brcond` (or the documented
+    current hot-op equivalents), using a fresh hot-block summary from the
+    backend artifact, not from an old TCI run.
+  - The deterministic module-emitter differential tests
+    (`scripts/ci/wasm-tb-module-emitter-test.mjs`,
+    `scripts/ci/wasm-generated-block-prototype-test.mjs`) and
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs` pass, plus
+    `git diff --check`.
+  - The generic Linux Chromium smoke boots to `QEMU_WASM_LINUX_BOOT_OK`
+    with the backend enabled and with nonzero executed generated blocks.
+  This item may land as several commits, but it is not done until all of
+  the above hold on one recorded artifact pair.
+- [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
+  DoD: same-commit default-TCI artifact and backend artifact run the
+  identical generic Chromium smoke back to back on the same host and
+  browser build. The backend artifact must reach
+  `QEMU_WASM_LINUX_BOOT_OK` at least `25%` faster than the default-TCI
+  run. Record both hashes, both timings, and the percentage in this file
+  and `docs/devel/wasm-support-plan.rst`. If the gate fails, the next
+  lowering/optimization work item must be added here with the measured
+  blocker named before more implementation; do not spend a long Bus Engine
+  OS run on a failed gate.
+- [ ] W4 - Run the Bus Engine OS `virtual-server` browser proof from the
+  gated backend artifact.
+  DoD: Chrome/Chromium proof with the accepted `virtual-server` kernel and
+  rootfs (current accepted hashes at planning time: kernel
+  `3169668b74ef4fae4ca6a54bc5ad334a47e4eaf0c63c236248c9301af1c17920`,
+  rootfs
+  `5452bcc0c6fe0cab89f187e80572bc52174456cc60ed3cb723a8531519a0d22e`;
+  use newer accepted hashes if the Bus Engine OS lane publishes them),
+  recording result JSON, screenshot, boot milestone timings (kernel,
+  `/dev/vda`, rootfs mount, init, hostname, journald, basic target,
+  multi-user target, login prompt), final serial state, and artifact
+  hashes. Success means the Exact Definition of Done above. A run that
+  times out is still recorded evidence: it must name the last milestone
+  reached, the milestone-to-milestone deltas against the recorded baseline
+  (hostname at about `110000`-`125000` ms), and the next concrete work
+  item.
+- [ ] W5 - Promote accepted work: commit and push QEMU `develop`, run BusDK
+  `./scripts/sync-submodules.sh`, and commit/push the required BusDK and
+  supervisor pins with the memo update.
