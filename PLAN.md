@@ -1117,7 +1117,7 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     fallback, but it is slower than default and is not the Bus Engine OS
     performance solution. No Bus Engine OS long proof is justified from this
     artifact.
-  - [ ] Stop expanding the tiny live TCI-subset path unless new evidence
+  - [x] Stop expanding the tiny live TCI-subset path unless new evidence
     predicts a real speedup:
     DoD is a short implementation note that compares the accepted generated
     execution coverage against total TCI/subset attempts, explains why
@@ -1128,6 +1128,31 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     block coverage and dispatch semantics instead of another isolated opcode
     shortcut. If a fresh measurement points to a device/backend boundary, the
     next patch must sit behind that QEMU boundary.
+    Accepted decision evidence on 2026-07-01: the direct C-callable
+    generated-block proof compiled and executed generated functions but covered
+    only `17040` generated attempts out of `72400000` subset attempts
+    (`0.0235%`) and only `14501` generated executions out of `53808998`
+    executed subset blocks (`0.0269%`) in generic Chromium smoke. The first
+    live generated-WASM slice covered more Bus Engine OS work
+    (`generated_executed=1301928`) but still timed out before multi-user
+    readiness and left `ld32u` as the dominant generated fallback with
+    `5018171` classifications. Later memory, branch, direct register-memory,
+    and direct C-callable variants all kept the default path safe but failed
+    the generic speed gate. The accepted conclusion is that isolated TCI
+    opcode shortcuts do not cover enough hot execution to beat strict TCI.
+    The next CPU patch must use a broader generated-block or backend-shaped
+    execution model instead of another narrow TCI-subset expansion.
+  - [ ] Implement the next broad generated-block/backend slice only after a
+    coverage gate predicts a win:
+    DoD is an opt-in wasm64 execution path that covers a measured hot block
+    family including the memory and control-flow shapes that keep rejecting
+    the tiny subset path, preserves strict TCI fallback for unsupported or
+    faulting blocks, records generated coverage and wall-clock timing, passes
+    default generic Chromium smoke, passes opt-in generic Chromium smoke with
+    nonzero generated counters, and beats the current strict-TCI generic smoke
+    gate before any Bus Engine OS long proof is started. If this gate does not
+    beat strict TCI, record it as rejected evidence and pick a different
+    measured implementation direction.
 
 ## MVP Generic QEMU Work
 

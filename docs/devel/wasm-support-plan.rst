@@ -5158,3 +5158,29 @@ default path on the generic smoke gate, so no Bus Engine OS long proof was run
 from this artifact.  Further generated-execution work should not add another
 isolated opcode shortcut until coverage evidence shows that the generated path
 can cover enough hot execution to beat strict TCI.
+
+Generated-subset coverage decision
+==================================
+
+The live generated-subset experiments now have enough evidence to close the
+tiny TCI-subset expansion lane.  The direct C-callable proof compiled and
+executed generated WebAssembly functions, but in the generic Chromium smoke it
+covered only ``17040`` generated attempts out of ``72400000`` subset attempts
+(``0.0235%``), and only ``14501`` generated executions out of ``53808998``
+executed subset blocks (``0.0269%``).  That coverage is too small to offset
+the generated-module and dispatch overhead.
+
+The earlier downstream Bus Engine OS proof with the first live generated-WASM
+slice had more generated execution, with ``generated_executed=1301928``, but it
+still timed out before multi-user readiness and left ``ld32u`` as the dominant
+generated fallback with ``5018171`` classifications.  Later memory, branch,
+direct register-memory, and direct C-callable variants kept the default path
+safe but failed the generic speed gate.
+
+The next CPU-side implementation must therefore move beyond isolated TCI
+opcode shortcuts.  A useful follow-up needs broader generated-block or
+backend-shaped execution that covers the memory and control-flow shapes seen
+in hot blocks, preserves strict TCI fallback, and beats the strict-TCI generic
+Chromium smoke before any Bus Engine OS long proof is meaningful.  If a fresh
+measurement points away from CPU execution, the next optimization must sit
+behind the matching QEMU device or browser-backend boundary.
