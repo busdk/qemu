@@ -90,6 +90,70 @@ typedef enum TCGWasm64FallbackReason {
     TCG_WASM64_FALLBACK_RUNTIME,
 } TCGWasm64FallbackReason;
 
+typedef enum TCGWasm64RunMode {
+    TCG_WASM64_RUN_MODE_COMPAT = 0,
+    TCG_WASM64_RUN_MODE_PERF_PROOF = 1,
+} TCGWasm64RunMode;
+
+typedef enum TCGWasm64RunExitReason {
+    TCG_WASM64_RUN_EXIT_BUDGET = 1,
+    TCG_WASM64_RUN_EXIT_MMIO = 2,
+    TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT = 3,
+    TCG_WASM64_RUN_EXIT_INTERRUPT = 4,
+    TCG_WASM64_RUN_EXIT_HELPER = 5,
+    TCG_WASM64_RUN_EXIT_UNSUPPORTED = 6,
+    TCG_WASM64_RUN_EXIT_HLT = 7,
+    TCG_WASM64_RUN_EXIT_INVALIDATED = 8,
+} TCGWasm64RunExitReason;
+
+typedef struct TCGWasm64RunExit {
+    uint32_t reason;
+    uint32_t tb_id;
+    uint64_t pc;
+    uint64_t vaddr;
+    uint64_t paddr;
+    uint64_t value;
+    uint32_t size;
+    uint32_t flags;
+} TCGWasm64RunExit;
+
+typedef struct TCGWasm64RunCounters {
+    uint64_t generated_guest_instructions;
+    uint64_t fallback_guest_instructions;
+    uint64_t generated_body_time_ns;
+    uint64_t tci_dispatch_time_ns;
+    uint64_t tb_lookup_time_ns;
+    uint64_t helper_call_time_ns;
+    uint64_t qemu_ld_time_ns;
+    uint64_t qemu_st_time_ns;
+    uint64_t compile_time_ns;
+    uint64_t instantiate_time_ns;
+    uint64_t generated_chain_length;
+    uint64_t inline_tlb_hit_loads;
+    uint64_t inline_tlb_hit_stores;
+    uint64_t helper_calls;
+    uint64_t qemu_ld_calls;
+    uint64_t qemu_st_calls;
+    uint64_t exits_budget;
+    uint64_t exits_mmio;
+    uint64_t exits_tlb_miss_or_fault;
+    uint64_t exits_interrupt;
+    uint64_t exits_helper;
+    uint64_t exits_unsupported;
+    uint64_t exits_hlt;
+    uint64_t exits_invalidated;
+} TCGWasm64RunCounters;
+
+typedef struct TCGWasm64RunContext {
+    CPUArchState *env;
+    void *guest_ram;
+    uint64_t budget;
+    TCGWasm64RunCounters *counters;
+    TCGWasm64RunExit *exit;
+    uint32_t mode;
+    uint32_t flags;
+} TCGWasm64RunContext;
+
 #define TCG_WASM64_TB_METADATA_MAGIC 0x36574153u /* "SAW6" */
 #define TCG_WASM64_TB_METADATA_VERSION 1u
 
@@ -150,6 +214,12 @@ void tcg_wasm64_count_fallback(TCGWasm64Counters *counters,
                                TCGWasm64FallbackReason reason);
 void tcg_wasm64_count_exit(TCGWasm64Counters *counters,
                            TCGWasm64ExitReason reason);
+void tcg_wasm64_run_counters_reset(TCGWasm64RunCounters *counters);
+void tcg_wasm64_run_counters_add(TCGWasm64RunCounters *dst,
+                                 const TCGWasm64RunCounters *src);
+void tcg_wasm64_run_count_exit(TCGWasm64RunCounters *counters,
+                               TCGWasm64RunExitReason reason);
+const char *tcg_wasm64_run_exit_reason_name(TCGWasm64RunExitReason reason);
 void tcg_wasm64_translate_begin(const void *tb_ptr);
 void tcg_wasm64_translate_note_tci_op(uint32_t op);
 void tcg_wasm64_translate_note_tci_insn(uint32_t op, uint32_t insn);

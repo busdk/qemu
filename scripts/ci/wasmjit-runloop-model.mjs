@@ -339,6 +339,53 @@ function writeU32(view, pointer, offset, value) {
   view.setUint32(pointer + offset, value >>> 0, true);
 }
 
+export function initializeWasmjitRunloopState({
+  memory,
+  contextPointer = 128,
+  ramPointer = 512,
+  initialRamValue = 0n,
+} = {}) {
+  const view = new DataView(memory.buffer);
+
+  for (const offset of Object.values(WASMJIT_CTX)) {
+    if (offset === WASMJIT_CTX.ramBase) {
+      writeU32(view, contextPointer, offset, ramPointer);
+    } else if (offset === WASMJIT_CTX.exitReason) {
+      writeU32(view, contextPointer, offset, 0);
+    } else {
+      writeU64(view, contextPointer, offset, 0n);
+    }
+  }
+  writeU64(view, ramPointer, 0, initialRamValue);
+
+  return {
+    view,
+    contextPointer,
+    ramPointer,
+    initialRamValue,
+  };
+}
+
+export async function instantiateWasmjitRunloop() {
+  const moduleBytes = buildWasmjitRunloopModule();
+  const contract = validateWasmjitRunloopContract(moduleBytes);
+  const compiled = await WebAssembly.compile(moduleBytes);
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const instance = await WebAssembly.instantiate(compiled, {
+    env: {
+      memory,
+    },
+  });
+
+  return {
+    moduleBytes,
+    contract,
+    compiled,
+    memory,
+    instance,
+  };
+}
+
 export function expectedRunloopValue(initial, budget) {
   let value = BigInt.asUintN(64, BigInt(initial));
 
@@ -352,24 +399,58 @@ export function expectedRunloopValue(initial, budget) {
   return value;
 }
 
+export function runTciLikeRunloopModel({ budget = 1_000_000, initial = 0n } = {}) {
+  let value = BigInt.asUintN(64, BigInt(initial));
+  let state = 0;
+  let generatedGuestInstructions = 0n;
+  let generatedChainLength = 0n;
+  let tlbHitAccesses = 0n;
+  let tb0Executions = 0n;
+  let tb1Executions = 0n;
+
+  for (let remaining = budget; remaining > 0; remaining--) {
+    if (state === 0) {
+      value = BigInt.asUintN(64, value + 1n);
+      tb0Executions++;
+      state = 1;
+    } else {
+      value = BigInt.asUintN(64, value ^ 0x5a5an);
+      tb1Executions++;
+      state = 0;
+    }
+    generatedGuestInstructions += 4n;
+    generatedChainLength++;
+    tlbHitAccesses += 2n;
+  }
+
+  return {
+    exitReason: WASMJIT_EXIT_BUDGET,
+    generatedGuestInstructions,
+    generatedChainLength,
+    tlbHitAccesses,
+    helperCalls: 0n,
+    qemuLoadCalls: 0n,
+    qemuStoreCalls: 0n,
+    tb0Executions,
+    tb1Executions,
+    accumulator: value,
+    ramValue: value,
+  };
+}
+
 export async function runWasmjitRunloopProbe({ budget = 1_000_000 } = {}) {
-  const moduleBytes = buildWasmjitRunloopModule();
-  const contract = validateWasmjitRunloopContract(moduleBytes);
-  const compiled = await WebAssembly.compile(moduleBytes);
-  const memory = new WebAssembly.Memory({ initial: 1 });
-  const view = new DataView(memory.buffer);
-  const contextPointer = 128;
-  const ramPointer = 512;
-  const initialRamValue = 0n;
-
-  writeU32(view, contextPointer, WASMJIT_CTX.ramBase, ramPointer);
-  writeU64(view, ramPointer, 0, initialRamValue);
-
-  const instance = await WebAssembly.instantiate(compiled, {
-    env: {
-      memory,
-    },
-  });
+  const {
+    moduleBytes,
+    contract,
+    memory,
+    instance,
+  } = await instantiateWasmjitRunloop();
+  const {
+    view,
+    contextPointer,
+    ramPointer,
+    initialRamValue,
+  } = initializeWasmjitRunloopState({ memory });
   const exitReason = instance.exports.wasmjit_run(contextPointer, budget);
   const generatedGuestInstructions =
     readU64(view, contextPointer, WASMJIT_CTX.generatedGuestInstructions);
@@ -422,5 +503,55 @@ export async function runWasmjitRunloopProbe({ budget = 1_000_000 } = {}) {
     accumulator: accumulator.toString(),
     ramValue: ramValue.toString(),
     expectedValue: expectedValue.toString(),
+  };
+}
+
+function best(values) {
+  return values.reduce((lowest, value) => Math.min(lowest, value), Infinity);
+}
+
+export async function runWasmjitRunloopBenchmark({
+  budget = 1_000_000,
+  rounds = 5,
+} = {}) {
+  const {
+    memory,
+    instance,
+  } = await instantiateWasmjitRunloop();
+  const wasmTimesMs = [];
+  const tciLikeTimesMs = [];
+
+  initializeWasmjitRunloopState({ memory });
+  instance.exports.wasmjit_run(128, Math.min(budget, 1024));
+
+  for (let round = 0; round < rounds; round++) {
+    const {
+      contextPointer,
+    } = initializeWasmjitRunloopState({ memory });
+    const start = performance.now();
+    instance.exports.wasmjit_run(contextPointer, budget);
+    wasmTimesMs.push(performance.now() - start);
+  }
+
+  for (let round = 0; round < rounds; round++) {
+    const start = performance.now();
+    runTciLikeRunloopModel({ budget });
+    tciLikeTimesMs.push(performance.now() - start);
+  }
+
+  const wasmBestMs = best(wasmTimesMs);
+  const tciLikeBestMs = best(tciLikeTimesMs);
+
+  return {
+    format: 1,
+    purpose: "qemu-wasmjit-runloop-model-benchmark",
+    version: WASMJIT_RUNLOOP_MODEL_VERSION,
+    budget,
+    rounds,
+    wasmTimesMs,
+    tciLikeTimesMs,
+    wasmBestMs,
+    tciLikeBestMs,
+    bestRatio: tciLikeBestMs / wasmBestMs,
   };
 }
