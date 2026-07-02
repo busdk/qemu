@@ -1051,11 +1051,21 @@ Engineering rules for this goal:
   abstraction. The implementation code for the direct-boundary experiment is
   removed from the live tree; the evidence remains here so the path is not
   reopened under a new name.
-- [ ] W2n - Design the real browser-Wasm accelerator run/exit path before
-  writing another execution optimization. DoD: add a short design note and
-  deterministic prototype plan for a long-running `wasmjit_run()`-style
-  entrypoint that stays inside generated Wasm until a synthetic VM exit
-  occurs. Required gates:
+- [x] W2n - Design the real browser-Wasm accelerator run/exit path before
+  writing another execution optimization. Accepted evidence: the live TCI
+  subset/direct-boundary execution paths were removed, the design note below
+  records the new accelerator shape, and
+  `scripts/ci/wasmjit-runloop-model-test.mjs` proves the deterministic
+  prototype shape. The model exports one `wasmjit_run(ctx,budget)` entrypoint,
+  imports only `env.memory`, performs internal hot TB dispatch, exits by
+  budget, and records `generatedGuestInstructions=4000000`,
+  `generatedChainLength=1000000`, `tlbHitAccesses=2000000`,
+  `helperCalls=0`, `qemuLoadCalls=0`, and `qemuStoreCalls=0` for one
+  `budget=1000000` call. Checks:
+  `node --check scripts/ci/wasmjit-runloop-model.mjs`,
+  `node --check scripts/ci/wasmjit-runloop-model-test.mjs`,
+  `node scripts/ci/wasmjit-runloop-model-test.mjs`, and `git diff --check`.
+  Required gates carried forward:
   - Metrics replace boundary-entry coverage with guest instructions retired
     through generated Wasm bodies, guest instructions retired through
     TCI/fallback, wall time in generated bodies, wall time in TCI dispatch,
@@ -1079,6 +1089,17 @@ Engineering rules for this goal:
   - No W3 browser speed gate may run from W2n until the deterministic
     micro-hotset gate proves the new shape is multiple-times faster than TCI
     on ALU/branch and TLB-hit RAM microbenches.
+- [ ] W2o - Integrate the run/exit micro-hotset gate with QEMU-facing
+  accelerator scaffolding instead of keeping it only as a JavaScript model.
+  DoD: add a QEMU-owned `wasmjit_run()` contract in the wasm64 backend headers
+  and runtime that mirrors the W2n model's exit reasons, counters, and
+  no-helper-import invariant. Add deterministic tests that instantiate the
+  generated run-loop module through the same ABI shape the C runtime will use,
+  compare it with a TCI-like interpreter for ALU/branch and TLB-hit RAM
+  microbenches, and record wall-time ratios. This is not done until the
+  generated run loop is multiple-times faster than the TCI-like baseline on
+  both microbench families and still executes one `1000000`-step budget before
+  returning for budget expiry.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and
