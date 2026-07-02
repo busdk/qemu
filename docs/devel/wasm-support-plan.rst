@@ -5497,6 +5497,31 @@ C backend integration remains required before an opt-in generic smoke speed
 gate is meaningful.  The default Chromium smoke gate must be re-run from a
 QEMU artifact once the C backend starts affecting runtime builds.
 
+TCI Fallback Architecture Note
+==============================
+
+Strict TCI fallback is an execution invariant, not only a Meson dependency.
+The current fallback path depends on selecting ``tcg_arch = 'tci'`` so QEMU
+generates TCI bytecode and uses the TCI ``tcg_qemu_tb_exec`` ABI.  Selecting
+the experimental ``tcg/wasm64`` target directory changes the TCG target ABI and
+does not by itself preserve the bytecode stream that the current interpreter
+executes.
+
+Therefore, the next runnable acceleration slice must not claim fallback merely
+by compiling ``tcg_wasm64_backend`` and ``tcg_interpreter`` together.  A safe
+incremental path has two viable shapes:
+
+* keep ``tcg_arch = 'tci'`` and add a generated WebAssembly side path for
+  selected validated TCI bytecode blocks, with all unsupported blocks falling
+  back to normal TCI; or
+* implement a full wasm64 TCG target with its own precise fallback boundary,
+  invalidation rules, helper behavior, and generated-block execution ABI.
+
+Until the full backend exists, the performance work should remain on the
+first path: TCI bytecode remains the correctness source of truth, and generated
+WebAssembly execution is an opt-in acceleration path for measured hot block
+families.
+
 Live Generated Lowering Rejection
 ---------------------------------
 

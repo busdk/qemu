@@ -1535,6 +1535,16 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
       opt-in backend Chromium smoke passing with nonzero generated counters,
       and opt-in wall time faster than the strict-TCI generic baseline before
       any Bus Engine OS long proof is attempted.
+    - [x] Preserve the real TCI fallback architecture in the next runnable
+      acceleration slice:
+      DoD is a short design and build-graph note explaining why strict TCI
+      fallback cannot be added by simply enabling `tcg_wasm64_backend` and
+      `tcg_interpreter` together. The next runnable slice must either keep
+      `tcg_arch=tci` and accelerate selected TCI bytecode blocks with a
+      generated WebAssembly side path, or implement a full wasm64 TCG target
+      that defines its own precise fallback boundary. Do not merge a Meson
+      change that claims fallback while selecting `tcg/wasm64/tcg-target.*`
+      and losing the TCI bytecode ABI used by `tcg_qemu_tb_exec`.
 
 ## MVP Generic QEMU Work
 
