@@ -173,6 +173,8 @@ Options:
                     Browser profile directory reused for OPFS restart proofs
   --visual-marker TEXT
                      Expected visual marker metadata for display proofs
+  --wasm64-runloop-smoke
+                     Enable opt-in QEMU wasm64 run/exit runtime smoke
   --help              Show this help
 
 Environment:
@@ -262,6 +264,7 @@ function parseArgs(argv) {
     timeoutMs: 180000,
     userDataDir: null,
     visualMarker: "",
+    wasm64RunloopSmoke: false,
   };
   const explicit = new Set();
 
@@ -488,6 +491,9 @@ function parseArgs(argv) {
     } else if (arg === "--visual-marker") {
       options.visualMarker = argv[++i];
       explicit.add("visualMarker");
+    } else if (arg === "--wasm64-runloop-smoke") {
+      options.wasm64RunloopSmoke = true;
+      explicit.add("wasm64RunloopSmoke");
     } else if (arg === "--help") {
       usage(0);
     } else {
@@ -509,6 +515,7 @@ function parseArgs(argv) {
       "tciFastGates",
       "tciProgress",
       "tciWasmGeneratedTrace",
+      "wasm64RunloopSmoke",
     ],
     checksumFields: ["kernel", "initrd", "rootfs"],
     integerFields: [
@@ -1308,6 +1315,7 @@ export function promoteSmokeState(result, smokeState) {
   result.performanceAttribution = smokeState.performanceAttribution || null;
   result.fwCfgTrace = smokeState.fwCfgTrace || null;
   result.wasm64Tcg = smokeState.wasm64Tcg || null;
+  result.wasm64Runloop = smokeState.wasm64Runloop || null;
   result.tci = smokeState.tci || null;
 }
 
@@ -1391,6 +1399,9 @@ export function browserSmokeUrl(options) {
       "tciWasmGeneratedTraceLimit",
       String(options.tciWasmGeneratedTraceLimit),
     );
+  }
+  if (options.wasm64RunloopSmoke) {
+    url.searchParams.set("wasm64RunloopSmoke", "1");
   }
   url.searchParams.set("rootfsDevice", options.rootfsDevice);
   if (rootfsStorage !== "memfs") {
@@ -1509,6 +1520,7 @@ export function initialSmokeResult(options, browserVersion) {
       Number.isInteger(options.tciWasmGeneratedTraceLimit)
         ? options.tciWasmGeneratedTraceLimit
         : 64,
+    wasm64RunloopSmoke: Boolean(options.wasm64RunloopSmoke),
     userDataDir: options.userDataDir,
     visualMarker: options.visualMarker,
     success: false,
