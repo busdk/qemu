@@ -840,6 +840,7 @@ for (const status of [
     maxOutputBytes: 60000,
     memory: "512M",
     network: "none",
+    program: "qemu-system-riscv64.js",
     port: 8010,
     persistentDisk: true,
     persistentDiskDevice: "virtio-pci",
@@ -855,6 +856,7 @@ for (const status of [
     rootfsStorage: "opfs-snapshot",
     timeoutMs: 180000,
     visualMarker: "login",
+    wasm: "qemu-system-riscv64.wasm",
   });
 
   assert.equal(url.href, "http://127.0.0.1:8010/?" +
@@ -870,6 +872,8 @@ for (const status of [
     "memory=512M&" +
     "machine=pc&" +
     "network=none&" +
+    "program=%2Fartifacts%2Fqemu-system-riscv64.js&" +
+    "wasm=%2Fartifacts%2Fqemu-system-riscv64.wasm&" +
     "persistentDisk=1&" +
     "persistentDiskDevice=virtio-pci&" +
     "persistentDiskOpfsName=virtual-server-state.raw&" +
@@ -913,6 +917,7 @@ for (const status of [
     memory: "256M",
     network: "default",
     port: 8020,
+    program: "qemu-system-x86_64.js",
     powerOperation: "",
     powerTimeoutMs: 30000,
     qemuArgs: [],
@@ -920,6 +925,7 @@ for (const status of [
     rootfsDevice: "virtio-mmio",
     timeoutMs: 30000,
     visualMarker: "",
+    wasm: "qemu-system-x86_64.wasm",
   });
 
   assert.equal(url.searchParams.has("initrd"), false);
@@ -930,6 +936,8 @@ for (const status of [
   assert.equal(url.searchParams.get("expectedResolution"), "");
   assert.equal(url.searchParams.get("focusDisplay"), "0");
   assert.equal(url.searchParams.get("network"), "default");
+  assert.equal(url.searchParams.get("program"), "/artifacts/qemu-system-x86_64.js");
+  assert.equal(url.searchParams.get("wasm"), "/artifacts/qemu-system-x86_64.wasm");
   assert.equal(url.searchParams.get("powerOperation"), "");
   assert.equal(url.searchParams.get("powerTimeoutMs"), "30000");
   assert.equal(url.searchParams.get("allowSerialFallback"), "1");

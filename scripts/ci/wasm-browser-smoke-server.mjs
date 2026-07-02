@@ -33,6 +33,7 @@ Options:
   --kernel FILE       64-bit Linux bzImage
   --port PORT         Bind port (default: 8010)
   --program FILE      JavaScript launcher inside artifact dir
+  --wasm FILE         WebAssembly module inside artifact dir
   --rootfs FILE       Raw root filesystem image exposed as /dev/vda
   --help              Show this help
 `);
@@ -49,6 +50,7 @@ function parseArgs(argv) {
     kernel: null,
     port: 8010,
     program: "qemu-system-x86_64.js",
+    wasm: null,
     rootfs: null,
   };
 
@@ -70,6 +72,8 @@ function parseArgs(argv) {
       options.port = Number(argv[++i]);
     } else if (arg === "--program") {
       options.program = argv[++i];
+    } else if (arg === "--wasm") {
+      options.wasm = argv[++i];
     } else if (arg === "--rootfs") {
       options.rootfs = argv[++i];
     } else if (arg === "--help") {
@@ -104,8 +108,15 @@ function parseArgs(argv) {
     harnessSelfTest: options.harnessSelfTest,
     initrd: options.initrd === null ? null : resolve(options.initrd),
     kernel: options.kernel === null ? null : resolve(options.kernel),
+    wasm: options.wasm === null ? defaultWasmForProgram(options.program) : options.wasm,
     rootfs: options.rootfs === null ? null : resolve(options.rootfs),
   };
+}
+
+function defaultWasmForProgram(program) {
+  return String(program).endsWith(".js")
+    ? `${String(program).slice(0, -3)}.wasm`
+    : `${program}.wasm`;
 }
 
 function requireReadable(path, label) {
@@ -148,8 +159,8 @@ function routeFile(options, scriptDir, pathname) {
   if (options.harnessSelfTest) {
     return routes.get(pathname);
   }
-  routes.set("/artifacts/qemu-system-x86_64.wasm", join(options.artifactDir, "qemu-system-x86_64.wasm"));
   routes.set(`/artifacts/${basename(options.program)}`, join(options.artifactDir, basename(options.program)));
+  routes.set(`/artifacts/${basename(options.wasm)}`, join(options.artifactDir, basename(options.wasm)));
   routes.set("/guest/kernel", options.kernel);
   routes.set("/firmware/qboot.rom", join(options.firmwareDir, "qboot.rom"));
   routes.set("/firmware/linuxboot_dma.bin", join(options.firmwareDir, "linuxboot_dma.bin"));
@@ -173,7 +184,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 
 if (!options.harnessSelfTest) {
   requireReadable(join(options.artifactDir, basename(options.program)), "program");
-  requireReadable(join(options.artifactDir, "qemu-system-x86_64.wasm"), "wasm module");
+  requireReadable(join(options.artifactDir, basename(options.wasm)), "wasm module");
   requireReadable(options.kernel, "kernel");
   if (options.initrd !== null) {
     requireReadable(options.initrd, "initrd");

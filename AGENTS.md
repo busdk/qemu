@@ -10,12 +10,15 @@ reach normal multi-user boot in browser-hosted QEMU/WASM within five minutes.
 Keep the scope narrow:
 
 - Emscripten `wasm64` host builds.
-- `x86_64-softmmu` system emulation.
+- `riscv64-softmmu` system emulation as the active browser target.
 - Chrome or Chromium as the first browser acceptance target.
 - TCI console boot must keep working as the regression gate.
 - Browser execution through modern APIs with cross-origin isolation.
 - Generic QEMU changes only; downstream Bus Engine product work stays
   downstream.
+
+Existing `x86_64-softmmu` QEMU/WASM smoke behavior remains a non-regression
+gate. Do not remove or weaken it while adding the RISC-V path.
 
 Graphics, keyboard input, native WebAssembly TCG, persistence, networking, and
 other browser runtime features belong in `BACKLOG.md` unless `PLAN.md`

@@ -37,6 +37,7 @@ function parseArgs(argv) {
     memory: "512M",
     out: null,
     program: "qemu-system-x86_64.js",
+    wasm: null,
     qemuArgs: [],
     rootfs: null,
     rootfsDevice: "virtio-mmio",
@@ -90,6 +91,9 @@ function parseArgs(argv) {
     } else if (arg === "--program") {
       options.program = argv[++i];
       explicit.add("program");
+    } else if (arg === "--wasm") {
+      options.wasm = argv[++i];
+      explicit.add("wasm");
     } else if (arg === "--qemu-arg") {
       options.qemuArgs.push(argv[++i]);
       explicit.add("qemuArgs");
@@ -129,6 +133,7 @@ function parseArgs(argv) {
       "program",
       "rootfs",
       "rootfsDevice",
+      "wasm",
     ],
     stringListFields: ["expectText", "qemuArgs"],
   });
@@ -153,8 +158,17 @@ function parseArgs(argv) {
     console.error("--rootfs-device must be virtio-mmio or virtio-pci");
     usage(2);
   }
+  if (options.wasm === null) {
+    options.wasm = defaultWasmForProgram(options.program);
+  }
 
   return options;
+}
+
+function defaultWasmForProgram(program) {
+  return String(program).endsWith(".js")
+    ? `${String(program).slice(0, -3)}.wasm`
+    : `${program}.wasm`;
 }
 
 function usage(status) {
@@ -177,6 +191,7 @@ Options:
   --memory SIZE          Guest memory size passed to QEMU
   --out FILE             Write smoke result JSON to FILE
   --program FILE         JavaScript launcher inside artifact dir
+  --wasm FILE            WebAssembly module inside artifact dir
   --qemu-arg ARG         Extra QEMU argument appended to the smoke command
   --rootfs FILE          Raw root filesystem image exposed as /dev/vda
   --rootfs-device KIND   Rootfs block device kind: virtio-mmio or virtio-pci
@@ -221,7 +236,7 @@ function runSmoke(options) {
   }
 
   requireReadable(resolve(options.artifactDir, options.program), "program");
-  requireReadable(resolve(options.artifactDir, "qemu-system-x86_64.wasm"), "wasm module");
+  requireReadable(resolve(options.artifactDir, options.wasm), "wasm module");
   requireReadable(options.kernel, "kernel");
   if (options.initrd !== null) {
     requireReadable(options.initrd, "initrd");

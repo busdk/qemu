@@ -1615,6 +1615,7 @@ async function run() {
   }
   const programUrl = new URL(config.program, window.location.href);
   const wasmUrl = new URL(config.wasm, window.location.href);
+  const wasmFileName = String(config.wasm).split(/[\\/]/).filter(Boolean).pop();
   const generatedQemuArgs = qemuArgs(config);
   const expectedResolution = parseResolution(config.expectedResolution);
   const startTime = performance.now();
@@ -2165,7 +2166,7 @@ async function run() {
     qemuWasmTciEnv: tciEnv,
     qemuWasmDisplayCanvas: canvas,
     locateFile(path) {
-      if (path === "qemu-system-x86_64.wasm") {
+      if (path === wasmFileName) {
         return wasmUrl.href;
       }
       return new URL(path, programUrl).href;

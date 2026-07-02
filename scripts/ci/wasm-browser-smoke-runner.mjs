@@ -104,6 +104,7 @@ Options:
                      (default: 10000)
   --port PORT         Local smoke server port
   --program FILE      JavaScript launcher inside artifact dir
+  --wasm FILE         WebAssembly module inside artifact dir
   --persistent-disk  Add an OPFS-backed writable virtio disk
   --persistent-disk-device KIND
                      Persistent disk device kind: virtio-mmio or virtio-pci
@@ -246,6 +247,7 @@ function parseArgs(argv) {
     fwCfgTraceLimit: 256,
     port: 8010,
     program: "qemu-system-x86_64.js",
+    wasm: null,
     progressSampleIntervalMs: DEFAULT_PROGRESS_SAMPLE_INTERVAL_MS,
     progressSampleLimit: DEFAULT_PROGRESS_SAMPLE_LIMIT,
     persistentDisk: false,
@@ -410,6 +412,9 @@ function parseArgs(argv) {
     } else if (arg === "--program") {
       options.program = argv[++i];
       explicit.add("program");
+    } else if (arg === "--wasm") {
+      options.wasm = argv[++i];
+      explicit.add("wasm");
     } else if (arg === "--persistent-disk") {
       options.persistentDisk = true;
       explicit.add("persistentDisk");
@@ -625,6 +630,7 @@ function parseArgs(argv) {
       "rootfsStorage",
       "screenshot",
       "visualMarker",
+      "wasm",
     ],
     stringListFields: ["expectText", "qemuArgs"],
     serviceBridgeField: "serviceBridge",
@@ -869,8 +875,25 @@ function parseArgs(argv) {
     console.error("--power-timeout-ms must be a positive integer");
     usage(2);
   }
+  if (options.wasm === null) {
+    options.wasm = defaultWasmForProgram(options.program);
+  }
 
   return options;
+}
+
+function baseName(path) {
+  return String(path).split(/[\\/]/).filter(Boolean).pop() || String(path);
+}
+
+function artifactUrlPath(path) {
+  return `/artifacts/${baseName(path)}`;
+}
+
+function defaultWasmForProgram(program) {
+  return String(program).endsWith(".js")
+    ? `${String(program).slice(0, -3)}.wasm`
+    : `${program}.wasm`;
 }
 
 function appendBounded(list, entry) {
@@ -1112,6 +1135,8 @@ function startServer(options) {
       options.kernel,
       "--program",
       options.program,
+      "--wasm",
+      options.wasm,
     );
   }
   if (options.initrd !== null) {
@@ -1387,6 +1412,8 @@ export function browserSmokeUrl(options) {
   url.searchParams.set("memory", options.memory);
   url.searchParams.set("machine", options.machine);
   url.searchParams.set("network", options.network);
+  url.searchParams.set("program", artifactUrlPath(options.program || "qemu-system-x86_64.js"));
+  url.searchParams.set("wasm", artifactUrlPath(options.wasm || defaultWasmForProgram(options.program || "qemu-system-x86_64.js")));
   if (options.persistentDisk) {
     url.searchParams.set("persistentDisk", "1");
     url.searchParams.set("persistentDiskDevice", options.persistentDiskDevice);
@@ -1532,12 +1559,14 @@ export function initialSmokeResult(options, browserVersion) {
     guestIdleTimeoutMs: options.guestIdleTimeoutMs,
     progressSampleIntervalMs: options.progressSampleIntervalMs,
     progressSampleLimit: options.progressSampleLimit,
+    program: options.program,
     persistentDisk: options.persistentDisk,
     persistentDiskDevice: options.persistentDiskDevice,
     persistentDiskOpfsName: options.persistentDiskOpfsName,
     persistentDiskPath: options.persistentDiskPath,
     persistentDiskSizeBytes: options.persistentDiskSizeBytes,
     qemuArgs: options.qemuArgs,
+    wasm: options.wasm,
     requireDisplayOutput: options.requireDisplayOutput,
     displayMinNonblackPixels: options.displayMinNonblackPixels,
     rootfs: options.rootfs,

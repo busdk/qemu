@@ -90,6 +90,24 @@ run that reaches a weaker marker than normal multi-user readiness.
   TCI, record exact commands, browser version, artifact hashes, result JSON,
   and compare wall time to native RISC-V QEMU and the previous x86_64 browser
   evidence.
+  - [x] R1a - Make the existing QEMU WASM artifact builder and browser smoke
+    harness target-selectable before measuring `riscv64-softmmu`. DoD:
+    `scripts/ci/wasm-build-artifacts-local.py` can request
+    `--target riscv64`, the browser smoke server/page/runner can serve and
+    load `qemu-system-riscv64.js` plus `qemu-system-riscv64.wasm`, and the
+    existing x86_64 defaults remain covered by deterministic tests. Accepted
+    2026-07-03: `python3 scripts/ci/wasm-build-artifacts-local-test.py`,
+    `node --check` on the browser runner/page/server and Linux boot smoke
+    scripts, `node scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+    `node scripts/ci/wasm-browser-smoke-args-test.mjs`,
+    `python3 scripts/ci/wasm-artifact-manifest-test.py`, `git diff --check`,
+    and `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-dry-run --target
+    riscv64 --dry-run` all passed. The dry run produced a Docker command with
+    `--target-list=riscv64-softmmu`, copied `qemu-system-riscv64.js` plus
+    `qemu-system-riscv64.wasm`, validated manifest target `riscv64`, and
+    wrote SHA256SUMS for those artifact names. No full artifact build or
+    browser boot was run in this slice.
 - [ ] R2 - Add the RV64-to-WASM accelerator design and fail-closed boundary.
   DoD: document CPU state layout, register residency, synthetic exits
   (`BUDGET`, `MMIO`, `TLB_MISS`, `INTERRUPT`, `CSR`, `INVALID`, `FATAL`),
