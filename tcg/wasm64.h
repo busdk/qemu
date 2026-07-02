@@ -81,6 +81,8 @@ typedef enum TCGWasm64TranslateFallbackReason {
 
 #define TCG_WASM64_LOWERING_PROFILE_HOTBLOCK 1u
 #define TCG_WASM64_TRANSLATE_OUTPUT_MAX 4096u
+#define TCG_WASM64_TRANSLATE_OUTPUT_WORDS \
+    (TCG_WASM64_TRANSLATE_OUTPUT_MAX / sizeof(uint32_t))
 
 /*
  * Side-band metadata recorded while the wasm64 target emits the fallback TCI
@@ -106,7 +108,7 @@ typedef struct TCGWasm64TBMetadata {
     uint32_t generated_output_size;
     uint32_t generated_output_op_count;
     uint32_t generated_output_checksum;
-    const uint8_t *generated_output;
+    const uint32_t *generated_output;
 } TCGWasm64TBMetadata;
 
 void tcg_wasm64_counters_reset(TCGWasm64Counters *counters);
@@ -123,6 +125,7 @@ bool tcg_wasm64_translate_generated_candidate(
 bool tcg_wasm64_translate_generated_output_available(
     const TCGWasm64TBMetadata *metadata);
 bool tcg_wasm64_backend_available(void);
+uintptr_t tcg_tci_qemu_tb_exec(CPUArchState *env, const void *tb_ptr);
 
 /*
  * Context shared between QEMU and a generated WebAssembly TB function.

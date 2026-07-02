@@ -11,14 +11,12 @@
 #include "tcg/tcg.h"
 #include "tcg/wasm64.h"
 
-uintptr_t tcg_tci_qemu_tb_exec(CPUArchState *env, const void *tb_ptr);
-
 #define TCG_WASM64_TRANSLATE_CACHE_SIZE 8192u
 
 typedef struct TCGWasm64TranslateEntry {
     const void *tb_ptr;
     TCGWasm64TBMetadata metadata;
-    uint8_t generated_output[TCG_WASM64_TRANSLATE_OUTPUT_MAX];
+    uint32_t generated_output[TCG_WASM64_TRANSLATE_OUTPUT_WORDS];
 } TCGWasm64TranslateEntry;
 
 static __thread TCGWasm64Counters *active_counters;
@@ -306,8 +304,9 @@ static uint32_t tcg_wasm64_checksum32(uint32_t checksum, uint8_t value)
 void tcg_wasm64_translate_note_tci_insn(uint32_t op, uint32_t insn)
 {
     TCGWasm64TBMetadata *metadata = active_translate_metadata;
-    uint8_t *output;
+    uint32_t *output;
     uint32_t size;
+    uint32_t output_index;
 
     if (!metadata || !tcg_wasm64_translate_op_generated_supported(op)) {
         return;
@@ -320,17 +319,22 @@ void tcg_wasm64_translate_note_tci_insn(uint32_t op, uint32_t insn)
         return;
     }
 
-    output = (uint8_t *)metadata->generated_output;
-    output[size++] = (uint8_t)(insn & 0xffu);
-    output[size++] = (uint8_t)((insn >> 8) & 0xffu);
-    output[size++] = (uint8_t)((insn >> 16) & 0xffu);
-    output[size++] = (uint8_t)((insn >> 24) & 0xffu);
-    for (uint32_t i = metadata->generated_output_size; i < size; i++) {
-        metadata->generated_output_checksum =
-            tcg_wasm64_checksum32(metadata->generated_output_checksum,
-                                  output[i]);
-    }
-    metadata->generated_output_size = size;
+    output = (uint32_t *)metadata->generated_output;
+    output_index = size / sizeof(insn);
+    output[output_index] = insn;
+    metadata->generated_output_checksum =
+        tcg_wasm64_checksum32(metadata->generated_output_checksum,
+                              (uint8_t)(insn & 0xffu));
+    metadata->generated_output_checksum =
+        tcg_wasm64_checksum32(metadata->generated_output_checksum,
+                              (uint8_t)((insn >> 8) & 0xffu));
+    metadata->generated_output_checksum =
+        tcg_wasm64_checksum32(metadata->generated_output_checksum,
+                              (uint8_t)((insn >> 16) & 0xffu));
+    metadata->generated_output_checksum =
+        tcg_wasm64_checksum32(metadata->generated_output_checksum,
+                              (uint8_t)((insn >> 24) & 0xffu));
+    metadata->generated_output_size = size + sizeof(insn);
     metadata->generated_output_op_count++;
     metadata->flags |= TCG_WASM64_TB_METADATA_GENERATED_OUTPUT;
 }
@@ -380,6 +384,10 @@ bool tcg_wasm64_translate_generated_output_available(
         return false;
     }
     return metadata->generated_output_size != 0 &&
+           metadata->generated_output_size % sizeof(uint32_t) == 0 &&
+           metadata->generated_output_op_count == metadata->op_count &&
+           metadata->generated_output_op_count ==
+               metadata->generated_output_size / sizeof(uint32_t) &&
            metadata->generated_output != NULL;
 }
 

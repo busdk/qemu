@@ -175,6 +175,11 @@ Options:
   --tci-wasm-subset-interval N
                     Attempt interval between subset summaries
                     (default: 100000)
+  --tci-wasm-generated-trace
+                    Emit bounded generated WebAssembly block trace diagnostics
+                    into the smoke result JSON
+  --tci-wasm-generated-trace-limit N
+                    Maximum generated trace events to keep (default: 64)
   --user-data-dir DIR
                     Browser profile directory reused for OPFS restart proofs
   --visual-marker TEXT
@@ -263,6 +268,8 @@ function parseArgs(argv) {
     tciProgressInterval: 100000,
     tciWasmSubset: false,
     tciWasmGeneratedOnly: false,
+    tciWasmGeneratedTrace: false,
+    tciWasmGeneratedTraceLimit: 64,
     tciWasmSubsetInterval: 100000,
     tciWasmSubsetMaxOps: 512,
     tciWasmSubsetThreshold: 1024,
@@ -485,6 +492,14 @@ function parseArgs(argv) {
       options.tciWasmSubset = true;
       explicit.add("tciWasmGeneratedOnly");
       explicit.add("tciWasmSubset");
+    } else if (arg === "--tci-wasm-generated-trace") {
+      options.tciWasmGeneratedTrace = true;
+      options.tciWasmSubset = true;
+      explicit.add("tciWasmGeneratedTrace");
+      explicit.add("tciWasmSubset");
+    } else if (arg === "--tci-wasm-generated-trace-limit") {
+      options.tciWasmGeneratedTraceLimit = Number(argv[++i]);
+      explicit.add("tciWasmGeneratedTraceLimit");
     } else if (arg === "--tci-wasm-subset-interval") {
       options.tciWasmSubsetInterval = Number(argv[++i]);
       explicit.add("tciWasmSubsetInterval");
@@ -523,6 +538,7 @@ function parseArgs(argv) {
       "tciProgress",
       "tciWasmSubset",
       "tciWasmGeneratedOnly",
+      "tciWasmGeneratedTrace",
     ],
     checksumFields: ["kernel", "initrd", "rootfs"],
     integerFields: [
@@ -546,6 +562,7 @@ function parseArgs(argv) {
       "tcgHotblocksOpSample",
       "tcgHotblocksTop",
       "tciWasmSubsetInterval",
+      "tciWasmGeneratedTraceLimit",
       "tciWasmSubsetMaxOps",
       "tciWasmSubsetThreshold",
       "timeoutMs",
@@ -670,6 +687,12 @@ function parseArgs(argv) {
   if (!Number.isInteger(options.tciWasmSubsetInterval) ||
       options.tciWasmSubsetInterval <= 0) {
     console.error("--tci-wasm-subset-interval must be a positive integer");
+    usage(2);
+  }
+  if (!Number.isInteger(options.tciWasmGeneratedTraceLimit) ||
+      options.tciWasmGeneratedTraceLimit < 0 ||
+      options.tciWasmGeneratedTraceLimit > 1024) {
+    console.error("--tci-wasm-generated-trace-limit must be an integer from 0 to 1024");
     usage(2);
   }
   if (!Number.isInteger(options.tciWasmSubsetMaxOps) ||
@@ -1390,6 +1413,13 @@ export function browserSmokeUrl(options) {
     if (options.tciWasmGeneratedOnly) {
       url.searchParams.set("tciWasmGeneratedOnly", "1");
     }
+    if (options.tciWasmGeneratedTrace) {
+      url.searchParams.set("tciWasmGeneratedTrace", "1");
+      url.searchParams.set(
+        "tciWasmGeneratedTraceLimit",
+        String(options.tciWasmGeneratedTraceLimit),
+      );
+    }
     url.searchParams.set(
       "tciWasmSubsetInterval",
       String(options.tciWasmSubsetInterval),
@@ -1508,6 +1538,11 @@ export function initialSmokeResult(options, browserVersion) {
       : 100000,
     tciWasmSubset: Boolean(options.tciWasmSubset),
     tciWasmGeneratedOnly: Boolean(options.tciWasmGeneratedOnly),
+    tciWasmGeneratedTrace: Boolean(options.tciWasmGeneratedTrace),
+    tciWasmGeneratedTraceLimit:
+      Number.isInteger(options.tciWasmGeneratedTraceLimit)
+        ? options.tciWasmGeneratedTraceLimit
+        : 64,
     tciWasmSubsetInterval: Number.isInteger(options.tciWasmSubsetInterval)
       ? options.tciWasmSubsetInterval
       : 100000,

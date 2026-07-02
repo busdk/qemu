@@ -684,6 +684,58 @@ Engineering rules for this goal:
   W2m remains open: the next accepted slice must turn this translation-time
   output into a C-callable generated WebAssembly module/function with strict
   fallback and nonzero generated execution before any W3 browser speed gate.
+- [ ] W2m-b - Compile from translation-time output material through the
+  existing C-callable generated-function boundary. DoD: generated compilation
+  for the wasm64 backend reads the per-TB translation output buffer recorded
+  by W2m-a, while resolving TCI relative operands against the original TB
+  base; strict fallback remains active if generated output is absent,
+  truncated, unsupported, or fails to compile; deterministic tests prove the
+  emitted compiler path uses separate code and relative-base pointers before
+  any browser run. Prediction: this should not be measured with W3 until
+  local checks show the compiler consumes translation-time output and a
+  focused backend smoke reports nonzero generated execution. The intended
+  gate effect is an order-of-magnitude generated coverage increase only after
+  this path executes generated blocks broadly; the first local slice may still
+  have `0` browser-measured speed change.
+  Attempt 2026-07-02 is not accepted as W2m-b complete. It changed the
+  generated compiler to consume the translation-time output buffer and added
+  bounded generated-block trace diagnostics, but the browser evidence showed
+  only `34` generated executions/cache hits out of `53,900,000` to
+  `73,820,000` eligible TB entries (`0` ppm in 150 s summaries). A 30 s
+  generated-only trace run and a 150 s fallback-enabled run both timed out
+  before `QEMU_WASM_LINUX_BOOT_OK`. The generated path compiled only `12`
+  blocks and had `fallback_runtime=1`; that is useful failure evidence, not
+  meaningful generated coverage. The pointer-width ABI correction from
+  `addFunction(..., "ii")` to `addFunction(..., "jj")` is retained, and
+  deterministic tests now guard it. Because generated execution is still too
+  narrow and unsafe for the gate, backend builds now keep
+  `QEMU_TCI_WASM_SUBSET` opt-in instead of enabling generated/subset
+  execution by default. The final opt-in-guarded artifact hashes are JS
+  `d02596846580898d9a062dd1bf3a0ee04b727447e669733e3662283fb458846`,
+  WASM `b70c7ec5bda838094487700cd766197283cb796af723d9e1675ce68dcd541342`,
+  manifest `b1d667d55fff5be892a609f833bb9a5b2a1bfad52705ee0785d5e863b20a1c49`.
+  The generic Chromium `149.0.7827.55` smoke reached
+  `QEMU_WASM_LINUX_BOOT_OK` in `93186` ms with `tci.wasmSubset.enabled=false`,
+  `wasm64Tcg.summaryCount=0`, and no generated attempts; result JSON
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-subset-optin-final-default-smoke/wasm-browser-smoke-result.json`
+  SHA-256 `5f833d7f8002b2e7046ead6359eb089963ffb9eefc4546c7de68baa501147b19`,
+  screenshot SHA-256
+  `7790c1602b7fc002de8c3020befa4d332828fe041dec420dbda28caa83284ff5`.
+  Against the prior native generic TuxBoot time of `1968` ms, this is about
+  `47.4x` native. Applied to Bus Engine OS native evidence, it estimates
+  about `34.7` minutes to multi-user/login from the `44` second native boot
+  and about `45.8` minutes through the `58` second boot-audit marker. The
+  five-minute goal still needs roughly a `6.9x` to `9.2x` improvement from
+  the current safe fallback path.
+- [ ] W2m-c - Add a deterministic generated-output equivalence gate before
+  broad generated execution. DoD: use the W2m-b trace shapes to build a local
+  semantic check that compares generated-block register, memory, and dispatch
+  effects against the existing TCI interpreter for at least the early
+  terminal `goto_tb` and `exit_tb` block family, with no browser run required
+  for encoding/ABI failures. The next browser measurement is allowed only
+  after this deterministic gate passes and the generated coverage prediction
+  names how the change can plausibly move from tens of executions to thousands
+  of executed generated TBs.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and

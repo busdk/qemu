@@ -6636,3 +6636,117 @@ The next W2m slice must convert this translation-time output into a callable
 generated WebAssembly module/function with strict fallback and nonzero
 generated execution.  A browser W3 speed gate remains premature until that
 local execution evidence exists.
+
+W2m-b negative generated-execution result and opt-in guard
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The next W2m-b attempt made the generated compiler consume the
+translation-time generated-output buffer instead of the original TCI stream.
+It also changed the generated function table signature from ``"ii"`` to
+``"jj"`` for the wasm64 pointer-width ABI and added bounded generated-block
+trace records under ``QEMU_TCI_WASM_GENERATED_TRACE=1``.
+
+Checks:
+
+* ``git diff --check``
+* ``node --check scripts/ci/wasm-browser-smoke-runner.mjs``
+* ``node --check scripts/ci/wasm-browser-smoke.mjs``
+* ``node scripts/ci/wasm64-translate-metadata-test.mjs``
+* ``node scripts/ci/wasm-generated-block-prototype-test.mjs``
+* ``node scripts/ci/wasm-browser-smoke-runner-test.mjs`` outside the sandbox
+  because sandboxed child-process assertions return empty stderr
+
+The first backend artifact for this attempt wrote:
+
+* ``qemu-system-x86_64.js`` =
+  ``d02596846580898d9a062dd1bf3a0ee04b727447e669733e3662283fb4588470``
+* ``qemu-system-x86_64.wasm`` =
+  ``5f7f12c0c66fd491ce509e8c4763f0f875567cd353d13b598c48b1d90fbc105d``
+* manifest =
+  ``56288937e5ed50f4ae9dd26ec617eb299ed0f26d20ffd1624d907b56a788897c``
+* ``SHA256SUMS`` =
+  ``b544c54404354e1a116ee3dcf25d4cb91040be9b3c171d6033d38c0e72636470``
+
+The generated-only trace smoke used Chromium ``149.0.7827.55`` and timed out
+after ``30255`` ms before ``QEMU_WASM_LINUX_BOOT_OK``:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-jj-signature-smoke/wasm-browser-smoke-result.json``
+
+Result JSON SHA-256:
+
+``2999525b1803275dd20f0050096e10b6a3a8d8e0a78402c7fc02870e3debb215``
+
+The fallback-enabled trace smoke used the same artifact and Chromium build,
+and timed out after ``150215`` ms:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-jj-signature-fallback-smoke/wasm-browser-smoke-result.json``
+
+Result JSON SHA-256:
+
+``ce8d341169a7b60bd07cff3c6ec028d91c828a54bb1c3c1999b2fad2ed50b81a``
+
+The last summaries showed ``generated_compiled=12``,
+``generated_executed=23``, ``generated_cache_hits=11``, and generated coverage
+of only ``34 / 13,320,000`` in the 30 s run and ``34 / 73,820,000`` in the
+150 s run.  This is effectively zero coverage, so the attempt does not
+complete W2m-b and cannot proceed to the W3 speed gate.
+
+The same attempt also exposed a safety issue in the measurement shape:
+backend builds enabled the generated/subset path when ``QEMU_TCI_WASM_SUBSET``
+was unset.  That made backend default smokes run a tiny generated subset even
+when the runner configuration said the subset was disabled.  The default is
+now fail-closed: generated/subset execution requires
+``QEMU_TCI_WASM_SUBSET=1``.
+
+The opt-in-guarded backend artifact was built with:
+
+.. code-block:: console
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-subset-optin-final-artifacts \
+    --jobs auto \
+    --build-image \
+    --configure-arg=--disable-tcg-interpreter \
+    --configure-arg=--enable-tcg-wasm64-backend
+
+Artifact hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``d02596846580898d9a062dd1bf3a0ee04b727447e669733e3662283fb4588470``
+* ``qemu-system-x86_64.wasm`` =
+  ``b70c7ec5bda838094487700cd766197283cb796af723d9e1675ce68dcd541342``
+* manifest =
+  ``b1d667d55fff5be892a609f833bb9a5b2a1bfad52705ee0785d5e863b20a1c49``
+* ``SHA256SUMS`` =
+  ``c2640d5e733ebaf6aca7acd2a554519f71177bef7110c78ead66984e077f83df``
+
+The opt-in-guarded generic Chromium smoke reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``93186`` ms with subset execution disabled,
+``wasm64Tcg.summaryCount=0``, no generated attempts, and Chromium
+``149.0.7827.55``:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2m-subset-optin-final-default-smoke/wasm-browser-smoke-result.json``
+
+Result JSON SHA-256:
+
+``5f833d7f8002b2e7046ead6359eb089963ffb9eefc4546c7de68baa501147b19``
+
+Screenshot SHA-256:
+
+``7790c1602b7fc002de8c3020befa4d332828fe041dec420dbda28caa83284ff5``
+
+This restores a trustworthy default-TCI fallback measurement for backend
+artifacts.  Using the prior native generic TuxBoot time of ``1968`` ms, the
+new browser/native ratio is about ``47.4x``.  Applying that rough ratio to
+the accepted Bus Engine OS native evidence predicts about ``34.7`` minutes to
+multi-user/login from the ``44`` second native boot and about ``45.8`` minutes
+through the ``58`` second boot-audit service marker.  The five-minute target
+therefore still needs roughly a ``6.9x`` to ``9.2x`` throughput improvement
+from the current fallback path.
+
+The next accepted W2 work must add a deterministic generated-output
+equivalence gate before another browser run.  The trace shapes from this
+attempt are enough to build a local check for early terminal ``goto_tb`` and
+``exit_tb`` blocks; a browser measurement is not justified until that gate
+passes and the generated coverage prediction moves from tens of executions to
+thousands of executed generated TBs.
