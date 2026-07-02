@@ -7251,3 +7251,53 @@ the deterministic micro-hotset evidence that the run/exit shape can clear the
 model-level speed gate when setup and bookkeeping are kept out of the measured
 run.  The remaining W2 work is to move this shape into QEMU runtime execution
 without falling back to the rejected per-TB generated wrapper.
+
+W2o-b QEMU-facing microbench split
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The deterministic run-loop model now uses the same run-context and exit-frame
+offsets declared in ``tcg/wasm64.h``.  The header exposes
+``TCG_WASM64_RUN_CTX_*`` and ``TCG_WASM64_RUN_EXIT_*`` offset macros, and
+``tcg/wasm64.c`` guards them with ``QEMU_BUILD_BUG_ON()`` checks.  The
+JavaScript contract test reads those macros and verifies that the generated
+Wasm model uses the same offsets for ``guest_ram``, ``counters``, and
+``exit``.  This keeps the deterministic microbench tied to the ABI QEMU will
+use instead of a private JS-only layout.
+
+The benchmark now runs two workload families:
+
+* ``alu-branch``: internal two-TB dispatch with arithmetic and branches only.
+* ``tlb-hit-ram``: the same dispatch shape plus inline guest-RAM load/store
+  operations through the run context's ``guest_ram`` pointer.
+
+The accepted local command was:
+
+.. code-block:: text
+
+  node --input-type=module -e 'import {runWasmjitRunloopBenchmark,WASMJIT_WORKLOAD_ALU_BRANCH,WASMJIT_WORKLOAD_TLB_HIT_RAM} from "./scripts/ci/wasmjit-runloop-model.mjs"; const out=[]; for (const workload of [WASMJIT_WORKLOAD_ALU_BRANCH,WASMJIT_WORKLOAD_TLB_HIT_RAM]) out.push(await runWasmjitRunloopBenchmark({budget:1000000, rounds:5, workload})); console.log(JSON.stringify(out, null, 2));'
+
+Results:
+
+.. code-block:: text
+
+  alu-branch:
+    wasmBestMs=0.9502170000000021
+    tciLikeBestMs=110.12317500000006
+    bestRatio=115.89265925572771
+
+  tlb-hit-ram:
+    wasmBestMs=2.4207790000000386
+    tciLikeBestMs=189.05584899999997
+    bestRatio=78.09711212795425
+
+For both workloads the generated run loop executed one ``1000000``-step
+budget before returning for budget expiry, recorded
+``generatedGuestInstructions=4000000`` and
+``generatedChainLength=1000000``, and recorded zero helper,
+``qemu_ld``, and ``qemu_st`` calls.
+
+This is still not a generic Chromium smoke and not a Bus Engine OS proof.  It
+does, however, satisfy the deterministic W2 microbench gate for the run/exit
+shape.  The next step is to execute this ABI from the actual Emscripten/QEMU
+runtime path and export the same metrics in result JSON before attempting the
+W3 generic speed gate again.

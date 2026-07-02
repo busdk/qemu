@@ -94,18 +94,21 @@ Engineering rules for this goal:
 3. Every measurement must record artifact SHA-256 hashes, browser version,
    the exact runner command, and the result JSON path, in this file or in
    `docs/devel/wasm-support-plan.rst`.
-4. Generated-Wasm work is steered by gate metrics, not rejection-list churn.
-   Every summary must record generated coverage share as
-   `(generated_executed + generated_cache_hits) / total eligible TB
-   executions` or the exact raw numerator and denominator used. A lowering
-   change that cannot plausibly move coverage share by an order of magnitude
-   does not justify a browser run.
-5. W2 continues by closing the structural backend gap: translation-time
-   lowering through `tcg/wasm64/tcg-target.c.inc`, with TCG ops entering the
-   backend before TCI bytecode exists and per-TB fallback metadata attached to
-   generated output. Runtime revalidation of TCI bytecode and threshold-hot
-   narrow block compilation is diagnostic scaffolding only; it must not remain
-   the hot path for W2.
+4. Generated-Wasm work is steered by gate metrics, not rejection-list churn or
+   boundary-entry coverage. Every summary must record generated/fallback guest
+   instruction retirement, wall time in generated bodies, wall time in TCI
+   dispatch, wall time in TB lookup/main-loop work, helper/`qemu_ld`/
+   `qemu_st` time or counts, internal generated-chain length, and synthetic
+   exit reasons. A change that cannot plausibly improve same-commit wall
+   clock time or generated run-loop residency does not justify a browser run.
+5. W2 now continues by closing the accelerator-shape gap: a long-running
+   `wasmjit_run()`-style run/exit loop must execute generated Wasm bodies,
+   chain or dispatch hot TBs inside Wasm, inline common SoftMMU/TLB-hit RAM
+   load/store operations, and return to QEMU only for synthetic exits such as
+   MMIO, page fault/TLB miss, interrupt, halt, invalidation, unsupported
+   helper, or budget expiry. TCI stays as the compatibility fallback, but
+   performance-proof mode must fail loudly for unsupported hot paths instead
+   of hiding work behind silent fallback.
 6. A failed W3 gate is a re-plan point. Do not run another same-family
    browser measurement until the plan names the mechanism that should move
    the same-commit wall-clock gate.
@@ -146,11 +149,11 @@ Engineering rules for this goal:
     instruction retirement, internal TB chaining, inline SoftMMU/TLB hits, or
     rare synthetic exits. Treat millions of generated-boundary entries as a
     warning sign, not a success metric.
-  - Guest-side Bus Engine OS trimming is useful but secondary. Even an
-    aggressive native boot reduction from `44` seconds to `20` seconds would
-    still project to about `17` minutes at the current browser/native ratio.
-    The downstream B2/B3 lane should run in parallel, but it cannot replace a
-    QEMU execution-throughput fix.
+  - Guest-side Bus Engine OS trimming is out of scope for the current
+    accelerator-only goal. Even an aggressive native boot reduction from
+    `44` seconds to `20` seconds would still project to about `17` minutes at
+    the current browser/native ratio, so it cannot replace a QEMU
+    execution-throughput fix.
   - W2l-c shows the remaining high-leverage boundary: translation-time
     metadata sees `65920` generated-candidate TBs and `102077` lowerable TBs
     out of `251212` translated TBs, with `8121286` generated-candidate
@@ -191,37 +194,38 @@ Engineering rules for this goal:
   it in `91639` ms. The `5.8%` improvement is below the `20%` decision gate,
   so W2 continues wasm64-first and no default artifact family changes from
   this item.
-- [ ] W2 - Implement a real TCG-to-WebAssembly backend behind the existing
-  `tcg_wasm64_backend` gate, modeled on the `ktock/qemu-wasm`
-  `wasm64-tcg-b` reference (`tcg/wasm64.c`, `tcg/wasm64.h`,
-  `tcg/wasm64/tcg-target.c.inc`) without wholesale copying.
+- [ ] W2 - Implement the real browser-Wasm accelerator path behind the
+  existing wasm64 QEMU/WASM gate. Do not continue optimizing the rejected
+  direct-boundary path as the W2 performance candidate.
   DoD, all required:
   - The backend is selectable and buildable: the Emscripten build with
     `--enable-tcg-wasm64-backend` (or the wasm32 equivalent if W1 selects
     wasm32-first) configures, compiles, and links a runnable
     `qemu-system-x86_64` artifact instead of failing closed.
-  - Generated translation blocks execute through a C-callable instantiated
-    WebAssembly function boundary (`WasmContext *` style), not through a
-    per-block `EM_JS`/JavaScript crossing.
-  - Strict fallback is preserved: any TB whose lowering is unsupported, or
-    whose compile/instantiate step fails at runtime, executes through the
-    existing interpreter path with identical guest-visible semantics. The
-    already-committed `TCGWasm64Counters` contract reports nonzero
-    generated attempts, compiled blocks, executed blocks, cache hits, and
-    per-reason fallback counts in the browser smoke result JSON.
-  - Lowering coverage passes `scripts/ci/wasm-tcg-coverage-gate.mjs`
-    against the measured hot-op profile with
-    `--require-op ld --require-op st --require-op mb
-    --require-op tci_setcond32 --require-op brcond` (or the documented
-    current hot-op equivalents), using a fresh hot-block summary from the
-    backend artifact, not from an old TCI run.
-  - The deterministic module-emitter differential tests
-    (`scripts/ci/wasm-tb-module-emitter-test.mjs`,
-    `scripts/ci/wasm-generated-block-prototype-test.mjs`) and
-    `node scripts/ci/wasm-browser-smoke-runner-test.mjs` pass, plus
-    `git diff --check`.
-  - The generic Linux Chromium smoke boots to `QEMU_WASM_LINUX_BOOT_OK`
-    with the backend enabled and with nonzero executed generated blocks.
+  - The accelerator exposes a long-running `wasmjit_run()`-style run/exit
+    entrypoint. One call into the generated run loop must execute at least
+    `1000000` counted guest-instruction-equivalent operations before returning
+    for budget expiry in deterministic tests.
+  - Generated hot paths chain or dispatch internally inside WebAssembly. They
+    must not return to the QEMU main loop after every TB on the measured hot
+    path.
+  - Common RAM load/store TLB hits use an inline SoftMMU/TLB fast path and do
+    not call `qemu_ld`/`qemu_st` helpers on the hit path.
+  - Strict compatibility fallback is preserved for unsupported or failed
+    generated paths. Performance-proof mode must report and fail unsupported
+    hot paths loudly instead of silently treating fallback as accelerator
+    success.
+  - The accelerator reports dynamic instruction and wall-time metrics in the
+    browser result JSON: generated/fallback guest instruction retirement,
+    generated-body wall time, TCI dispatch time, TB lookup/main-loop time,
+    helper/`qemu_ld`/`qemu_st` counts or time, compile/instantiate time,
+    internal chain length or hotset residency, and synthetic exits by reason.
+  - Deterministic run-loop, ABI-contract, module-emitter, and generated-output
+    equivalence tests pass, plus `node scripts/ci/wasm-browser-smoke-runner-test.mjs`
+    and `git diff --check`.
+  - The generic Linux Chromium smoke boots to `QEMU_WASM_LINUX_BOOT_OK` with
+    the accelerator enabled, records real generated execution and rare
+    synthetic exits, and then passes W3's same-commit speed gate.
   This item may land as several commits, but it is not done until all of
   the above hold on one recorded artifact pair.
 - [x] W2a - Open the wasm64 backend build path with an explicit C-callable
@@ -1005,16 +1009,38 @@ Engineering rules for this goal:
   `node --check scripts/ci/wasmjit-runloop-model.mjs`,
   `node --check scripts/ci/wasmjit-runloop-model-test.mjs`, and
   `node scripts/ci/wasmjit-runloop-model-test.mjs`.
-- [ ] W2o-b - Replace the model-only run-loop proof with QEMU-integrated
-  wasm64 accelerator scaffolding. DoD: wire the run/exit ABI into the wasm64
-  backend runtime without using the rejected per-TB generated wrapper, add
-  deterministic ALU/branch and TLB-hit RAM microbenches through the same
-  runtime boundary QEMU will use, and report generated/fallback instruction
-  retirement, chain length, exit reasons, helper calls, `qemu_ld`/`qemu_st`
-  calls, and wall-time ratios. This is not done until the generated run loop
-  is multiple-times faster than the TCI-like baseline on both microbench
-  families and still executes one `1000000`-step budget before returning for
-  budget expiry.
+- [x] W2o-b - Replace the model-only run-loop proof with QEMU-facing wasm64
+  accelerator scaffolding and two deterministic microbench families. Accepted
+  evidence: `TCGWasm64RunContext` and `TCGWasm64RunExit` now have explicit
+  offset macros guarded by `QEMU_BUILD_BUG_ON()` in `tcg/wasm64.c`, and the
+  deterministic Wasm module uses those same offsets for `guest_ram`,
+  `counters`, and `exit`. The model now has separate `alu-branch` and
+  `tlb-hit-ram` workloads. Both execute one `1000000`-step budget before
+  returning for budget expiry, with `generatedGuestInstructions=4000000`,
+  `generatedChainLength=1000000`, zero helper calls, zero `qemu_ld` calls,
+  and zero `qemu_st` calls. On this host, the explicit benchmark command
+  recorded:
+  - `alu-branch`: best Wasm `0.9502170000000021 ms`, best TCI-like
+    `110.12317500000006 ms`, ratio `115.89265925572771`.
+  - `tlb-hit-ram`: best Wasm `2.4207790000000386 ms`, best TCI-like
+    `189.05584899999997 ms`, ratio `78.09711212795425`.
+  Checks: `git diff --check`,
+  `node --check scripts/ci/wasmjit-runloop-model.mjs`,
+  `node --check scripts/ci/wasmjit-runloop-model-test.mjs`,
+  `node --check scripts/ci/wasm64-runloop-contract-test.mjs`,
+  `node scripts/ci/wasm64-runloop-contract-test.mjs`, and
+  `node scripts/ci/wasmjit-runloop-model-test.mjs`. This is still
+  deterministic microbench evidence, not a generic smoke or Bus Engine OS
+  proof.
+- [ ] W2p - Execute the run/exit ABI from the actual Emscripten/QEMU runtime
+  path. DoD: build a wasm64 artifact with the run/exit ABI enabled and add a
+  QEMU-owned deterministic runtime smoke that instantiates or calls a
+  generated `wasmjit_run()` hotset through the same runtime mechanism intended
+  for translated TB hotsets. The smoke must record generated/fallback
+  instruction retirement, generated-body wall time, helper/`qemu_ld`/`qemu_st`
+  calls, chain length, and synthetic exits in the QEMU result JSON. Do not run
+  W3 until this runtime smoke preserves the W2o-b multiple-times microbench
+  win without reintroducing per-TB QEMU main-loop returns.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and

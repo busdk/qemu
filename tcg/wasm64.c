@@ -13,6 +13,39 @@
 
 #define TCG_WASM64_TRANSLATE_CACHE_SIZE 8192u
 
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, env) !=
+                  TCG_WASM64_RUN_CTX_ENV_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, guest_ram) !=
+                  TCG_WASM64_RUN_CTX_GUEST_RAM_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, budget) !=
+                  TCG_WASM64_RUN_CTX_BUDGET_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, counters) !=
+                  TCG_WASM64_RUN_CTX_COUNTERS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, exit) !=
+                  TCG_WASM64_RUN_CTX_EXIT_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, mode) !=
+                  TCG_WASM64_RUN_CTX_MODE_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, flags) !=
+                  TCG_WASM64_RUN_CTX_FLAGS_OFFSET);
+QEMU_BUILD_BUG_ON(sizeof(TCGWasm64RunContext) != TCG_WASM64_RUN_CTX_SIZE);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, reason) !=
+                  TCG_WASM64_RUN_EXIT_REASON_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, tb_id) !=
+                  TCG_WASM64_RUN_EXIT_TB_ID_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, pc) !=
+                  TCG_WASM64_RUN_EXIT_PC_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, vaddr) !=
+                  TCG_WASM64_RUN_EXIT_VADDR_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, paddr) !=
+                  TCG_WASM64_RUN_EXIT_PADDR_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, value) !=
+                  TCG_WASM64_RUN_EXIT_VALUE_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, size) !=
+                  TCG_WASM64_RUN_EXIT_SIZE_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, flags) !=
+                  TCG_WASM64_RUN_EXIT_FLAGS_OFFSET);
+QEMU_BUILD_BUG_ON(sizeof(TCGWasm64RunExit) != TCG_WASM64_RUN_EXIT_SIZE);
+
 typedef struct TCGWasm64TranslateEntry {
     const void *tb_ptr;
     TCGWasm64TBMetadata metadata;

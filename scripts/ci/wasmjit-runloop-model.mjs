@@ -8,21 +8,47 @@
 const VALUE_I32 = 0x7f;
 const VALUE_I64 = 0x7e;
 
-export const WASMJIT_RUNLOOP_MODEL_VERSION = 1;
+export const WASMJIT_RUNLOOP_MODEL_VERSION = 2;
 export const WASMJIT_EXIT_BUDGET = 1;
 
-export const WASMJIT_CTX = {
+export const WASMJIT_WORKLOAD_ALU_BRANCH = "alu-branch";
+export const WASMJIT_WORKLOAD_TLB_HIT_RAM = "tlb-hit-ram";
+
+export const WASMJIT_RUN_CTX = {
+  env: 0,
+  guestRam: 8,
+  budget: 16,
+  counters: 24,
+  exit: 32,
+  mode: 40,
+  flags: 44,
+  size: 48,
+};
+
+export const WASMJIT_RUN_EXIT = {
+  reason: 0,
+  tbId: 4,
+  pc: 8,
+  vaddr: 16,
+  paddr: 24,
+  value: 32,
+  sizeField: 40,
+  flags: 44,
+  size: 48,
+};
+
+export const WASMJIT_COUNTERS = {
   generatedGuestInstructions: 0,
   generatedChainLength: 8,
-  exitReason: 16,
-  ramBase: 20,
-  accumulator: 24,
-  tlbHitAccesses: 32,
-  helperCalls: 40,
-  qemuLoadCalls: 48,
-  qemuStoreCalls: 56,
-  tb0Executions: 64,
-  tb1Executions: 72,
+  inlineTlbHitLoads: 16,
+  inlineTlbHitStores: 24,
+  helperCalls: 32,
+  qemuLoadCalls: 40,
+  qemuStoreCalls: 48,
+  tb0Executions: 56,
+  tb1Executions: 64,
+  accumulator: 72,
+  size: 80,
 };
 
 export function encodeU32(value) {
@@ -58,6 +84,14 @@ export function encodeS64(value) {
       return bytes;
     }
   }
+}
+
+function normalizeWorkload(workload) {
+  if (workload === WASMJIT_WORKLOAD_ALU_BRANCH ||
+      workload === WASMJIT_WORKLOAD_TLB_HIT_RAM) {
+    return workload;
+  }
+  throw new Error(`unsupported wasmjit run-loop workload: ${workload}`);
 }
 
 function utf8Bytes(text) {
@@ -131,67 +165,120 @@ function i64Const(value) {
   return [0x42, ...encodeS64(value)];
 }
 
-function i32LoadCtx(offset) {
+function i32LoadAtPtr(ptrLocal, offset) {
   return [
-    ...localGet(0),
+    ...localGet(ptrLocal),
     0x28, ...memArg(2, offset),
   ];
 }
 
-function i64LoadCtx(offset) {
+function i64LoadAtPtr(ptrLocal, offset) {
   return [
-    ...localGet(0),
+    ...localGet(ptrLocal),
     0x29, ...memArg(3, offset),
   ];
 }
 
-function i64StoreCtx(offset, valueBytes) {
+function i32StoreAtPtr(ptrLocal, offset, valueBytes) {
   return [
-    ...localGet(0),
-    ...valueBytes,
-    0x37, ...memArg(3, offset),
-  ];
-}
-
-function i32StoreCtx(offset, valueBytes) {
-  return [
-    ...localGet(0),
+    ...localGet(ptrLocal),
     ...valueBytes,
     0x36, ...memArg(2, offset),
   ];
 }
 
-function i64Local(index) {
-  return [VALUE_I64, index];
+function i64StoreAtPtr(ptrLocal, offset, valueBytes) {
+  return [
+    ...localGet(ptrLocal),
+    ...valueBytes,
+    0x37, ...memArg(3, offset),
+  ];
 }
 
-function wasmjitRunInstructions() {
+function wasmjitRunInstructions(workload) {
+  workload = normalizeWorkload(workload);
+
   const remaining = 2;
   const state = 3;
-  const generatedGuestInstructions = 4;
-  const generatedChainLength = 5;
-  const value = 6;
-  const tlbHitAccesses = 7;
-  const tb0Executions = 8;
-  const tb1Executions = 9;
+  const countersPtr = 4;
+  const guestRamPtr = 5;
+  const exitPtr = 6;
+  const value = 7;
+  const generatedGuestInstructions = 8;
+  const generatedChainLength = 9;
+  const inlineLoads = 10;
+  const inlineStores = 11;
+  const tb0Executions = 12;
+  const tb1Executions = 13;
+  const isRam = workload === WASMJIT_WORKLOAD_TLB_HIT_RAM;
+
+  const tb0ValueUpdate = isRam ? [
+    ...i64LoadAtPtr(guestRamPtr, 0),
+    ...i64Const(1n),
+    0x7c,                  /* i64.add */
+    ...localSet(value),
+    ...i64StoreAtPtr(guestRamPtr, 0, localGet(value)),
+    ...localGet(inlineLoads),
+    ...i64Const(1n),
+    0x7c,                  /* i64.add */
+    ...localSet(inlineLoads),
+    ...localGet(inlineStores),
+    ...i64Const(1n),
+    0x7c,                  /* i64.add */
+    ...localSet(inlineStores),
+  ] : [
+    ...localGet(value),
+    ...i64Const(1n),
+    0x7c,                  /* i64.add */
+    ...localSet(value),
+  ];
+  const tb1ValueUpdate = isRam ? [
+    ...i64LoadAtPtr(guestRamPtr, 0),
+    ...i64Const(0x5a5an),
+    0x85,                  /* i64.xor */
+    ...localSet(value),
+    ...i64StoreAtPtr(guestRamPtr, 0, localGet(value)),
+    ...localGet(inlineLoads),
+    ...i64Const(1n),
+    0x7c,                  /* i64.add */
+    ...localSet(inlineLoads),
+    ...localGet(inlineStores),
+    ...i64Const(1n),
+    0x7c,                  /* i64.add */
+    ...localSet(inlineStores),
+  ] : [
+    ...localGet(value),
+    ...i64Const(0x5a5an),
+    0x85,                  /* i64.xor */
+    ...localSet(value),
+  ];
 
   return [
     ...localGet(1),
     ...localSet(remaining),
     ...i32Const(0),
     ...localSet(state),
-    ...i64LoadCtx(WASMJIT_CTX.generatedGuestInstructions),
+    ...i32LoadAtPtr(0, WASMJIT_RUN_CTX.counters),
+    ...localSet(countersPtr),
+    ...i32LoadAtPtr(0, WASMJIT_RUN_CTX.guestRam),
+    ...localSet(guestRamPtr),
+    ...i32LoadAtPtr(0, WASMJIT_RUN_CTX.exit),
+    ...localSet(exitPtr),
+    ...i64LoadAtPtr(countersPtr, WASMJIT_COUNTERS.generatedGuestInstructions),
     ...localSet(generatedGuestInstructions),
-    ...i64LoadCtx(WASMJIT_CTX.generatedChainLength),
+    ...i64LoadAtPtr(countersPtr, WASMJIT_COUNTERS.generatedChainLength),
     ...localSet(generatedChainLength),
-    ...i64LoadCtx(WASMJIT_CTX.tlbHitAccesses),
-    ...localSet(tlbHitAccesses),
-    ...i64LoadCtx(WASMJIT_CTX.tb0Executions),
+    ...i64LoadAtPtr(countersPtr, WASMJIT_COUNTERS.inlineTlbHitLoads),
+    ...localSet(inlineLoads),
+    ...i64LoadAtPtr(countersPtr, WASMJIT_COUNTERS.inlineTlbHitStores),
+    ...localSet(inlineStores),
+    ...i64LoadAtPtr(countersPtr, WASMJIT_COUNTERS.tb0Executions),
     ...localSet(tb0Executions),
-    ...i64LoadCtx(WASMJIT_CTX.tb1Executions),
+    ...i64LoadAtPtr(countersPtr, WASMJIT_COUNTERS.tb1Executions),
     ...localSet(tb1Executions),
-    ...i32LoadCtx(WASMJIT_CTX.ramBase),
-    0x29, ...memArg(3, 0), /* i64.load guest RAM */
+    ...(isRam
+      ? i64LoadAtPtr(guestRamPtr, 0)
+      : i64LoadAtPtr(countersPtr, WASMJIT_COUNTERS.accumulator)),
     ...localSet(value),
 
     0x02, 0x40,            /* block exit */
@@ -208,14 +295,7 @@ function wasmjitRunInstructions() {
     ...localGet(state),
     0x45,                  /* i32.eqz */
     0x04, 0x40,            /* if tb0 */
-    ...i32LoadCtx(WASMJIT_CTX.ramBase),
-    0x29, ...memArg(3, 0), /* i64.load guest RAM */
-    ...i64Const(1n),
-    0x7c,                  /* i64.add */
-    ...localSet(value),
-    ...i32LoadCtx(WASMJIT_CTX.ramBase),
-    ...localGet(value),
-    0x37, ...memArg(3, 0), /* i64.store guest RAM */
+    ...tb0ValueUpdate,
     ...localGet(tb0Executions),
     ...i64Const(1n),
     0x7c,                  /* i64.add */
@@ -223,14 +303,7 @@ function wasmjitRunInstructions() {
     ...i32Const(1),
     ...localSet(state),
     0x05,                  /* else tb1 */
-    ...i32LoadCtx(WASMJIT_CTX.ramBase),
-    0x29, ...memArg(3, 0), /* i64.load guest RAM */
-    ...i64Const(0x5a5an),
-    0x85,                  /* i64.xor */
-    ...localSet(value),
-    ...i32LoadCtx(WASMJIT_CTX.ramBase),
-    ...localGet(value),
-    0x37, ...memArg(3, 0), /* i64.store guest RAM */
+    ...tb1ValueUpdate,
     ...localGet(tb1Executions),
     ...i64Const(1n),
     0x7c,                  /* i64.add */
@@ -247,28 +320,33 @@ function wasmjitRunInstructions() {
     ...i64Const(1n),
     0x7c,                  /* i64.add */
     ...localSet(generatedChainLength),
-    ...localGet(tlbHitAccesses),
-    ...i64Const(2n),
-    0x7c,                  /* i64.add */
-    ...localSet(tlbHitAccesses),
     0x0c, ...encodeU32(0), /* br dispatch */
     0x0b,                  /* end loop */
     0x0b,                  /* end block */
 
-    ...i64StoreCtx(WASMJIT_CTX.generatedGuestInstructions,
+    ...i64StoreAtPtr(countersPtr, WASMJIT_COUNTERS.generatedGuestInstructions,
       localGet(generatedGuestInstructions)),
-    ...i64StoreCtx(WASMJIT_CTX.generatedChainLength,
+    ...i64StoreAtPtr(countersPtr, WASMJIT_COUNTERS.generatedChainLength,
       localGet(generatedChainLength)),
-    ...i32StoreCtx(WASMJIT_CTX.exitReason, i32Const(WASMJIT_EXIT_BUDGET)),
-    ...i64StoreCtx(WASMJIT_CTX.accumulator, localGet(value)),
-    ...i64StoreCtx(WASMJIT_CTX.tlbHitAccesses, localGet(tlbHitAccesses)),
-    ...i64StoreCtx(WASMJIT_CTX.tb0Executions, localGet(tb0Executions)),
-    ...i64StoreCtx(WASMJIT_CTX.tb1Executions, localGet(tb1Executions)),
+    ...i64StoreAtPtr(countersPtr, WASMJIT_COUNTERS.inlineTlbHitLoads,
+      localGet(inlineLoads)),
+    ...i64StoreAtPtr(countersPtr, WASMJIT_COUNTERS.inlineTlbHitStores,
+      localGet(inlineStores)),
+    ...i64StoreAtPtr(countersPtr, WASMJIT_COUNTERS.tb0Executions,
+      localGet(tb0Executions)),
+    ...i64StoreAtPtr(countersPtr, WASMJIT_COUNTERS.tb1Executions,
+      localGet(tb1Executions)),
+    ...i64StoreAtPtr(countersPtr, WASMJIT_COUNTERS.accumulator,
+      localGet(value)),
+    ...i32StoreAtPtr(exitPtr, WASMJIT_RUN_EXIT.reason,
+      i32Const(WASMJIT_EXIT_BUDGET)),
     ...i32Const(WASMJIT_EXIT_BUDGET),
   ];
 }
 
-export function buildWasmjitRunloopModule() {
+export function buildWasmjitRunloopModule({
+  workload = WASMJIT_WORKLOAD_TLB_HIT_RAM,
+} = {}) {
   const bytes = [
     0x00, 0x61, 0x73, 0x6d,
     0x01, 0x00, 0x00, 0x00,
@@ -285,9 +363,9 @@ export function buildWasmjitRunloopModule() {
       [...name("wasmjit_run"), 0x00, ...encodeU32(0)],
     ])),
     ...section(10, vector([
-      functionBody(wasmjitRunInstructions(), [
-        { count: 2, type: VALUE_I32 },
-        { count: 6, type: VALUE_I64 },
+      functionBody(wasmjitRunInstructions(workload), [
+        { count: 5, type: VALUE_I32 },
+        { count: 7, type: VALUE_I64 },
       ]),
     ])),
   ];
@@ -342,32 +420,43 @@ function writeU32(view, pointer, offset, value) {
 export function initializeWasmjitRunloopState({
   memory,
   contextPointer = 128,
+  countersPointer = 256,
+  exitPointer = 384,
   ramPointer = 512,
   initialRamValue = 0n,
 } = {}) {
   const view = new DataView(memory.buffer);
 
-  for (const offset of Object.values(WASMJIT_CTX)) {
-    if (offset === WASMJIT_CTX.ramBase) {
-      writeU32(view, contextPointer, offset, ramPointer);
-    } else if (offset === WASMJIT_CTX.exitReason) {
-      writeU32(view, contextPointer, offset, 0);
-    } else {
-      writeU64(view, contextPointer, offset, 0n);
-    }
+  for (let offset = 0; offset < WASMJIT_RUN_CTX.size; offset += 8) {
+    writeU64(view, contextPointer, offset, 0n);
   }
+  for (let offset = 0; offset < WASMJIT_COUNTERS.size; offset += 8) {
+    writeU64(view, countersPointer, offset, 0n);
+  }
+  for (let offset = 0; offset < WASMJIT_RUN_EXIT.size; offset += 8) {
+    writeU64(view, exitPointer, offset, 0n);
+  }
+
+  writeU32(view, contextPointer, WASMJIT_RUN_CTX.guestRam, ramPointer);
+  writeU32(view, contextPointer, WASMJIT_RUN_CTX.counters, countersPointer);
+  writeU32(view, contextPointer, WASMJIT_RUN_CTX.exit, exitPointer);
+  writeU32(view, contextPointer, WASMJIT_RUN_CTX.mode, 1);
   writeU64(view, ramPointer, 0, initialRamValue);
 
   return {
     view,
     contextPointer,
+    countersPointer,
+    exitPointer,
     ramPointer,
     initialRamValue,
   };
 }
 
-export async function instantiateWasmjitRunloop() {
-  const moduleBytes = buildWasmjitRunloopModule();
+export async function instantiateWasmjitRunloop({
+  workload = WASMJIT_WORKLOAD_TLB_HIT_RAM,
+} = {}) {
+  const moduleBytes = buildWasmjitRunloopModule({ workload });
   const contract = validateWasmjitRunloopContract(moduleBytes);
   const compiled = await WebAssembly.compile(moduleBytes);
   const memory = new WebAssembly.Memory({ initial: 1 });
@@ -383,6 +472,7 @@ export async function instantiateWasmjitRunloop() {
     compiled,
     memory,
     instance,
+    workload: normalizeWorkload(workload),
   };
 }
 
@@ -399,12 +489,19 @@ export function expectedRunloopValue(initial, budget) {
   return value;
 }
 
-export function runTciLikeRunloopModel({ budget = 1_000_000, initial = 0n } = {}) {
+export function runTciLikeRunloopModel({
+  budget = 1_000_000,
+  initial = 0n,
+  workload = WASMJIT_WORKLOAD_TLB_HIT_RAM,
+} = {}) {
+  workload = normalizeWorkload(workload);
+
   let value = BigInt.asUintN(64, BigInt(initial));
   let state = 0;
   let generatedGuestInstructions = 0n;
   let generatedChainLength = 0n;
-  let tlbHitAccesses = 0n;
+  let inlineTlbHitLoads = 0n;
+  let inlineTlbHitStores = 0n;
   let tb0Executions = 0n;
   let tb1Executions = 0n;
 
@@ -420,81 +517,108 @@ export function runTciLikeRunloopModel({ budget = 1_000_000, initial = 0n } = {}
     }
     generatedGuestInstructions += 4n;
     generatedChainLength++;
-    tlbHitAccesses += 2n;
+    if (workload === WASMJIT_WORKLOAD_TLB_HIT_RAM) {
+      inlineTlbHitLoads++;
+      inlineTlbHitStores++;
+    }
   }
 
   return {
     exitReason: WASMJIT_EXIT_BUDGET,
     generatedGuestInstructions,
     generatedChainLength,
-    tlbHitAccesses,
+    inlineTlbHitLoads,
+    inlineTlbHitStores,
     helperCalls: 0n,
     qemuLoadCalls: 0n,
     qemuStoreCalls: 0n,
     tb0Executions,
     tb1Executions,
     accumulator: value,
-    ramValue: value,
+    ramValue: workload === WASMJIT_WORKLOAD_TLB_HIT_RAM ? value : BigInt(initial),
   };
 }
 
-export async function runWasmjitRunloopProbe({ budget = 1_000_000 } = {}) {
+export async function runWasmjitRunloopProbe({
+  budget = 1_000_000,
+  workload = WASMJIT_WORKLOAD_TLB_HIT_RAM,
+} = {}) {
+  workload = normalizeWorkload(workload);
+
   const {
     moduleBytes,
     contract,
     memory,
     instance,
-  } = await instantiateWasmjitRunloop();
+  } = await instantiateWasmjitRunloop({ workload });
   const {
     view,
     contextPointer,
+    countersPointer,
+    exitPointer,
     ramPointer,
     initialRamValue,
   } = initializeWasmjitRunloopState({ memory });
+  writeU64(view, contextPointer, WASMJIT_RUN_CTX.budget, BigInt(budget));
+
   const exitReason = instance.exports.wasmjit_run(contextPointer, budget);
   const generatedGuestInstructions =
-    readU64(view, contextPointer, WASMJIT_CTX.generatedGuestInstructions);
+    readU64(view, countersPointer, WASMJIT_COUNTERS.generatedGuestInstructions);
   const generatedChainLength =
-    readU64(view, contextPointer, WASMJIT_CTX.generatedChainLength);
+    readU64(view, countersPointer, WASMJIT_COUNTERS.generatedChainLength);
   const storedExitReason =
-    view.getUint32(contextPointer + WASMJIT_CTX.exitReason, true);
-  const accumulator = readU64(view, contextPointer, WASMJIT_CTX.accumulator);
-  const tlbHitAccesses = readU64(view, contextPointer, WASMJIT_CTX.tlbHitAccesses);
-  const helperCalls = readU64(view, contextPointer, WASMJIT_CTX.helperCalls);
-  const qemuLoadCalls = readU64(view, contextPointer, WASMJIT_CTX.qemuLoadCalls);
-  const qemuStoreCalls = readU64(view, contextPointer, WASMJIT_CTX.qemuStoreCalls);
-  const tb0Executions = readU64(view, contextPointer, WASMJIT_CTX.tb0Executions);
-  const tb1Executions = readU64(view, contextPointer, WASMJIT_CTX.tb1Executions);
+    view.getUint32(exitPointer + WASMJIT_RUN_EXIT.reason, true);
+  const accumulator = readU64(view, countersPointer, WASMJIT_COUNTERS.accumulator);
+  const inlineTlbHitLoads =
+    readU64(view, countersPointer, WASMJIT_COUNTERS.inlineTlbHitLoads);
+  const inlineTlbHitStores =
+    readU64(view, countersPointer, WASMJIT_COUNTERS.inlineTlbHitStores);
+  const helperCalls = readU64(view, countersPointer, WASMJIT_COUNTERS.helperCalls);
+  const qemuLoadCalls = readU64(view, countersPointer, WASMJIT_COUNTERS.qemuLoadCalls);
+  const qemuStoreCalls = readU64(view, countersPointer, WASMJIT_COUNTERS.qemuStoreCalls);
+  const tb0Executions = readU64(view, countersPointer, WASMJIT_COUNTERS.tb0Executions);
+  const tb1Executions = readU64(view, countersPointer, WASMJIT_COUNTERS.tb1Executions);
   const ramValue = readU64(view, ramPointer, 0);
   const expectedValue = expectedRunloopValue(initialRamValue, budget);
+  const expectedRamValue = workload === WASMJIT_WORKLOAD_TLB_HIT_RAM
+    ? expectedValue
+    : initialRamValue;
+  const expectedTlbHits = workload === WASMJIT_WORKLOAD_TLB_HIT_RAM
+    ? BigInt(budget)
+    : 0n;
 
   return {
     format: 1,
     purpose: "qemu-wasmjit-runloop-model",
     version: WASMJIT_RUNLOOP_MODEL_VERSION,
+    workload,
     ok: exitReason === WASMJIT_EXIT_BUDGET &&
       storedExitReason === WASMJIT_EXIT_BUDGET &&
       generatedGuestInstructions === BigInt(budget) * 4n &&
       generatedChainLength === BigInt(budget) &&
-      tlbHitAccesses === BigInt(budget) * 2n &&
+      inlineTlbHitLoads === expectedTlbHits &&
+      inlineTlbHitStores === expectedTlbHits &&
       helperCalls === 0n &&
       qemuLoadCalls === 0n &&
       qemuStoreCalls === 0n &&
       tb0Executions === BigInt(Math.ceil(budget / 2)) &&
       tb1Executions === BigInt(Math.floor(budget / 2)) &&
       accumulator === expectedValue &&
-      ramValue === expectedValue,
+      ramValue === expectedRamValue,
     moduleBytes: moduleBytes.length,
     imports: contract.imports,
     exports: contract.exports,
     contextPointer,
+    countersPointer,
+    exitPointer,
     ramPointer,
     budget,
     exitReason,
     storedExitReason,
     generatedGuestInstructions: generatedGuestInstructions.toString(),
     generatedChainLength: generatedChainLength.toString(),
-    tlbHitAccesses: tlbHitAccesses.toString(),
+    inlineTlbHitLoads: inlineTlbHitLoads.toString(),
+    inlineTlbHitStores: inlineTlbHitStores.toString(),
     helperCalls: helperCalls.toString(),
     qemuLoadCalls: qemuLoadCalls.toString(),
     qemuStoreCalls: qemuStoreCalls.toString(),
@@ -513,11 +637,14 @@ function best(values) {
 export async function runWasmjitRunloopBenchmark({
   budget = 1_000_000,
   rounds = 5,
+  workload = WASMJIT_WORKLOAD_TLB_HIT_RAM,
 } = {}) {
+  workload = normalizeWorkload(workload);
+
   const {
     memory,
     instance,
-  } = await instantiateWasmjitRunloop();
+  } = await instantiateWasmjitRunloop({ workload });
   const wasmTimesMs = [];
   const tciLikeTimesMs = [];
 
@@ -527,7 +654,9 @@ export async function runWasmjitRunloopBenchmark({
   for (let round = 0; round < rounds; round++) {
     const {
       contextPointer,
+      view,
     } = initializeWasmjitRunloopState({ memory });
+    writeU64(view, contextPointer, WASMJIT_RUN_CTX.budget, BigInt(budget));
     const start = performance.now();
     instance.exports.wasmjit_run(contextPointer, budget);
     wasmTimesMs.push(performance.now() - start);
@@ -535,7 +664,7 @@ export async function runWasmjitRunloopBenchmark({
 
   for (let round = 0; round < rounds; round++) {
     const start = performance.now();
-    runTciLikeRunloopModel({ budget });
+    runTciLikeRunloopModel({ budget, workload });
     tciLikeTimesMs.push(performance.now() - start);
   }
 
@@ -546,6 +675,7 @@ export async function runWasmjitRunloopBenchmark({
     format: 1,
     purpose: "qemu-wasmjit-runloop-model-benchmark",
     version: WASMJIT_RUNLOOP_MODEL_VERSION,
+    workload,
     budget,
     rounds,
     wasmTimesMs,
