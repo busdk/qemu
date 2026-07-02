@@ -5566,3 +5566,55 @@ performance solution.  The next QEMU/WASM performance step should re-baseline
 the Bus Engine OS ``virtual-server`` guest with the current non-debug artifact
 and select the next optimization from measured QEMU/browser attribution rather
 than from additional opcode-lowering guesses.
+
+Default-Path TCI Progress Evidence
+----------------------------------
+
+On 2026-07-02, the default wasm64 TCI path gained opt-in progress summaries
+for production-shaped browser diagnostics.  ``QEMU_TCI_PROGRESS=1`` enables
+``qemu-tci-progress`` JSON lines and ``QEMU_TCI_PROGRESS_INTERVAL`` controls
+the translation-block entry interval between summaries.  The browser smoke
+runner exposes this through ``--tci-progress`` and
+``--tci-progress-interval`` and stores bounded summaries under
+``result.tci.progress``.  The switch is disabled by default and is separate
+from hot-block instrumentation.
+
+The rebuilt non-debug artifact produced:
+
+* ``qemu-system-x86_64.js`` =
+  ``b50a8bd1e3be815af1f8e4de8d9cfaa223b3c34bd06b90cd6fb651e8b962a1ae``
+* ``qemu-system-x86_64.wasm`` =
+  ``58bcbd70d7dae0947a9ee0bb4201b2adf22cb060288f2081733a7db347b5eed7``
+
+Generic Chromium ``149.0.7827.55`` smoke reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``84703`` ms with
+``summaryCount=7379``:
+``/tmp/qemu-wasm-tci-progress/generic-browser-smoke-tci-progress.json``.
+The last summary reported ``tb_entries=73790000`` and
+``dispatches=73445713``.
+
+The Bus Engine OS ``virtual-server`` microvm proof used kernel
+``3169668b74ef4fae4ca6a54bc5ad334a47e4eaf0c63c236248c9301af1c17920`` and
+rootfs ``5452bcc0c6fe0cab89f187e80572bc52174456cc60ed3cb723a8531519a0d22e``.
+The strict run wrote
+``/tmp/qemu-wasm-tci-progress/bus-engine-os-virtual-server-tci-progress.json``.
+It reached the kernel at ``53646`` ms, discovered ``/dev/vda`` at
+``76129`` ms, mounted rootfs at ``98146`` ms, started init at ``99593`` ms,
+set the hostname at ``111493`` ms, and then failed the guest-origin idle
+timeout at ``300460`` ms.  The last TCI progress summary reported
+``tb_entries=194000000`` and ``dispatches=192308504`` while the last
+guest-origin line remained ``systemd[1]: Hostname set to <bus-engine-os>.``.
+
+The relaxed-memory-barrier comparison wrote
+``/tmp/qemu-wasm-tci-progress/bus-engine-os-virtual-server-relaxed-mb-tci-progress.json``.
+It reached the same early milestones about six seconds faster and the same
+``194000000`` TB-entry count about ``10.3`` seconds earlier, but it still
+failed after hostname before multi-user readiness.
+
+This evidence rules out a missing virtio block, RNG, serial, display, timer,
+or interrupt event as the immediate post-hostname blocker.  QEMU is still
+executing guest CPU work through TCI while guest-origin serial output is
+silent.  The next accepted performance patch must therefore improve CPU
+execution throughput for this workload, preserve strict TCI fallback, and beat
+the strict-TCI generic smoke gate before it is treated as a Bus Engine OS boot
+solution.

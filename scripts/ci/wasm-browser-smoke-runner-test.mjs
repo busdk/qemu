@@ -33,7 +33,9 @@ import {
   recordBootMilestone,
   recordHotBlockSummary,
   recordPerfAttributionSummary,
+  recordTciProgressSummary,
   recordTciWasmSubsetSummary,
+  tciProgressSummary,
   tciWasmSubsetSummary,
 } from "./wasm-browser-smoke.mjs";
 
@@ -151,6 +153,16 @@ for (const status of [
         events: 200,
       },
     },
+    tci: {
+      progress: {
+        enabled: true,
+        summaryCount: 1,
+        lastSummary: {
+          event: "summary",
+          tb_entries: 300,
+        },
+      },
+    },
   });
 
   assert.equal(result.phase, "failed");
@@ -209,6 +221,16 @@ for (const status of [
     lastSummary: {
       event: "summary",
       events: 200,
+    },
+  });
+  assert.deepEqual(result.tci, {
+    progress: {
+      enabled: true,
+      summaryCount: 1,
+      lastSummary: {
+        event: "summary",
+        tb_entries: 300,
+      },
     },
   });
   assert.equal(result.phases[1].failedDuring, "fetch-guest-inputs");
@@ -426,6 +448,50 @@ for (const status of [
   assert.equal(state.tci.wasmSubset.summaries.length, 2);
   assert.equal(state.tci.wasmSubset.summaries[0].executed, 2);
   assert.equal(state.tci.wasmSubset.lastSummary.elapsedMs, 30);
+}
+
+{
+  const line = "qemu-tci-progress: " + JSON.stringify({
+    format: 1,
+    event: "summary",
+    reason: "interval",
+    elapsed_ms: 1234,
+    tb_entries: 5000000,
+    dispatches: 4900000,
+    tb_ptr: "0x1234",
+  });
+  const parsed = tciProgressSummary(line);
+  assert.equal(parsed.event, "summary");
+  assert.equal(parsed.tb_entries, 5000000);
+  assert.equal(parsed.dispatches, 4900000);
+  assert.equal(parsed.tb_ptr, "0x1234");
+  assert.equal(tciProgressSummary("ordinary serial line"), null);
+  assert.equal(tciProgressSummary("qemu-tci-progress: not-json"), null);
+}
+
+{
+  const state = {
+    tci: {
+      progress: {
+        enabled: true,
+        maxSummaries: 2,
+        summaryCount: 0,
+        summaries: [],
+        lastSummary: null,
+      },
+    },
+  };
+  for (const value of [1, 2, 3]) {
+    recordTciProgressSummary(
+      state,
+      `qemu-tci-progress: {"format":1,"event":"summary","tb_entries":${value}}`,
+      value * 10,
+    );
+  }
+  assert.equal(state.tci.progress.summaryCount, 3);
+  assert.equal(state.tci.progress.summaries.length, 2);
+  assert.equal(state.tci.progress.summaries[0].tb_entries, 2);
+  assert.equal(state.tci.progress.lastSummary.elapsedMs, 30);
 }
 
 {
@@ -649,6 +715,42 @@ for (const status of [
   assert.equal(url.searchParams.get("tcgHotblocksOpLimit"), "4096");
   assert.equal(url.searchParams.get("tcgHotblocksOpSample"), "1024");
   assert.equal(url.searchParams.get("tcgHotblocksTop"), "5");
+}
+
+{
+  const url = browserSmokeUrl({
+    allowSerialFallback: true,
+    appendExtra: "",
+    cpu: "Nehalem",
+    display: "none",
+    displayDevice: "default",
+    expectedResolution: "",
+    expectText: [],
+    focusDisplay: false,
+    host: "localhost",
+    initrd: "/tmp/initramfs.cpio.gz",
+    keyboardAfterText: "",
+    keyboardText: "",
+    kernelAppend: null,
+    machine: "microvm,acpi=off",
+    marker,
+    maxOutputBytes: 8192,
+    memory: "256M",
+    network: "none",
+    port: 8020,
+    powerOperation: "",
+    powerTimeoutMs: 30000,
+    qemuArgs: [],
+    rootfs: null,
+    rootfsDevice: "virtio-mmio",
+    tciProgress: true,
+    tciProgressInterval: 2000000,
+    timeoutMs: 30000,
+    visualMarker: "",
+  });
+
+  assert.equal(url.searchParams.get("tciProgress"), "1");
+  assert.equal(url.searchParams.get("tciProgressInterval"), "2000000");
 }
 
 {
@@ -917,6 +1019,8 @@ for (const status of [
       interactiveOnly: false,
     },
     timeoutMs: 180000,
+    tciProgress: true,
+    tciProgressInterval: 2000000,
     tciWasmSubset: true,
     tciWasmGeneratedOnly: true,
     tciWasmSubsetInterval: 10000,
@@ -957,6 +1061,8 @@ for (const status of [
   assert.equal(result.requireDisplayOutput, true);
   assert.equal(result.displayMinNonblackPixels, 4);
   assert.equal(result.rootfsDevice, "virtio-pci");
+  assert.equal(result.tciProgress, true);
+  assert.equal(result.tciProgressInterval, 2000000);
   assert.equal(result.tciWasmSubset, true);
   assert.equal(result.tciWasmGeneratedOnly, true);
   assert.equal(result.tciWasmSubsetInterval, 10000);

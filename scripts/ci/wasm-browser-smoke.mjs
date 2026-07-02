@@ -316,6 +316,23 @@ export function tciWasmSubsetSummary(line) {
   }
 }
 
+export function tciProgressSummary(line) {
+  const prefix = "qemu-tci-progress: ";
+
+  if (!line.startsWith(prefix)) {
+    return null;
+  }
+  try {
+    const summary = JSON.parse(line.slice(prefix.length));
+    if (summary === null || typeof summary !== "object" || Array.isArray(summary)) {
+      return null;
+    }
+    return summary;
+  } catch {
+    return null;
+  }
+}
+
 export function recordHotBlockSummary(state, line, elapsedMs) {
   if (!state || !state.hotBlocks || !state.hotBlocks.enabled) {
     return;
@@ -353,6 +370,27 @@ export function recordTciWasmSubsetSummary(state, line, elapsedMs) {
   if (state.tci.wasmSubset.summaries.length >
       state.tci.wasmSubset.maxSummaries) {
     state.tci.wasmSubset.summaries.shift();
+  }
+}
+
+export function recordTciProgressSummary(state, line, elapsedMs) {
+  if (!state || !state.tci || !state.tci.progress ||
+      !state.tci.progress.enabled) {
+    return;
+  }
+  const summary = tciProgressSummary(line);
+  if (summary === null) {
+    return;
+  }
+  state.tci.progress.summaryCount += 1;
+  state.tci.progress.lastSummary = {
+    elapsedMs,
+    ...summary,
+  };
+  state.tci.progress.summaries.push(state.tci.progress.lastSummary);
+  if (state.tci.progress.summaries.length >
+      state.tci.progress.maxSummaries) {
+    state.tci.progress.summaries.shift();
   }
 }
 
@@ -1360,6 +1398,8 @@ function buildConfig() {
     tcgHotblocksOpSample: numberOption("tcgHotblocksOpSample", 1),
     tcgHotblocksTop: numberOption("tcgHotblocksTop", 12),
     tciRelaxedMb: boolOption("tciRelaxedMb", false),
+    tciProgress: boolOption("tciProgress", false),
+    tciProgressInterval: numberOption("tciProgressInterval", 100000),
     tciWasmSubset: boolOption("tciWasmSubset", false),
     tciWasmGeneratedOnly: boolOption("tciWasmGeneratedOnly", false),
     tciWasmSubsetInterval: numberOption("tciWasmSubsetInterval", 100000),
@@ -1540,6 +1580,14 @@ async function run() {
     },
     tci: {
       relaxedMb: Boolean(config.tciRelaxedMb),
+      progress: {
+        enabled: Boolean(config.tciProgress),
+        interval: config.tciProgressInterval,
+        maxSummaries: 16,
+        summaryCount: 0,
+        summaries: [],
+        lastSummary: null,
+      },
       wasmSubset: {
         enabled: Boolean(config.tciWasmSubset),
         generatedOnly: Boolean(config.tciWasmGeneratedOnly),
@@ -1551,8 +1599,13 @@ async function run() {
         summaries: [],
         lastSummary: null,
       },
-      env: (config.tciRelaxedMb || config.tciWasmSubset) ? {
+      env: (config.tciRelaxedMb || config.tciProgress ||
+          config.tciWasmSubset) ? {
         ...(config.tciRelaxedMb ? { QEMU_TCI_RELAXED_MB: "1" } : {}),
+        ...(config.tciProgress ? {
+          QEMU_TCI_PROGRESS: "1",
+          QEMU_TCI_PROGRESS_INTERVAL: String(config.tciProgressInterval),
+        } : {}),
         ...(config.tciWasmSubset ? {
           QEMU_TCI_WASM_SUBSET: "1",
           ...(config.tciWasmGeneratedOnly ? {
@@ -1770,6 +1823,7 @@ async function run() {
     }
     return !(
       line.startsWith("qemu-tci-wasm-subset:") ||
+      line.startsWith("qemu-tci-progress:") ||
       line.startsWith("qemu-tcg-hotblocks:") ||
       line.startsWith("qemu-wasm-perf-attrib:") ||
       line.startsWith("qemu-wasm-perf-attribution:") ||
@@ -1808,6 +1862,11 @@ async function run() {
       Math.round(performance.now() - startTime),
     );
     recordTciWasmSubsetSummary(
+      smokeState,
+      line,
+      Math.round(performance.now() - startTime),
+    );
+    recordTciProgressSummary(
       smokeState,
       line,
       Math.round(performance.now() - startTime),
@@ -1885,6 +1944,10 @@ async function run() {
   } : {};
   const tciEnv = {
     ...(config.tciRelaxedMb ? { QEMU_TCI_RELAXED_MB: "1" } : {}),
+    ...(config.tciProgress ? {
+      QEMU_TCI_PROGRESS: "1",
+      QEMU_TCI_PROGRESS_INTERVAL: String(config.tciProgressInterval),
+    } : {}),
     ...(config.tciWasmSubset ? {
       QEMU_TCI_WASM_SUBSET: "1",
       ...(config.tciWasmGeneratedOnly ? {
@@ -1945,7 +2008,8 @@ async function run() {
             .join("\n") + "\n";
           module.FS.writeFile("/qemu-wasm-perf-attrib-env", lines);
         }
-        if (config.tciRelaxedMb || config.tciWasmSubset) {
+        if (config.tciRelaxedMb || config.tciProgress ||
+            config.tciWasmSubset) {
           const lines = Object.entries(tciEnv)
             .map(([key, value]) => `${key}=${value}`)
             .join("\n") + "\n";

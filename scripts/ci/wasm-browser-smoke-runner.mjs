@@ -151,6 +151,11 @@ Options:
                      Maximum hotspot entries per summary (default: 12)
   --tci-relaxed-mb  Enable the Emscripten/TCI-only relaxed memory-barrier
                     experiment; default QEMU execution remains strict
+  --tci-progress    Enable opt-in TCI translation-block progress summaries
+                    for default-path browser diagnostics
+  --tci-progress-interval N
+                    TB entries between TCI progress summaries
+                    (default: 100000)
   --tci-wasm-subset
                     Enable the opt-in wasm64 TCI subset execution proof
   --tci-wasm-generated-only
@@ -248,6 +253,8 @@ function parseArgs(argv) {
     tcgHotblocksOpSample: 1,
     tcgHotblocksTop: 12,
     tciRelaxedMb: false,
+    tciProgress: false,
+    tciProgressInterval: 100000,
     tciWasmSubset: false,
     tciWasmGeneratedOnly: false,
     tciWasmSubsetInterval: 100000,
@@ -452,6 +459,12 @@ function parseArgs(argv) {
     } else if (arg === "--tci-relaxed-mb") {
       options.tciRelaxedMb = true;
       explicit.add("tciRelaxedMb");
+    } else if (arg === "--tci-progress") {
+      options.tciProgress = true;
+      explicit.add("tciProgress");
+    } else if (arg === "--tci-progress-interval") {
+      options.tciProgressInterval = Number(argv[++i]);
+      explicit.add("tciProgressInterval");
     } else if (arg === "--tci-wasm-subset") {
       options.tciWasmSubset = true;
       explicit.add("tciWasmSubset");
@@ -494,6 +507,7 @@ function parseArgs(argv) {
       "screenshotFullPage",
       "tcgHotblocks",
       "tciRelaxedMb",
+      "tciProgress",
       "tciWasmSubset",
       "tciWasmGeneratedOnly",
     ],
@@ -653,6 +667,11 @@ function parseArgs(argv) {
   if (!Number.isInteger(options.tciWasmSubsetThreshold) ||
       options.tciWasmSubsetThreshold <= 0) {
     console.error("--tci-wasm-subset-threshold must be a positive integer");
+    usage(2);
+  }
+  if (!Number.isInteger(options.tciProgressInterval) ||
+      options.tciProgressInterval <= 0) {
+    console.error("--tci-progress-interval must be a positive integer");
     usage(2);
   }
   if (!Number.isInteger(options.maxOutputBytes) || options.maxOutputBytes <= 0) {
@@ -1330,6 +1349,13 @@ export function browserSmokeUrl(options) {
   if (options.tciRelaxedMb) {
     url.searchParams.set("tciRelaxedMb", "1");
   }
+  if (options.tciProgress) {
+    url.searchParams.set("tciProgress", "1");
+    url.searchParams.set(
+      "tciProgressInterval",
+      String(options.tciProgressInterval),
+    );
+  }
   if (options.tciWasmSubset) {
     url.searchParams.set("tciWasmSubset", "1");
     if (options.tciWasmGeneratedOnly) {
@@ -1443,6 +1469,10 @@ export function initialSmokeResult(options, browserVersion) {
       ? options.tcgHotblocksTop
       : 12,
     tciRelaxedMb: Boolean(options.tciRelaxedMb),
+    tciProgress: Boolean(options.tciProgress),
+    tciProgressInterval: Number.isInteger(options.tciProgressInterval)
+      ? options.tciProgressInterval
+      : 100000,
     tciWasmSubset: Boolean(options.tciWasmSubset),
     tciWasmGeneratedOnly: Boolean(options.tciWasmGeneratedOnly),
     tciWasmSubsetInterval: Number.isInteger(options.tciWasmSubsetInterval)

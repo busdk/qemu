@@ -44,19 +44,40 @@ by a checkbox in this file before it is treated as accepted work.
 
 This goal is done only when all of the following are true:
 
-- [ ] The current browser-hosted Bus Engine OS `virtual-server` boot baseline
+- [x] The current browser-hosted Bus Engine OS `virtual-server` boot baseline
   is recorded with exact QEMU artifact hashes, guest kernel/rootfs hashes,
   browser version, command line, timeout/readiness state, and final serial
   marker. Current accepted baseline on 2026-07-02: the production-shaped
-  non-debug artifact
-  `/tmp/qemu-wasm-generated-only-isolation/qemu-system-x86_64.{js,wasm}`
-  still does not reach `Reached target Multi-User System.` or
-  `QEMU_WASM_SERVICE_READY`. The `microvm,acpi=off` proof with the accepted
-  `virtual-server` rootfs idled after systemd set the hostname at `106328` ms
-  and failed after `290420` ms.
-- [ ] QEMU-side attribution identifies the dominant measured bottleneck for
+  non-debug progress artifact
+  `/tmp/qemu-wasm-tci-progress/qemu-system-x86_64.{js,wasm}` has
+  `qemu-system-x86_64.js` SHA-256
+  `b50a8bd1e3be815af1f8e4de8d9cfaa223b3c34bd06b90cd6fb651e8b962a1ae`
+  and `qemu-system-x86_64.wasm` SHA-256
+  `58bcbd70d7dae0947a9ee0bb4201b2adf22cb060288f2081733a7db347b5eed7`.
+  The accepted Bus Engine OS microvm kernel is
+  `3169668b74ef4fae4ca6a54bc5ad334a47e4eaf0c63c236248c9301af1c17920`
+  and the rootfs is
+  `5452bcc0c6fe0cab89f187e80572bc52174456cc60ed3cb723a8531519a0d22e`.
+  Chromium `149.0.7827.55` still does not reach
+  `Reached target Multi-User System.` or `QEMU_WASM_SERVICE_READY`. The strict
+  `microvm,acpi=off` proof failed after `300460` ms; it reached the kernel at
+  `53646` ms, `/dev/vda` at `76129` ms, mounted rootfs at `98146` ms, started
+  init at `99593` ms, set the hostname at `111493` ms, and then hit the
+  `180149` ms guest-origin idle timeout. The relaxed-memory-barrier comparison
+  failed after `290461` ms with the same final hostname line, but improved
+  those early markers by about six seconds.
+- [x] QEMU-side attribution identifies the dominant measured bottleneck for
   that baseline. The accepted bottleneck must be backed by counters or timing
-  evidence, not by intuition.
+  evidence, not by intuition. Accepted evidence: the strict default-path proof
+  emitted `194` opt-in `qemu-tci-progress` summaries by timeout, with the last
+  summary showing `tb_entries=194000000`, `dispatches=192308504`, and QEMU
+  elapsed `290761` ms while the last guest-origin serial line was still
+  `systemd[1]: Hostname set to <bus-engine-os>.`. The relaxed comparison
+  emitted the same `194000000` TB entries about `10.3` seconds earlier, with
+  similar dispatch counts. This proves QEMU/TCI is actively executing guest CPU
+  work after hostname; the current blocker is CPU execution throughput through
+  early systemd work, not a missing interrupt, timer, block, RNG, display, or
+  serial event.
 - [ ] The implemented optimization matches the measured bottleneck. CPU work
   must improve hot translation-block execution while preserving strict TCI
   fallback. Device or browser API work must sit behind the matching QEMU
@@ -466,6 +487,38 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   markers from `guestLines`/`guestOutputBytes`/`guestLastLine`, and
   `wasm-browser-smoke-runner-test.mjs` passes with a synthetic `/sys/fs/bpf`
   stall plus continuing heartbeat lines.
+- [x] Add default-path TCI progress visibility for post-hostname silence:
+  DoD is a production-shaped, non-debug wasm64 artifact that can emit
+  low-volume opt-in `qemu-tci-progress` JSON summaries without enabling
+  hot-block instrumentation; browser runner flags and result fields for the
+  progress interval and bounded summaries; deterministic parser, URL, and
+  result tests; a passing generic Chromium smoke; and strict versus
+  relaxed-memory-barrier Bus Engine OS microvm proofs that identify whether
+  the guest is still executing CPU work after the last guest-origin serial
+  line. Accepted evidence on 2026-07-02: `QEMU_TCI_PROGRESS=1` and
+  `QEMU_TCI_PROGRESS_INTERVAL=N` are default-off Emscripten/TCI switches in
+  `tcg/tci.c`; the browser smoke runner exposes `--tci-progress` and
+  `--tci-progress-interval`; generic Chromium smoke
+  `/tmp/qemu-wasm-tci-progress/generic-browser-smoke-tci-progress.json`
+  reached `QEMU_WASM_LINUX_BOOT_OK` in `84703` ms with `summaryCount=7379`.
+  The strict Bus Engine OS proof
+  `/tmp/qemu-wasm-tci-progress/bus-engine-os-virtual-server-tci-progress.json`
+  timed out after hostname but recorded `194000000` TB entries and
+  `192308504` dispatches, proving ongoing guest CPU execution. The relaxed
+  comparison
+  `/tmp/qemu-wasm-tci-progress/bus-engine-os-virtual-server-relaxed-mb-tci-progress.json`
+  improved early markers by about six seconds but still timed out after
+  hostname, so relaxed barriers remain insufficient as the performance fix.
+- [ ] Implement a measured CPU execution throughput fix for the post-hostname
+  systemd workload:
+  DoD is a QEMU-side acceleration patch selected from evidence rather than
+  speculation, preserves strict TCI fallback, keeps the default generic
+  Chromium smoke passing, and produces a Bus Engine OS `virtual-server`
+  microvm run that either reaches multi-user/service readiness within
+  `300000` ms or records a marker-to-marker improvement plus the next concrete
+  measured CPU-side bottleneck in this plan. Do not continue the rejected
+  per-block `EM_JS` generated-module path unless new evidence shows it can
+  beat strict TCI on the generic smoke gate.
 - [x] Implement the first evidence-backed acceleration slice:
   DoD is an initial hot-TB WebAssembly translation slice modeled on
   `ktock/qemu-wasm` if CPU interpreter cost is the measured blocker, or the
