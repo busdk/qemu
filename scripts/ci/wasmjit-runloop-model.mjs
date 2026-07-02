@@ -39,16 +39,30 @@ export const WASMJIT_RUN_EXIT = {
 
 export const WASMJIT_COUNTERS = {
   generatedGuestInstructions: 0,
-  generatedChainLength: 8,
-  inlineTlbHitLoads: 16,
-  inlineTlbHitStores: 24,
-  helperCalls: 32,
-  qemuLoadCalls: 40,
-  qemuStoreCalls: 48,
-  tb0Executions: 56,
-  tb1Executions: 64,
-  accumulator: 72,
-  size: 80,
+  fallbackGuestInstructions: 8,
+  generatedBodyTimeNs: 16,
+  tciDispatchTimeNs: 24,
+  tbLookupTimeNs: 32,
+  helperCallTimeNs: 40,
+  qemuLdTimeNs: 48,
+  qemuStTimeNs: 56,
+  compileTimeNs: 64,
+  instantiateTimeNs: 72,
+  generatedChainLength: 80,
+  inlineTlbHitLoads: 88,
+  inlineTlbHitStores: 96,
+  helperCalls: 104,
+  qemuLoadCalls: 112,
+  qemuStoreCalls: 120,
+  exitsBudget: 128,
+  exitsMmio: 136,
+  exitsTlbMissOrFault: 144,
+  exitsInterrupt: 152,
+  exitsHelper: 160,
+  exitsUnsupported: 168,
+  exitsHlt: 176,
+  exitsInvalidated: 184,
+  size: 192,
 };
 
 export function encodeU32(value) {
@@ -208,8 +222,6 @@ function wasmjitRunInstructions(workload) {
   const generatedChainLength = 9;
   const inlineLoads = 10;
   const inlineStores = 11;
-  const tb0Executions = 12;
-  const tb1Executions = 13;
   const isRam = workload === WASMJIT_WORKLOAD_TLB_HIT_RAM;
 
   const tb0ValueUpdate = isRam ? [
@@ -272,13 +284,9 @@ function wasmjitRunInstructions(workload) {
     ...localSet(inlineLoads),
     ...i64LoadAtPtr(countersPtr, WASMJIT_COUNTERS.inlineTlbHitStores),
     ...localSet(inlineStores),
-    ...i64LoadAtPtr(countersPtr, WASMJIT_COUNTERS.tb0Executions),
-    ...localSet(tb0Executions),
-    ...i64LoadAtPtr(countersPtr, WASMJIT_COUNTERS.tb1Executions),
-    ...localSet(tb1Executions),
     ...(isRam
       ? i64LoadAtPtr(guestRamPtr, 0)
-      : i64LoadAtPtr(countersPtr, WASMJIT_COUNTERS.accumulator)),
+      : i64Const(0n)),
     ...localSet(value),
 
     0x02, 0x40,            /* block exit */
@@ -296,18 +304,10 @@ function wasmjitRunInstructions(workload) {
     0x45,                  /* i32.eqz */
     0x04, 0x40,            /* if tb0 */
     ...tb0ValueUpdate,
-    ...localGet(tb0Executions),
-    ...i64Const(1n),
-    0x7c,                  /* i64.add */
-    ...localSet(tb0Executions),
     ...i32Const(1),
     ...localSet(state),
     0x05,                  /* else tb1 */
     ...tb1ValueUpdate,
-    ...localGet(tb1Executions),
-    ...i64Const(1n),
-    0x7c,                  /* i64.add */
-    ...localSet(tb1Executions),
     ...i32Const(0),
     ...localSet(state),
     0x0b,                  /* end if */
@@ -332,12 +332,7 @@ function wasmjitRunInstructions(workload) {
       localGet(inlineLoads)),
     ...i64StoreAtPtr(countersPtr, WASMJIT_COUNTERS.inlineTlbHitStores,
       localGet(inlineStores)),
-    ...i64StoreAtPtr(countersPtr, WASMJIT_COUNTERS.tb0Executions,
-      localGet(tb0Executions)),
-    ...i64StoreAtPtr(countersPtr, WASMJIT_COUNTERS.tb1Executions,
-      localGet(tb1Executions)),
-    ...i64StoreAtPtr(countersPtr, WASMJIT_COUNTERS.accumulator,
-      localGet(value)),
+    ...i64StoreAtPtr(exitPtr, WASMJIT_RUN_EXIT.value, localGet(value)),
     ...i32StoreAtPtr(exitPtr, WASMJIT_RUN_EXIT.reason,
       i32Const(WASMJIT_EXIT_BUDGET)),
     ...i32Const(WASMJIT_EXIT_BUDGET),
@@ -568,7 +563,7 @@ export async function runWasmjitRunloopProbe({
     readU64(view, countersPointer, WASMJIT_COUNTERS.generatedChainLength);
   const storedExitReason =
     view.getUint32(exitPointer + WASMJIT_RUN_EXIT.reason, true);
-  const accumulator = readU64(view, countersPointer, WASMJIT_COUNTERS.accumulator);
+  const exitValue = readU64(view, exitPointer, WASMJIT_RUN_EXIT.value);
   const inlineTlbHitLoads =
     readU64(view, countersPointer, WASMJIT_COUNTERS.inlineTlbHitLoads);
   const inlineTlbHitStores =
@@ -576,8 +571,6 @@ export async function runWasmjitRunloopProbe({
   const helperCalls = readU64(view, countersPointer, WASMJIT_COUNTERS.helperCalls);
   const qemuLoadCalls = readU64(view, countersPointer, WASMJIT_COUNTERS.qemuLoadCalls);
   const qemuStoreCalls = readU64(view, countersPointer, WASMJIT_COUNTERS.qemuStoreCalls);
-  const tb0Executions = readU64(view, countersPointer, WASMJIT_COUNTERS.tb0Executions);
-  const tb1Executions = readU64(view, countersPointer, WASMJIT_COUNTERS.tb1Executions);
   const ramValue = readU64(view, ramPointer, 0);
   const expectedValue = expectedRunloopValue(initialRamValue, budget);
   const expectedRamValue = workload === WASMJIT_WORKLOAD_TLB_HIT_RAM
@@ -601,9 +594,7 @@ export async function runWasmjitRunloopProbe({
       helperCalls === 0n &&
       qemuLoadCalls === 0n &&
       qemuStoreCalls === 0n &&
-      tb0Executions === BigInt(Math.ceil(budget / 2)) &&
-      tb1Executions === BigInt(Math.floor(budget / 2)) &&
-      accumulator === expectedValue &&
+      exitValue === expectedValue &&
       ramValue === expectedRamValue,
     moduleBytes: moduleBytes.length,
     imports: contract.imports,
@@ -622,9 +613,7 @@ export async function runWasmjitRunloopProbe({
     helperCalls: helperCalls.toString(),
     qemuLoadCalls: qemuLoadCalls.toString(),
     qemuStoreCalls: qemuStoreCalls.toString(),
-    tb0Executions: tb0Executions.toString(),
-    tb1Executions: tb1Executions.toString(),
-    accumulator: accumulator.toString(),
+    exitValue: exitValue.toString(),
     ramValue: ramValue.toString(),
     expectedValue: expectedValue.toString(),
   };

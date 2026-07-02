@@ -367,6 +367,23 @@ export function wasm64TcgSummary(line) {
   }
 }
 
+export function wasm64RunloopSummary(line) {
+  const prefix = "qemu-wasm64-runloop: ";
+
+  if (!line.startsWith(prefix)) {
+    return null;
+  }
+  try {
+    const summary = JSON.parse(line.slice(prefix.length));
+    if (summary === null || typeof summary !== "object" || Array.isArray(summary)) {
+      return null;
+    }
+    return summary;
+  } catch {
+    return null;
+  }
+}
+
 export function recordHotBlockSummary(state, line, elapsedMs) {
   if (!state || !state.hotBlocks || !state.hotBlocks.enabled) {
     return;
@@ -443,6 +460,26 @@ export function recordWasm64TcgSummary(state, line, elapsedMs) {
   state.wasm64Tcg.summaries.push(state.wasm64Tcg.lastSummary);
   if (state.wasm64Tcg.summaries.length > state.wasm64Tcg.maxSummaries) {
     state.wasm64Tcg.summaries.shift();
+  }
+}
+
+export function recordWasm64RunloopSummary(state, line, elapsedMs) {
+  if (!state || !state.wasm64Runloop) {
+    return;
+  }
+  const summary = wasm64RunloopSummary(line);
+  if (summary === null) {
+    return;
+  }
+  state.wasm64Runloop.summaryCount += 1;
+  state.wasm64Runloop.lastSummary = {
+    elapsedMs,
+    ...summary,
+  };
+  state.wasm64Runloop.summaries.push(state.wasm64Runloop.lastSummary);
+  if (state.wasm64Runloop.summaries.length >
+      state.wasm64Runloop.maxSummaries) {
+    state.wasm64Runloop.summaries.shift();
   }
 }
 
@@ -1481,6 +1518,7 @@ function buildConfig() {
       nonNegativeNumberOption("tciWasmGeneratedTraceLimit", 64),
     timeoutMs: numberOption("timeoutMs", 180000),
     visualMarker: option("visualMarker", ""),
+    wasm64RunloopSmoke: boolOption("wasm64RunloopSmoke", false),
     wasm: option("wasm", "/artifacts/qemu-system-x86_64.wasm"),
   };
 }
@@ -1661,6 +1699,13 @@ async function run() {
       last: null,
     },
     wasm64Tcg: {
+      maxSummaries: 16,
+      summaryCount: 0,
+      summaries: [],
+      lastSummary: null,
+    },
+    wasm64Runloop: {
+      enabled: Boolean(config.wasm64RunloopSmoke),
       maxSummaries: 16,
       summaryCount: 0,
       summaries: [],
@@ -1908,6 +1953,7 @@ async function run() {
       line.startsWith("qemu-fw-cfg-trace:") ||
       line.startsWith("qemu-tcg-hotblocks:") ||
       line.startsWith("qemu-wasm64-tcg:") ||
+      line.startsWith("qemu-wasm64-runloop:") ||
       line.startsWith("qemu-wasm-perf-attrib:") ||
       line.startsWith("qemu-wasm-perf-attribution:") ||
       line.startsWith("wasm-browser-smoke:") ||
@@ -1960,6 +2006,11 @@ async function run() {
       Math.round(performance.now() - startTime),
     );
     recordWasm64TcgSummary(
+      smokeState,
+      line,
+      Math.round(performance.now() - startTime),
+    );
+    recordWasm64RunloopSummary(
       smokeState,
       line,
       Math.round(performance.now() - startTime),
@@ -2051,6 +2102,9 @@ async function run() {
       QEMU_TCI_WASM_GENERATED_TRACE_LIMIT:
         String(config.tciWasmGeneratedTraceLimit),
     } : {}),
+    ...(config.wasm64RunloopSmoke ? {
+      QEMU_WASM64_RUNLOOP_SMOKE: "1",
+    } : {}),
   };
   const installWasmKeySink = (module) => {
     if (config.display === "wasm" && typeof module._qemu_wasm_display_key_event === "function") {
@@ -2109,7 +2163,11 @@ async function run() {
             .join("\n") + "\n";
           module.FS.writeFile("/qemu-fw-cfg-env", lines);
         }
-        if (config.tciProgress || config.tciWasmGeneratedTrace) {
+        if (
+          config.tciProgress ||
+          config.tciWasmGeneratedTrace ||
+          config.wasm64RunloopSmoke
+        ) {
           const lines = Object.entries(tciEnv)
             .map(([key, value]) => `${key}=${value}`)
             .join("\n") + "\n";

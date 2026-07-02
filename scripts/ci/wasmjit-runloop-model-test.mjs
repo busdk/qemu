@@ -75,9 +75,7 @@ assert.equal(aluSmallProbe.inlineTlbHitStores, "0");
 assert.equal(aluSmallProbe.helperCalls, "0");
 assert.equal(aluSmallProbe.qemuLoadCalls, "0");
 assert.equal(aluSmallProbe.qemuStoreCalls, "0");
-assert.equal(aluSmallProbe.tb0Executions, "16");
-assert.equal(aluSmallProbe.tb1Executions, "16");
-assert.equal(aluSmallProbe.accumulator, aluSmallProbe.expectedValue);
+assert.equal(aluSmallProbe.exitValue, aluSmallProbe.expectedValue);
 assert.equal(aluSmallProbe.ramValue, "0");
 
 const ramSmallProbe = await runWasmjitRunloopProbe({
@@ -93,9 +91,7 @@ assert.equal(ramSmallProbe.inlineTlbHitStores, "32");
 assert.equal(ramSmallProbe.helperCalls, "0");
 assert.equal(ramSmallProbe.qemuLoadCalls, "0");
 assert.equal(ramSmallProbe.qemuStoreCalls, "0");
-assert.equal(ramSmallProbe.tb0Executions, "16");
-assert.equal(ramSmallProbe.tb1Executions, "16");
-assert.equal(ramSmallProbe.accumulator, ramSmallProbe.expectedValue);
+assert.equal(ramSmallProbe.exitValue, ramSmallProbe.expectedValue);
 assert.equal(ramSmallProbe.ramValue, ramSmallProbe.expectedValue);
 
 for (const workload of [
@@ -113,9 +109,7 @@ for (const workload of [
   assert.equal(budgetProbe.helperCalls, "0");
   assert.equal(budgetProbe.qemuLoadCalls, "0");
   assert.equal(budgetProbe.qemuStoreCalls, "0");
-  assert.equal(budgetProbe.tb0Executions, "500000");
-  assert.equal(budgetProbe.tb1Executions, "500000");
-  assert.equal(budgetProbe.accumulator, budgetProbe.expectedValue);
+  assert.equal(budgetProbe.exitValue, budgetProbe.expectedValue);
   if (workload === WASMJIT_WORKLOAD_TLB_HIT_RAM) {
     assert.equal(budgetProbe.inlineTlbHitLoads, "1000000");
     assert.equal(budgetProbe.inlineTlbHitStores, "1000000");

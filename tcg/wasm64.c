@@ -11,7 +11,13 @@
 #include "tcg/tcg.h"
 #include "tcg/wasm64.h"
 
+#ifdef CONFIG_EMSCRIPTEN
+#include <emscripten/emscripten.h>
+#endif
+
 #define TCG_WASM64_TRANSLATE_CACHE_SIZE 8192u
+#define TCG_WASM64_RUNLOOP_ENV_FILE "/qemu-tci-env"
+#define TCG_WASM64_RUNLOOP_SMOKE_BUDGET 1000000u
 
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, env) !=
                   TCG_WASM64_RUN_CTX_ENV_OFFSET);
@@ -45,6 +51,58 @@ QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, size) !=
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, flags) !=
                   TCG_WASM64_RUN_EXIT_FLAGS_OFFSET);
 QEMU_BUILD_BUG_ON(sizeof(TCGWasm64RunExit) != TCG_WASM64_RUN_EXIT_SIZE);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters,
+                  generated_guest_instructions) !=
+                  TCG_WASM64_RUN_COUNTERS_GENERATED_GUEST_INSTRUCTIONS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters,
+                  fallback_guest_instructions) !=
+                  TCG_WASM64_RUN_COUNTERS_FALLBACK_GUEST_INSTRUCTIONS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, generated_body_time_ns) !=
+                  TCG_WASM64_RUN_COUNTERS_GENERATED_BODY_TIME_NS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, tci_dispatch_time_ns) !=
+                  TCG_WASM64_RUN_COUNTERS_TCI_DISPATCH_TIME_NS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, tb_lookup_time_ns) !=
+                  TCG_WASM64_RUN_COUNTERS_TB_LOOKUP_TIME_NS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, helper_call_time_ns) !=
+                  TCG_WASM64_RUN_COUNTERS_HELPER_CALL_TIME_NS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, qemu_ld_time_ns) !=
+                  TCG_WASM64_RUN_COUNTERS_QEMU_LD_TIME_NS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, qemu_st_time_ns) !=
+                  TCG_WASM64_RUN_COUNTERS_QEMU_ST_TIME_NS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, compile_time_ns) !=
+                  TCG_WASM64_RUN_COUNTERS_COMPILE_TIME_NS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, instantiate_time_ns) !=
+                  TCG_WASM64_RUN_COUNTERS_INSTANTIATE_TIME_NS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, generated_chain_length) !=
+                  TCG_WASM64_RUN_COUNTERS_GENERATED_CHAIN_LENGTH_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, inline_tlb_hit_loads) !=
+                  TCG_WASM64_RUN_COUNTERS_INLINE_TLB_HIT_LOADS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, inline_tlb_hit_stores) !=
+                  TCG_WASM64_RUN_COUNTERS_INLINE_TLB_HIT_STORES_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, helper_calls) !=
+                  TCG_WASM64_RUN_COUNTERS_HELPER_CALLS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, qemu_ld_calls) !=
+                  TCG_WASM64_RUN_COUNTERS_QEMU_LD_CALLS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, qemu_st_calls) !=
+                  TCG_WASM64_RUN_COUNTERS_QEMU_ST_CALLS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, exits_budget) !=
+                  TCG_WASM64_RUN_COUNTERS_EXITS_BUDGET_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, exits_mmio) !=
+                  TCG_WASM64_RUN_COUNTERS_EXITS_MMIO_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, exits_tlb_miss_or_fault) !=
+                  TCG_WASM64_RUN_COUNTERS_EXITS_TLB_MISS_OR_FAULT_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, exits_interrupt) !=
+                  TCG_WASM64_RUN_COUNTERS_EXITS_INTERRUPT_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, exits_helper) !=
+                  TCG_WASM64_RUN_COUNTERS_EXITS_HELPER_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, exits_unsupported) !=
+                  TCG_WASM64_RUN_COUNTERS_EXITS_UNSUPPORTED_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, exits_hlt) !=
+                  TCG_WASM64_RUN_COUNTERS_EXITS_HLT_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters, exits_invalidated) !=
+                  TCG_WASM64_RUN_COUNTERS_EXITS_INVALIDATED_OFFSET);
+QEMU_BUILD_BUG_ON(sizeof(TCGWasm64RunCounters) !=
+                  TCG_WASM64_RUN_COUNTERS_SIZE);
 
 typedef struct TCGWasm64TranslateEntry {
     const void *tb_ptr;
@@ -326,6 +384,431 @@ const char *tcg_wasm64_run_exit_reason_name(TCGWasm64RunExitReason reason)
     default:
         return "unknown";
     }
+}
+
+#ifdef CONFIG_EMSCRIPTEN
+static char *tcg_wasm64_runloop_file_getenv(const char *name)
+{
+    g_autofree char *contents = NULL;
+    const char *line;
+    size_t name_len = strlen(name);
+
+    if (!g_file_get_contents(TCG_WASM64_RUNLOOP_ENV_FILE, &contents,
+                             NULL, NULL)) {
+        return NULL;
+    }
+
+    line = contents;
+    while (*line != '\0') {
+        const char *end = strchr(line, '\n');
+        size_t line_len = end ? end - line : strlen(line);
+
+        if (line_len > name_len && line[name_len] == '=' &&
+            memcmp(line, name, name_len) == 0) {
+            return g_strndup(line + name_len + 1, line_len - name_len - 1);
+        }
+        line += line_len;
+        if (*line == '\n') {
+            line++;
+        }
+    }
+
+    return NULL;
+}
+#endif
+
+static bool tcg_wasm64_runloop_env_bool(const char *name)
+{
+#ifdef CONFIG_EMSCRIPTEN
+    g_autofree char *owned = NULL;
+    const char *raw = g_getenv(name);
+
+    if (raw == NULL) {
+        owned = tcg_wasm64_runloop_file_getenv(name);
+        raw = owned;
+    }
+
+    return raw != NULL &&
+           (g_strcmp0(raw, "1") == 0 ||
+            g_ascii_strcasecmp(raw, "true") == 0 ||
+            g_ascii_strcasecmp(raw, "yes") == 0 ||
+            g_ascii_strcasecmp(raw, "on") == 0);
+#else
+    return false;
+#endif
+}
+
+#ifdef CONFIG_EMSCRIPTEN
+EM_JS(int, tcg_wasm64_runloop_smoke_js,
+      (uintptr_t context_arg, uint64_t budget_arg), {
+    if (typeof wasmMemory === "undefined" || !wasmMemory) {
+        return 6;
+    }
+
+    const context = Number(context_arg);
+    const budget = Number(budget_arg);
+    const valueI32 = 0x7f;
+    const valueI64 = 0x7e;
+    const exitBudget = 1;
+
+    function encodeU32(value) {
+        const bytes = [];
+        let current = Number(value) >>> 0;
+        do {
+            let byte = current & 0x7f;
+            current >>>= 7;
+            if (current !== 0) {
+                byte |= 0x80;
+            }
+            bytes.push(byte);
+        } while (current !== 0);
+        return bytes;
+    }
+
+    function encodeS64(value) {
+        let current = BigInt.asIntN(64, BigInt(value));
+        const bytes = [];
+        for (;;) {
+            let byte = Number(current & 0x7fn);
+            const sign = (byte & 0x40) !== 0;
+            current >>= 7n;
+            const done = (current === 0n && !sign) ||
+                         (current === -1n && sign);
+            if (!done) {
+                byte |= 0x80;
+            }
+            bytes.push(byte);
+            if (done) {
+                return bytes;
+            }
+        }
+    }
+
+    function utf8Bytes(text) {
+        return Array.from(new TextEncoder().encode(text));
+    }
+
+    function name(text) {
+        const bytes = utf8Bytes(text);
+        return [...encodeU32(bytes.length), ...bytes];
+    }
+
+    function vector(items) {
+        return [...encodeU32(items.length), ...items.flat()];
+    }
+
+    function section(id, payload) {
+        return [id, ...encodeU32(payload.length), ...payload];
+    }
+
+    function functionType(params, results) {
+        return [
+            0x60,
+            ...vector(params.map((param) => [param])),
+            ...vector(results.map((result) => [result])),
+        ];
+    }
+
+    function functionBody(instructions, locals = []) {
+        const body = [
+            ...vector(locals.map(({ count, type }) =>
+                [...encodeU32(count), type])),
+            ...instructions,
+            0x0b,
+        ];
+        return [...encodeU32(body.length), ...body];
+    }
+
+    function memArg(align, offset) {
+        return [...encodeU32(align), ...encodeU32(offset)];
+    }
+
+    function localGet(index) {
+        return [0x20, ...encodeU32(index)];
+    }
+
+    function localSet(index) {
+        return [0x21, ...encodeU32(index)];
+    }
+
+    function i32Const(value) {
+        return [0x41, ...encodeU32(value)];
+    }
+
+    function i64Const(value) {
+        return [0x42, ...encodeS64(value)];
+    }
+
+    function i32LoadAtPtr(ptrLocal, offset) {
+        return [...localGet(ptrLocal), 0x28, ...memArg(2, offset)];
+    }
+
+    function i64LoadAtPtr(ptrLocal, offset) {
+        return [...localGet(ptrLocal), 0x29, ...memArg(3, offset)];
+    }
+
+    function i32StoreAtPtr(ptrLocal, offset, valueBytes) {
+        return [...localGet(ptrLocal), ...valueBytes, 0x36, ...memArg(2, offset)];
+    }
+
+    function i64StoreAtPtr(ptrLocal, offset, valueBytes) {
+        return [...localGet(ptrLocal), ...valueBytes, 0x37, ...memArg(3, offset)];
+    }
+
+    const remaining = 2;
+    const state = 3;
+    const countersPtr = 4;
+    const guestRamPtr = 5;
+    const exitPtr = 6;
+    const value = 7;
+    const generatedGuestInstructions = 8;
+    const generatedChainLength = 9;
+    const inlineLoads = 10;
+    const inlineStores = 11;
+
+    const instructions = [
+        ...localGet(1),
+        ...localSet(remaining),
+        ...i32Const(0),
+        ...localSet(state),
+        ...i64LoadAtPtr(0, 24),
+        ...localSet(countersPtr),
+        ...i64LoadAtPtr(0, 8),
+        ...localSet(guestRamPtr),
+        ...i64LoadAtPtr(0, 32),
+        ...localSet(exitPtr),
+        ...i64LoadAtPtr(countersPtr, 0),
+        ...localSet(generatedGuestInstructions),
+        ...i64LoadAtPtr(countersPtr, 80),
+        ...localSet(generatedChainLength),
+        ...i64LoadAtPtr(countersPtr, 88),
+        ...localSet(inlineLoads),
+        ...i64LoadAtPtr(countersPtr, 96),
+        ...localSet(inlineStores),
+        ...i64LoadAtPtr(guestRamPtr, 0),
+        ...localSet(value),
+
+        0x02, 0x40,            /* block exit */
+        0x03, 0x40,            /* loop dispatch */
+        ...localGet(remaining),
+        0x50,                  /* i64.eqz */
+        0x0d, ...encodeU32(1), /* br_if exit */
+
+        ...localGet(remaining),
+        ...i64Const(1n),
+        0x7d,                  /* i64.sub */
+        ...localSet(remaining),
+
+        ...localGet(state),
+        0x45,                  /* i32.eqz */
+        0x04, 0x40,            /* if tb0 */
+        ...i64LoadAtPtr(guestRamPtr, 0),
+        ...i64Const(1n),
+        0x7c,                  /* i64.add */
+        ...localSet(value),
+        ...i64StoreAtPtr(guestRamPtr, 0, localGet(value)),
+        ...i32Const(1),
+        ...localSet(state),
+        0x05,                  /* else tb1 */
+        ...i64LoadAtPtr(guestRamPtr, 0),
+        ...i64Const(0x5a5an),
+        0x85,                  /* i64.xor */
+        ...localSet(value),
+        ...i64StoreAtPtr(guestRamPtr, 0, localGet(value)),
+        ...i32Const(0),
+        ...localSet(state),
+        0x0b,                  /* end if */
+
+        ...localGet(generatedGuestInstructions),
+        ...i64Const(4n),
+        0x7c,                  /* i64.add */
+        ...localSet(generatedGuestInstructions),
+        ...localGet(generatedChainLength),
+        ...i64Const(1n),
+        0x7c,                  /* i64.add */
+        ...localSet(generatedChainLength),
+        ...localGet(inlineLoads),
+        ...i64Const(1n),
+        0x7c,                  /* i64.add */
+        ...localSet(inlineLoads),
+        ...localGet(inlineStores),
+        ...i64Const(1n),
+        0x7c,                  /* i64.add */
+        ...localSet(inlineStores),
+        0x0c, ...encodeU32(0), /* br dispatch */
+        0x0b,                  /* end loop */
+        0x0b,                  /* end block */
+
+        ...i64StoreAtPtr(countersPtr, 0, localGet(generatedGuestInstructions)),
+        ...i64StoreAtPtr(countersPtr, 80, localGet(generatedChainLength)),
+        ...i64StoreAtPtr(countersPtr, 88, localGet(inlineLoads)),
+        ...i64StoreAtPtr(countersPtr, 96, localGet(inlineStores)),
+        ...i32StoreAtPtr(exitPtr, 0, i32Const(exitBudget)),
+        ...i32Const(exitBudget),
+    ];
+
+    const bytes = Uint8Array.from([
+        0x00, 0x61, 0x73, 0x6d,
+        0x01, 0x00, 0x00, 0x00,
+        ...section(1, vector([
+            functionType([valueI64, valueI64], [valueI32]),
+        ])),
+        ...section(2, vector([
+            [
+                ...name("env"), ...name("memory"),
+                0x02, 0x07, 0x00, 0x80, 0x80, 0x10,
+            ],
+        ])),
+        ...section(3, vector([[0x00]])),
+        ...section(7, vector([
+            [...name("wasmjit_run"), 0x00, ...encodeU32(0)],
+        ])),
+        ...section(10, vector([
+            functionBody(instructions, [
+                { count: 1, type: valueI64 },
+                { count: 1, type: valueI32 },
+                { count: 8, type: valueI64 },
+            ]),
+        ])),
+    ]);
+
+    try {
+        const compileStart = performance.now();
+        const module = new WebAssembly.Module(bytes);
+        const compileNs = BigInt(Math.round((performance.now() - compileStart) * 1000000));
+        const instantiateStart = performance.now();
+        const instance = new WebAssembly.Instance(module, {
+            env: { memory: wasmMemory },
+        });
+        const instantiateNs = BigInt(Math.round((performance.now() - instantiateStart) * 1000000));
+        const bodyStart = performance.now();
+        const exitReason = instance.exports.wasmjit_run(BigInt(context), BigInt(budget));
+        const bodyNs = BigInt(Math.round((performance.now() - bodyStart) * 1000000));
+        const counters = Number(HEAPU64[context / 8 + 3]);
+
+        HEAPU64[counters / 8 + 2] = bodyNs;
+        HEAPU64[counters / 8 + 8] = compileNs;
+        HEAPU64[counters / 8 + 9] = instantiateNs;
+        return Number(exitReason);
+    } catch (error) {
+        return 6;
+    }
+});
+#endif
+
+static void tcg_wasm64_report_runloop_smoke(const TCGWasm64RunCounters *counters,
+                                            const TCGWasm64RunExit *exit,
+                                            uint64_t budget, bool ok)
+{
+    TCGWasm64RunExitReason reason = exit && exit->reason ?
+        (TCGWasm64RunExitReason)exit->reason : TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+
+    fprintf(stderr,
+            "qemu-wasm64-runloop: {\"format\":1,"
+            "\"event\":\"runtime-smoke\","
+            "\"ok\":%s,"
+            "\"budget\":%" PRIu64 ","
+            "\"exit_reason\":\"%s\","
+            "\"exit_reason_code\":%u,"
+            "\"generated_guest_instructions\":%" PRIu64 ","
+            "\"fallback_guest_instructions\":%" PRIu64 ","
+            "\"generated_body_time_ns\":%" PRIu64 ","
+            "\"tci_dispatch_time_ns\":%" PRIu64 ","
+            "\"tb_lookup_time_ns\":%" PRIu64 ","
+            "\"helper_call_time_ns\":%" PRIu64 ","
+            "\"qemu_ld_time_ns\":%" PRIu64 ","
+            "\"qemu_st_time_ns\":%" PRIu64 ","
+            "\"compile_time_ns\":%" PRIu64 ","
+            "\"instantiate_time_ns\":%" PRIu64 ","
+            "\"generated_chain_length\":%" PRIu64 ","
+            "\"inline_tlb_hit_loads\":%" PRIu64 ","
+            "\"inline_tlb_hit_stores\":%" PRIu64 ","
+            "\"helper_calls\":%" PRIu64 ","
+            "\"qemu_ld_calls\":%" PRIu64 ","
+            "\"qemu_st_calls\":%" PRIu64 ","
+            "\"exits_budget\":%" PRIu64 ","
+            "\"exits_mmio\":%" PRIu64 ","
+            "\"exits_tlb_miss_or_fault\":%" PRIu64 ","
+            "\"exits_interrupt\":%" PRIu64 ","
+            "\"exits_helper\":%" PRIu64 ","
+            "\"exits_unsupported\":%" PRIu64 ","
+            "\"exits_hlt\":%" PRIu64 ","
+            "\"exits_invalidated\":%" PRIu64 "}\n",
+            ok ? "true" : "false",
+            budget,
+            tcg_wasm64_run_exit_reason_name(reason),
+            exit ? exit->reason : 0,
+            counters ? counters->generated_guest_instructions : 0,
+            counters ? counters->fallback_guest_instructions : 0,
+            counters ? counters->generated_body_time_ns : 0,
+            counters ? counters->tci_dispatch_time_ns : 0,
+            counters ? counters->tb_lookup_time_ns : 0,
+            counters ? counters->helper_call_time_ns : 0,
+            counters ? counters->qemu_ld_time_ns : 0,
+            counters ? counters->qemu_st_time_ns : 0,
+            counters ? counters->compile_time_ns : 0,
+            counters ? counters->instantiate_time_ns : 0,
+            counters ? counters->generated_chain_length : 0,
+            counters ? counters->inline_tlb_hit_loads : 0,
+            counters ? counters->inline_tlb_hit_stores : 0,
+            counters ? counters->helper_calls : 0,
+            counters ? counters->qemu_ld_calls : 0,
+            counters ? counters->qemu_st_calls : 0,
+            counters ? counters->exits_budget : 0,
+            counters ? counters->exits_mmio : 0,
+            counters ? counters->exits_tlb_miss_or_fault : 0,
+            counters ? counters->exits_interrupt : 0,
+            counters ? counters->exits_helper : 0,
+            counters ? counters->exits_unsupported : 0,
+            counters ? counters->exits_hlt : 0,
+            counters ? counters->exits_invalidated : 0);
+}
+
+static void tcg_wasm64_runloop_smoke_maybe(CPUArchState *env)
+{
+    static bool checked;
+    TCGWasm64RunCounters counters;
+    TCGWasm64RunExit exit;
+    uint64_t smoke_ram = 0;
+    const uint64_t budget = TCG_WASM64_RUNLOOP_SMOKE_BUDGET;
+    TCGWasm64RunContext context = {
+        .env = env,
+        .guest_ram = &smoke_ram,
+        .budget = budget,
+        .counters = &counters,
+        .exit = &exit,
+        .mode = TCG_WASM64_RUN_MODE_PERF_PROOF,
+    };
+    TCGWasm64RunExitReason reason = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+    bool ok = false;
+
+    if (checked) {
+        return;
+    }
+    checked = true;
+    if (!tcg_wasm64_runloop_env_bool("QEMU_WASM64_RUNLOOP_SMOKE")) {
+        return;
+    }
+
+    tcg_wasm64_run_counters_reset(&counters);
+    memset(&exit, 0, sizeof(exit));
+#ifdef CONFIG_EMSCRIPTEN
+    reason = (TCGWasm64RunExitReason)tcg_wasm64_runloop_smoke_js(
+        (uintptr_t)&context, budget);
+    if (exit.reason == 0) {
+        exit.reason = reason;
+    }
+#endif
+    tcg_wasm64_run_count_exit(&counters, reason);
+    ok = reason == TCG_WASM64_RUN_EXIT_BUDGET &&
+         counters.generated_guest_instructions == budget * 4 &&
+         counters.generated_chain_length == budget &&
+         counters.inline_tlb_hit_loads == budget &&
+         counters.inline_tlb_hit_stores == budget &&
+         counters.helper_calls == 0 &&
+         counters.qemu_ld_calls == 0 &&
+         counters.qemu_st_calls == 0;
+    tcg_wasm64_report_runloop_smoke(&counters, &exit, budget, ok);
 }
 
 static bool tcg_wasm64_translate_op_supported(uint32_t op)
@@ -775,6 +1258,8 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
         .env = env,
         .counters = counters,
     };
+
+    tcg_wasm64_runloop_smoke_maybe(env);
 
     /*
      * Native wasm64 lowering grows behind this boundary.  The TCI fallback

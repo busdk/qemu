@@ -7301,3 +7301,69 @@ does, however, satisfy the deterministic W2 microbench gate for the run/exit
 shape.  The next step is to execute this ABI from the actual Emscripten/QEMU
 runtime path and export the same metrics in result JSON before attempting the
 W3 generic speed gate again.
+
+W2p QEMU runtime run/exit smoke
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The QEMU runtime path now has an opt-in deterministic
+``QEMU_WASM64_RUNLOOP_SMOKE`` probe.  It runs once from the actual
+Emscripten/QEMU execution path, instantiates a generated
+``wasmjit_run(ctx, budget)`` module against the live Emscripten
+``WebAssembly.Memory``, and records the accelerator-shape counters through
+QEMU-owned C structs before the browser harness copies them into result JSON.
+
+The accepted artifact build command was:
+
+.. code-block:: text
+
+  python3 scripts/ci/wasm-build-artifacts-local.py --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2p-runloop-runtime-artifacts --jobs auto --configure-arg=--disable-tcg-interpreter --configure-arg=--enable-tcg-wasm64-backend
+
+Artifact hashes:
+
+.. code-block:: text
+
+  qemu-system-x86_64.js    9d6d7bc42f18e184cc9e8cd20e7b86d9c66311fc9205f8c7a66ae2d6d89280b1
+  qemu-system-x86_64.wasm  af5b7376638ae39f3320031f2bf803267f4ea0c11244d4b10860f75ed520e516
+  manifest                 a883be097fdf1c735947e21c992625b7398d254eb3b6701bf4c27bf3ddc9a57a
+
+The browser proof command was:
+
+.. code-block:: text
+
+  npm exec --yes --package=playwright -- node scripts/ci/wasm-browser-smoke-runner.mjs --artifact-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2p-runloop-runtime-artifacts --kernel /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-default-tci-smoke/wasm-smoke-cache/tuxboot-x86_64-bzImage --initrd /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-default-tci-smoke/wasm-browser-smoke-guest/tuxboot-smoke-initramfs.cpio.gz --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2p-runloop-runtime-smoke/wasm-browser-smoke-result.json --screenshot /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2p-runloop-runtime-smoke/screenshot.png --port 8098 --timeout-ms 180000 --wasm64-runloop-smoke
+
+Chromium ``149.0.7827.55`` reached ``QEMU_WASM_LINUX_BOOT_OK`` with
+``success=true`` and total elapsed time ``92975`` ms.  The runtime smoke
+summary appeared at elapsed ``2339`` ms with:
+
+.. code-block:: text
+
+  ok=true
+  budget=1000000
+  exit_reason=budget
+  generated_guest_instructions=4000000
+  fallback_guest_instructions=0
+  generated_body_time_ns=4935000
+  compile_time_ns=375000
+  instantiate_time_ns=45000
+  generated_chain_length=1000000
+  inline_tlb_hit_loads=1000000
+  inline_tlb_hit_stores=1000000
+  helper_calls=0
+  qemu_ld_calls=0
+  qemu_st_calls=0
+  exits_budget=1
+  exits_mmio=0
+  exits_tlb_miss_or_fault=0
+  exits_interrupt=0
+  exits_helper=0
+  exits_unsupported=0
+  exits_hlt=0
+  exits_invalidated=0
+
+This completes the runtime-smoke slice.  It proves the browser artifact can
+instantiate and execute a long-running generated Wasm run/exit loop through
+the same runtime family intended for translated hotsets, while exporting the
+instruction, wall-time, helper, load/store, chain-length, and synthetic-exit
+metrics needed for the accelerator path.  It is not the W3 same-commit speed
+gate and not a Bus Engine OS five-minute proof.

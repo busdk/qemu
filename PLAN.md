@@ -1032,7 +1032,7 @@ Engineering rules for this goal:
   `node scripts/ci/wasmjit-runloop-model-test.mjs`. This is still
   deterministic microbench evidence, not a generic smoke or Bus Engine OS
   proof.
-- [ ] W2p - Execute the run/exit ABI from the actual Emscripten/QEMU runtime
+- [x] W2p - Execute the run/exit ABI from the actual Emscripten/QEMU runtime
   path. DoD: build a wasm64 artifact with the run/exit ABI enabled and add a
   QEMU-owned deterministic runtime smoke that instantiates or calls a
   generated `wasmjit_run()` hotset through the same runtime mechanism intended
@@ -1040,7 +1040,39 @@ Engineering rules for this goal:
   instruction retirement, generated-body wall time, helper/`qemu_ld`/`qemu_st`
   calls, chain length, and synthetic exits in the QEMU result JSON. Do not run
   W3 until this runtime smoke preserves the W2o-b multiple-times microbench
-  win without reintroducing per-TB QEMU main-loop returns.
+  win without reintroducing per-TB QEMU main-loop returns. Accepted evidence:
+  a wasm64 artifact was built with:
+  `python3 scripts/ci/wasm-build-artifacts-local.py --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2p-runloop-runtime-artifacts --jobs auto --configure-arg=--disable-tcg-interpreter --configure-arg=--enable-tcg-wasm64-backend`.
+  Artifact hashes were JS
+  `9d6d7bc42f18e184cc9e8cd20e7b86d9c66311fc9205f8c7a66ae2d6d89280b1`,
+  WASM
+  `af5b7376638ae39f3320031f2bf803267f4ea0c11244d4b10860f75ed520e516`,
+  and manifest
+  `a883be097fdf1c735947e21c992625b7398d254eb3b6701bf4c27bf3ddc9a57a`.
+  Browser runtime proof command:
+  `npm exec --yes --package=playwright -- node scripts/ci/wasm-browser-smoke-runner.mjs --artifact-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2p-runloop-runtime-artifacts --kernel /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-default-tci-smoke/wasm-smoke-cache/tuxboot-x86_64-bzImage --initrd /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w3-default-tci-smoke/wasm-browser-smoke-guest/tuxboot-smoke-initramfs.cpio.gz --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2p-runloop-runtime-smoke/wasm-browser-smoke-result.json --screenshot /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-w2p-runloop-runtime-smoke/screenshot.png --port 8098 --timeout-ms 180000 --wasm64-runloop-smoke`.
+  Chromium `149.0.7827.55` reached `QEMU_WASM_LINUX_BOOT_OK` with
+  `success=true` and elapsed `92975` ms. The QEMU-owned runtime smoke summary
+  appeared at elapsed `2339` ms with `ok=true`, `budget=1000000`,
+  `exit_reason=budget`, `generated_guest_instructions=4000000`,
+  `fallback_guest_instructions=0`, `generated_body_time_ns=4935000`,
+  `compile_time_ns=375000`, `instantiate_time_ns=45000`,
+  `generated_chain_length=1000000`, `inline_tlb_hit_loads=1000000`,
+  `inline_tlb_hit_stores=1000000`, zero helper/`qemu_ld`/`qemu_st` calls, and
+  a single budget exit with no MMIO, TLB/fault, interrupt, helper,
+  unsupported, HLT, or invalidation exits. Checks:
+  `git diff --check`, `node --check scripts/ci/wasmjit-runloop-model.mjs`,
+  `node --check scripts/ci/wasmjit-runloop-model-test.mjs`,
+  `node --check scripts/ci/wasm64-runloop-contract-test.mjs`,
+  `node --check scripts/ci/wasm-browser-smoke.mjs`,
+  `node --check scripts/ci/wasm-browser-smoke-runner.mjs`,
+  `node --check scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+  `node scripts/ci/wasm64-runloop-contract-test.mjs`,
+  `node scripts/ci/wasmjit-runloop-model-test.mjs`, and
+  `node scripts/ci/wasm-browser-smoke-runner-test.mjs` outside the sandbox
+  because sandboxed child-process spawning returns `EPERM`. This completes
+  the QEMU runtime-smoke slice only; it does not complete W2, W3, or the
+  Bus Engine OS five-minute proof.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and
