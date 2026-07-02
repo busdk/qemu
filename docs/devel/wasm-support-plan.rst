@@ -4877,6 +4877,28 @@ generic slowdown is not relevant to the Bus Engine OS boot path.  A
 paravirtual or browser-API patch must be tied to a measured QEMU device or
 backend boundary rather than to plausible browser technology alone.
 
+A later opt-in C interpreter peephole fused the adjacent
+``tci_setcond32``/``brcond`` shape because that pair was known to be hot.  The
+experiment preserved the ``tci_setcond32`` destination register, skipped only
+the immediately following branch dispatch when the branch source register
+matched, and otherwise fell back to normal TCI.  It was active but slower.  The
+rebuilt artifact hashes were:
+
+* ``qemu-system-x86_64.js`` =
+  ``9167e1c7dc95b99c4da48210f22fa0c55dfb8a4a14ddcbf0e03239dc91561911``
+* ``qemu-system-x86_64.wasm`` =
+  ``dc922919841e83a438f523caf42ce0413eb75395b2b83ba453e2a2fa81e123f4``
+
+Default Chromium ``149.0.7827.55`` smoke reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``87638`` ms.  The fused path reached the same
+marker in ``91578`` ms with ``attempts=72400000``, ``executed=72399999``, and
+``reg_mismatch=0``.  A summary-interval-``1`` diagnostic timed out from
+excessive logging after proving the path active with ``2481138`` attempts and
+``2481137`` executions.  The patch was removed.  This hot pattern exists, but
+single-op C interpreter fusion does not beat default TCI.  Do not spend more
+work on narrow adjacent-op interpreter peepholes unless a measurement first
+shows they can improve the generic Chromium smoke gate.
+
 Two refreshed Bus Engine OS runs then used the accepted max-512 artifact
 (``qemu-system-x86_64.js`` SHA-256
 ``700ae01fe2a06ce86cdd7989556245dc664c5cdf83ba0755b4af11f23399ba66`` and

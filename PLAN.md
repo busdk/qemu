@@ -755,6 +755,24 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
     Generated counters still showed `ld32u` as the dominant generated fallback
     (`854356`) and did not make the generated path a performance win. Do not
     promote this narrow branch-to-terminal generated path without new evidence.
+    Follow-up rejected evidence on 2026-07-02: an opt-in adjacent
+    `tci_setcond32` plus `brcond` C interpreter fusion preserved the
+    `tci_setcond32` destination register, skipped only the immediately
+    following branch dispatch when the branch source register matched, and
+    otherwise fell back to normal TCI. The rebuilt artifact hashes were
+    `qemu-system-x86_64.js=9167e1c7dc95b99c4da48210f22fa0c55dfb8a4a14ddcbf0e03239dc91561911`
+    and
+    `qemu-system-x86_64.wasm=dc922919841e83a438f523caf42ce0413eb75395b2b83ba453e2a2fa81e123f4`.
+    Default Chromium `149.0.7827.55` smoke reached `QEMU_WASM_LINUX_BOOT_OK`
+    in `87638` ms. The fused path with a practical summary interval reached
+    the same marker in `91578` ms with `attempts=72400000`,
+    `executed=72399999`, and `reg_mismatch=0`. A summary-interval-`1`
+    diagnostic timed out from excessive logging after proving the path active
+    with `2481138` attempts and `2481137` executions. The patch was removed:
+    this hot pattern exists, but single-op C interpreter fusion does not beat
+    default TCI. Do not spend more work on narrow adjacent-op interpreter
+    peepholes unless a measurement first shows they can improve the generic
+    Chromium smoke gate.
     Current decision: do not keep expanding generated `brcond` or memory
     helper coverage from opcode availability alone. Each accepted CPU
     acceleration patch must first improve the generic Chromium smoke or
