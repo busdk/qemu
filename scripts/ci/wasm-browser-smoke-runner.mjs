@@ -183,6 +183,9 @@ Options:
                      Expected visual marker metadata for display proofs
   --wasm64-one-tb-differential
                      Enable opt-in generated-vs-TCI proof for one live x86 TB
+  --wasm64-live-one-tb-differential
+                     Enable opt-in generated-vs-reference proof for one real
+                     translated x86 TB shape
   --wasm64-runloop-smoke
                      Enable opt-in QEMU wasm64 run/exit runtime smoke
   --wasm64-tcg-summary
@@ -289,6 +292,7 @@ export function parseArgs(argv) {
     userDataDir: null,
     visualMarker: "",
     wasm64OneTbDifferential: false,
+    wasm64LiveOneTbDifferential: false,
     wasm64RunloopSmoke: false,
     wasm64TcgSummary: false,
     wasm64TcgSummaryInterval: 10000,
@@ -524,6 +528,9 @@ export function parseArgs(argv) {
     } else if (arg === "--wasm64-one-tb-differential") {
       options.wasm64OneTbDifferential = true;
       explicit.add("wasm64OneTbDifferential");
+    } else if (arg === "--wasm64-live-one-tb-differential") {
+      options.wasm64LiveOneTbDifferential = true;
+      explicit.add("wasm64LiveOneTbDifferential");
     } else if (arg === "--wasm64-runloop-smoke") {
       options.wasm64RunloopSmoke = true;
       explicit.add("wasm64RunloopSmoke");
@@ -564,6 +571,7 @@ export function parseArgs(argv) {
       "tciProgress",
       "tciWasmGeneratedTrace",
       "wasm64OneTbDifferential",
+      "wasm64LiveOneTbDifferential",
       "wasm64RunloopSmoke",
       "wasm64TcgSummary",
       "requireWasm64TcgCoverage",
@@ -1579,6 +1587,9 @@ export function browserSmokeUrl(options) {
   if (options.wasm64OneTbDifferential) {
     url.searchParams.set("wasm64OneTbDifferential", "1");
   }
+  if (options.wasm64LiveOneTbDifferential) {
+    url.searchParams.set("wasm64LiveOneTbDifferential", "1");
+  }
   if (options.wasm64TcgSummary) {
     url.searchParams.set("wasm64TcgSummary", "1");
     url.searchParams.set(
@@ -1705,6 +1716,8 @@ export function initialSmokeResult(options, browserVersion) {
         : 64,
     wasm64RunloopSmoke: Boolean(options.wasm64RunloopSmoke),
     wasm64OneTbDifferential: Boolean(options.wasm64OneTbDifferential),
+    wasm64LiveOneTbDifferential:
+      Boolean(options.wasm64LiveOneTbDifferential),
     wasm64TcgSummary: Boolean(options.wasm64TcgSummary),
     wasm64TcgSummaryInterval: Number.isInteger(options.wasm64TcgSummaryInterval)
       ? options.wasm64TcgSummaryInterval

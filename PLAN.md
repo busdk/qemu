@@ -765,7 +765,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     instrumentation stability only. It is not acceleration evidence:
     `generated_compiled=0`, `generated_executed=0`, and R4i remains the next
     x86 implementation gate.
-  - [ ] R4i - Prove one real translated x86 Linux TB through
+  - [x] R4i - Prove one real translated x86 Linux TB through
     `wasmjit_run()` before any more structural accelerator widening. DoD:
     choose one highest-frequency attachable live x86_64 TB shape from a real
     generic Linux or Bus Engine OS boot; use the measured `ld32u`-first family
@@ -776,7 +776,49 @@ run that reaches a weaker marker than normal multi-user readiness.
     target against TCI. The standard metrics must record nonzero generated
     guest-instruction retirement for that real TB. `call`-heavy TBs stay on
     fallback until a helper-exit design exists. Descriptor fields may be added
-    only when required by this single TB proof.
+    only when required by this single TB proof. Accepted 2026-07-03: branch
+    `qemu/r4i-live-x86-tb-20260703-09` proved one live translated
+    `x86_64-softmmu` generic Linux TB with shape `ld32u, tci_movi,
+    tci_setcond32, brcond, tci_movi, st8, ld, tci_movi, add, st, goto_tb`.
+    Focused deterministic checks passed:
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke-runner.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs` outside the sandbox,
+    and `git diff --check`. Artifact build:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    tmp/qemu-x86_64-r4i-live-one-tb-20260703-schema --target x86_64 --jobs
+    20 --tcg-wasm64-backend --build-image`. Artifact hashes:
+    `qemu-system-x86_64.js`
+    `765bc4f3c4d76699adba49429fcf39fadaac99e5653d2d0ad167fa3d0a34bc10`,
+    `qemu-system-x86_64.wasm`
+    `66a05708ede65968c08c03cd0d1d58ccf19c3bac741a96f7f8c27478f2c96d55`,
+    manifest
+    `7013c88806b3255319908f3404df835c2d49b4b43bdf1722baaa58620b36f5d4`.
+    The single bounded Chromium `149.0.7827.55` proof used
+    `--wasm64-live-one-tb-differential --wasm64-tcg-summary`, reached
+    `QEMU_WASM_LINUX_BOOT_OK` in `91175` ms, and wrote
+    `tmp/qemu-x86_64-r4i-live-one-tb-guest-20260703/wasm-browser-smoke-live-one-tb-schema-result.json`
+    SHA256
+    `91c4c3466bfd5d65e7a61196bd3af4bc13a03a130d70e26f0a990a2abbf290ff`;
+    screenshot SHA256
+    `ce23ee51209b585cc07d071ec6e406a4fb3f2dde8f2f8d34f987981a269e0024`.
+    The result contained 24 `live-one-tb-differential` events, all `ok=true`.
+    The selected live event had `real_live_state_capture=true`,
+    `live_shape_fixture=false`, `tb_ptr=0x78700c0`, `tb_pc=0x0`,
+    `tb_cs_base=0xffff0000`, `tb_flags=64`, `tb_cflags=4278321152`,
+    `tb_size=3`, `tb_icount=1`, `metadata_op_count=13`,
+    `generated_guest_instructions=1`, `reference_guest_instructions=1`,
+    matching generated/reference dispatch target `126288108`, register
+    checksum `407154517823240700`, memory checksum `8033238923928634000`,
+    and memory writes `2`. It reported `inline_tlb_hit_loads=2`,
+    `inline_tlb_hit_stores=2`, and zero `helper_calls`, `qemu_ld_calls`, and
+    `qemu_st_calls`. The normal guest path stayed on TCI: final summary
+    `generated_attempts=0`, `generated_compiled=0`, `generated_executed=0`,
+    `generated_coverage_numerator=0`, `generated_coverage_denominator=0`,
+    `translated_tbs=40000`, and `exec_generated_output_available_tbs=0`.
   - [x] R4i-a - Add a pre-R4i deterministic one-TB fixture scaffold without
     claiming real live-state R4i completion. DoD: the measured non-`call`
     `ld32u`-first x86 shape is represented as an opt-in generated

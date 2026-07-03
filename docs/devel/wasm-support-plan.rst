@@ -283,6 +283,87 @@ PC/identity plus ``TranslationBlock.icount`` for the ``ld32u``-first family.
 The pre-R4i fixture is useful scaffolding, but it explicitly reports
 ``real_live_state_capture=false``.
 
+R4i live x86_64 one-TB proof
+----------------------------
+
+On 2026-07-03, QEMU accepted the first live translated ``x86_64-softmmu``
+R4i slice for the generic Linux browser smoke.  This remains a one-TB
+differential proof and does not enable the normal guest path to execute
+generated bodies; normal guest execution stayed on TCI.
+
+The attached live TB shape was:
+
+``ld32u, tci_movi, tci_setcond32, brcond, tci_movi, st8, ld, tci_movi, add, st, goto_tb``.
+
+Focused deterministic checks passed:
+
+* ``node scripts/ci/wasm64-translate-metadata-test.mjs``
+* ``node scripts/ci/wasm-generated-output-equivalence-test.mjs``
+* ``node --check scripts/ci/wasm-browser-smoke.mjs``
+* ``node --check scripts/ci/wasm-browser-smoke-runner.mjs``
+* ``node --check scripts/ci/wasm-browser-smoke-runner-test.mjs``
+* ``node scripts/ci/wasm-browser-smoke-runner-test.mjs`` outside the sandbox
+* ``git diff --check``
+
+Build command::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+      --out tmp/qemu-x86_64-r4i-live-one-tb-20260703-schema \
+      --target x86_64 --jobs 20 --tcg-wasm64-backend --build-image
+
+Artifact hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``765bc4f3c4d76699adba49429fcf39fadaac99e5653d2d0ad167fa3d0a34bc10``
+* ``qemu-system-x86_64.wasm`` =
+  ``66a05708ede65968c08c03cd0d1d58ccf19c3bac741a96f7f8c27478f2c96d55``
+* manifest =
+  ``7013c88806b3255319908f3404df835c2d49b4b43bdf1722baaa58620b36f5d4``
+
+Browser command::
+
+  env PLAYWRIGHT_BROWSERS_PATH=tmp/ms-playwright npm_config_cache=tmp/npm-cache \
+      npm exec --yes --package=playwright -- \
+      node scripts/ci/wasm-browser-smoke-runner.mjs \
+      --artifact-dir tmp/qemu-x86_64-r4i-live-one-tb-20260703-schema \
+      --firmware-dir pc-bios \
+      --guest-manifest tmp/qemu-x86_64-r4i-live-one-tb-guest-20260703/tuxboot-browser-smoke-guest.json \
+      --out tmp/qemu-x86_64-r4i-live-one-tb-guest-20260703/wasm-browser-smoke-live-one-tb-schema-result.json \
+      --screenshot tmp/qemu-x86_64-r4i-live-one-tb-guest-20260703/wasm-browser-smoke-live-one-tb-schema.png \
+      --port 8022 --timeout-ms 240000 \
+      --wasm64-live-one-tb-differential --wasm64-tcg-summary \
+      --wasm64-tcg-summary-interval 10000 \
+      --progress-sample-interval-ms 10000 --progress-sample-limit 60
+
+The single bounded Chromium ``149.0.7827.55`` proof reached
+``QEMU_WASM_LINUX_BOOT_OK`` in ``91175`` ms.  It wrote
+``tmp/qemu-x86_64-r4i-live-one-tb-guest-20260703/wasm-browser-smoke-live-one-tb-schema-result.json``
+with SHA-256
+``91c4c3466bfd5d65e7a61196bd3af4bc13a03a130d70e26f0a990a2abbf290ff``.
+The screenshot
+``tmp/qemu-x86_64-r4i-live-one-tb-guest-20260703/wasm-browser-smoke-live-one-tb-schema.png``
+had SHA-256
+``ce23ee51209b585cc07d071ec6e406a4fb3f2dde8f2f8d34f987981a269e0024``.
+
+The result contained 24 ``live-one-tb-differential`` events, all with
+``ok=true``.  The selected event reported ``name=live-x86-r4i-ld32u-goto-tb-11``,
+``real_live_state_capture=true``, ``live_shape_fixture=false``,
+``tb_ptr=0x78700c0``, ``tb_pc=0x0``, ``tb_cs_base=0xffff0000``,
+``tb_flags=64``, ``tb_cflags=4278321152``, ``tb_size=3``,
+``tb_icount=1``, and ``metadata_op_count=13``.  It reported
+``generated_guest_instructions=1`` and ``reference_guest_instructions=1``,
+matching generated and reference dispatch target ``126288108``, register
+checksum ``407154517823240700``, memory checksum ``8033238923928634000``,
+and memory writes ``2``.  The inline RAM/TLB counters were
+``inline_tlb_hit_loads=2`` and ``inline_tlb_hit_stores=2``.  It recorded
+zero ``helper_calls``, ``qemu_ld_calls``, and ``qemu_st_calls``.
+
+The final TCG summary showed that the normal guest path remained on TCI:
+``generated_attempts=0``, ``generated_compiled=0``,
+``generated_executed=0``, ``generated_coverage_numerator=0``,
+``generated_coverage_denominator=0``, ``translated_tbs=40000``, and
+``exec_generated_output_available_tbs=0``.
+
 RISC-V 64 accelerator boundary
 ==============================
 
