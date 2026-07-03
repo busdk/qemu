@@ -1639,31 +1639,66 @@ run that reaches a weaker marker than normal multi-user readiness.
     must beat same-commit default TCI by at least `25%`; otherwise record the
     failed gate and re-plan before another x86 browser run.
 
-    2026-07-03 latest-QEMU check: `origin/develop` was fetched and
-    `projects/qemu` was already current at
-    `4a1892102dc3d2737d47966509ecd4c5e5720021` (`Added tmp/ to
-    .gitignore`). A clean detached source worktree at the same commit was used
-    for both builds. Default artifact hashes: JS
+    Attempt 2026-07-03 after R4m: `origin/develop` was fetched and
+    `projects/qemu` was current at
+    `d447dd51d9b831824af9da1de7d1e18c1f066d65` (`wasm64: route
+    live x86 generated execution opt-in`). A clean Docker build helper was
+    used for both artifacts:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-d447dd5-default-artifacts
+    --target x86_64 --jobs 10`, and the same command with
+    `--tcg-wasm64-backend` writing
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-d447dd5-accelerator-artifacts`.
+    Default artifact hashes: JS
     `105d0404f8f105be8604cff8f4f094c665a663c9696bd5dab3f7ab7e20e69870`,
     WASM `6fe1613185bcbdb0fdfd7fddfac6c1ea384a0ebb92893887c1081c5d6af7c50e`,
     manifest
     `d9c96709f2984502d92097397efcbf7c05dc695de05be9e9dd5e86e35190cad0`.
     Accelerator artifact hashes: JS
-    `42451a03589f280d98e441056a5841b29a5fd64c1cb8a4edbc46be2d7915bf54`,
-    WASM `978c665ff6349866a2daf8359b56bf4112ba92c517756c8d9c9e9804aa8a22d8`,
+    `3c49db2604c6f8ce79b60a21f7e2c930fc699e4b68ab1bf1fad83e980f48e8bd`,
+    WASM `a755bf94202338c01337895d0b75f1ac1d3014202bb471b0715067efd5914da1`,
     manifest
-    `f1e622aaedc0e63ee718f7fd491f2dab6cfd273ceb0cf3fe4102c96f4878953f`.
-    Both ran in Chrome for Testing `149.0.7827.55` using the same
-    `microvm,acpi=off` generic x86_64 TuxBoot smoke guest. Default TCI reached
-    `QEMU_WASM_LINUX_BOOT_OK` in `88838` ms with result JSON
-    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-current-default-direct-smoke-20260703-20/wasm-browser-smoke-result.json`.
-    The accelerator artifact reached the marker in `93182` ms with result JSON
-    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-current-accelerator-direct-smoke-20260703-20/wasm-browser-smoke-result.json`.
-    That is `4.9%` slower than default TCI, not `25%` faster. These speed runs
-    did not enable `--wasm64-tcg-summary`, so they are sufficient to reject the
-    current artifact as a speed gate but not sufficient to close R4l's dynamic
-    metric requirements. Do not start an x86_64 Bus Engine OS browser proof
-    from this artifact.
+    `e858329e298d68f271a82c5d3a17e61be6f935940458d79a65164078a41bbd45`.
+    Both ran in Chrome for Testing `149.0.7827.55` using the same fresh
+    `microvm,acpi=off` generic x86_64 TuxBoot smoke guest manifest
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-d447dd5-guest-current/tuxboot-browser-smoke-guest.json`.
+    The guest used kernel SHA-256
+    `f57bfc6553bcd6e0a54aab86095bf642b33b5571d14e3af1731b18c87ed5aef8`
+    and initramfs SHA-256
+    `632b8d6b856ca868bdf66b42c97ee64623b1897c144ebf9cf26608d4f9f06e02`.
+
+    Default TCI reached `QEMU_WASM_LINUX_BOOT_OK` in `86206` ms with result
+    JSON
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-d447dd5-default-smoke/wasm-browser-smoke-result.json`.
+    Kernel version printed at `35496` ms and init started at `83534` ms.
+    The accelerator run used the same runner shape plus
+    `--wasm64-live-generated-exec --wasm64-tcg-summary`, wrote result JSON
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-d447dd5-accelerator-smoke/wasm-browser-smoke-result.json`,
+    and timed out at `180236` ms without `QEMU_WASM_LINUX_BOOT_OK`. Kernel
+    version printed at `41032` ms, but init did not start before timeout.
+    The final `wasm64Tcg.lastSummary` had `generated_attempts=0`,
+    `generated_compiled=0`, `generated_executed=0`,
+    `generated_cache_hits=0`, and generated coverage `0` over denominator
+    `0`. It did report translated/generated-output shape data at the first
+    interval: `translated_tbs=10000`, `translated_generated_output_tbs=5558`,
+    `translated_generated_output_unavailable_tbs=4442`, and first unsupported
+    ops led by `call=4136`, `sar=99`, and `tci_movcond32=56`. The final
+    `wasm64Runloop.lastSummary` rejected live generated execution with
+    `reason=selected-body-shape-unsupported`, `compat_fallback=true`,
+    `generated_guest_instructions=0`, `generated_chain_length=0`,
+    `inline_tlb_hit_loads=0`, `inline_tlb_hit_stores=0`, `helper_calls=0`,
+    `qemu_ld_calls=0`, `qemu_st_calls=0`, `exits_unsupported=1`, and
+    `attempt_index=156388`.
+
+    This rejects the current latest-QEMU accelerator artifact for R4l. It is
+    not just below the required `25%` improvement; it is slower than default
+    TCI and does not retire generated guest instructions. The run also emitted
+    per-attempt `qemu-wasm64-runloop:` diagnostics until the page output was
+    suppressed, so another browser speed run is not justified until the
+    accelerator path records aggregate metrics without serial-output flooding
+    and can execute a supported live generated body or fail no-silent preflight
+    before a long run. Do not start an x86_64 Bus Engine OS browser proof from
+    this artifact.
   - [x] R4m - R4k follow-up: connect metadata-backed live x86 TBs to
     generated execution before TCI fallback. DoD: document the failed R4l
     diagnosis that the accelerator artifact still reached normal guest
@@ -1703,6 +1738,16 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. Compile/browser
     proof was not run on this supervisor host because `ninja`, `meson`, and
     `emcc` were not available on `PATH`; this slice makes no R4l speed claim.
+- [ ] R4n - Replace the R4m per-attempt live-generated-exec diagnostic path
+  with an accelerator preflight and aggregate-metrics path before another x86
+  browser speed run. DoD: normal generic smoke output no longer emits one
+  `qemu-wasm64-runloop:` line per attempted TB; unsupported or missing
+  generated bodies are counted in aggregate and can fail no-silent preflight
+  before a long browser run; deterministic tests cover
+  `selected-body-shape-unsupported`, `metadata-missing`, and one supported
+  live generated body with nonzero generated guest-instruction retirement; and
+  the next R4l attempt is only allowed when the preflight predicts nonzero
+  useful generated execution.
 - [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
   accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
   cold in browser-hosted QEMU/WASM with the accelerator and reaches

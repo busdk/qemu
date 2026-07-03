@@ -165,6 +165,69 @@ It is not acceleration evidence: ``generated_compiled=0`` and
 Linux TB executing through ``wasmjit_run()`` and differentially verified
 against TCI from the same input state.
 
+Latest x86_64 R4l speed-gate rejection
+--------------------------------------
+
+On 2026-07-03, ``origin/develop`` was fetched and the Linux supervisor
+checkout was current at QEMU commit
+``d447dd51d9b831824af9da1de7d1e18c1f066d65``.  Same-commit
+``x86_64-softmmu`` artifacts were built with
+``scripts/ci/wasm-build-artifacts-local.py`` in Docker.  The default TCI build
+produced:
+
+* ``qemu-system-x86_64.js`` =
+  ``105d0404f8f105be8604cff8f4f094c665a663c9696bd5dab3f7ab7e20e69870``
+* ``qemu-system-x86_64.wasm`` =
+  ``6fe1613185bcbdb0fdfd7fddfac6c1ea384a0ebb92893887c1081c5d6af7c50e``
+* manifest =
+  ``d9c96709f2984502d92097397efcbf7c05dc695de05be9e9dd5e86e35190cad0``
+
+The accelerator build produced:
+
+* ``qemu-system-x86_64.js`` =
+  ``3c49db2604c6f8ce79b60a21f7e2c930fc699e4b68ab1bf1fad83e980f48e8bd``
+* ``qemu-system-x86_64.wasm`` =
+  ``a755bf94202338c01337895d0b75f1ac1d3014202bb471b0715067efd5914da1``
+* manifest =
+  ``e858329e298d68f271a82c5d3a17e61be6f935940458d79a65164078a41bbd45``
+
+Both browser runs used Chrome for Testing ``149.0.7827.55`` and the same
+fresh ``microvm,acpi=off`` generic x86_64 TuxBoot smoke manifest:
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-d447dd5-guest-current/tuxboot-browser-smoke-guest.json``.
+The guest used kernel SHA-256
+``f57bfc6553bcd6e0a54aab86095bf642b33b5571d14e3af1731b18c87ed5aef8`` and
+initramfs SHA-256
+``632b8d6b856ca868bdf66b42c97ee64623b1897c144ebf9cf26608d4f9f06e02``.
+
+The default TCI run reached ``QEMU_WASM_LINUX_BOOT_OK`` in ``86206`` ms,
+printed the kernel version at ``35496`` ms, and started init at ``83534`` ms.
+Result JSON:
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-d447dd5-default-smoke/wasm-browser-smoke-result.json``.
+
+The accelerator run used ``--wasm64-live-generated-exec`` and
+``--wasm64-tcg-summary``.  It timed out at ``180236`` ms without
+``QEMU_WASM_LINUX_BOOT_OK``.  It printed the kernel version at ``41032`` ms
+but did not start init.  Result JSON:
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-d447dd5-accelerator-smoke/wasm-browser-smoke-result.json``.
+The final wasm64 TCG summary reported ``generated_attempts=0``,
+``generated_compiled=0``, ``generated_executed=0``, ``generated_cache_hits=0``,
+and zero generated coverage.  The first interval still showed
+``translated_generated_output_tbs=5558`` out of ``translated_tbs=10000`` and
+unsupported generated ops led by ``call=4136``, ``sar=99``, and
+``tci_movcond32=56``.  The final run-loop summary reported
+``reason=selected-body-shape-unsupported``, ``compat_fallback=true``,
+``generated_guest_instructions=0``, ``generated_chain_length=0``,
+``helper_calls=0``, ``qemu_ld_calls=0``, ``qemu_st_calls=0``, and
+``attempt_index=156388``.
+
+This rejects the current latest-QEMU x86 accelerator artifact.  It is slower
+than default TCI and retires no generated guest instructions, so it cannot be
+used for Bus Engine OS browser proof.  The run also emitted per-attempt
+``qemu-wasm64-runloop:`` diagnostics until page output was suppressed.  Before
+another x86 browser speed run, the accelerator path must use aggregate metrics
+or a preflight and must prove a supported live generated body will execute
+useful guest work.
+
 Pre-R4i x86_64 one-TB fixture scaffold
 --------------------------------------
 
