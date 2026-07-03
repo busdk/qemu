@@ -19,6 +19,7 @@ import {
   encodeTciRRS,
   encodeU32,
   expectedRunloopValue,
+  hotsetTbEnvOffsetReadiness,
   runTciLikeRunloopModel,
   runWasmjitRunloopBenchmark,
   runWasmjitRunloopProbe,
@@ -171,6 +172,16 @@ function generatedMetadata({
   assert.equal(built.hotset.tbs[0].baseEnvOffset, 0x200);
   assert.equal(built.hotset.tbs[0].storeEnvOffset, 0x120);
   assert.equal(built.hotset.tbs[0].branchEnvOffset, WASMJIT_ENV_OFFSET_INVALID);
+  assert.deepEqual(hotsetTbEnvOffsetReadiness(built.hotset.tbs[0]), {
+    ready: true,
+    unsupportedOp: false,
+    missing: {
+      value: false,
+      base: false,
+      branch: false,
+      store: false,
+    },
+  });
 }
 
 {
@@ -200,6 +211,63 @@ function generatedMetadata({
   assert.equal(built.hotset.tbs[0].baseEnvOffset, WASMJIT_ENV_OFFSET_INVALID);
   assert.equal(built.hotset.tbs[0].branchEnvOffset, WASMJIT_ENV_OFFSET_INVALID);
   assert.equal(built.hotset.tbs[0].storeEnvOffset, WASMJIT_ENV_OFFSET_INVALID);
+  assert.deepEqual(hotsetTbEnvOffsetReadiness(built.hotset.tbs[0]), {
+    ready: false,
+    unsupportedOp: false,
+    missing: {
+      value: true,
+      base: true,
+      branch: true,
+      store: true,
+    },
+  });
+}
+
+{
+  const offsets = Array(16).fill(WASMJIT_ENV_OFFSET_INVALID);
+  offsets[0] = 0x120;
+  const built = buildHotsetFromMetadataModel([
+    generatedMetadata({
+      generatedOutput: aluBranchGeneratedOutput("xor", 3),
+      tciRegEnvOffsets: offsets,
+    }),
+  ], { opcodes });
+
+  assert.equal(built.ok, true);
+  assert.deepEqual(hotsetTbEnvOffsetReadiness(built.hotset.tbs[0]), {
+    ready: true,
+    unsupportedOp: false,
+    missing: {
+      value: false,
+      base: false,
+      branch: false,
+      store: false,
+    },
+  });
+}
+
+{
+  const offsets = Array(16).fill(WASMJIT_ENV_OFFSET_INVALID);
+  offsets[4] = 0x120;
+  offsets[13] = 0x190;
+  const built = buildHotsetFromMetadataModel([
+    generatedMetadata({
+      generatedOutput: traceLd32uBranchStoreOutput(),
+      tciRegEnvOffsets: offsets,
+    }),
+  ], { opcodes });
+
+  assert.equal(built.ok, true);
+  assert.deepEqual(hotsetTbEnvOffsetReadiness(built.hotset.tbs[0]), {
+    ready: false,
+    unsupportedOp: false,
+    missing: {
+      value: false,
+      base: true,
+      branch: false,
+      store: false,
+    },
+  });
 }
 
 assert.equal(

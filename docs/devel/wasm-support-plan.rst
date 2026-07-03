@@ -1210,6 +1210,103 @@ not complete R4.  The next accelerator step should use these env offsets to
 build a real generated execution path or run a bounded attach diagnostic that
 proves the descriptor gap has narrowed before any browser speed gate.
 
+R4j env-offset attach diagnostic
+--------------------------------
+
+R4j added diagnostic counters for descriptor env-offset readiness.  The
+attach-probe summary now distinguishes structurally ready descriptors from
+descriptors that have the concrete ``CPUArchState`` offsets needed for
+execution.  It reports ``env_ready_tbs`` and ``env_ready_ops`` plus per-field
+missing counters for ``value_env_offset``, ``base_env_offset``,
+``branch_env_offset``, and ``store_env_offset``.
+
+This is not a performance optimization and did not run a speed gate.  It was
+intended to answer whether the R4i metadata work made live translated TB
+descriptors executable, or whether the next blocker is earlier in generated
+output candidacy.
+
+Focused checks passed:
+
+.. code-block:: console
+
+  $ git diff --check
+  $ node --check scripts/ci/wasmjit-runloop-model.mjs
+  $ node --check scripts/ci/wasmjit-runloop-model-test.mjs
+  $ node scripts/ci/wasmjit-runloop-model-test.mjs
+  $ node scripts/ci/wasm64-runloop-contract-test.mjs
+  $ node scripts/ci/wasm64-translate-metadata-test.mjs
+  $ node --check scripts/ci/wasm-browser-smoke-runner.mjs
+
+``node scripts/ci/wasm-browser-smoke-runner-test.mjs`` passed outside the
+sandbox after the sandboxed negative subprocess fixture returned empty
+stderr.
+
+The backend artifact was built with:
+
+.. code-block:: console
+
+  $ python3 scripts/ci/wasm-build-artifacts-local.py \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4j-riscv64-env-offset-attach-artifacts \
+      --target riscv64 \
+      --tcg-wasm64-backend \
+      --jobs auto \
+      --build-image
+
+Meson reported ``TCG backend: experimental wasm64 with TCI fallback``.
+Artifact SHA-256 values were:
+
+* ``qemu-system-riscv64.js``:
+  ``9d8fc8f70591299a7e8fdb55d559fb2d4cd1524f662cf1d02f32018f69a08eb8``
+* ``qemu-system-riscv64.wasm``:
+  ``3b28c786f3cd7da3dabe654816c22bd42d277791b71564bfd60450ee5cc33db1``
+* manifest:
+  ``76ae3df90d748b335253a3f290c504059ddcca0d6d9e0b99a739b9b0fdbae57c``
+* ``SHA256SUMS``:
+  ``b491c337eae2f061ce7c3f6fc39bcf6f8532c9b6bd21b3be1cbe26141b813e84``
+
+The bounded browser diagnostic used Chromium ``149.0.7827.55``:
+
+.. code-block:: console
+
+  $ npm exec --yes --package=playwright -- node \
+      scripts/ci/wasm-browser-smoke-runner.mjs \
+      --artifact-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4j-riscv64-env-offset-attach-artifacts \
+      --guest-manifest /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-guest/tuxboot-browser-smoke-guest.json \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4j-riscv64-env-offset-attach-smoke/wasm-browser-smoke-result.json \
+      --screenshot /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4j-riscv64-env-offset-attach-smoke/wasm-browser-smoke.png \
+      --timeout-ms 180000 \
+      --progress-sample-interval-ms 10000 \
+      --progress-sample-limit 40 \
+      --wasm64-tcg-summary \
+      --wasm64-tcg-summary-interval 50000 \
+      --wasm64-tcg-summary-limit 4 \
+      --wasm64-runloop-attach-probe
+
+It timed out at ``180194`` ms without reaching ``Welcome to TuxTest``.  The
+kernel version printed at ``37943`` ms, and the final guest line was an
+Emscripten pthread abort on ``p_rcu_reader->depth != 0`` in QEMU RCU unlock.
+Result JSON SHA-256:
+``cb064a273fb3359950925df36b5286212581f6e7a947827dc383137b58dbaec2``.
+Screenshot SHA-256:
+``680f4b07e580d051b8d194eb75a38c5b572d440ebcd441f2429bc21b2682960a``.
+
+The final summary reported ``generated_attempts=0``,
+``generated_compiled=0``, ``generated_executed=0``,
+``generated_coverage_ppm=0``, ``translated_tbs=40610``, and
+``translated_ops=1465109``.  It also reported
+``translated_generated_candidate_tbs=0``,
+``translated_generated_output_tbs=0``, and
+``exec_generated_output_available_tbs=0``.  The attach probe sampled
+``200000`` TB entries with ``ready_tbs=0``, ``env_ready_tbs=0``,
+``missing_metadata=159390``, and ``unsupported_generated_ops=40610``.  The
+top first unsupported generated ops were ``ld32u=40598`` and ``st8=3741``.
+
+The accepted conclusion is negative but useful: the live run does not reach
+env-offset readiness yet.  The next execution blocker is earlier, in
+generated-output candidacy for load/store-heavy RISC-V shapes, not in the
+env-offset attachment itself.  R4j does not improve marker time, does not
+execute live Linux TBs through generated Wasm, and does not complete R4.
+
 Strict definition of done
 =========================
 

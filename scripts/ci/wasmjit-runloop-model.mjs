@@ -489,6 +489,57 @@ export function buildHotsetFromMetadataModel(metadata, {
   };
 }
 
+function envOffsetValid(offset) {
+  return offset !== WASMJIT_ENV_OFFSET_INVALID;
+}
+
+export function hotsetTbEnvOffsetReadiness(tb) {
+  const missing = {
+    value: false,
+    base: false,
+    branch: false,
+    store: false,
+  };
+
+  function requireOffset(field, key) {
+    if (!envOffsetValid(tb[field] ?? WASMJIT_ENV_OFFSET_INVALID)) {
+      missing[key] = true;
+    }
+  }
+
+  switch (tb?.op) {
+  case WASMJIT_HOTSET_OP.aluAddConst:
+  case WASMJIT_HOTSET_OP.aluXorConst:
+    requireOffset("valueEnvOffset", "value");
+    requireOffset("branchEnvOffset", "branch");
+    break;
+  case WASMJIT_HOTSET_OP.ramAddConst:
+  case WASMJIT_HOTSET_OP.ramXorConst:
+    requireOffset("valueEnvOffset", "value");
+    requireOffset("baseEnvOffset", "base");
+    requireOffset("storeEnvOffset", "store");
+    break;
+  case WASMJIT_HOTSET_OP.traceLd32uBranchStore:
+    requireOffset("valueEnvOffset", "value");
+    requireOffset("baseEnvOffset", "base");
+    requireOffset("branchEnvOffset", "branch");
+    requireOffset("storeEnvOffset", "store");
+    break;
+  default:
+    return {
+      ready: false,
+      unsupportedOp: true,
+      missing,
+    };
+  }
+
+  return {
+    ready: !missing.value && !missing.base && !missing.branch && !missing.store,
+    unsupportedOp: false,
+    missing,
+  };
+}
+
 function utf8Bytes(text) {
   return Array.from(new TextEncoder().encode(text));
 }

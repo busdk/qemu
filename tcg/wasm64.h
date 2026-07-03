@@ -72,6 +72,12 @@ typedef struct TCGWasm64Counters {
     uint64_t runloop_attach_probe_tbs;
     uint64_t runloop_attach_probe_ready_tbs;
     uint64_t runloop_attach_probe_ready_ops;
+    uint64_t runloop_attach_probe_env_ready_tbs;
+    uint64_t runloop_attach_probe_env_ready_ops;
+    uint64_t runloop_attach_probe_missing_value_env_offset;
+    uint64_t runloop_attach_probe_missing_base_env_offset;
+    uint64_t runloop_attach_probe_missing_branch_env_offset;
+    uint64_t runloop_attach_probe_missing_store_env_offset;
     uint64_t runloop_attach_probe_empty;
     uint64_t runloop_attach_probe_capacity;
     uint64_t runloop_attach_probe_missing_metadata;

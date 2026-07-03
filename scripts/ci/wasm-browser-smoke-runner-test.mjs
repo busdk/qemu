@@ -680,6 +680,12 @@ for (const status of [
       tbs: 100,
       ready_tbs: 7,
       ready_ops: 35,
+      env_ready_tbs: 2,
+      env_ready_ops: 9,
+      missing_value_env_offset: 3,
+      missing_base_env_offset: 4,
+      missing_branch_env_offset: 5,
+      missing_store_env_offset: 6,
       missing_metadata: 10,
       unsupported_hot_tb: 70,
       unsupported_generated_ops: 40,
@@ -716,6 +722,12 @@ for (const status of [
   });
   assert.equal(parsed.runloop_attach_probe.ready_tbs, 7);
   assert.equal(parsed.runloop_attach_probe.ready_ops, 35);
+  assert.equal(parsed.runloop_attach_probe.env_ready_tbs, 2);
+  assert.equal(parsed.runloop_attach_probe.env_ready_ops, 9);
+  assert.equal(parsed.runloop_attach_probe.missing_value_env_offset, 3);
+  assert.equal(parsed.runloop_attach_probe.missing_base_env_offset, 4);
+  assert.equal(parsed.runloop_attach_probe.missing_branch_env_offset, 5);
+  assert.equal(parsed.runloop_attach_probe.missing_store_env_offset, 6);
   assert.equal(parsed.runloop_attach_probe.unsupported_hot_tb, 70);
   assert.equal(parsed.runloop_attach_probe.unsupported_generated_ops, 40);
   assert.equal(parsed.runloop_attach_probe.unsupported_semantic_shape, 30);

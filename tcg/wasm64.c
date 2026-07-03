@@ -246,6 +246,18 @@ void tcg_wasm64_counters_add(TCGWasm64Counters *dst,
         src->runloop_attach_probe_ready_tbs;
     dst->runloop_attach_probe_ready_ops +=
         src->runloop_attach_probe_ready_ops;
+    dst->runloop_attach_probe_env_ready_tbs +=
+        src->runloop_attach_probe_env_ready_tbs;
+    dst->runloop_attach_probe_env_ready_ops +=
+        src->runloop_attach_probe_env_ready_ops;
+    dst->runloop_attach_probe_missing_value_env_offset +=
+        src->runloop_attach_probe_missing_value_env_offset;
+    dst->runloop_attach_probe_missing_base_env_offset +=
+        src->runloop_attach_probe_missing_base_env_offset;
+    dst->runloop_attach_probe_missing_branch_env_offset +=
+        src->runloop_attach_probe_missing_branch_env_offset;
+    dst->runloop_attach_probe_missing_store_env_offset +=
+        src->runloop_attach_probe_missing_store_env_offset;
     dst->runloop_attach_probe_empty += src->runloop_attach_probe_empty;
     dst->runloop_attach_probe_capacity += src->runloop_attach_probe_capacity;
     dst->runloop_attach_probe_missing_metadata +=
@@ -346,6 +358,18 @@ static void tcg_wasm64_counters_add_translation(TCGWasm64Counters *dst,
         src->runloop_attach_probe_ready_tbs;
     dst->runloop_attach_probe_ready_ops +=
         src->runloop_attach_probe_ready_ops;
+    dst->runloop_attach_probe_env_ready_tbs +=
+        src->runloop_attach_probe_env_ready_tbs;
+    dst->runloop_attach_probe_env_ready_ops +=
+        src->runloop_attach_probe_env_ready_ops;
+    dst->runloop_attach_probe_missing_value_env_offset +=
+        src->runloop_attach_probe_missing_value_env_offset;
+    dst->runloop_attach_probe_missing_base_env_offset +=
+        src->runloop_attach_probe_missing_base_env_offset;
+    dst->runloop_attach_probe_missing_branch_env_offset +=
+        src->runloop_attach_probe_missing_branch_env_offset;
+    dst->runloop_attach_probe_missing_store_env_offset +=
+        src->runloop_attach_probe_missing_store_env_offset;
     dst->runloop_attach_probe_empty += src->runloop_attach_probe_empty;
     dst->runloop_attach_probe_capacity += src->runloop_attach_probe_capacity;
     dst->runloop_attach_probe_missing_metadata +=
@@ -545,9 +569,86 @@ static uint32_t tcg_wasm64_tci_op(uint32_t insn);
 static bool tcg_wasm64_metadata_base_valid(
     const TCGWasm64TBMetadata *metadata);
 
+static bool tcg_wasm64_runloop_env_offset_valid(uint32_t env_offset)
+{
+    return env_offset != TCG_WASM64_RUN_ENV_OFFSET_INVALID;
+}
+
+static bool tcg_wasm64_count_runloop_attach_probe_env_ready(
+    TCGWasm64Counters *counters,
+    const TCGWasm64RunHotsetTB *tb,
+    const TCGWasm64TBMetadata *metadata)
+{
+    bool ready = true;
+
+    if (!counters || !tb) {
+        return false;
+    }
+
+    switch (tb->op) {
+    case TCG_WASM64_RUN_HOTSET_OP_ALU_ADD_CONST:
+    case TCG_WASM64_RUN_HOTSET_OP_ALU_XOR_CONST:
+        if (!tcg_wasm64_runloop_env_offset_valid(tb->value_env_offset)) {
+            counters->runloop_attach_probe_missing_value_env_offset++;
+            ready = false;
+        }
+        if (!tcg_wasm64_runloop_env_offset_valid(tb->branch_env_offset)) {
+            counters->runloop_attach_probe_missing_branch_env_offset++;
+            ready = false;
+        }
+        break;
+    case TCG_WASM64_RUN_HOTSET_OP_RAM_ADD_CONST:
+    case TCG_WASM64_RUN_HOTSET_OP_RAM_XOR_CONST:
+        if (!tcg_wasm64_runloop_env_offset_valid(tb->value_env_offset)) {
+            counters->runloop_attach_probe_missing_value_env_offset++;
+            ready = false;
+        }
+        if (!tcg_wasm64_runloop_env_offset_valid(tb->base_env_offset)) {
+            counters->runloop_attach_probe_missing_base_env_offset++;
+            ready = false;
+        }
+        if (!tcg_wasm64_runloop_env_offset_valid(tb->store_env_offset)) {
+            counters->runloop_attach_probe_missing_store_env_offset++;
+            ready = false;
+        }
+        break;
+    case TCG_WASM64_RUN_HOTSET_OP_TRACE_LD32U_BRANCH_STORE:
+        if (!tcg_wasm64_runloop_env_offset_valid(tb->value_env_offset)) {
+            counters->runloop_attach_probe_missing_value_env_offset++;
+            ready = false;
+        }
+        if (!tcg_wasm64_runloop_env_offset_valid(tb->base_env_offset)) {
+            counters->runloop_attach_probe_missing_base_env_offset++;
+            ready = false;
+        }
+        if (!tcg_wasm64_runloop_env_offset_valid(tb->branch_env_offset)) {
+            counters->runloop_attach_probe_missing_branch_env_offset++;
+            ready = false;
+        }
+        if (!tcg_wasm64_runloop_env_offset_valid(tb->store_env_offset)) {
+            counters->runloop_attach_probe_missing_store_env_offset++;
+            ready = false;
+        }
+        break;
+    default:
+        ready = false;
+        break;
+    }
+
+    if (ready) {
+        counters->runloop_attach_probe_env_ready_tbs++;
+        if (metadata) {
+            counters->runloop_attach_probe_env_ready_ops +=
+                metadata->generated_output_op_count;
+        }
+    }
+    return ready;
+}
+
 static void tcg_wasm64_count_runloop_attach_probe(
     TCGWasm64Counters *counters,
     TCGWasm64RunHotsetBuildStatus status,
+    const TCGWasm64RunHotsetTB *tb,
     const TCGWasm64TBMetadata *metadata)
 {
     if (!counters) {
@@ -562,6 +663,8 @@ static void tcg_wasm64_count_runloop_attach_probe(
             counters->runloop_attach_probe_ready_ops +=
                 metadata->generated_output_op_count;
         }
+        tcg_wasm64_count_runloop_attach_probe_env_ready(
+            counters, tb, metadata);
         break;
     case TCG_WASM64_RUN_HOTSET_BUILD_EMPTY:
         counters->runloop_attach_probe_empty++;
@@ -2433,7 +2536,7 @@ static void tcg_wasm64_runloop_attach_probe(
     (void)tcg_wasm64_run_hotset_build_from_metadata(
         &hotset, &tb, 1, single_metadata, ARRAY_SIZE(single_metadata),
         &status);
-    tcg_wasm64_count_runloop_attach_probe(counters, status, metadata);
+    tcg_wasm64_count_runloop_attach_probe(counters, status, &tb, metadata);
 }
 
 bool tcg_wasm64_backend_available(void)
@@ -2599,6 +2702,12 @@ void tcg_wasm64_report_summary(const char *reason,
             "\"exec_generated_output_incomplete_tbs\":%" PRIu64 ","
             "\"runloop_attach_probe\":{\"tbs\":%" PRIu64 ","
             "\"ready_tbs\":%" PRIu64 ",\"ready_ops\":%" PRIu64 ","
+            "\"env_ready_tbs\":%" PRIu64 ","
+            "\"env_ready_ops\":%" PRIu64 ","
+            "\"missing_value_env_offset\":%" PRIu64 ","
+            "\"missing_base_env_offset\":%" PRIu64 ","
+            "\"missing_branch_env_offset\":%" PRIu64 ","
+            "\"missing_store_env_offset\":%" PRIu64 ","
             "\"empty\":%" PRIu64 ",\"capacity\":%" PRIu64 ","
             "\"missing_metadata\":%" PRIu64 ","
             "\"invalid_metadata\":%" PRIu64 ","
@@ -2653,6 +2762,12 @@ void tcg_wasm64_report_summary(const char *reason,
             counters->runloop_attach_probe_tbs,
             counters->runloop_attach_probe_ready_tbs,
             counters->runloop_attach_probe_ready_ops,
+            counters->runloop_attach_probe_env_ready_tbs,
+            counters->runloop_attach_probe_env_ready_ops,
+            counters->runloop_attach_probe_missing_value_env_offset,
+            counters->runloop_attach_probe_missing_base_env_offset,
+            counters->runloop_attach_probe_missing_branch_env_offset,
+            counters->runloop_attach_probe_missing_store_env_offset,
             counters->runloop_attach_probe_empty,
             counters->runloop_attach_probe_capacity,
             counters->runloop_attach_probe_missing_metadata,

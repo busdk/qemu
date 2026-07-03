@@ -1052,6 +1052,71 @@ run that reaches a weaker marker than normal multi-user readiness.
     `a8838587723d4918bba939f268ca4d5a4cc2bd2c328d923bbbfe31b69f8b042a`.
     This slice does not execute live Linux TBs through generated Wasm, does
     not improve the browser marker time by itself, and does not complete R4.
+  - [x] R4j - Attribute live attach-probe readiness for descriptor env
+    offsets before wiring generated execution. Prediction: this should not
+    improve marker time and should not trigger a speed gate; it should show
+    whether R4i made real translated TB descriptors execution-addressable, or
+    whether the next blocker is missing `value_env_offset`,
+    `base_env_offset`, `branch_env_offset`, or `store_env_offset` metadata.
+    DoD: attach-probe counters distinguish env-ready descriptors from each
+    missing env-offset field, deterministic tests cover the new counter
+    contract, a focused artifact build succeeds, and any live browser run is
+    bounded to diagnostic evidence with result JSON, browser version, command,
+    and artifact hashes recorded here. Do not count this slice as a speed
+    improvement, and do not continue to R5 until the diagnostic identifies the
+    next execution blocker. Accepted 2026-07-03: attach-probe summaries now
+    report `env_ready_tbs`, `env_ready_ops`, and per-field missing
+    `value_env_offset`, `base_env_offset`, `branch_env_offset`, and
+    `store_env_offset` counters. The bounded Chromium diagnostic was negative:
+    Chromium `149.0.7827.55` timed out at `180194` ms without reaching
+    `Welcome to TuxTest`, printed the Linux kernel version at `37943` ms, and
+    ended with an Emscripten pthread abort on
+    `p_rcu_reader->depth != 0`. Final summary values were
+    `generated_attempts=0`, `generated_compiled=0`,
+    `generated_executed=0`, `generated_coverage_ppm=0`,
+    `translated_tbs=40610`, `translated_ops=1465109`,
+    `translated_generated_candidate_tbs=0`,
+    `translated_generated_output_tbs=0`,
+    `exec_generated_output_available_tbs=0`, attach-probe
+    `ready_tbs=0`, `env_ready_tbs=0`, `missing_metadata=159390`,
+    and `unsupported_generated_ops=40610`. The top first unsupported generated
+    ops were `ld32u=40598` and `st8=3741`. This means the live run did not
+    reach env-offset readiness at all; the next execution blocker is earlier,
+    in generated-output candidacy for load/store-heavy RISC-V shapes, not in
+    env-offset attachment.
+
+    Checks: `git diff --check`,
+    `node --check scripts/ci/wasmjit-runloop-model.mjs`,
+    `node --check scripts/ci/wasmjit-runloop-model-test.mjs`,
+    `node scripts/ci/wasmjit-runloop-model-test.mjs`,
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`,
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke-runner.mjs`, and
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs` outside the sandbox
+    because the sandboxed negative subprocess fixture returned empty stderr.
+
+    Artifact build command:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4j-riscv64-env-offset-attach-artifacts
+    --target riscv64 --tcg-wasm64-backend --jobs auto --build-image`.
+    Meson reported `TCG backend: experimental wasm64 with TCI fallback`.
+    Artifact hashes: `qemu-system-riscv64.js`
+    `9d8fc8f70591299a7e8fdb55d559fb2d4cd1524f662cf1d02f32018f69a08eb8`,
+    `qemu-system-riscv64.wasm`
+    `3b28c786f3cd7da3dabe654816c22bd42d277791b71564bfd60450ee5cc33db1`,
+    manifest
+    `76ae3df90d748b335253a3f290c504059ddcca0d6d9e0b99a739b9b0fdbae57c`,
+    SHA256SUMS
+    `b491c337eae2f061ce7c3f6fc39bcf6f8532c9b6bd21b3be1cbe26141b813e84`.
+    Browser result JSON:
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4j-riscv64-env-offset-attach-smoke/wasm-browser-smoke-result.json`,
+    SHA-256
+    `cb064a273fb3359950925df36b5286212581f6e7a947827dc383137b58dbaec2`.
+    Screenshot SHA-256:
+    `680f4b07e580d051b8d194eb75a38c5b572d440ebcd441f2429bc21b2682960a`.
+    This slice is accepted only as diagnostic evidence. It does not improve
+    marker time, does not execute live Linux TBs through generated Wasm, and
+    does not complete R4.
 - [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
   accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
   cold in browser-hosted QEMU/WASM with the accelerator and reaches
