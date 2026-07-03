@@ -300,37 +300,58 @@ run that reaches a weaker marker than normal multi-user readiness.
     `c455ba71fbac1c911b77183810b354959b180455a4e8d2d8ef8d9bf43c6b1cad`.
     The slice does not enable generated guest execution yet; it creates the
     clean selectable artifact path required before running backend smokes.
-  - [x] R3c - Add an explicit backend-generated execution gate for browser
-    smoke runs. DoD: backend-built artifacts can request generated wasm64 TCG
-    attempts with a backend-named option instead of relying on the older
-    TCI-subset flag shape, default TCI behavior remains unchanged, the browser
-    smoke result records the requested mode, and a full backend artifact build
-    compiles the C path. Accepted 2026-07-03:
-    `QEMU_WASM64_TCG_GENERATED=1` now makes `CONFIG_TCG_WASM64_BACKEND`
-    artifacts take the fast-gated generated-output attempt path; non-backend
-    builds ignore the gate. `scripts/ci/wasm-browser-smoke-runner.mjs` exposes
-    `--wasm64-tcg-generated`, the browser smoke page forwards
-    `QEMU_WASM64_TCG_GENERATED=1`, and the result JSON records
-    `wasm64TcgGenerated`. Checks:
-    `node --check scripts/ci/wasm-browser-smoke-runner.mjs`,
-    `node --check scripts/ci/wasm-browser-smoke.mjs`,
-    `node scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+  - [x] R3c - Supersede the explicit backend-generated direct-boundary gate.
+    Accepted 2026-07-03: the older `--wasm64-tcg-generated` /
+    `QEMU_WASM64_TCG_GENERATED` smoke path was removed from the live smoke
+    harness because it selected the rejected direct-boundary/generated-output
+    attempt family. Keeping it would allow boundary-entry coverage to be
+    mistaken for accelerator progress. The active generated path is now the
+    `wasmjit_run()` run-loop smoke and future translated-hotset descriptors.
+    Checks: `node scripts/ci/wasm-browser-smoke-runner-test.mjs`,
     `node scripts/ci/wasm-browser-smoke-args-test.mjs`,
-    `python3 scripts/ci/wasm-build-artifacts-local-test.py`,
-    `git diff --check`, and
+    `node --check scripts/ci/wasm-browser-smoke-runner.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke.mjs`, and `git diff --check`.
+  - [x] R3d - Port the descriptor-backed `wasmjit_run()` runtime smoke onto
+    the current RISC-V baseline and prove it in a real `riscv64-softmmu`
+    backend artifact. Accepted 2026-07-03: this branch contains the
+    QEMU-facing run/exit ABI, deterministic ALU/branch and TLB-hit RAM model
+    tests, browser-result run-loop summary parsing, and a C-owned
+    `TCGWasm64RunHotset` descriptor smoke. Current `riscv64-softmmu` backend
+    artifact build command:
     `python3 scripts/ci/wasm-build-artifacts-local.py --out
-    /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-backend-r3c-generated-flag
-    --target riscv64 --tcg-wasm64-backend` passed. Meson reported
-    `TCG backend: experimental wasm64 with TCI fallback`; `tcg_tci.c`
-    compiled cleanly. Artifact hashes: `qemu-system-riscv64.js`
-    `17ee104776f21e46a6ab83ca7f9fd1f7052df625ad1f2b0931ccba7f97201b39`,
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3-runloop-riscv64-backend-artifacts
+    --target riscv64 --tcg-wasm64-backend --jobs auto`. Meson reported
+    `TCG backend: experimental wasm64 with TCI fallback`. Artifact hashes:
+    `qemu-system-riscv64.js`
+    `0e210c3597fdb1eb33eac18fd618a59878817e75916ef413c693302345d094b7`,
     `qemu-system-riscv64.wasm`
-    `7d0cb03fa22115c019684f09ea21feabf85fb071f37bd26f7f78dfa10183afcd`,
+    `99d3a2892dc0d337f42849a9899c4bd0d558f0c25f6ebf4fb4adcc41be49a7a9`,
     manifest
-    `c69bce1a579501c6f306487f3c1453a5b9264cb53d08be273926cc4333db70d0`.
-    This slice does not prove speed or nonzero generated execution in a guest;
-    the next R3 slice must run a backend browser smoke with this gate and
-    inspect generated/fallback counters.
+    `fa989b2ff6c74c78db28120d90098319fb7a8cd2285cd30d49854e81e986093a`.
+    Browser proof command:
+    `npm exec --yes --package=playwright -- node
+    scripts/ci/wasm-browser-smoke-runner.mjs --artifact-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3-runloop-riscv64-backend-artifacts
+    --guest-manifest
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3-riscv64-guest/tuxboot-browser-smoke-guest.json
+    --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3-runloop-riscv64-browser-smoke/wasm-browser-smoke-result.json
+    --screenshot
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3-runloop-riscv64-browser-smoke/wasm-browser-smoke.png
+    --timeout-ms 180000 --progress-sample-interval-ms 10000
+    --progress-sample-limit 40 --wasm64-runloop-smoke`. Chromium
+    `149.0.7827.55` reached the generic `Welcome to TuxTest` marker in
+    `142864` ms. The run-loop runtime summary at `10704` ms reported
+    `ok=true`, `budget=1000000`, `exit_reason=budget`,
+    `generated_guest_instructions=4000000`,
+    `fallback_guest_instructions=0`, `generated_body_time_ns=5045000`,
+    `compile_time_ns=245000`, `instantiate_time_ns=50000`,
+    `generated_chain_length=1000000`, `inline_tlb_hit_loads=1000000`,
+    `inline_tlb_hit_stores=1000000`, zero helper/`qemu_ld`/`qemu_st` calls,
+    and one budget exit with no MMIO, TLB, interrupt, helper, unsupported,
+    HLT, or invalidation exits. This is runtime-smoke evidence only: the
+    generic boot time is not faster than the R1 default-TCI baseline
+    (`140119` ms), and this does not complete R4.
   - [x] R3d - Keep the generated path off unsafe direct TCI host-memory ops
     after the R3c RISC-V browser crash. DoD: direct host-memory `ld`/`st`
     opcodes are no longer accepted by
@@ -366,6 +387,13 @@ run that reaches a weaker marker than normal multi-user readiness.
     blocker clarification, not a speed win. The next accepted R3 work must
     either implement a validated aligned generated-memory model or resolve the
     shared RCU assertion before another speed-gate run.
+  - [ ] R3e - Attach the descriptor-backed run-loop ABI to real translated
+    RISC-V TB metadata in a deterministic proof. DoD: a focused test builds at
+    least one valid multi-TB hotset descriptor from real translated TB or
+    generated-output metadata, rejects unsupported hot TBs with explicit
+    no-silent-fallback reasons, records generated/fallback instruction and
+    wall-time counters, and proves the descriptor fields are sufficient for
+    the runtime ABI without returning to the old direct-boundary path.
 - [ ] R4 - Prove performance before Bus Engine OS long runs. DoD: a same-commit
   Chromium generic RISC-V accelerator smoke is at least 25% faster than
   default RISC-V TCI, and microbenchmarks show at least 3x over RISC-V TCI for
