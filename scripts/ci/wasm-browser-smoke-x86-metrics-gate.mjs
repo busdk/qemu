@@ -7,7 +7,7 @@
 
 import fs from "node:fs";
 
-export const X86_BROWSER_SMOKE_METRICS_GATE_VERSION = 2;
+export const X86_BROWSER_SMOKE_METRICS_GATE_VERSION = 3;
 
 const RUNLOOP_RUNTIME_SMOKE_FIELDS = [
   ["event", (value) => value === "runtime-smoke"],
@@ -72,19 +72,17 @@ const RUNLOOP_WORKLOAD_FIELDS = [
   ["exits_invalidated", isInteger],
 ];
 
-const ONE_TB_DIFFERENTIAL_SHARED_FIELDS = [
+const ONE_TB_DIFFERENTIAL_RESULT_FIELDS = [
   ["name", isString],
-  ["ok", (value) => typeof value === "boolean"],
+  ["ok", isBoolean],
   ["shape", isArray],
   ["generated_tci_op_equivalents", isInteger],
   ["reference_tci_op_equivalents", isInteger],
-  ["generated_body_time_ns", isInteger],
-  ["tci_dispatch_time_ns", isInteger],
-  ["compile_time_ns", isInteger],
-  ["instantiate_time_ns", isInteger],
-  ["generated_chain_length", isInteger],
-  ["inline_tlb_hit_loads", isInteger],
-  ["inline_tlb_hit_stores", isInteger],
+  ["generated_body_time_ns", isPositiveInteger],
+  ["tci_dispatch_time_ns", isPositiveInteger],
+  ["compile_time_ns", isPositiveInteger],
+  ["instantiate_time_ns", isPositiveInteger],
+  ["generated_chain_length", isPositiveInteger],
   ["helper_calls", isInteger],
   ["qemu_ld_calls", isInteger],
   ["qemu_st_calls", isInteger],
@@ -109,18 +107,32 @@ const ONE_TB_DIFFERENTIAL_SCAFFOLD_FIELDS = [
   ["event", (value) => value === "one-tb-differential"],
   ["live_shape_fixture", (value) => value === true],
   ["real_live_state_capture", (value) => value === false],
-  ...ONE_TB_DIFFERENTIAL_SHARED_FIELDS,
+  ["inline_tlb_hit_loads", isInteger],
+  ["inline_tlb_hit_stores", isInteger],
+  ...ONE_TB_DIFFERENTIAL_RESULT_FIELDS,
 ];
 
 const LIVE_ONE_TB_DIFFERENTIAL_FIELDS = [
   ["event", (value) => value === "live-one-tb-differential"],
   ["live_shape_fixture", (value) => value !== true],
   ["real_live_state_capture", (value) => value === true],
-  ["tb_id", isOptionalInteger],
-  ["pc", isOptionalInteger],
+  ["tb_ptr", isNonEmptyString],
+  ["tb_pc", isNonEmptyString],
+  ["tb_cs_base", isNonEmptyString],
+  ["tb_flags", isInteger],
+  ["tb_cflags", isInteger],
+  ["tb_size", isPositiveInteger],
+  ["tb_icount", isPositiveInteger],
+  ["metadata_op_count", isPositiveInteger],
+  ["metadata_generated_output_available", isBoolean],
   ["generated_guest_instructions", isPositiveInteger],
   ["reference_guest_instructions", isPositiveInteger],
-  ...ONE_TB_DIFFERENTIAL_SHARED_FIELDS,
+  ["host_memory_loads", isOptionalPositiveInteger],
+  ["host_memory_stores", isOptionalPositiveInteger],
+  ["inline_tlb_hit_loads", isOptionalPositiveInteger],
+  ["inline_tlb_hit_stores", isOptionalPositiveInteger],
+  ...ONE_TB_DIFFERENTIAL_RESULT_FIELDS,
+  ["scanned_live_tbs_before_match", isPositiveInteger],
 ];
 
 const TCG_SUMMARY_FIELDS = [
@@ -186,12 +198,20 @@ function isPositiveInteger(value) {
   return Number.isInteger(value) && value > 0;
 }
 
-function isOptionalInteger(value) {
-  return value === undefined || isInteger(value);
+function isOptionalPositiveInteger(value) {
+  return value === undefined || isPositiveInteger(value);
 }
 
 function isString(value) {
   return typeof value === "string";
+}
+
+function isNonEmptyString(value) {
+  return isString(value) && value.length > 0;
+}
+
+function isBoolean(value) {
+  return typeof value === "boolean";
 }
 
 function isArray(value) {
@@ -326,8 +346,11 @@ function validateRunloopSummary(summary) {
   };
 }
 
-function validateOneTbDifferentialSummary(summary, fields, options = {}) {
-  const missingFields = collectMissingFields(summary, fields);
+function validateScaffoldOneTbDifferentialSummary(summary) {
+  const missingFields = collectMissingFields(
+    summary,
+    ONE_TB_DIFFERENTIAL_SCAFFOLD_FIELDS,
+  );
   const generatedTciOpEquivalentsMatch =
     isInteger(summary?.generated_tci_op_equivalents) &&
     isInteger(summary?.reference_tci_op_equivalents) &&
@@ -337,14 +360,13 @@ function validateOneTbDifferentialSummary(summary, fields, options = {}) {
     isPositiveInteger(summary?.generated_body_time_ns);
   const tciDispatchTimePositive =
     isPositiveInteger(summary?.tci_dispatch_time_ns);
+  const compileTimePositive = isPositiveInteger(summary?.compile_time_ns);
+  const instantiateTimePositive =
+    isPositiveInteger(summary?.instantiate_time_ns);
   const generatedChainLengthPositive =
     isPositiveInteger(summary?.generated_chain_length);
-  const inlineTlbHitLoadsValid = options.requireInlineTlbHits
-    ? isPositiveInteger(summary?.inline_tlb_hit_loads)
-    : isInteger(summary?.inline_tlb_hit_loads);
-  const inlineTlbHitStoresValid = options.requireInlineTlbHits
-    ? isPositiveInteger(summary?.inline_tlb_hit_stores)
-    : isInteger(summary?.inline_tlb_hit_stores);
+  const inlineTlbHitLoadsValid = isInteger(summary?.inline_tlb_hit_loads);
+  const inlineTlbHitStoresValid = isInteger(summary?.inline_tlb_hit_stores);
   const helperCallsZero = summary?.helper_calls === 0;
   const qemuLdCallsZero = summary?.qemu_ld_calls === 0;
   const qemuStCallsZero = summary?.qemu_st_calls === 0;
@@ -370,21 +392,6 @@ function validateOneTbDifferentialSummary(summary, fields, options = {}) {
     isInteger(summary?.expected_memory_writes) &&
     summary.generated_memory_writes === summary.reference_memory_writes &&
     summary.expected_memory_writes === summary.generated_memory_writes;
-  const liveCaptureMatches = options.requireLiveCapture
-    ? summary?.real_live_state_capture === true
-    : summary?.real_live_state_capture === false;
-  const fixtureMarkerMatches = options.requireFixtureMarker
-    ? summary?.live_shape_fixture === true
-    : summary?.live_shape_fixture !== true;
-  const generatedGuestInstructionsValid = options.requireGuestInstructions
-    ? isPositiveInteger(summary?.generated_guest_instructions)
-    : true;
-  const referenceGuestInstructionsValid = options.requireGuestInstructions
-    ? isPositiveInteger(summary?.reference_guest_instructions)
-    : true;
-  const tbIdentityValid = options.allowTbIdentity
-    ? isOptionalInteger(summary?.tb_id) && isOptionalInteger(summary?.pc)
-    : true;
 
   return {
     ...summary,
@@ -392,6 +399,8 @@ function validateOneTbDifferentialSummary(summary, fields, options = {}) {
     generated_tci_op_equivalents_matches: generatedTciOpEquivalentsMatch,
     generated_body_time_positive: generatedBodyTimePositive,
     tci_dispatch_time_positive: tciDispatchTimePositive,
+    compile_time_positive: compileTimePositive,
+    instantiate_time_positive: instantiateTimePositive,
     generated_chain_length_positive: generatedChainLengthPositive,
     inline_tlb_hit_loads_valid: inlineTlbHitLoadsValid,
     inline_tlb_hit_stores_valid: inlineTlbHitStoresValid,
@@ -403,18 +412,15 @@ function validateOneTbDifferentialSummary(summary, fields, options = {}) {
     helper_calls_zero: helperCallsZero,
     qemu_ld_calls_zero: qemuLdCallsZero,
     qemu_st_calls_zero: qemuStCallsZero,
-    live_capture_matches: liveCaptureMatches,
-    fixture_marker_matches: fixtureMarkerMatches,
-    generated_guest_instructions_valid: generatedGuestInstructionsValid,
-    reference_guest_instructions_valid: referenceGuestInstructionsValid,
-    tb_identity_valid: tbIdentityValid,
-    acceptanceAllowed: options.acceptanceAllowed === true,
+    acceptanceAllowed: false,
     ok:
       summary?.ok === true &&
       missingFields.length === 0 &&
       generatedTciOpEquivalentsMatch &&
       generatedBodyTimePositive &&
       tciDispatchTimePositive &&
+      compileTimePositive &&
+      instantiateTimePositive &&
       generatedChainLengthPositive &&
       inlineTlbHitLoadsValid &&
       inlineTlbHitStoresValid &&
@@ -425,43 +431,215 @@ function validateOneTbDifferentialSummary(summary, fields, options = {}) {
       generatedMemoryWritesMatch &&
       helperCallsZero &&
       qemuLdCallsZero &&
-      qemuStCallsZero &&
-      liveCaptureMatches &&
-      fixtureMarkerMatches &&
-      generatedGuestInstructionsValid &&
-      referenceGuestInstructionsValid &&
-      tbIdentityValid,
+      qemuStCallsZero,
   };
 }
 
-function validateScaffoldOneTbDifferentialSummary(summary) {
-  return validateOneTbDifferentialSummary(
-    summary,
-    ONE_TB_DIFFERENTIAL_SCAFFOLD_FIELDS,
-    {
-      acceptanceAllowed: false,
-      requireFixtureMarker: true,
-      requireLiveCapture: false,
-      requireGuestInstructions: false,
-      requireInlineTlbHits: false,
-      allowTbIdentity: false,
-    },
-  );
+function normalizeLiveMemoryCounters(summary) {
+  const hostLoads = summary?.host_memory_loads;
+  const hostStores = summary?.host_memory_stores;
+  const inlineLoads = summary?.inline_tlb_hit_loads;
+  const inlineStores = summary?.inline_tlb_hit_stores;
+  const hostProvided =
+    hostLoads !== undefined || hostStores !== undefined;
+  const inlineProvided =
+    inlineLoads !== undefined || inlineStores !== undefined;
+  const hostValid =
+    !hostProvided ||
+    (isPositiveInteger(hostLoads) && isPositiveInteger(hostStores));
+  const inlineValid =
+    !inlineProvided ||
+    (isPositiveInteger(inlineLoads) && isPositiveInteger(inlineStores));
+
+  if (hostProvided && hostValid && (!inlineProvided || !inlineValid)) {
+    return {
+      normalized_memory_loads: hostLoads,
+      normalized_memory_stores: hostStores,
+      normalized_memory_counter_source: "host_memory",
+      memory_counters_match: !inlineProvided,
+    };
+  }
+
+  if (inlineProvided && inlineValid && (!hostProvided || !hostValid)) {
+    return {
+      normalized_memory_loads: inlineLoads,
+      normalized_memory_stores: inlineStores,
+      normalized_memory_counter_source: "inline_tlb_hit",
+      memory_counters_match: !hostProvided,
+    };
+  }
+
+  if (
+    hostProvided &&
+    hostValid &&
+    inlineProvided &&
+    inlineValid &&
+    hostLoads === inlineLoads &&
+    hostStores === inlineStores
+  ) {
+    return {
+      normalized_memory_loads: hostLoads,
+      normalized_memory_stores: hostStores,
+      normalized_memory_counter_source: "host_memory",
+      memory_counters_match: true,
+    };
+  }
+
+  return {
+    normalized_memory_loads: null,
+    normalized_memory_stores: null,
+    normalized_memory_counter_source: null,
+    memory_counters_match: false,
+  };
 }
 
 function validateLiveOneTbDifferentialSummary(summary) {
-  return validateOneTbDifferentialSummary(
+  const missingFields = collectMissingFields(
     summary,
     LIVE_ONE_TB_DIFFERENTIAL_FIELDS,
-    {
-      acceptanceAllowed: true,
-      requireFixtureMarker: false,
-      requireLiveCapture: true,
-      requireGuestInstructions: true,
-      requireInlineTlbHits: true,
-      allowTbIdentity: true,
-    },
   );
+  const memoryCounters = normalizeLiveMemoryCounters(summary);
+  const generatedTciOpEquivalentsMatch =
+    isInteger(summary?.generated_tci_op_equivalents) &&
+    isInteger(summary?.reference_tci_op_equivalents) &&
+    summary.generated_tci_op_equivalents ===
+      summary.reference_tci_op_equivalents;
+  const generatedBodyTimePositive =
+    isPositiveInteger(summary?.generated_body_time_ns);
+  const tciDispatchTimePositive =
+    isPositiveInteger(summary?.tci_dispatch_time_ns);
+  const compileTimePositive = isPositiveInteger(summary?.compile_time_ns);
+  const instantiateTimePositive =
+    isPositiveInteger(summary?.instantiate_time_ns);
+  const generatedChainLengthPositive =
+    isPositiveInteger(summary?.generated_chain_length);
+  const helperCallsZero = summary?.helper_calls === 0;
+  const qemuLdCallsZero = summary?.qemu_ld_calls === 0;
+  const qemuStCallsZero = summary?.qemu_st_calls === 0;
+  const generatedStatusMatches =
+    isInteger(summary?.generated_status) &&
+    isInteger(summary?.reference_status) &&
+    summary.generated_status === summary.reference_status;
+  const dispatchStatusMatches =
+    generatedStatusMatches && summary.generated_status === summary.dispatch_status;
+  const generatedDispatchTargetMatches =
+    isInteger(summary?.generated_dispatch_target) &&
+    isInteger(summary?.reference_dispatch_target) &&
+    summary.generated_dispatch_target === summary.reference_dispatch_target;
+  const generatedRegsChecksumMatches =
+    isInteger(summary?.generated_regs_checksum) &&
+    isInteger(summary?.reference_regs_checksum) &&
+    summary.generated_regs_checksum === summary.reference_regs_checksum;
+  const generatedMemoryChecksumMatches =
+    isInteger(summary?.generated_memory_checksum) &&
+    isInteger(summary?.reference_memory_checksum) &&
+    summary.generated_memory_checksum === summary.reference_memory_checksum;
+  const generatedMemoryWritesMatch =
+    isInteger(summary?.generated_memory_writes) &&
+    isInteger(summary?.reference_memory_writes) &&
+    isInteger(summary?.expected_memory_writes) &&
+    summary.generated_memory_writes === summary.reference_memory_writes &&
+    summary.expected_memory_writes === summary.generated_memory_writes;
+  const liveCaptureMatches = summary?.real_live_state_capture === true;
+  const fixtureMarkerMatches = summary?.live_shape_fixture !== true;
+  const tbPtrValid = isNonEmptyString(summary?.tb_ptr);
+  const tbPcValid = isNonEmptyString(summary?.tb_pc);
+  const tbCsBaseValid = isNonEmptyString(summary?.tb_cs_base);
+  const tbSizePositive = isPositiveInteger(summary?.tb_size);
+  const tbIcountPositive = isPositiveInteger(summary?.tb_icount);
+  const metadataOpCountPositive = isPositiveInteger(summary?.metadata_op_count);
+  const metadataGeneratedOutputAvailableValid = isBoolean(
+    summary?.metadata_generated_output_available,
+  );
+  const generatedGuestInstructionsPositive = isPositiveInteger(
+    summary?.generated_guest_instructions,
+  );
+  const referenceGuestInstructionsPositive = isPositiveInteger(
+    summary?.reference_guest_instructions,
+  );
+  const scannedLiveTbsBeforeMatchPositive = isPositiveInteger(
+    summary?.scanned_live_tbs_before_match,
+  );
+  const memoryLoadsPositive = isPositiveInteger(
+    memoryCounters.normalized_memory_loads,
+  );
+  const memoryStoresPositive = isPositiveInteger(
+    memoryCounters.normalized_memory_stores,
+  );
+
+  return {
+    ...summary,
+    missingFields,
+    generated_tci_op_equivalents_matches: generatedTciOpEquivalentsMatch,
+    generated_body_time_positive: generatedBodyTimePositive,
+    tci_dispatch_time_positive: tciDispatchTimePositive,
+    compile_time_positive: compileTimePositive,
+    instantiate_time_positive: instantiateTimePositive,
+    generated_chain_length_positive: generatedChainLengthPositive,
+    helper_calls_zero: helperCallsZero,
+    qemu_ld_calls_zero: qemuLdCallsZero,
+    qemu_st_calls_zero: qemuStCallsZero,
+    generated_status_matches: generatedStatusMatches,
+    dispatch_status_matches: dispatchStatusMatches,
+    generated_dispatch_target_matches: generatedDispatchTargetMatches,
+    generated_regs_checksum_matches: generatedRegsChecksumMatches,
+    generated_memory_checksum_matches: generatedMemoryChecksumMatches,
+    generated_memory_writes_matches: generatedMemoryWritesMatch,
+    live_capture_matches: liveCaptureMatches,
+    fixture_marker_matches: fixtureMarkerMatches,
+    tb_ptr_valid: tbPtrValid,
+    tb_pc_valid: tbPcValid,
+    tb_cs_base_valid: tbCsBaseValid,
+    tb_size_positive: tbSizePositive,
+    tb_icount_positive: tbIcountPositive,
+    metadata_op_count_positive: metadataOpCountPositive,
+    metadata_generated_output_available_valid:
+      metadataGeneratedOutputAvailableValid,
+    generated_guest_instructions_positive: generatedGuestInstructionsPositive,
+    reference_guest_instructions_positive: referenceGuestInstructionsPositive,
+    normalized_memory_loads: memoryCounters.normalized_memory_loads,
+    normalized_memory_stores: memoryCounters.normalized_memory_stores,
+    normalized_memory_counter_source:
+      memoryCounters.normalized_memory_counter_source,
+    memory_counters_match: memoryCounters.memory_counters_match &&
+      memoryLoadsPositive &&
+      memoryStoresPositive,
+    scanned_live_tbs_before_match_positive: scannedLiveTbsBeforeMatchPositive,
+    acceptanceAllowed: true,
+    ok:
+      summary?.ok === true &&
+      missingFields.length === 0 &&
+      generatedTciOpEquivalentsMatch &&
+      generatedBodyTimePositive &&
+      tciDispatchTimePositive &&
+      compileTimePositive &&
+      instantiateTimePositive &&
+      generatedChainLengthPositive &&
+      helperCallsZero &&
+      qemuLdCallsZero &&
+      qemuStCallsZero &&
+      generatedStatusMatches &&
+      dispatchStatusMatches &&
+      generatedDispatchTargetMatches &&
+      generatedRegsChecksumMatches &&
+      generatedMemoryChecksumMatches &&
+      generatedMemoryWritesMatch &&
+      liveCaptureMatches &&
+      fixtureMarkerMatches &&
+      tbPtrValid &&
+      tbPcValid &&
+      tbCsBaseValid &&
+      tbSizePositive &&
+      tbIcountPositive &&
+      metadataOpCountPositive &&
+      metadataGeneratedOutputAvailableValid &&
+      generatedGuestInstructionsPositive &&
+      referenceGuestInstructionsPositive &&
+      memoryLoadsPositive &&
+      memoryStoresPositive &&
+      memoryCounters.memory_counters_match &&
+      scannedLiveTbsBeforeMatchPositive,
+  };
 }
 
 function validateRunloopSummaryByEvent(summary) {
@@ -647,6 +825,13 @@ function printResult(gate, json) {
     process.stdout.write(
       `  generated_vs_tci_speedup_ppm=${gate.runloop.lastSummary.generated_vs_tci_speedup_ppm} ` +
       `computed=${gate.runloop.lastSummary.generated_vs_tci_speedup_ppm_computed}\n`,
+    );
+  }
+  if (gate.runloop.lastSummary?.normalized_memory_counter_source !== undefined) {
+    process.stdout.write(
+      `  normalized_memory_counter_source=${gate.runloop.lastSummary.normalized_memory_counter_source} ` +
+      `normalized_memory_loads=${gate.runloop.lastSummary.normalized_memory_loads} ` +
+      `normalized_memory_stores=${gate.runloop.lastSummary.normalized_memory_stores}\n`,
     );
   }
   if (tcgState !== null) {

@@ -397,30 +397,152 @@ const scaffoldOneTbDifferentialResult = {
   },
 };
 
-const liveOneTbDifferentialResult = JSON.parse(
-  JSON.stringify(scaffoldOneTbDifferentialResult),
+const liveOneTbDifferentialResult = {
+  wasm64Runloop: {
+    summaryCount: 1,
+    summaries: [
+      {
+        elapsedMs: 2355,
+        format: 1,
+        event: "live-one-tb-differential",
+        name: "live-x86-r4i-ld32u-goto-tb-11",
+        ok: true,
+        live_shape_fixture: false,
+        real_live_state_capture: true,
+        shape: [
+          "ld32u",
+          "tci_movi",
+          "tci_setcond32",
+          "brcond",
+          "tci_movi",
+          "st8",
+          "ld",
+          "tci_movi",
+          "add",
+          "st",
+          "goto_tb",
+        ],
+        tb_ptr: "0x78700c0",
+        tb_pc: "0x0",
+        tb_cs_base: "0xffff0000",
+        tb_flags: 64,
+        tb_cflags: 4278321152,
+        tb_size: 3,
+        tb_icount: 1,
+        metadata_op_count: 13,
+        metadata_generated_output_available: false,
+        generated_guest_instructions: 1,
+        reference_guest_instructions: 1,
+        generated_tci_op_equivalents: 11,
+        reference_tci_op_equivalents: 11,
+        generated_body_time_ns: 45000,
+        tci_dispatch_time_ns: 300000,
+        compile_time_ns: 200000,
+        instantiate_time_ns: 50000,
+        generated_chain_length: 1,
+        host_memory_loads: 2,
+        host_memory_stores: 2,
+        helper_calls: 0,
+        qemu_ld_calls: 0,
+        qemu_st_calls: 0,
+        generated_status: 2,
+        reference_status: 2,
+        dispatch_status: 2,
+        generated_dispatch_target: 126288108,
+        reference_dispatch_target: 126288108,
+        exit_reason_code: 2,
+        exit_value: 126288108,
+        generated_regs_checksum: 407154517823240700,
+        reference_regs_checksum: 407154517823240700,
+        generated_memory_checksum: 8033238923928634000,
+        reference_memory_checksum: 8033238923928634000,
+        generated_memory_writes: 2,
+        reference_memory_writes: 2,
+        expected_memory_writes: 2,
+        scanned_live_tbs_before_match: 1,
+        js_status: 0,
+      },
+    ],
+    lastSummary: {
+      elapsedMs: 2355,
+      format: 1,
+      event: "live-one-tb-differential",
+      name: "live-x86-r4i-ld32u-goto-tb-11",
+      ok: true,
+      live_shape_fixture: false,
+      real_live_state_capture: true,
+      shape: [
+        "ld32u",
+        "tci_movi",
+        "tci_setcond32",
+        "brcond",
+        "tci_movi",
+        "st8",
+        "ld",
+        "tci_movi",
+        "add",
+        "st",
+        "goto_tb",
+      ],
+      tb_ptr: "0x78700c0",
+      tb_pc: "0x0",
+      tb_cs_base: "0xffff0000",
+      tb_flags: 64,
+      tb_cflags: 4278321152,
+      tb_size: 3,
+      tb_icount: 1,
+      metadata_op_count: 13,
+      metadata_generated_output_available: false,
+      generated_guest_instructions: 1,
+      reference_guest_instructions: 1,
+      generated_tci_op_equivalents: 11,
+      reference_tci_op_equivalents: 11,
+      generated_body_time_ns: 45000,
+      tci_dispatch_time_ns: 300000,
+      compile_time_ns: 200000,
+      instantiate_time_ns: 50000,
+      generated_chain_length: 1,
+      host_memory_loads: 2,
+      host_memory_stores: 2,
+      helper_calls: 0,
+      qemu_ld_calls: 0,
+      qemu_st_calls: 0,
+      generated_status: 2,
+      reference_status: 2,
+      dispatch_status: 2,
+      generated_dispatch_target: 126288108,
+      reference_dispatch_target: 126288108,
+      exit_reason_code: 2,
+      exit_value: 126288108,
+      generated_regs_checksum: 407154517823240700,
+      reference_regs_checksum: 407154517823240700,
+      generated_memory_checksum: 8033238923928634000,
+      reference_memory_checksum: 8033238923928634000,
+      generated_memory_writes: 2,
+      reference_memory_writes: 2,
+      expected_memory_writes: 2,
+      scanned_live_tbs_before_match: 1,
+      js_status: 0,
+    },
+  },
+};
+
+const liveInlineMemoryOneTbDifferentialResult = JSON.parse(
+  JSON.stringify(liveOneTbDifferentialResult),
 );
 {
-  const liveSummary = {
-    ...liveOneTbDifferentialResult.wasm64Runloop.summaries[0],
-    event: "live-one-tb-differential",
-    name: "live-x86-r4i-ld32u-goto-tb-13",
-    live_shape_fixture: false,
-    real_live_state_capture: true,
-    tb_id: 13,
-    pc: 20552,
-    generated_guest_instructions: 4000000,
-    reference_guest_instructions: 4000000,
-    inline_tlb_hit_loads: 2,
-    inline_tlb_hit_stores: 2,
-  };
-  liveOneTbDifferentialResult.wasm64Runloop.summaries[0] = liveSummary;
-  liveOneTbDifferentialResult.wasm64Runloop.lastSummary = {
+  const liveSummary =
+    liveInlineMemoryOneTbDifferentialResult.wasm64Runloop.summaries[0];
+  delete liveSummary.host_memory_loads;
+  delete liveSummary.host_memory_stores;
+  liveSummary.inline_tlb_hit_loads = 2;
+  liveSummary.inline_tlb_hit_stores = 2;
+  liveInlineMemoryOneTbDifferentialResult.wasm64Runloop.lastSummary = {
     ...liveSummary,
   };
 }
 
-assert.equal(X86_BROWSER_SMOKE_METRICS_GATE_VERSION, 2);
+assert.equal(X86_BROWSER_SMOKE_METRICS_GATE_VERSION, 3);
 
 {
   const gate = x86BrowserSmokeMetricsGate(runtimeSmokeResult);
@@ -475,19 +597,38 @@ assert.equal(X86_BROWSER_SMOKE_METRICS_GATE_VERSION, 2);
   assert.equal(gate.runloop.acceptanceAllowed, true);
   assert.equal(gate.runloop.lastSummary.event, "live-one-tb-differential");
   assert.equal(gate.runloop.lastSummary.real_live_state_capture, true);
-  assert.equal(gate.runloop.lastSummary.tb_id, 13);
-  assert.equal(gate.runloop.lastSummary.pc, 20552);
-  assert.equal(gate.runloop.lastSummary.generated_guest_instructions, 4000000);
-  assert.equal(gate.runloop.lastSummary.reference_guest_instructions, 4000000);
-  assert.equal(gate.runloop.lastSummary.generated_guest_instructions_valid, true);
-  assert.equal(gate.runloop.lastSummary.reference_guest_instructions_valid, true);
-  assert.equal(gate.runloop.lastSummary.tb_identity_valid, true);
+  assert.equal(gate.runloop.lastSummary.live_shape_fixture, false);
+  assert.equal(gate.runloop.lastSummary.tb_ptr, "0x78700c0");
+  assert.equal(gate.runloop.lastSummary.tb_pc, "0x0");
+  assert.equal(gate.runloop.lastSummary.tb_cs_base, "0xffff0000");
+  assert.equal(gate.runloop.lastSummary.tb_flags, 64);
+  assert.equal(gate.runloop.lastSummary.tb_cflags, 4278321152);
+  assert.equal(gate.runloop.lastSummary.tb_size, 3);
+  assert.equal(gate.runloop.lastSummary.tb_icount, 1);
+  assert.equal(gate.runloop.lastSummary.metadata_op_count, 13);
+  assert.equal(gate.runloop.lastSummary.metadata_generated_output_available, false);
+  assert.equal(gate.runloop.lastSummary.scanned_live_tbs_before_match, 1);
+  assert.equal(gate.runloop.lastSummary.generated_guest_instructions, 1);
+  assert.equal(gate.runloop.lastSummary.reference_guest_instructions, 1);
+  assert.equal(gate.runloop.lastSummary.host_memory_loads, 2);
+  assert.equal(gate.runloop.lastSummary.host_memory_stores, 2);
+  assert.equal(gate.runloop.lastSummary.generated_guest_instructions_positive, true);
+  assert.equal(gate.runloop.lastSummary.reference_guest_instructions_positive, true);
+  assert.equal(gate.runloop.lastSummary.tb_ptr_valid, true);
+  assert.equal(gate.runloop.lastSummary.tb_pc_valid, true);
+  assert.equal(gate.runloop.lastSummary.tb_cs_base_valid, true);
+  assert.equal(gate.runloop.lastSummary.tb_size_positive, true);
+  assert.equal(gate.runloop.lastSummary.tb_icount_positive, true);
+  assert.equal(gate.runloop.lastSummary.metadata_op_count_positive, true);
+  assert.equal(gate.runloop.lastSummary.metadata_generated_output_available_valid, true);
   assert.equal(gate.runloop.lastSummary.generated_body_time_positive, true);
   assert.equal(gate.runloop.lastSummary.tci_dispatch_time_positive, true);
+  assert.equal(gate.runloop.lastSummary.compile_time_positive, true);
+  assert.equal(gate.runloop.lastSummary.instantiate_time_positive, true);
   assert.equal(gate.runloop.lastSummary.generated_chain_length_positive, true);
-  assert.equal(gate.runloop.lastSummary.inline_tlb_hit_loads_valid, true);
-  assert.equal(gate.runloop.lastSummary.inline_tlb_hit_stores_valid, true);
   assert.equal(gate.runloop.lastSummary.generated_tci_op_equivalents_matches, true);
+  assert.equal(gate.runloop.lastSummary.generated_status_matches, true);
+  assert.equal(gate.runloop.lastSummary.dispatch_status_matches, true);
   assert.equal(gate.runloop.lastSummary.generated_dispatch_target_matches, true);
   assert.equal(gate.runloop.lastSummary.generated_regs_checksum_matches, true);
   assert.equal(gate.runloop.lastSummary.generated_memory_checksum_matches, true);
@@ -495,7 +636,27 @@ assert.equal(X86_BROWSER_SMOKE_METRICS_GATE_VERSION, 2);
   assert.equal(gate.runloop.lastSummary.helper_calls_zero, true);
   assert.equal(gate.runloop.lastSummary.qemu_ld_calls_zero, true);
   assert.equal(gate.runloop.lastSummary.qemu_st_calls_zero, true);
+  assert.equal(gate.runloop.lastSummary.normalized_memory_counter_source, "host_memory");
+  assert.equal(gate.runloop.lastSummary.normalized_memory_loads, 2);
+  assert.equal(gate.runloop.lastSummary.normalized_memory_stores, 2);
+  assert.equal(gate.runloop.lastSummary.memory_counters_match, true);
   assert.equal(gate.tcg, null);
+}
+
+{
+  const gate = x86BrowserSmokeMetricsGate(liveInlineMemoryOneTbDifferentialResult);
+  assert.equal(gate.ok, true);
+  assert.equal(gate.runloop.ok, true);
+  assert.equal(gate.runloop.acceptanceAllowed, true);
+  assert.equal(gate.runloop.lastSummary.event, "live-one-tb-differential");
+  assert.equal(gate.runloop.lastSummary.normalized_memory_counter_source, "inline_tlb_hit");
+  assert.equal(gate.runloop.lastSummary.normalized_memory_loads, 2);
+  assert.equal(gate.runloop.lastSummary.normalized_memory_stores, 2);
+  assert.equal(gate.runloop.lastSummary.memory_counters_match, true);
+  assert.equal(gate.runloop.lastSummary.host_memory_loads, undefined);
+  assert.equal(gate.runloop.lastSummary.host_memory_stores, undefined);
+  assert.equal(gate.runloop.lastSummary.inline_tlb_hit_loads, 2);
+  assert.equal(gate.runloop.lastSummary.inline_tlb_hit_stores, 2);
 }
 
 {
