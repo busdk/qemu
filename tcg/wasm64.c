@@ -61,6 +61,7 @@
 #define TCG_WASM64_ONE_TB_MEMORY_WRITES 2u
 #define TCG_WASM64_LIVE_TB_COVERAGE_DEFAULT_SCAN_LIMIT 50000u
 #define TCG_WASM64_LIVE_GENERATED_EXEC_DEFAULT_PREFLIGHT_LIMIT 10000u
+#define TCG_WASM64_LIVE_HOTSET_SLOT_BACKSCAN 256u
 
 static const uint32_t tcg_wasm64_one_tb_words[] = {
     0xfff0e41c, 0x0000057d, 0x00254d88, 0x00000d04,
@@ -328,6 +329,13 @@ static __thread uint64_t live_one_tb_differential_scanned;
 static __thread uint64_t live_generated_exec_attempted;
 static __thread uint64_t live_generated_exec_successes;
 static __thread uint64_t live_generated_exec_summary_reported_attempts;
+static __thread uint64_t live_generated_exec_hotset_probe_attempts;
+static __thread uint64_t live_generated_exec_hotset_goto_sources;
+static __thread uint64_t live_generated_exec_hotset_target_slots_read;
+static __thread uint64_t live_generated_exec_hotset_target_slots_unsafe;
+static __thread uint64_t live_generated_exec_hotset_target_metadata_hits;
+static __thread uint64_t live_generated_exec_hotset_target_output_hits;
+static __thread uint64_t live_generated_exec_hotset_target_stale;
 static __thread uint64_t live_generated_exec_reject_reasons[
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT__MAX];
 static __thread bool live_tb_coverage_checked;
@@ -3882,6 +3890,97 @@ static bool tcg_wasm64_live_one_tb_selected_hot_shape(
            metadata->first_op == INDEX_op_ld32u;
 }
 
+typedef struct TCGWasm64GeneratedTerminal {
+    bool found;
+    TCGOpcode op;
+    intptr_t slot_offset;
+} TCGWasm64GeneratedTerminal;
+
+static bool tcg_wasm64_generated_terminal_parse(
+    const TCGWasm64TBMetadata *metadata, TCGWasm64GeneratedTerminal *terminal)
+{
+    const uint32_t *words;
+
+    memset(terminal, 0, sizeof(*terminal));
+    if (!metadata || !tcg_wasm64_translate_generated_output_available(metadata)) {
+        return false;
+    }
+
+    words = metadata->generated_output;
+    for (uint32_t i = 0; i < metadata->generated_output_op_count; i++) {
+        uint32_t insn = words[i];
+        TCGOpcode op = (TCGOpcode)extract32(insn, 0, 8);
+
+        if (op == INDEX_op_goto_tb || op == INDEX_op_exit_tb) {
+            /*
+             * Keep this in lock-step with the accepted R4k generated-output
+             * model.  TCI records branch slots as compact word offsets; the
+             * generated wasm body uses the current word position plus the
+             * encoded signed displacement to reach the slot.
+             */
+            terminal->found = true;
+            terminal->op = op;
+            terminal->slot_offset =
+                (intptr_t)((i + 1) * sizeof(uint32_t)) +
+                (intptr_t)sextract32(insn, 12, 20);
+            return true;
+        }
+    }
+    return false;
+}
+
+static void tcg_wasm64_live_generated_exec_probe_hotset_target(
+    const void *tb_ptr, const TCGWasm64TBMetadata *metadata,
+    const TranslationBlock *tb)
+{
+    TCGWasm64GeneratedTerminal terminal;
+    intptr_t min_offset = -(intptr_t)TCG_WASM64_LIVE_HOTSET_SLOT_BACKSCAN;
+    intptr_t max_offset;
+    uintptr_t target = 0;
+    const TCGWasm64TBMetadata *target_metadata;
+
+    live_generated_exec_hotset_probe_attempts++;
+    if (!tcg_wasm64_generated_terminal_parse(metadata, &terminal)) {
+        return;
+    }
+    if (terminal.op != INDEX_op_goto_tb) {
+        return;
+    }
+
+    live_generated_exec_hotset_goto_sources++;
+    if (!tb || tb->tc.ptr != tb_ptr ||
+        tb->tc.size < sizeof(uintptr_t)) {
+        live_generated_exec_hotset_target_slots_unsafe++;
+        return;
+    }
+
+    max_offset = (intptr_t)tb->tc.size - (intptr_t)sizeof(uintptr_t);
+    if (terminal.slot_offset < min_offset ||
+        terminal.slot_offset > max_offset) {
+        live_generated_exec_hotset_target_slots_unsafe++;
+        return;
+    }
+
+    memcpy(&target, (const uint8_t *)tb_ptr + terminal.slot_offset,
+           sizeof(target));
+    if (target == 0) {
+        live_generated_exec_hotset_target_stale++;
+        return;
+    }
+
+    live_generated_exec_hotset_target_slots_read++;
+    target_metadata = tcg_wasm64_translate_lookup((const void *)target);
+    if (!target_metadata) {
+        live_generated_exec_hotset_target_stale++;
+        return;
+    }
+
+    live_generated_exec_hotset_target_metadata_hits++;
+    if (tcg_wasm64_translate_generated_output_available(target_metadata)) {
+        live_generated_exec_hotset_target_output_hits++;
+    }
+}
+
 static const char *tcg_wasm64_live_one_tb_js_status_name(uint64_t status)
 {
     switch (status) {
@@ -4632,6 +4731,13 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             "\"generated_guest_instructions\":%" PRIu64 ","
             "\"generated_coverage_numerator\":%" PRIu64 ","
             "\"generated_coverage_denominator\":%" PRIu64 ","
+            "\"hotset_probe_attempts\":%" PRIu64 ","
+            "\"hotset_goto_sources\":%" PRIu64 ","
+            "\"hotset_target_slots_read\":%" PRIu64 ","
+            "\"hotset_target_slots_unsafe\":%" PRIu64 ","
+            "\"hotset_target_metadata_hits\":%" PRIu64 ","
+            "\"hotset_target_output_hits\":%" PRIu64 ","
+            "\"hotset_target_stale\":%" PRIu64 ","
             "\"reject_reasons\":[",
             reason ? reason : "unknown",
             (tcg_wasm64_live_generated_exec_reject_total() != 0 &&
@@ -4645,7 +4751,14 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             tcg_wasm64_live_generated_exec_reject_total(),
             translated_counters.generated_coverage_numerator,
             translated_counters.generated_coverage_numerator,
-            translated_counters.generated_coverage_denominator);
+            translated_counters.generated_coverage_denominator,
+            live_generated_exec_hotset_probe_attempts,
+            live_generated_exec_hotset_goto_sources,
+            live_generated_exec_hotset_target_slots_read,
+            live_generated_exec_hotset_target_slots_unsafe,
+            live_generated_exec_hotset_target_metadata_hits,
+            live_generated_exec_hotset_target_output_hits,
+            live_generated_exec_hotset_target_stale);
     tcg_wasm64_print_live_generated_exec_reject_reasons();
     fprintf(stderr, "]}\n");
 }
@@ -4727,13 +4840,14 @@ static bool tcg_wasm64_live_generated_exec_try(
             "generated-output-unavailable", tb_ptr, metadata, NULL,
             TCG_WASM64_RUN_EXIT_UNSUPPORTED, counters, no_fallback);
     }
+    tb = tcg_tb_lookup((uintptr_t)tb_ptr);
+    tcg_wasm64_live_generated_exec_probe_hotset_target(tb_ptr, metadata, tb);
     if (!tcg_wasm64_live_one_tb_generated_output_shape_supported(metadata)) {
         return tcg_wasm64_live_generated_exec_reject(
             "selected-body-shape-unsupported", tb_ptr, metadata, NULL,
             TCG_WASM64_RUN_EXIT_UNSUPPORTED, counters, no_fallback);
     }
 
-    tb = tcg_tb_lookup((uintptr_t)tb_ptr);
     if (!tb || tb->tc.ptr != tb_ptr || tb->icount == 0) {
         return tcg_wasm64_live_generated_exec_reject(
             "tb-identity-missing-or-stale", tb_ptr, metadata, tb,

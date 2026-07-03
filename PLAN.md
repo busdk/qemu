@@ -1791,6 +1791,50 @@ run that reaches a weaker marker than normal multi-user readiness.
   `ecd236eda4eb80dee24b1d65a9dbbeb9b07777f889bc4baee235db7a78f75dc4`.
   This item makes no R4l speed claim, does not use RISC-V timing as x86
   evidence, and does not permit an x86 Bus Engine OS browser proof yet.
+- [x] R4o - Add live x86 hotset-target attribution before another browser
+  speed gate. DoD: the opt-in live-generated-exec preflight inspects each
+  metadata-backed `goto_tb` source before the old exact-shape rejection,
+  reports whether the `goto_tb` slot could be safely read, whether the target
+  resolved to live translated metadata, and whether the target already has
+  generated output available. This item must not execute a chained target,
+  broaden the rejected direct-boundary path, claim a speedup, or permit R4l;
+  it only decides whether the next live `wasmjit_run()` implementation slice
+  can use available hotset targets or must first add target publication.
+  Required checks: `git diff --check`, `node --check
+  scripts/ci/wasm64-translate-metadata-test.mjs`, `node
+  scripts/ci/wasm64-translate-metadata-test.mjs`, and, if the C change is
+  accepted, one current-artifact bounded Chromium preflight that records the
+  new `hotset_*` fields in the result JSON before any full speed gate.
+  Accepted 2026-07-03 on latest QEMU `origin/develop`
+  `b512ef836e19e3f652a029abc213ffa96bf9f9f4`: the live-generated-exec
+  preflight now parses generated-output terminals before exact-shape
+  rejection and records `hotset_*` counters without executing chained targets.
+  Build command: `python3 scripts/ci/wasm-build-artifacts-local.py --out
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4o-hotset-attribution-artifacts
+  --target x86_64 --tcg-wasm64-backend --jobs 20`; hashes:
+  `qemu-system-x86_64.js`
+  `baa3ca621faa1e1aa9af8fffadb1a7fb3acb21d3d63ad2a4ec9e8bd2eed2e011`,
+  `qemu-system-x86_64.wasm`
+  `2eebbba293881c8e1db7d2f353ce4eb9a7827554eb03a48c956ae466723dee07`,
+  manifest
+  `7f1e125380b7d3b8c322131c5fbc42961b5051f2680b9eef01d70d733538a336`.
+  Checks: `git diff --check`, `node --check
+  scripts/ci/wasm64-translate-metadata-test.mjs`, `node
+  scripts/ci/wasm64-translate-metadata-test.mjs`, `node --check
+  scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+  scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node --check
+  scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs`, and `node
+  scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`.
+  Bounded Chromium `149.0.7827.55` preflight command wrote
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4o-hotset-attribution-preflight/wasm-browser-smoke-result.json`.
+  It intentionally aborted with `preflight-zero-generated-exec` instead of
+  waiting for a boot marker; the diagnostic summary reported attempts `1000`,
+  generated guest instructions `0`, hotset probe attempts `996`, `goto_tb`
+  sources `538`, target slots read `538`, unsafe slots `0`, target metadata
+  hits `60`, target generated-output hits `58`, and stale/missing targets
+  `478`. This accepts only target-attribution evidence, makes no speed claim,
+  does not permit R4l, and points the next slice at live hotset execution for
+  source and target TBs that already have generated output.
 - [x] R7 - Dispatch available RISC-V generated output from the live wasm64
   run loop before TCI fallback. DoD: when live TB metadata reports
   `tcg_wasm64_translate_generated_output_available()` and the RV64
