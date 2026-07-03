@@ -1070,6 +1070,121 @@ run that reaches a weaker marker than normal multi-user readiness.
     browser smoke, browser speed claim, same-commit speed gate, broad
     SoftMMU/TLB lowering, RISC-V work, BusDK work, or Bus Engine OS proof;
     R4k remains open for slices 5-6.
+    Slice 5 prep accepted 2026-07-03 on branch
+    `qemu/r4k-softmmu-fastpath-map-20260703-11`: this is a source-map and
+    deterministic-fixture plan only; it does not implement broad SoftMMU/TLB
+    lowering, run a browser smoke, claim a speedup, or mark R4k slice 5
+    complete. The exact x86 state reachability is `TCGWasm64RunContext.env`
+    in `tcg/wasm64.h`, `env_cpu(env)` in `include/exec/cpu-common.h`, and
+    `CPUState.neg.tlb` in `include/hw/core/cpu.h`; the generated path must
+    use C-authored mirrors instead of hard-coding the negative
+    `CPUState`/`CPUArchState` displacement. The x86 translator state that
+    supplies the SoftMMU index is `DisasContext.mem_index` in
+    `target/i386/tcg/translate.c`, initialized by
+    `cpu_mmu_index(cpu, false)` and implemented by
+    `x86_cpu_mmu_index()`/`x86_mmu_index_pl()` in
+    `target/i386/tcg/tcg-cpu.c` for `MMU_KSMAP64_IDX`,
+    `MMU_KSMAP32_IDX`, `MMU_USER64_IDX`, `MMU_USER32_IDX`,
+    `MMU_KNOSMAP64_IDX`, `MMU_KNOSMAP32_IDX`, `MMU_PHYS_IDX`, and
+    `MMU_NESTED_IDX` from `target/i386/cpu.h`. The CPU state fields already
+    needed around these accesses are `CPUX86State.regs[]`, `eip`,
+    `cc_dst`, `cc_src`, `cc_src2`, `cc_op`, `hflags`, `hflags2`,
+    `segs[]`, `cr[]`, and `a20_mask` in `target/i386/cpu.h`, with TCG
+    globals wired by `tcg_global_mem_new*()` in
+    `target/i386/tcg/translate.c`.
+    The exact TLB layout for a wasm64 hit is
+    `CPUTLBDescFast.mask`/`table` in `include/exec/tlb-common.h`, indexed as
+    `((vaddr >> TARGET_PAGE_BITS) & (mask >> CPU_TLB_ENTRY_BITS))`, where
+    x86 has `TARGET_PAGE_BITS == 12` from `target/i386/cpu-param.h` and
+    wasm64 has `CPU_TLB_ENTRY_BITS == 5`, so `CPUTLBEntry` is 32 bytes with
+    `addr_read` at offset 0, `addr_write` at offset 8, `addr_code` at offset
+    16, and `addend` at offset 24. `cpu_tlb_fast()` and
+    `mmuidx_to_fast_index()` in `include/hw/core/cpu.h` select the fast TLB
+    array. Permission and slow-path tags are the comparator bits
+    `TLB_INVALID_MASK`, `TLB_NOTDIRTY`, and `TLB_FORCE_SLOW` plus
+    `CPUTLBEntryFull.slow_flags[MMU_DATA_LOAD]` and
+    `slow_flags[MMU_DATA_STORE]` from `include/hw/core/cpu.h` and
+    `include/exec/tlb-flags.h`; `TLB_BSWAP`, `TLB_WATCHPOINT`,
+    `TLB_CHECK_ALIGNED`, `TLB_DISCARD_WRITE`, and `TLB_MMIO` must not be
+    modeled as RAM hits.
+    The current QEMU slow boundary is `tci_qemu_ld()`/`tci_qemu_st()` in
+    `tcg/tci.c`, which dispatch through `helper_ldub_mmu`,
+    `helper_lduw_mmu`, `helper_ldul_mmu`, `helper_ldq_mmu`, and the matching
+    store helpers in `accel/tcg/ldst_common.c.inc` to
+    `do_ld*_mmu()`/`do_st*_mmu()` in `accel/tcg/cputlb.c`. Those helpers
+    decode `MemOpIdx` with `get_memop()`/`get_mmuidx()` from
+    `include/exec/memopidx.h`, split page-crossing accesses in
+    `mmu_lookup()`, fill or fault through `tlb_fill_align()`, and classify
+    RAM versus MMIO in `tlb_set_page_full()`: RAM and ROMD reads get
+    `entry->addend = memory_region_get_ram_ptr(section->mr) + xlat -
+    addr_page`, I/O has addend 0, I/O reads and I/O or ROMD writes set
+    `TLB_MMIO`, missing permissions set the comparator to `-1`, and
+    dirty/write-discard/watchpoint/alignment/bswap cases force the slow path.
+    The native x86 TCG reference guard is
+    `prepare_host_addr()` in `tcg/x86_64/tcg-target.c.inc`, using
+    `tlb_mask_table_ofs()` in `tcg/tcg.c`: compare the page/adjusted-page
+    address against `addr_read` or `addr_write`, then use `vaddr + addend`
+    only on a clean hit.
+    Slice 5 implementation must export or mirror into
+    `TCGWasm64RunContext` enough C-owned data to reproduce that guard:
+    either an explicit `CPUState *cpu` plus per-access reloads of
+    `CPUTLBDescFast.mask`, `CPUTLBDescFast.table`, and
+    `CPUTLBDesc.fulltlb`, or precomputed per-`mmu_idx` mirror fields for
+    those three values, with `QEMU_BUILD_BUG_ON()` checks for all exported
+    offsets and constants. The current context has only `env`, `guest_ram`,
+    `budget`, `counters`, `exit`, `mode`, and `flags`, so it is not enough to
+    identify MMIO versus a miss/fault. The generated hit guard must fail
+    closed before any direct memory access when `((addr ^ (addr + size - 1))
+    & TARGET_PAGE_MASK) != 0`, the comparator base page
+    `(addr_read_or_write & TARGET_PAGE_MASK)` does not match
+    `(addr & TARGET_PAGE_MASK)`, the `MemOp` is not a little-endian
+    1/4/8-byte scalar covered by the fixture, or the operation would require
+    a helper side effect. If the base page matches but `addr_read`/`addr_write`
+    contains any `TLB_FLAGS_MASK` bit or the mirrored full entry has any
+    `TLB_SLOW_FLAGS_MASK` bit, the only precise generated classifications are
+    `TCG_WASM64_RUN_EXIT_MMIO` when the mirrored full entry contains
+    `TLB_MMIO`, `TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT` for invalid or
+    disabled permission state, and `TCG_WASM64_RUN_EXIT_UNSUPPORTED` for
+    unmodeled slow flags; none may be guessed as RAM.
+    Deterministic slice-5 fixture names and expected generated counters are:
+    these are SoftMMU `qemu_ld`/`qemu_st` width/access cases, not approval to
+    generate raw host-memory `INDEX_op_ld32u`, `INDEX_op_ld`,
+    `INDEX_op_st8`, or `INDEX_op_st`, which
+    `tcg_wasm64_translate_op_generated_supported()` in `tcg/wasm64.c`
+    intentionally still excludes.
+    `r4k-softmmu-ld32u-tlb-hit-ram` (`inline_tlb_hit_loads=1`,
+    `inline_tlb_hit_stores=0`, `helper_calls=0`, `qemu_ld_calls=0`,
+    `qemu_st_calls=0`, no synthetic exit beyond normal TB terminal);
+    `r4k-softmmu-ld-tlb-hit-ram` with the same counts for one 64-bit load;
+    `r4k-softmmu-st8-tlb-hit-ram` (`loads=0`, `stores=1`, helper and
+    `qemu_*` counts 0, normal terminal); `r4k-softmmu-st-tlb-hit-ram` with
+    the same counts for one 64-bit store; `r4k-softmmu-tlb-miss` (all inline,
+    helper, and `qemu_*` counts 0, `TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT`,
+    `exits_tlb_miss_or_fault=1`); `r4k-softmmu-mmio` (all inline, helper,
+    and `qemu_*` counts 0, mirrored `TLB_MMIO`,
+    `TCG_WASM64_RUN_EXIT_MMIO`, `exits_mmio=1`);
+    `r4k-softmmu-permission-fault` (all inline, helper, and `qemu_*` counts
+    0, disabled comparator or `TLB_INVALID_MASK`,
+    `TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT`,
+    `exits_tlb_miss_or_fault=1`); `r4k-softmmu-page-crossing` (all inline,
+    helper, and `qemu_*` counts 0, page-crossing flag in
+    `TCGWasm64RunExit.flags`, `TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT`,
+    `exits_tlb_miss_or_fault=1`); and
+    `r4k-softmmu-stale-output-mismatch` (all generated counters 0, current
+    status `metadata-output-tb-code-mismatch` from `tcg/wasm64.c` when
+    `metadata->generated_output` no longer matches TB words). True
+    stale-TB/address-space invalidation is not safely expressible until
+    slice 6 adds generation tracking; that later fixture should use
+    `TCG_WASM64_RUN_EXIT_INVALIDATED` and `exits_invalidated=1`. The first
+    real implementation task is to add the narrow run-context TLB mirror and
+    deterministic JS softmmu fixture model, then replace only the generated
+    `qemu_ld`/`qemu_st` helper call in
+    `scripts/ci/wasm-generated-output-equivalence-test.mjs` for these width
+    cases with the guard above. Its failure mode must be a zero-inline-count
+    synthetic exit for every unmirrored offset, flag, crossing, miss, MMIO,
+    permission, or unsupported `MemOp`; its first check command is
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs` followed by
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`.
   - [ ] R4l - Run the x86_64 same-commit generic Chromium speed gate only
     after R4h-R4k have deterministic evidence. DoD: build one default-TCI
     `x86_64-softmmu` artifact and one accelerator artifact from the same
