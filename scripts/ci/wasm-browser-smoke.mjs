@@ -38,6 +38,11 @@ function option(name, fallback) {
   return value === null || value === "" ? fallback : value;
 }
 
+function blankableOption(name, fallback) {
+  const value = new URLSearchParams(window.location.search).get(name);
+  return value === null ? fallback : value;
+}
+
 function pathOption(name, fallback) {
   const value = new URLSearchParams(window.location.search).get(name);
   return value === null ? fallback : value;
@@ -1471,7 +1476,7 @@ function buildConfig() {
   return {
     appendExtra: option("appendExtra", ""),
     allowSerialFallback: boolOption("allowSerialFallback", true),
-    cpu: option("cpu", "Nehalem"),
+    cpu: blankableOption("cpu", "Nehalem"),
     display: option("display", "none"),
     displayDevice: option("displayDevice", "default"),
     expectText: listOption("expectText"),

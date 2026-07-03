@@ -144,6 +144,51 @@ run that reaches a weaker marker than normal multi-user readiness.
     `Assertion failed: p_rcu_reader->depth != 0`. This completes the native
     control and blocker capture only; R1 remains open until a generic RISC-V
     browser smoke reaches its marker with default TCI.
+  - [x] R1c - Correct the RISC-V browser smoke shape and capture the current
+    default-TCI browser blocker without the ad hoc `-cpu rv64` option. DoD:
+    `scripts/ci/wasm-prepare-tuxboot-smoke-guest.py --target riscv64`
+    produces a browser manifest for `machine=virt`, blank `cpu`, raw ext4
+    rootfs on `virtio-blk-device`, and marker `Welcome to TuxTest`; the
+    browser page preserves the blank CPU query parameter; tests cover the
+    omitted `-cpu` command shape; and a current `riscv64-softmmu` default-TCI
+    artifact is run in Chrome/Chromium with result JSON. Accepted
+    2026-07-03: `python3 scripts/ci/wasm-prepare-tuxboot-smoke-guest-test.py`,
+    `node scripts/ci/wasm-browser-smoke-args-test.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke.mjs`, and
+    `node --check scripts/ci/wasm-linux-boot-smoke.mjs` passed. The guest
+    manifest was written to
+    `/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-official-guest/tuxboot-browser-smoke-guest.json`
+    with kernel SHA256
+    `2bd8132a3bf21570290042324fff48c987f42f2a00c08de979f43f0662ebadba`
+    and raw rootfs SHA256
+    `bdae7f7e022592800442b73eb32ec7631f43a4c13dd8621051204f7e482fbd2b`.
+    The artifact build command
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-default-r1b-current
+    --target riscv64 --build-image` passed and produced
+    `qemu-system-riscv64.js`
+    `09661031708135586564f43d6bf879ef49442124b4811eb0c8244943af96a2bf`,
+    `qemu-system-riscv64.wasm`
+    `0e3fc5b40c0f1a319f6eb0c856f9aee0d5b6c0472d377dbf0193722bfbacbab6`,
+    and manifest
+    `54f668e44a602a6e85c2dc963f0de66182e0d6ea573a063717df18a6841b73a0`.
+    A local headless Chrome/CDP proof using Chrome `149.0.7827.201` wrote
+    `/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-tci-current/wasm-browser-smoke-result.json`
+    and screenshot
+    `/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-tci-current/wasm-browser-smoke.png`.
+    It used `-M virt -m 512M -accel tcg,thread=single -nographic -kernel
+    /kernel -append 'printk.time=0 root=/dev/vda console=ttyS0 panic=-1'
+    -drive file=/rootfs.raw,format=raw,if=none,id=hd0 -device
+    virtio-blk-device,drive=hd0 -nic none -L /firmware`, loaded the full
+    1073741824 byte MEMFS rootfs, imported QEMU in `2956` ms, started QEMU in
+    `2974` ms, printed the Linux kernel version at `13958` ms, reached
+    `virtio_blk virtio0`, and timed out at `180321` ms without
+    `Welcome to TuxTest`. The final line was `Pthread ... Uncaught Infinity`.
+    Generated JS maps that value to Emscripten's
+    `__emscripten_throw_longjmp`, so the current corrected generic RISC-V
+    browser blocker is an escaped Emscripten JS SJLJ longjmp in the block I/O
+    path, not the earlier ad hoc-shape RCU assertion. R1 remains open until
+    this guest reaches `Welcome to TuxTest` in browser default TCI.
 - [x] R2 - Add the RV64-to-WASM accelerator design and fail-closed boundary.
   DoD: document CPU state layout, register residency, synthetic exits
   (`BUDGET`, `MMIO`, `TLB_MISS`, `INTERRUPT`, `CSR`, `INVALID`, `FATAL`),

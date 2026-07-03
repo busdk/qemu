@@ -205,9 +205,79 @@ ops were ``ld32u=46085`` and ``st8=23158``.
 This result is an accepted safety and attribution slice, not an acceleration
 win.  It proves the browser unaligned trap was caused by unsafe direct
 generated host-memory operations, and it names two next blockers: validated
-aligned generated-memory support if generated coverage is to resume, and the
-shared RISC-V browser RCU assertion before this generic guest can become the
-passing RISC-V browser baseline.
+aligned generated-memory support if generated coverage is to resume, and a
+passing default-TCI RISC-V browser baseline before this generic guest can
+become accelerator evidence.
+
+Later on 2026-07-03, the RISC-V browser baseline was corrected to use the
+official TuxBoot ``virt`` machine shape without the ad hoc ``-cpu rv64`` option
+from earlier temporary CDP runs.  The prep helper now supports
+``--target riscv64`` and writes a browser manifest with ``machine=virt``, blank
+``cpu``, marker ``Welcome to TuxTest``, raw ext4 rootfs, and
+``rootfsDevice=virtio-mmio``.  The browser harness now preserves a blank
+``cpu=`` query parameter instead of replacing it with the x86 default, and the
+node smoke command omits ``-cpu`` when the target configuration requests a
+blank CPU.  The focused checks passed:
+``python3 scripts/ci/wasm-prepare-tuxboot-smoke-guest-test.py``,
+``node scripts/ci/wasm-browser-smoke-args-test.mjs``,
+``node --check scripts/ci/wasm-browser-smoke.mjs``, and
+``node --check scripts/ci/wasm-linux-boot-smoke.mjs``.
+
+The corrected default-TCI ``riscv64-softmmu`` artifact was built with::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-default-r1b-current \
+    --target riscv64 --build-image
+
+It produced:
+
+* ``qemu-system-riscv64.js`` =
+  ``09661031708135586564f43d6bf879ef49442124b4811eb0c8244943af96a2bf``;
+* ``qemu-system-riscv64.wasm`` =
+  ``0e3fc5b40c0f1a319f6eb0c856f9aee0d5b6c0472d377dbf0193722bfbacbab6``;
+* manifest =
+  ``54f668e44a602a6e85c2dc963f0de66182e0d6ea573a063717df18a6841b73a0``.
+
+The guest manifest was written to
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-official-guest/tuxboot-browser-smoke-guest.json``
+with kernel SHA-256
+``2bd8132a3bf21570290042324fff48c987f42f2a00c08de979f43f0662ebadba``
+and raw rootfs SHA-256
+``bdae7f7e022592800442b73eb32ec7631f43a4c13dd8621051204f7e482fbd2b``.
+
+The browser proof used local headless Chrome ``149.0.7827.201`` through CDP
+because fetching Playwright from npm was not available in the restricted
+environment.  It wrote
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-tci-current/wasm-browser-smoke-result.json``
+and screenshot
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-tci-current/wasm-browser-smoke.png``.
+The QEMU command recorded in the result was::
+
+  ./this.program -M virt -m 512M -accel tcg,thread=single -nographic \
+    -serial mon:stdio -monitor none -kernel /kernel \
+    -append 'printk.time=0 root=/dev/vda console=ttyS0 panic=-1' \
+    -drive file=/rootfs.raw,format=raw,if=none,id=hd0 \
+    -device virtio-blk-device,drive=hd0 -nic none -L /firmware
+
+The run loaded the full 1073741824 byte MEMFS rootfs, imported the QEMU module
+in ``2956`` ms, started QEMU in ``2974`` ms, printed the Linux kernel version
+at ``13958`` ms, reached ``virtio_blk virtio0``, and timed out at ``180321``
+ms without ``Welcome to TuxTest``.  The final line was
+``Pthread ... Uncaught Infinity``.  In the generated Emscripten JavaScript,
+``Infinity`` is thrown by ``__emscripten_throw_longjmp`` for JS SJLJ longjmp
+support, so the current corrected generic RISC-V browser blocker is an
+escaped Emscripten longjmp in the raw block I/O path.  The earlier RCU
+assertion remains historical evidence from an ad hoc browser shape and should
+not be treated as the current RISC-V baseline blocker without reproducing it
+with the official blank-CPU manifest.
+
+An attempted experiment to pass ``-sSUPPORT_LONGJMP=wasm`` through
+``--configure-arg=--extra-cflags=...`` and ``--configure-arg=--extra-ldflags=...``
+was stopped as unaccepted: Meson still reported the normal Emscripten
+``-sASYNCIFY=1 -sPROXY_TO_PTHREAD=1`` link shape and compiler probes still
+used ``-enable-emscripten-sjlj``.  If Wasm SJLJ is tested next, it needs a
+real cross-file or build-helper option that changes the Emscripten compile and
+link mode before spending time on browser proof.
 
 Strict definition of done
 =========================
