@@ -257,9 +257,6 @@ static bool tcg_wasm64_translate_op_generated_supported(uint32_t op)
     case INDEX_op_deposit:
     case INDEX_op_exit_tb:
     case INDEX_op_goto_tb:
-    case INDEX_op_ld:
-    case INDEX_op_ld32u:
-    case INDEX_op_ld32s:
     case INDEX_op_mb:
     case INDEX_op_mov:
     case INDEX_op_movcond:
@@ -269,12 +266,14 @@ static bool tcg_wasm64_translate_op_generated_supported(uint32_t op)
     case INDEX_op_setcond:
     case INDEX_op_shl:
     case INDEX_op_shr:
-    case INDEX_op_st:
-    case INDEX_op_st8:
-    case INDEX_op_st32:
     case INDEX_op_sub:
     case INDEX_op_tci_movi:
     case INDEX_op_tci_movl:
+    /*
+     * Direct TCI host-memory ld/st operations need a validated aligned
+     * memory-access model before they can be generated safely in browsers.
+     * Helper-backed guest RAM accesses are still allowed below.
+     */
     case INDEX_op_tci_qemu_ld_rrr:
     case INDEX_op_tci_qemu_st_rrr:
     case INDEX_op_tci_setcond32:

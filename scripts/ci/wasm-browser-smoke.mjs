@@ -24,6 +24,8 @@ const OPTIONAL_FIRMWARE_FILES = [
   "vgabios.bin",
   "vgabios-stdvga.bin",
   "efi-virtio.rom",
+  "opensbi-riscv32-generic-fw_dynamic.bin",
+  "opensbi-riscv64-generic-fw_dynamic.bin",
 ];
 const DEFAULT_ROOTFS_OPFS_NAME = "qemu-wasm-rootfs.raw";
 const OPFS_ROOTFS_DIRECTORY = "qemu-wasm-rootfs";

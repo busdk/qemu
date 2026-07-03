@@ -69,6 +69,24 @@ assert.match(runtime, /TCG_WASM64_TRANSLATE_CACHE_SIZE/);
 assert.match(runtime, /static __thread TCGWasm64TranslateEntry translate_cache/);
 assert.match(runtime, /tcg_wasm64_translate_op_supported/);
 assert.match(runtime, /tcg_wasm64_translate_op_generated_supported/);
+const generatedSupportedBody = runtime.match(
+  /static bool tcg_wasm64_translate_op_generated_supported\(uint32_t op\)\s*\{[\s\S]*?switch \(\(TCGOpcode\)op\) \{([\s\S]*?)default:/,
+)?.[1] || "";
+for (const unsafeHostMemoryOp of [
+  "INDEX_op_ld",
+  "INDEX_op_ld32u",
+  "INDEX_op_ld32s",
+  "INDEX_op_st",
+  "INDEX_op_st8",
+  "INDEX_op_st32",
+]) {
+  assert.doesNotMatch(
+    generatedSupportedBody,
+    new RegExp(`case\\s+${unsafeHostMemoryOp}:`),
+  );
+}
+assert.match(generatedSupportedBody, /case INDEX_op_tci_qemu_ld_rrr:/);
+assert.match(generatedSupportedBody, /case INDEX_op_tci_qemu_st_rrr:/);
 assert.match(runtime, /case INDEX_op_mb:/);
 assert.match(runtime, /case INDEX_op_tci_setcond32:/);
 assert.match(runtime, /case INDEX_op_tci_qemu_ld_rrr:/);

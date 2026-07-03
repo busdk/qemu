@@ -108,6 +108,42 @@ run that reaches a weaker marker than normal multi-user readiness.
     `qemu-system-riscv64.wasm`, validated manifest target `riscv64`, and
     wrote SHA256SUMS for those artifact names. No full artifact build or
     browser boot was run in this slice.
+  - [x] R1b - Establish a generic RISC-V Linux native control and record the
+    current browser blockers before using the guest for accelerator evidence.
+    DoD: a real RISC-V Linux disk guest reaches login under native
+    `qemu-system-riscv64`, the browser harness can serve the needed RISC-V
+    firmware, and failed browser runs record exact artifact/result paths and
+    final failure lines. Accepted 2026-07-03: TuxBoot RISC-V assets were stored
+    under `/Users/test/git/busdk/agent-supervisor/tmp/qemu-wasm-smoke-assets`.
+    Kernel SHA256:
+    `2bd8132a3bf21570290042324fff48c987f42f2a00c08de979f43f0662ebadba`;
+    compressed rootfs SHA256:
+    `aa4736a9872651dfc0d95e709465eedf1134fd19d42b8cb305bfd776f9801004`;
+    decompressed 1 GiB ext4 rootfs SHA256:
+    `bdae7f7e022592800442b73eb32ec7631f43a4c13dd8621051204f7e482fbd2b`.
+    Native command `qemu-system-riscv64 -M virt -m 512M -nographic -serial
+    mon:stdio -monitor none -kernel <Image> -append 'console=ttyS0
+    root=/dev/vda rw panic=-1' -drive
+    file=<rootfs.ext4>,format=raw,if=none,id=hd0 -device
+    virtio-blk-device,drive=hd0 -nic none` reached `Welcome to TuxTest` and
+    `tuxtest login:` inside a 30 second capture. A `-bios none` native control
+    produced no serial output in 10 seconds, so the browser smoke server and
+    runners now preserve optional OpenSBI firmware files
+    `opensbi-riscv32-generic-fw_dynamic.bin` and
+    `opensbi-riscv64-generic-fw_dynamic.bin`. Checks:
+    `node --check scripts/ci/wasm-browser-smoke-server.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke.mjs`,
+    `node --check scripts/ci/wasm-linux-boot-smoke.mjs`, and
+    `git diff --check` passed. Browser evidence used Chrome `149.0.7827.201`.
+    The R3c generated artifact browser run wrote
+    `/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-backend-r3c-generated-flag/browser-riscv64-tuxboot-generated-cdp.json`
+    and aborted with `operation does not support unaligned accesses`; the R3c
+    default no-generated control wrote
+    `/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-backend-r3c-generated-flag/browser-riscv64-tuxboot-default-cdp.json`
+    and reached OpenSBI/Linux/`virtio_blk` before aborting at
+    `Assertion failed: p_rcu_reader->depth != 0`. This completes the native
+    control and blocker capture only; R1 remains open until a generic RISC-V
+    browser smoke reaches its marker with default TCI.
 - [x] R2 - Add the RV64-to-WASM accelerator design and fail-closed boundary.
   DoD: document CPU state layout, register residency, synthetic exits
   (`BUDGET`, `MMIO`, `TLB_MISS`, `INTERRUPT`, `CSR`, `INVALID`, `FATAL`),
@@ -205,6 +241,41 @@ run that reaches a weaker marker than normal multi-user readiness.
     This slice does not prove speed or nonzero generated execution in a guest;
     the next R3 slice must run a backend browser smoke with this gate and
     inspect generated/fallback counters.
+  - [x] R3d - Keep the generated path off unsafe direct TCI host-memory ops
+    after the R3c RISC-V browser crash. DoD: direct host-memory `ld`/`st`
+    opcodes are no longer accepted by
+    `tcg_wasm64_translate_op_generated_supported()`, helper-backed QEMU
+    load/store ops remain accepted, deterministic metadata tests enforce that
+    boundary, a fresh backend artifact builds, and the generated browser proof
+    no longer fails with the unaligned-access trap. Accepted 2026-07-03:
+    `tcg/wasm64.c` now excludes `INDEX_op_ld`, `INDEX_op_ld32u`,
+    `INDEX_op_ld32s`, `INDEX_op_st`, `INDEX_op_st8`, and `INDEX_op_st32` from
+    the generated-support predicate, while keeping `INDEX_op_tci_qemu_ld_rrr`
+    and `INDEX_op_tci_qemu_st_rrr`. Checks:
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node --check scripts/ci/wasm64-translate-metadata-test.mjs`, the three
+    browser-smoke `node --check` commands from R1b, and `git diff --check`
+    passed. Full artifact build:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-backend-r3d-no-host-memory
+    --target riscv64 --tcg-wasm64-backend --build-image` passed. Artifact
+    hashes: `qemu-system-riscv64.js`
+    `17ee104776f21e46a6ab83ca7f9fd1f7052df625ad1f2b0931ccba7f97201b39`,
+    `qemu-system-riscv64.wasm`
+    `7195c1ac1c6e0f54e1042a029c1ca2b1f44344731cd260c724eebc4caeb6bded`,
+    manifest
+    `cba994d459de19bb0cc3f36e1aabb1402fbd5d6bbedbc6f02ffb22c0ff99f489`.
+    Chrome `149.0.7827.201` generated browser proof wrote
+    `/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-backend-r3d-no-host-memory/browser-riscv64-tuxboot-generated-cdp.json`
+    and loaded the full 1 GiB rootfs. It did not reach `Welcome to TuxTest`;
+    it produced `1554` wasm64 summaries, `generated_coverage_ppm=0`,
+    `generated_attempts=0`, `translated_generated_candidate_tbs=0`,
+    first unsupported generated ops `ld32u=46085` and `st8=23158`, then
+    converged with the default path by aborting at
+    `Assertion failed: p_rcu_reader->depth != 0`. This is a safety fix and
+    blocker clarification, not a speed win. The next accepted R3 work must
+    either implement a validated aligned generated-memory model or resolve the
+    shared RCU assertion before another speed-gate run.
 - [ ] R4 - Prove performance before Bus Engine OS long runs. DoD: a same-commit
   Chromium generic RISC-V accelerator smoke is at least 25% faster than
   default RISC-V TCI, and microbenchmarks show at least 3x over RISC-V TCI for

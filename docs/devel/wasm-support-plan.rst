@@ -114,6 +114,101 @@ generated behavior for supported integer, branch, load/store, helper/CSR-exit,
 and invalidation cases.  Existing ``x86_64`` QEMU/WASM TCI smoke remains a
 non-regression gate.
 
+RISC-V browser baseline and generated-memory safety evidence
+============================================================
+
+On 2026-07-03, the first generic RISC-V Linux control guest for the active
+``riscv64-softmmu`` lane was captured from TuxBoot and stored under the
+supervisor workspace ``tmp`` evidence area:
+
+* ``tmp/qemu-wasm-smoke-assets/tuxboot-riscv64-Image``:
+  ``2bd8132a3bf21570290042324fff48c987f42f2a00c08de979f43f0662ebadba``;
+* ``tmp/qemu-wasm-smoke-assets/tuxboot-riscv64-rootfs.ext4.zst``:
+  ``aa4736a9872651dfc0d95e709465eedf1134fd19d42b8cb305bfd776f9801004``;
+* decompressed ``tmp/qemu-wasm-smoke-assets/tuxboot-riscv64-rootfs.ext4``,
+  1073741824 bytes:
+  ``bdae7f7e022592800442b73eb32ec7631f43a4c13dd8621051204f7e482fbd2b``.
+
+Native QEMU proved this guest shape is valid.  The command::
+
+  qemu-system-riscv64 -M virt -m 512M -nographic -serial mon:stdio \
+    -monitor none -kernel <Image> \
+    -append 'console=ttyS0 root=/dev/vda rw panic=-1' \
+    -drive file=<rootfs.ext4>,format=raw,if=none,id=hd0 \
+    -device virtio-blk-device,drive=hd0 -nic none
+
+reached ``Welcome to TuxTest`` and ``tuxtest login:`` within a 30 second
+capture.  The same guest with ``-bios none`` produced no serial output in 10
+seconds, so the browser smoke harness now serves optional OpenSBI firmware
+files from the configured firmware directory:
+``opensbi-riscv32-generic-fw_dynamic.bin`` and
+``opensbi-riscv64-generic-fw_dynamic.bin``.  The harness update was checked
+with ``node --check scripts/ci/wasm-browser-smoke-server.mjs``,
+``node --check scripts/ci/wasm-browser-smoke.mjs``, ``node --check
+scripts/ci/wasm-linux-boot-smoke.mjs``, and ``git diff --check``.
+
+Browser evidence used local headless Chrome ``149.0.7827.201`` through CDP
+against the R3c backend artifact:
+
+* ``qemu-system-riscv64.js`` =
+  ``17ee104776f21e46a6ab83ca7f9fd1f7052df625ad1f2b0931ccba7f97201b39``;
+* ``qemu-system-riscv64.wasm`` =
+  ``7d0cb03fa22115c019684f09ea21feabf85fb071f37bd26f7f78dfa10183afcd``;
+* manifest =
+  ``c69bce1a579501c6f306487f3c1453a5b9264cb53d08be273926cc4333db70d0``.
+
+The generated run wrote
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-backend-r3c-generated-flag/browser-riscv64-tuxboot-generated-cdp.json``.
+It loaded the 1 GiB rootfs, emitted generated traces, and then failed with
+``RuntimeError: operation does not support unaligned accesses``.  The trace
+included generated direct TCI host-memory operations such as ``ld``,
+``ld32u``, ``st``, ``st8``, and ``st32``.  The no-generated control wrote
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-backend-r3c-generated-flag/browser-riscv64-tuxboot-default-cdp.json``.
+It reached OpenSBI, Linux, and ``virtio_blk virtio0`` before aborting at
+``Assertion failed: p_rcu_reader->depth != 0`` in ``rcu_read_unlock``.
+
+The accepted safety fix removes the direct TCI host-memory opcodes from
+``tcg_wasm64_translate_op_generated_supported()`` until a validated aligned
+memory-access model exists.  Helper-backed guest RAM operations remain eligible
+through ``INDEX_op_tci_qemu_ld_rrr`` and ``INDEX_op_tci_qemu_st_rrr``.  The
+metadata test now asserts that ``INDEX_op_ld``, ``INDEX_op_ld32u``,
+``INDEX_op_ld32s``, ``INDEX_op_st``, ``INDEX_op_st8``, and ``INDEX_op_st32``
+are not accepted by the generated-support switch.
+
+The fresh R3d artifact was built with::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-backend-r3d-no-host-memory \
+    --target riscv64 --tcg-wasm64-backend --build-image
+
+It produced:
+
+* ``qemu-system-riscv64.js`` =
+  ``17ee104776f21e46a6ab83ca7f9fd1f7052df625ad1f2b0931ccba7f97201b39``;
+* ``qemu-system-riscv64.wasm`` =
+  ``7195c1ac1c6e0f54e1042a029c1ca2b1f44344731cd260c724eebc4caeb6bded``;
+* manifest =
+  ``cba994d459de19bb0cc3f36e1aabb1402fbd5d6bbedbc6f02ffb22c0ff99f489``.
+
+The R3d generated browser proof wrote
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-backend-r3d-no-host-memory/browser-riscv64-tuxboot-generated-cdp.json``
+and loaded the full 1 GiB rootfs.  It no longer hit the unaligned-access
+trap, but it still did not reach ``Welcome to TuxTest``.  The final state was
+the same RCU assertion seen in the default control:
+``p_rcu_reader->depth != 0`` at ``rcu_read_unlock``.  It emitted ``1554``
+``qemu-wasm64-tcg`` summaries with zero generated coverage:
+``generated_attempts=0``, ``generated_compiled=0``, ``generated_executed=0``,
+``generated_cache_hits=0``, ``generated_coverage_ppm=0``, and
+``translated_generated_candidate_tbs=0``.  The first generated-unsupported
+ops were ``ld32u=46085`` and ``st8=23158``.
+
+This result is an accepted safety and attribution slice, not an acceleration
+win.  It proves the browser unaligned trap was caused by unsafe direct
+generated host-memory operations, and it names two next blockers: validated
+aligned generated-memory support if generated coverage is to resume, and the
+shared RISC-V browser RCU assertion before this generic guest can become the
+passing RISC-V browser baseline.
+
 Strict definition of done
 =========================
 
