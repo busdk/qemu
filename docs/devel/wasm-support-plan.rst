@@ -165,6 +165,59 @@ It is not acceleration evidence: ``generated_compiled=0`` and
 Linux TB executing through ``wasmjit_run()`` and differentially verified
 against TCI from the same input state.
 
+Pre-R4i x86_64 one-TB fixture scaffold
+--------------------------------------
+
+On 2026-07-03, QEMU added an opt-in fixture scaffold for the measured
+``ld32u``-first x86 shape.  The fixture is named
+``live-x86-pre-r4i-ld32u-goto-tb-13`` and uses generated WebAssembly through
+``wasmjit_run()`` for this TCI-op shape:
+
+``ld32u, tci_movi, tci_setcond32, brcond, tci_movi, st8, ld, tci_movi, add, st, goto_tb, exit_tb, exit_tb``.
+
+The scaffold is intentionally not accepted as R4i completion.  Its JSON labels
+the proof as ``live_shape_fixture=true`` and ``real_live_state_capture=false``.
+It reports ``generated_tci_op_equivalents`` and
+``reference_tci_op_equivalents`` rather than claiming real guest-instruction
+retirement.
+
+Build command::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86_64-pre-r4i-fixture-20260703 \
+      --target x86_64 --jobs 20 --tcg-wasm64-backend --build-image
+
+Artifact hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``c717b25cee9899c9630f5ec5b425dc24941d6118968d31d162c3fe57c64cb5c2``
+* ``qemu-system-x86_64.wasm`` =
+  ``3f2a0af94dca5d469297d698d3a7d83550e5863a4c328028f3cfb764141b301c``
+* manifest =
+  ``75923af90d077d43b359f2a28f3a0eaac1de747d398f6e41a1e89263914b52f2``
+
+A Chromium ``149.0.7827.55`` browser proof with
+``--wasm64-one-tb-differential`` reached ``QEMU_WASM_LINUX_BOOT_OK`` in
+``88954`` ms and wrote
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86_64-pre-r4i-fixture-run-20260703/wasm-browser-smoke-result.json``
+with SHA-256
+``9233a829fc6fd2563332dc94e792e37eac4932436816c652e5934a24233fe467``.
+The screenshot SHA-256 was
+``0061a54bdf99a141e64c195d1db08e4e7c04a355089f9832132c584083f6edf3``.
+
+The opt-in event reported ``ok=true``, matching generated and reference
+dispatch target ``20552``, register checksum ``4806450183793710000``, memory
+checksum ``16094818889002498000``, and two memory writes.  It recorded
+``generated_tci_op_equivalents=11``,
+``reference_tci_op_equivalents=11``, ``inline_tlb_hit_loads=2``,
+``inline_tlb_hit_stores=2``, and zero helper, ``qemu_ld``, and ``qemu_st``
+calls.
+
+The remaining R4i gap is real live-TB identity and same-input state: the next
+proof must tie the generated execution to a real translated TB instance with
+``TranslationBlock.icount`` and enough captured CPU/TB state to report nonzero
+generated guest-instruction retirement.
+
 RISC-V 64 accelerator boundary
 ==============================
 

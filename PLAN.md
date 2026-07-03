@@ -710,6 +710,49 @@ run that reaches a weaker marker than normal multi-user readiness.
     guest-instruction retirement for that real TB. `call`-heavy TBs stay on
     fallback until a helper-exit design exists. Descriptor fields may be added
     only when required by this single TB proof.
+  - [x] R4i-a - Add a pre-R4i deterministic one-TB fixture scaffold without
+    claiming real live-state R4i completion. DoD: the measured non-`call`
+    `ld32u`-first x86 shape is represented as an opt-in generated
+    `wasmjit_run()` fixture, compared against a reference interpreter from the
+    same deterministic state, and the emitted metrics explicitly name
+    TCI-op-equivalent counts rather than guest-instruction retirement. Accepted
+    2026-07-03: branch `r4i-x86-one-tb-differential` added
+    `QEMU_WASM64_ONE_TB_DIFFERENTIAL` and fixture
+    `live-x86-pre-r4i-ld32u-goto-tb-13`, with JSON fields
+    `live_shape_fixture=true`, `real_live_state_capture=false`,
+    `generated_tci_op_equivalents=11`, and
+    `reference_tci_op_equivalents=11`. Checks:
+    `git diff --check`, `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`,
+    `node scripts/ci/wasmjit-runloop-model-test.mjs`,
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs` outside the sandbox,
+    and `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86_64-pre-r4i-fixture-20260703
+    --target x86_64 --jobs 20 --tcg-wasm64-backend --build-image` passed.
+    Artifact hashes: `qemu-system-x86_64.js`
+    `c717b25cee9899c9630f5ec5b425dc24941d6118968d31d162c3fe57c64cb5c2`,
+    `qemu-system-x86_64.wasm`
+    `3f2a0af94dca5d469297d698d3a7d83550e5863a4c328028f3cfb764141b301c`,
+    manifest
+    `75923af90d077d43b359f2a28f3a0eaac1de747d398f6e41a1e89263914b52f2`.
+    Chromium `149.0.7827.55` browser proof with
+    `--wasm64-one-tb-differential` reached `QEMU_WASM_LINUX_BOOT_OK` in
+    `88954` ms and wrote
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86_64-pre-r4i-fixture-run-20260703/wasm-browser-smoke-result.json`
+    SHA256
+    `9233a829fc6fd2563332dc94e792e37eac4932436816c652e5934a24233fe467`;
+    screenshot SHA256
+    `0061a54bdf99a141e64c195d1db08e4e7c04a355089f9832132c584083f6edf3`.
+    The event reported `ok=true`, matching generated/reference dispatch target
+    `20552`, register checksum `4806450183793710000`, memory checksum
+    `16094818889002498000`, and two memory writes with no helper,
+    `qemu_ld`, or `qemu_st` calls. This is useful scaffold evidence only:
+    `R4i` remains open until a real live TB instance has TB identity,
+    `TranslationBlock.icount`, same-input CPU/TB state, and nonzero generated
+    guest-instruction retirement.
   - [ ] R4j - Decide whether the bespoke descriptor ABI remains viable or the
     x86 lane switches to a reference-shaped per-TB generated function body.
     DoD: after R4i, record whether the descriptor ABI expressed the dominant
