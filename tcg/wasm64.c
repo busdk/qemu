@@ -18,6 +18,7 @@
 #define TCG_WASM64_TRANSLATE_CACHE_SIZE 8192u
 #define TCG_WASM64_RUNLOOP_ENV_FILE "/qemu-tci-env"
 #define TCG_WASM64_RUNLOOP_SMOKE_BUDGET 1000000u
+#define TCG_WASM64_RUNLOOP_MIN_RATIO_PPM 3000000u
 
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, env) !=
                   TCG_WASM64_RUN_CTX_ENV_OFFSET);
@@ -624,6 +625,7 @@ EM_JS(int, tcg_wasm64_runloop_smoke_js,
     }
 
     const runCtxHotsetOffset = 48;
+    const runExitValueOffset = 32;
     const hotsetTbCountOffset = 0;
     const hotsetEntryTbIdOffset = 4;
     const hotsetTbsOffset = 8;
@@ -787,6 +789,7 @@ EM_JS(int, tcg_wasm64_runloop_smoke_js,
         ...i64StoreAtPtr(countersPtr, 80, localGet(generatedChainLength)),
         ...i64StoreAtPtr(countersPtr, 88, localGet(inlineLoads)),
         ...i64StoreAtPtr(countersPtr, 96, localGet(inlineStores)),
+        ...i64StoreAtPtr(exitPtr, runExitValueOffset, localGet(value)),
         ...i32StoreAtPtr(exitPtr, 0, i32Const(exitBudget)),
         ...i32Const(exitBudget),
     ];
@@ -964,6 +967,273 @@ static uint32_t tcg_wasm64_tci_encode_rrr(TCGOpcode op, uint32_t r0,
 static uint32_t tcg_wasm64_tci_encode_rrs(TCGOpcode op, uint32_t r0,
                                           uint32_t r1, int32_t offset);
 static uint32_t tcg_wasm64_tci_encode_p(TCGOpcode op, int32_t diff);
+static uint32_t tcg_wasm64_tci_encode_rl(TCGOpcode op, uint32_t r0,
+                                         int32_t diff);
+static uint32_t tcg_wasm64_tci_op(uint32_t insn);
+static uint32_t tcg_wasm64_tci_r0(uint32_t insn);
+static uint32_t tcg_wasm64_tci_r1(uint32_t insn);
+static uint32_t tcg_wasm64_tci_r2(uint32_t insn);
+static int32_t tcg_wasm64_tci_imm20(uint32_t insn);
+static int32_t tcg_wasm64_tci_offset16(uint32_t insn);
+static bool tcg_wasm64_tci_terminal_op(uint32_t op);
+
+static uint64_t tcg_wasm64_runloop_now_ns(void)
+{
+    return (uint64_t)g_get_monotonic_time() * 1000u;
+}
+
+static TCGWasm64RunExitReason tcg_wasm64_runloop_generated_hotset(
+    CPUArchState *env,
+    TCGWasm64RunHotset *hotset,
+    uint64_t *guest_ram,
+    uint64_t budget,
+    TCGWasm64RunCounters *counters,
+    TCGWasm64RunExit *exit)
+{
+    TCGWasm64RunExitReason reason = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+    TCGWasm64RunContext context = {
+        .env = env,
+        .guest_ram = guest_ram,
+        .budget = budget,
+        .counters = counters,
+        .exit = exit,
+        .mode = TCG_WASM64_RUN_MODE_PERF_PROOF,
+        .hotset = (void *)hotset,
+    };
+
+    tcg_wasm64_run_counters_reset(counters);
+    memset(exit, 0, sizeof(*exit));
+#ifdef CONFIG_EMSCRIPTEN
+    reason = (TCGWasm64RunExitReason)tcg_wasm64_runloop_smoke_js(
+        (uintptr_t)&context, budget);
+    if (exit->reason == 0) {
+        exit->reason = reason;
+    }
+#else
+    exit->reason = reason;
+#endif
+    tcg_wasm64_run_count_exit(counters, reason);
+    return reason;
+}
+
+static TCGWasm64RunExitReason tcg_wasm64_runloop_interpret_metadata_hotset(
+    const TCGWasm64TBMetadata *const *metadata,
+    size_t metadata_count,
+    uint64_t *guest_ram,
+    uint64_t budget,
+    TCGWasm64RunCounters *counters,
+    TCGWasm64RunExit *exit)
+{
+    TCGWasm64RunExitReason reason = TCG_WASM64_RUN_EXIT_BUDGET;
+    uint64_t started_ns;
+    uint64_t regs[16] = { 0 };
+    uint32_t tb_id = 1;
+
+    tcg_wasm64_run_counters_reset(counters);
+    memset(exit, 0, sizeof(*exit));
+    started_ns = tcg_wasm64_runloop_now_ns();
+
+    if (!metadata || metadata_count == 0 || metadata_count > UINT32_MAX) {
+        reason = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+        goto out;
+    }
+
+    for (uint64_t index = 0; index < budget; index++) {
+        const TCGWasm64TBMetadata *current;
+        const uint32_t *words;
+        size_t count;
+
+        if (tb_id == 0 || tb_id > metadata_count) {
+            reason = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+            exit->tb_id = tb_id;
+            goto out;
+        }
+        current = metadata[tb_id - 1];
+        if (!tcg_wasm64_translate_generated_output_available(current)) {
+            reason = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+            exit->tb_id = tb_id;
+            goto out;
+        }
+        words = current->generated_output;
+        count = current->generated_output_op_count;
+        if (count == 0) {
+            reason = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+            exit->tb_id = tb_id;
+            goto out;
+        }
+
+        for (size_t op_index = 0; op_index < count; op_index++) {
+            uint32_t insn = words[op_index];
+            uint32_t op = tcg_wasm64_tci_op(insn);
+            uint32_t r0 = tcg_wasm64_tci_r0(insn);
+            uint32_t r1 = tcg_wasm64_tci_r1(insn);
+            uint32_t r2 = tcg_wasm64_tci_r2(insn);
+
+            switch ((TCGOpcode)op) {
+            case INDEX_op_tci_movi:
+                regs[r0] = (uint64_t)(int64_t)tcg_wasm64_tci_imm20(insn);
+                break;
+            case INDEX_op_ld:
+                if (!guest_ram || tcg_wasm64_tci_offset16(insn) != 0) {
+                    reason = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+                    exit->tb_id = tb_id;
+                    goto out;
+                }
+                regs[r0] = *guest_ram;
+                break;
+            case INDEX_op_st:
+                if (!guest_ram || tcg_wasm64_tci_offset16(insn) != 0) {
+                    reason = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+                    exit->tb_id = tb_id;
+                    goto out;
+                }
+                *guest_ram = regs[r0];
+                break;
+            case INDEX_op_add:
+                regs[r0] = regs[r1] + regs[r2];
+                break;
+            case INDEX_op_xor:
+                regs[r0] = regs[r1] ^ regs[r2];
+                break;
+            case INDEX_op_brcond:
+                break;
+            case INDEX_op_goto_tb:
+            case INDEX_op_exit_tb:
+                break;
+            default:
+                reason = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+                exit->tb_id = tb_id;
+                goto out;
+            }
+            counters->fallback_guest_instructions++;
+        }
+        if (!tcg_wasm64_tci_terminal_op(tcg_wasm64_tci_op(words[count - 1]))) {
+            reason = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+            exit->tb_id = tb_id;
+            goto out;
+        }
+        tb_id = tb_id == metadata_count ? 1 : tb_id + 1;
+    }
+
+out:
+    counters->tci_dispatch_time_ns +=
+        tcg_wasm64_runloop_now_ns() - started_ns;
+    exit->reason = reason;
+    exit->value = regs[0];
+    tcg_wasm64_run_count_exit(counters, reason);
+    return reason;
+}
+
+static void tcg_wasm64_report_runloop_benchmark(
+    const char *workload,
+    const TCGWasm64RunCounters *generated,
+    const TCGWasm64RunCounters *interpreted,
+    const TCGWasm64RunExit *generated_exit,
+    const TCGWasm64RunExit *interpreted_exit,
+    uint64_t budget,
+    bool ok)
+{
+    uint64_t generated_ns = generated ? generated->generated_body_time_ns : 0;
+    uint64_t interpreted_ns = interpreted ?
+        interpreted->tci_dispatch_time_ns : 0;
+    uint64_t ratio_ppm = 0;
+
+    if (generated_ns != 0) {
+        ratio_ppm = (uint64_t)((__uint128_t)interpreted_ns * 1000000u /
+                               generated_ns);
+    }
+
+    fprintf(stderr,
+            "qemu-wasm64-runloop: {\"format\":1,"
+            "\"event\":\"runtime-benchmark\","
+            "\"workload\":\"%s\","
+            "\"ok\":%s,"
+            "\"budget\":%" PRIu64 ","
+            "\"min_ratio_ppm\":%u,"
+            "\"ratio_ppm\":%" PRIu64 ","
+            "\"generated_body_time_ns\":%" PRIu64 ","
+            "\"tci_dispatch_time_ns\":%" PRIu64 ","
+            "\"generated_guest_instructions\":%" PRIu64 ","
+            "\"fallback_guest_instructions\":%" PRIu64 ","
+            "\"generated_chain_length\":%" PRIu64 ","
+            "\"inline_tlb_hit_loads\":%" PRIu64 ","
+            "\"inline_tlb_hit_stores\":%" PRIu64 ","
+            "\"helper_calls\":%" PRIu64 ","
+            "\"qemu_ld_calls\":%" PRIu64 ","
+            "\"qemu_st_calls\":%" PRIu64 ","
+            "\"generated_exit_reason\":\"%s\","
+            "\"interpreted_exit_reason\":\"%s\","
+            "\"generated_value\":%" PRIu64 ","
+            "\"interpreted_value\":%" PRIu64 "}\n",
+            workload ? workload : "unknown",
+            ok ? "true" : "false",
+            budget,
+            TCG_WASM64_RUNLOOP_MIN_RATIO_PPM,
+            ratio_ppm,
+            generated_ns,
+            interpreted_ns,
+            generated ? generated->generated_guest_instructions : 0,
+            interpreted ? interpreted->fallback_guest_instructions : 0,
+            generated ? generated->generated_chain_length : 0,
+            generated ? generated->inline_tlb_hit_loads : 0,
+            generated ? generated->inline_tlb_hit_stores : 0,
+            generated ? generated->helper_calls : 0,
+            generated ? generated->qemu_ld_calls : 0,
+            generated ? generated->qemu_st_calls : 0,
+            tcg_wasm64_run_exit_reason_name(generated_exit ?
+                (TCGWasm64RunExitReason)generated_exit->reason :
+                TCG_WASM64_RUN_EXIT_UNSUPPORTED),
+            tcg_wasm64_run_exit_reason_name(interpreted_exit ?
+                (TCGWasm64RunExitReason)interpreted_exit->reason :
+                TCG_WASM64_RUN_EXIT_UNSUPPORTED),
+            generated_exit ? generated_exit->value : 0,
+            interpreted_exit ? interpreted_exit->value : 0);
+}
+
+static void tcg_wasm64_runloop_benchmark_hotset(
+    CPUArchState *env,
+    const char *workload,
+    TCGWasm64RunHotset *hotset,
+    const TCGWasm64TBMetadata *const *metadata,
+    size_t metadata_count,
+    uint64_t budget)
+{
+    TCGWasm64RunCounters generated_counters;
+    TCGWasm64RunCounters interpreted_counters;
+    TCGWasm64RunExit generated_exit;
+    TCGWasm64RunExit interpreted_exit;
+    TCGWasm64RunExitReason generated_reason;
+    TCGWasm64RunExitReason interpreted_reason;
+    uint64_t generated_ram = 0;
+    uint64_t interpreted_ram = 0;
+    uint64_t ratio_ppm = 0;
+    bool values_match;
+    bool ok;
+
+    generated_reason = tcg_wasm64_runloop_generated_hotset(
+        env, hotset, &generated_ram, budget, &generated_counters,
+        &generated_exit);
+    interpreted_reason = tcg_wasm64_runloop_interpret_metadata_hotset(
+        metadata, metadata_count, &interpreted_ram, budget,
+        &interpreted_counters, &interpreted_exit);
+    if (generated_counters.generated_body_time_ns != 0) {
+        ratio_ppm =
+            (uint64_t)((__uint128_t)interpreted_counters.tci_dispatch_time_ns *
+                       1000000u /
+                       generated_counters.generated_body_time_ns);
+    }
+
+    values_match = generated_exit.value == interpreted_exit.value &&
+                   generated_ram == interpreted_ram;
+    ok = generated_reason == TCG_WASM64_RUN_EXIT_BUDGET &&
+         interpreted_reason == TCG_WASM64_RUN_EXIT_BUDGET &&
+         values_match &&
+         ratio_ppm >= TCG_WASM64_RUNLOOP_MIN_RATIO_PPM;
+    tcg_wasm64_report_runloop_benchmark(workload, &generated_counters,
+                                        &interpreted_counters,
+                                        &generated_exit,
+                                        &interpreted_exit, budget, ok);
+}
 
 static void tcg_wasm64_runloop_smoke_maybe(CPUArchState *env)
 {
@@ -1068,18 +1338,64 @@ static void tcg_wasm64_runloop_smoke_maybe(CPUArchState *env)
     };
     TCGWasm64RunHotsetTB smoke_tbs[ARRAY_SIZE(smoke_metadata)];
     TCGWasm64RunHotset smoke_hotset;
+    const uint32_t alu_output0[] = {
+        tcg_wasm64_tci_encode_ri(INDEX_op_tci_movi, 2, 1),
+        tcg_wasm64_tci_encode_rrr(INDEX_op_add, 0, 0, 2),
+        tcg_wasm64_tci_encode_rl(INDEX_op_brcond, 0, 0),
+        tcg_wasm64_tci_encode_p(INDEX_op_goto_tb, 0),
+    };
+    const uint32_t alu_output1[] = {
+        tcg_wasm64_tci_encode_ri(INDEX_op_tci_movi, 2, 0x5a5a),
+        tcg_wasm64_tci_encode_rrr(INDEX_op_xor, 0, 0, 2),
+        tcg_wasm64_tci_encode_rl(INDEX_op_brcond, 0, 0),
+        tcg_wasm64_tci_encode_p(INDEX_op_goto_tb, 0),
+    };
+    const TCGWasm64TBMetadata alu_metadata0 = {
+        .tb_ptr = (const void *)(uintptr_t)0x4000,
+        .magic = TCG_WASM64_TB_METADATA_MAGIC,
+        .version = TCG_WASM64_TB_METADATA_VERSION,
+        .flags = smoke_metadata0.flags,
+        .op_count = ARRAY_SIZE(alu_output0),
+        .first_op = INDEX_op_tci_movi,
+        .last_op = INDEX_op_goto_tb,
+        .first_unsupported_op = UINT32_MAX,
+        .fallback_reason = TCG_WASM64_TRANSLATE_FALLBACK_NONE,
+        .lowering_profile = TCG_WASM64_LOWERING_PROFILE_HOTBLOCK,
+        .supported_op_count = ARRAY_SIZE(alu_output0),
+        .generated_supported_op_count = ARRAY_SIZE(alu_output0),
+        .first_generated_unsupported_op = UINT32_MAX,
+        .generated_output_size = sizeof(alu_output0),
+        .generated_output_op_count = ARRAY_SIZE(alu_output0),
+        .generated_output = alu_output0,
+    };
+    const TCGWasm64TBMetadata alu_metadata1 = {
+        .tb_ptr = (const void *)(uintptr_t)0x5000,
+        .magic = TCG_WASM64_TB_METADATA_MAGIC,
+        .version = TCG_WASM64_TB_METADATA_VERSION,
+        .flags = smoke_metadata0.flags,
+        .op_count = ARRAY_SIZE(alu_output1),
+        .first_op = INDEX_op_tci_movi,
+        .last_op = INDEX_op_goto_tb,
+        .first_unsupported_op = UINT32_MAX,
+        .fallback_reason = TCG_WASM64_TRANSLATE_FALLBACK_NONE,
+        .lowering_profile = TCG_WASM64_LOWERING_PROFILE_HOTBLOCK,
+        .supported_op_count = ARRAY_SIZE(alu_output1),
+        .generated_supported_op_count = ARRAY_SIZE(alu_output1),
+        .first_generated_unsupported_op = UINT32_MAX,
+        .generated_output_size = sizeof(alu_output1),
+        .generated_output_op_count = ARRAY_SIZE(alu_output1),
+        .generated_output = alu_output1,
+    };
+    const TCGWasm64TBMetadata *alu_metadata[] = {
+        &alu_metadata0, &alu_metadata1,
+    };
+    TCGWasm64RunHotsetTB alu_tbs[ARRAY_SIZE(alu_metadata)];
+    TCGWasm64RunHotset alu_hotset;
+    TCGWasm64RunHotsetBuildStatus alu_build_status =
+        TCG_WASM64_RUN_HOTSET_BUILD_OK;
     uint64_t smoke_ram = 0;
     const uint64_t budget = TCG_WASM64_RUNLOOP_SMOKE_BUDGET;
     uint64_t expected_smoke_ram;
-    TCGWasm64RunContext context = {
-        .env = env,
-        .guest_ram = &smoke_ram,
-        .budget = budget,
-        .counters = &counters,
-        .exit = &exit,
-        .mode = TCG_WASM64_RUN_MODE_PERF_PROOF,
-        .hotset = (void *)&smoke_hotset,
-    };
 
     tcg_wasm64_run_counters_reset(&counters);
     memset(&exit, 0, sizeof(exit));
@@ -1095,14 +1411,8 @@ static void tcg_wasm64_runloop_smoke_maybe(CPUArchState *env)
     expected_smoke_ram =
         tcg_wasm64_runloop_hotset_expected_value(&smoke_hotset, smoke_ram,
                                                  budget);
-#ifdef CONFIG_EMSCRIPTEN
-    reason = (TCGWasm64RunExitReason)tcg_wasm64_runloop_smoke_js(
-        (uintptr_t)&context, budget);
-    if (exit.reason == 0) {
-        exit.reason = reason;
-    }
-#endif
-    tcg_wasm64_run_count_exit(&counters, reason);
+    reason = tcg_wasm64_runloop_generated_hotset(
+        env, &smoke_hotset, &smoke_ram, budget, &counters, &exit);
     ok = reason == TCG_WASM64_RUN_EXIT_BUDGET &&
          counters.generated_guest_instructions == budget * 5 &&
          counters.generated_chain_length == budget &&
@@ -1111,9 +1421,28 @@ static void tcg_wasm64_runloop_smoke_maybe(CPUArchState *env)
          counters.helper_calls == 0 &&
          counters.qemu_ld_calls == 0 &&
          counters.qemu_st_calls == 0 &&
+         exit.value == expected_smoke_ram &&
          smoke_ram == expected_smoke_ram;
     tcg_wasm64_report_runloop_smoke("metadata-hotset", build_status,
                                     &counters, &exit, budget, ok);
+    tcg_wasm64_runloop_benchmark_hotset(env, "tlb-hit-ram", &smoke_hotset,
+                                        smoke_metadata,
+                                        ARRAY_SIZE(smoke_metadata), budget);
+    if (!tcg_wasm64_run_hotset_build_from_metadata(
+            &alu_hotset, alu_tbs, ARRAY_SIZE(alu_tbs),
+            alu_metadata, ARRAY_SIZE(alu_metadata), &alu_build_status)) {
+        tcg_wasm64_run_counters_reset(&counters);
+        memset(&exit, 0, sizeof(exit));
+        exit.reason = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+        tcg_wasm64_run_count_exit(&counters, TCG_WASM64_RUN_EXIT_UNSUPPORTED);
+        tcg_wasm64_report_runloop_smoke("metadata-hotset-alu",
+                                        alu_build_status, &counters, &exit,
+                                        budget, false);
+        return;
+    }
+    tcg_wasm64_runloop_benchmark_hotset(env, "alu-branch", &alu_hotset,
+                                        alu_metadata,
+                                        ARRAY_SIZE(alu_metadata), budget);
 }
 
 static bool tcg_wasm64_translate_op_supported(uint32_t op)
@@ -1500,6 +1829,18 @@ static uint32_t tcg_wasm64_tci_encode_p(TCGOpcode op, int32_t diff)
 
     tcg_debug_assert(diff == sextract32(diff, 0, 20));
     insn = deposit32(insn, 0, 8, op);
+    insn = deposit32(insn, 12, 20, diff);
+    return insn;
+}
+
+static uint32_t tcg_wasm64_tci_encode_rl(TCGOpcode op, uint32_t r0,
+                                         int32_t diff)
+{
+    uint32_t insn = 0;
+
+    tcg_debug_assert(diff == sextract32(diff, 0, 20));
+    insn = deposit32(insn, 0, 8, op);
+    insn = deposit32(insn, 8, 4, r0);
     insn = deposit32(insn, 12, 20, diff);
     return insn;
 }

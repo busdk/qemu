@@ -629,6 +629,107 @@ not a same-commit default-TCI versus accelerator speed gate.  R4 should run
 only after the next change makes the semantic run-loop path performance
 relevant to the generic smoke.
 
+R4b in-binary runtime microbench
+--------------------------------
+
+R4b adds a QEMU/WASM artifact-local runtime benchmark.  It emits
+``qemu-wasm64-runloop`` ``runtime-benchmark`` JSON records for the
+``tlb-hit-ram`` and ``alu-branch`` workloads.  The generated path uses the
+same descriptor-backed ``wasmjit_run()`` boundary as the runtime smoke; the
+comparison path interprets the same generated-output metadata words through a
+C/TCI-like hotset interpreter.  The gate requires matching exit reasons,
+matching values, and at least ``3x`` generated/interpreter speedup in the
+browser artifact.
+
+Focused checks passed:
+
+.. code-block:: console
+
+  $ git diff --check
+  $ node scripts/ci/wasm64-runloop-contract-test.mjs
+  $ node --check scripts/ci/wasm-browser-smoke.mjs
+  $ node --check scripts/ci/wasm-browser-smoke-runner.mjs
+  $ python3 scripts/ci/wasm-build-artifacts-local-test.py
+  $ node scripts/ci/wasm-browser-smoke-runner-test.mjs
+
+The runner test was rerun outside the sandbox because sandboxed
+``spawnSync`` drops stderr in the expected negative subprocess case.
+
+The deterministic preflight was rerun after the C interpreter comparison was
+added:
+
+.. code-block:: console
+
+  $ node scripts/ci/wasmjit-runloop-benchmark-gate.mjs \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4b-runloop-benchmark-gate-final.json
+
+Result JSON SHA-256:
+``6a84931777026bc7cf13e3749b7a10fb441ffd6743afeb64141743003db37392``.
+``alu-branch`` passed with ratio ``70.10125683766317``.  ``tlb-hit-ram``
+passed with ratio ``82.41822030772704``.
+
+The accepted browser artifact was built with:
+
+.. code-block:: console
+
+  $ python3 scripts/ci/wasm-build-artifacts-local.py \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4b-riscv64-runtime-bench-artifacts-v3 \
+      --target riscv64 \
+      --tcg-wasm64-backend \
+      --jobs auto \
+      --build-image
+
+Meson reported ``TCG backend: experimental wasm64 with TCI fallback``.
+Artifact SHA-256 values were:
+
+* ``qemu-system-riscv64.js``:
+  ``7058739c8cfd1e19967218a5c8e8f2ff8972ce7c7c974fe25d96bfe898de34e5``
+* ``qemu-system-riscv64.wasm``:
+  ``554d989f98728b55880461e2749224be8c51f04e87a7483831f2158e329d9765``
+* manifest:
+  ``fc8e93fc981835a33ac27fe054586c03d7363242a95be0cb80c39050b1c7df55``
+
+The browser proof used Chromium ``149.0.7827.55``:
+
+.. code-block:: console
+
+  $ npm exec --yes --package=playwright -- node \
+      scripts/ci/wasm-browser-smoke-runner.mjs \
+      --artifact-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4b-riscv64-runtime-bench-artifacts-v3 \
+      --guest-manifest /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-guest/tuxboot-browser-smoke-guest.json \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4b-riscv64-runtime-bench-smoke-v3/wasm-browser-smoke-result.json \
+      --screenshot /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4b-riscv64-runtime-bench-smoke-v3/wasm-browser-smoke.png \
+      --timeout-ms 180000 \
+      --progress-sample-interval-ms 10000 \
+      --progress-sample-limit 40 \
+      --wasm64-runloop-smoke
+
+It reached ``Welcome to TuxTest`` in ``138501`` ms.  Result JSON SHA-256:
+``2f70f7e6cfcd927c78569cfb382a6108ed2f305b593cfec961ff3dc61c3f871d``.
+Screenshot SHA-256:
+``e35b9e20fcef68f660cdec596b58c3ba0f59477af8eb1a688bc96f7dfa59b06f``.
+
+The artifact emitted three run-loop summaries.  The structural runtime smoke
+reported ``ok=true``, ``budget=1000000``,
+``generated_guest_instructions=5000000``,
+``generated_body_time_ns=5000000``,
+``generated_chain_length=1000000``,
+``inline_tlb_hit_loads=1000000``,
+``inline_tlb_hit_stores=1000000``, and zero helper, ``qemu_ld``, or
+``qemu_st`` calls.
+
+The ``tlb-hit-ram`` runtime benchmark reported ``ok=true``,
+``ratio_ppm=31661697``, ``generated_body_time_ns=4360000``,
+``tci_dispatch_time_ns=138045000``, matching value ``1311247``, and zero
+helper, ``qemu_ld``, or ``qemu_st`` calls.
+
+The ``alu-branch`` runtime benchmark reported ``ok=true``,
+``ratio_ppm=9144805``, ``generated_body_time_ns=3080000``,
+``tci_dispatch_time_ns=28166000``, and matching value ``500000``.
+
+This accepts only the in-binary runtime microbench.  R4c still must run the
+same-commit default-TCI versus accelerator generic Chromium speed gate before
+any long Bus Engine OS proof.
 Strict definition of done
 =========================
 

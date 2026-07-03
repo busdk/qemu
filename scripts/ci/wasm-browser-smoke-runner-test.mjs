@@ -760,6 +760,25 @@ for (const status of [
 }
 
 {
+  const line = "qemu-wasm64-runloop: " + JSON.stringify({
+    format: 1,
+    event: "runtime-benchmark",
+    workload: "tlb-hit-ram",
+    ok: true,
+    budget: 1000000,
+    min_ratio_ppm: 3000000,
+    ratio_ppm: 80000000,
+    generated_body_time_ns: 2000000,
+    tci_dispatch_time_ns: 160000000,
+  });
+  const parsed = wasm64RunloopSummary(line);
+  assert.equal(parsed.event, "runtime-benchmark");
+  assert.equal(parsed.workload, "tlb-hit-ram");
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.ratio_ppm, 80000000);
+}
+
+{
   const state = {
     wasm64Runloop: {
       maxSummaries: 2,
