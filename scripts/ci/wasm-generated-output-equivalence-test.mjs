@@ -884,6 +884,64 @@ function emitPerTBFunctionBody(words, relativeBase) {
   }
 }
 
+function routeLiveGeneratedOutput(metadata) {
+  if (!metadata) {
+    return {
+      ok: false,
+      reason: "metadata-missing",
+      jsStatusName: "generated-output-unavailable",
+      generatedGuestInstructions: 0,
+    };
+  }
+  if (!metadata.generatedOutputAvailable || metadata.generatedOutputSize === 0 ||
+      metadata.generatedOutputSize % 4 !== 0) {
+    return {
+      ok: false,
+      reason: "generated-output-unavailable",
+      jsStatusName: "generated-output-unavailable",
+      generatedGuestInstructions: 0,
+    };
+  }
+  const shape = decodedShape(metadata.words);
+  const selectedHotShape = metadata.opCount === R4I_LIVE_X86_SHAPE.length &&
+    shape[0] === "ld32u";
+
+  if (!selectedHotShape ||
+      shape.length !== R4I_LIVE_X86_SHAPE.length ||
+      !shape.every((name, index) => name === R4I_LIVE_X86_SHAPE[index])) {
+    return {
+      ok: false,
+      reason: "selected-hot-shape-unsupported",
+      jsStatusName: "selected-hot-shape-unsupported",
+      generatedGuestInstructions: 0,
+      shape,
+    };
+  }
+
+  const emission = emitPerTBFunctionBody(metadata.words, metadata.relativeBase);
+
+  if (!emission.ok) {
+    return {
+      ok: false,
+      reason: emission.reason,
+      jsStatusName: emission.reason === "module-validation-failed"
+        ? "module-validation-failed"
+        : "module-emission-failed",
+      generatedGuestInstructions: 0,
+      shape,
+    };
+  }
+  return {
+    ok: true,
+    reason: null,
+    jsStatusName: "ok",
+    generatedGuestInstructions: metadata.guestInstructions,
+    shape,
+    moduleValid: emission.moduleValid,
+    moduleByteLength: emission.moduleByteLength,
+  };
+}
+
 function interpretGeneratedOutput(words, state, relativeBase) {
   const regs = state.regs.slice();
   const view = state.view;
@@ -1463,6 +1521,63 @@ assert.deepEqual(r4iRuntimeUnsupported.flushedRegs, {
   [x86RegField(5)]: "0",
   [x86RegField(13)]: "1",
 });
+const r4kLiveRoutingCases = [
+  routeLiveGeneratedOutput(null),
+  routeLiveGeneratedOutput({
+    opCount: R4I_LIVE_X86_SHAPE.length,
+    generatedOutputAvailable: false,
+    generatedOutputSize: 0,
+    words: [],
+    relativeBase: r4iLiveX86Fixture.relativeBase,
+    guestInstructions: 1,
+  }),
+  routeLiveGeneratedOutput({
+    opCount: R4I_LIVE_X86_SHAPE.length,
+    generatedOutputAvailable: true,
+    generatedOutputSize: r4iLiveX86Fixture.words.length * 4,
+    words: [
+      ...r4iLiveX86Fixture.words.slice(0, -1),
+      OPS.exit_tb,
+    ],
+    relativeBase: r4iLiveX86Fixture.relativeBase,
+    guestInstructions: 1,
+  }),
+  routeLiveGeneratedOutput({
+    opCount: R4I_LIVE_X86_SHAPE.length,
+    generatedOutputAvailable: true,
+    generatedOutputSize: r4iLiveX86Fixture.words.length * 4,
+    words: r4iLiveX86Fixture.words.map((word, index) =>
+      index === 2
+        ? OPS.tci_setcond32 | (13 << 8) | (4 << 12) |
+          (5 << 16) | (4 << 20)
+        : word),
+    relativeBase: r4iLiveX86Fixture.relativeBase,
+    guestInstructions: 1,
+  }),
+  routeLiveGeneratedOutput({
+    opCount: R4I_LIVE_X86_SHAPE.length,
+    generatedOutputAvailable: true,
+    generatedOutputSize: r4iLiveX86Fixture.words.length * 4,
+    words: r4iLiveX86Fixture.words,
+    relativeBase: r4iLiveX86Fixture.relativeBase,
+    guestInstructions: 1,
+  }),
+];
+assert.deepEqual(
+  r4kLiveRoutingCases.map((entry) => entry.reason),
+  [
+    "metadata-missing",
+    "generated-output-unavailable",
+    "selected-hot-shape-unsupported",
+    "unsupported-shape",
+    null,
+  ],
+);
+assert.deepEqual(
+  r4kLiveRoutingCases.map((entry) => entry.generatedGuestInstructions),
+  [0, 0, 0, 0, 1],
+);
+assert.equal(r4kLiveRoutingCases.at(-1).moduleValid, true);
 console.log(JSON.stringify({
   format: 1,
   event: "generated-output-equivalence",
@@ -1514,6 +1629,7 @@ console.log(JSON.stringify({
   r4iX86CpuStateContract:
     r4iEmitterResults[0].x86CpuStateContract,
   r4iRuntimeUnsupportedFlush: r4iRuntimeUnsupported,
+  r4kLiveMetadataRouting: r4kLiveRoutingCases,
   unsupportedX86StateFixtures: unsupportedX86StateResults,
   helperBoundaryFixtures: helperBoundaryResults.length,
   simpleGapFixtures: simpleGapResults.length,

@@ -1008,6 +1008,37 @@ run that reaches a weaker marker than normal multi-user readiness.
     No browser smoke, live guest routing, broad chaining,
     no-silent-fallback performance mode, or generic SoftMMU/TLB lowering was
     run or enabled; R4k remains open for slices 3-6.
+    Slice 3 accepted 2026-07-03 on branch
+    `qemu-r4k-live-tb-body-20260703-11`: the opt-in live one-TB differential
+    path still enters through `tcg_wasm64_tb_exec()` and still returns to the
+    normal TCI fallback for guest execution, but the generated `wasmjit_run`
+    body for the accepted R4i live TB is now sourced from
+    `metadata->generated_output` and `metadata->generated_output_size` instead
+    of the removed hard-coded `tcg_wasm64_live_one_tb_words[]` body source.
+    The live gate fails closed with explicit JSON/status reporting for missing
+    metadata, generated output unavailable for the selected hot shape,
+    selected hot shape unsupported by the live per-TB emitter, metadata output
+    versus TB code drift, module emission failure, and module validation
+    failure. Unsupported selected hot shapes report
+    `generated_guest_instructions=0` and are not counted as successful
+    generated work. Successful selected live execution can still record
+    nonzero generated guest-instruction retirement for the single TB
+    (`guestInsns`, `1` for the accepted R4i fixture) plus the existing
+    `11` generated TCI-op equivalents, two inline TLB-hit loads, two inline
+    TLB-hit stores, two memory writes, and zero helper, `qemu_ld`, and
+    `qemu_st` calls. The deterministic equivalence gate now records
+    `r4kLiveMetadataRouting` cases: `metadata-missing`,
+    `generated-output-unavailable`, `selected-hot-shape-unsupported`,
+    `unsupported-shape` mapped to `module-emission-failed`, and a successful
+    R4i metadata-backed route with `generatedGuestInstructions=1`,
+    `moduleValid=true`, and module byte length `564`. Checks:
+    `git diff --check`, `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+    `node --check scripts/ci/wasm64-translate-metadata-test.mjs`, and
+    `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`.
+    No browser smoke, speed claim, two-TB chaining, broad SoftMMU/TLB
+    lowering, helper exits, RISC-V work, BusDK work, or Bus Engine OS proof
+    was run or enabled; R4k remains open for slices 4-6.
   - [ ] R4l - Run the x86_64 same-commit generic Chromium speed gate only
     after R4h-R4k have deterministic evidence. DoD: build one default-TCI
     `x86_64-softmmu` artifact and one accelerator artifact from the same

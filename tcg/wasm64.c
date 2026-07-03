@@ -45,10 +45,18 @@ static const uint32_t tcg_wasm64_one_tb_words[] = {
     0xfff0f048,
 };
 
-static const uint32_t tcg_wasm64_live_one_tb_words[] = {
-    0xfff0e41c, 0x0000057d, 0x00254d88, 0x00020d04,
-    0x0000147d, 0xfff4e435, 0x0100e41e, 0xfff9057d,
-    0x00054407, 0x0100e438, 0xfff74049,
+static const TCGOpcode tcg_wasm64_live_one_tb_ops[] = {
+    INDEX_op_ld32u,
+    INDEX_op_tci_movi,
+    INDEX_op_tci_setcond32,
+    INDEX_op_brcond,
+    INDEX_op_tci_movi,
+    INDEX_op_st8,
+    INDEX_op_ld,
+    INDEX_op_tci_movi,
+    INDEX_op_add,
+    INDEX_op_st,
+    INDEX_op_goto_tb,
 };
 
 typedef enum TCGWasm64OneTBResultIndex {
@@ -212,6 +220,9 @@ static __thread TCGWasm64TBMetadata *active_translate_metadata;
 static __thread uint64_t summary_next_report;
 static __thread bool one_tb_differential_checked;
 static __thread bool live_one_tb_differential_checked;
+static __thread bool live_one_tb_metadata_missing_reported;
+static __thread bool live_one_tb_output_unavailable_reported;
+static __thread bool live_one_tb_unsupported_shape_reported;
 static __thread uint64_t live_one_tb_differential_scanned;
 static volatile uint64_t tcg_wasm64_runloop_smoke_sink;
 static gsize summary_env_initialized;
@@ -219,6 +230,8 @@ static gsize live_one_tb_env_initialized;
 static bool summary_enabled;
 static bool live_one_tb_enabled;
 static uint64_t summary_interval;
+
+static const char *tcg_wasm64_op_name(uint32_t op);
 
 static TCGWasm64TranslateEntry *tcg_wasm64_translate_entry(const void *tb_ptr)
 {
@@ -1428,7 +1441,8 @@ EM_JS(int, tcg_wasm64_one_tb_differential_js,
 EM_JS(int, tcg_wasm64_live_one_tb_differential_js,
       (uintptr_t context_arg, uintptr_t scratch_arg, uintptr_t counters_arg,
        uintptr_t exit_arg, uintptr_t result_arg, uintptr_t tb_arg,
-       uintptr_t env_arg, uint64_t guest_insns_arg), {
+       uintptr_t env_arg, uint64_t guest_insns_arg,
+       uintptr_t generated_output_arg, uint32_t generated_output_size_arg), {
     if (typeof wasmMemory === "undefined" || !wasmMemory) {
         return 1;
     }
@@ -1441,15 +1455,17 @@ EM_JS(int, tcg_wasm64_live_one_tb_differential_js,
     const tbPtr = Number(tb_arg);
     const envPtr = Number(env_arg);
     const guestInsns = BigInt(guest_insns_arg);
+    const generatedOutputPtr = Number(generated_output_arg);
+    const generatedOutputSize = Number(generated_output_size_arg);
     const regsPtr = scratch + 0x100;
     const stackPtr = scratch + 0x3000;
     const statusDispatch = 2n;
+    const statusUnsupported = 6n;
     const valueI32 = 0x7f;
     const valueI64 = 0x7e;
-    const words = [
-        0xfff0e41c, 0x0000057d, 0x00254d88, 0x00020d04,
-        0x0000147d, 0xfff4e435, 0x0100e41e, 0xfff9057d,
-        0x00054407, 0x0100e438, 0xfff74049,
+    const expectedShape = [
+        "ld32u", "tci_movi", "tci_setcond32", "brcond", "tci_movi",
+        "st8", "ld", "tci_movi", "add", "st", "goto_tb",
     ];
     const ops = {
         brcond: 4,
@@ -1602,60 +1618,196 @@ EM_JS(int, tcg_wasm64_live_one_tb_differential_js,
             i64Const(BigInt(value))));
     }
 
-    function runInstructions() {
-        const regs = 1;
-        const countersPtr = 2;
-        const exitPtr = 3;
-        const codeBasePtr = 4;
-        const r4 = 5;
-        const r5 = 6;
-        const r13 = 7;
-        const r14 = 8;
-        const ret = 9;
+    function opName(opc) {
+        for (const [name, value] of Object.entries(ops)) {
+            if (value === opc) {
+                return name;
+            }
+        }
+        return "unknown";
+    }
 
-        return [
+    function decodedShape(words) {
+        return words.map((insn) => opName(bits(insn >>> 0, 0, 8)));
+    }
+
+    function readGeneratedOutputWords() {
+        if (generatedOutputPtr === 0 || generatedOutputSize === 0 ||
+            generatedOutputSize % 4 !== 0) {
+            return { status: 4, words: [] };
+        }
+
+        const wordCount = generatedOutputSize / 4;
+        const output = [];
+
+        for (let i = 0; i < wordCount; i++) {
+            output.push(HEAPU32[generatedOutputPtr / 4 + i] >>> 0);
+        }
+        return { status: 0, words: output };
+    }
+
+    function generatedOutputShapeSupported(words) {
+        const shape = decodedShape(words);
+
+        return shape.length === expectedShape.length &&
+               shape.every((name, index) => name === expectedShape[index]);
+    }
+
+    function runInstructions(words) {
+        const regs = 1;
+        const codeBasePtr = 2;
+        const countersPtr = 3;
+        const exitPtr = 4;
+        const regLocalBase = 5;
+        const terminalStatus = 2;
+        const terminalIndex = words.findIndex((insn) => {
+            const opc = bits(insn >>> 0, 0, 8);
+
+            return opc === ops.goto_tb || opc === ops.exit_tb;
+        });
+        const emitted = [
             ...localSet(regs, i64LoadAtPtr(0, 0)),
             ...localSet(codeBasePtr, i64LoadAtPtr(0, 8)),
             ...localSet(countersPtr, i64LoadAtPtr(0, 24)),
             ...localSet(exitPtr, i64LoadAtPtr(0, 32)),
-            ...localSet(r14, i64LoadAtPtr(regs, 14 * 8)),
-
-            ...localSet(r4, i64ExtendI32U(
-                i32Load(addressAdd(localGet(r14), -16n)))),
-            ...localSet(r5, i64Const(0n)),
-            ...localSet(r13, i64ExtendI32U([
-                ...i32WrapI64(localGet(r4)),
-                ...i32WrapI64(localGet(r5)),
-                0x48, /* i32.lt_s */
-            ])),
-            0x02, 0x40, /* block: live brcond with fall-through target */
-            ...localGet(r13),
-            0x50,       /* i64.eqz */
-            0x45,       /* i32.eqz */
-            0x0d, 0x00, /* br_if 0 */
-            0x0b,
-
-            ...localSet(r4, i64Const(1n)),
-            ...i32Store8(addressAdd(localGet(r14), -12n),
-                         i32WrapI64(localGet(r4))),
-            ...localSet(r4, i64Load(addressAdd(localGet(r14), 256n))),
-            ...localSet(r5, i64Const(-112n)),
-            ...localSet(r4, i64Add(localGet(r4), localGet(r5))),
-            ...i64Store(addressAdd(localGet(r14), 256n), localGet(r4)),
-            ...localSet(ret, i64Load(addressAdd(localGet(codeBasePtr),
-                                                 -0x60n))),
-
-            ...i64StoreAtPtr(regs, 4 * 8, localGet(r4)),
-            ...i64StoreAtPtr(regs, 5 * 8, localGet(r5)),
-            ...i64StoreAtPtr(regs, 13 * 8, localGet(r13)),
-            ...i32StoreAtPtr(exitPtr, 0, i32Const(2)),
-            ...i64StoreAtPtr(exitPtr, 32, localGet(ret)),
-            ...incrementCounter(countersPtr, 0, 11),
-            ...incrementCounter(countersPtr, 80, 1),
-            ...incrementCounter(countersPtr, 88, 2),
-            ...incrementCounter(countersPtr, 96, 2),
-            ...i64Const(statusDispatch),
         ];
+        let inlineLoads = 0;
+        let inlineStores = 0;
+        let executedOps = 0;
+        let terminal = null;
+
+        function regLocal(reg) {
+            return regLocalBase + reg;
+        }
+
+        function flushAllRegisterLocals() {
+            const flushes = [];
+
+            for (let reg = 0; reg < 16; reg++) {
+                flushes.push(...i64StoreAtPtr(regs, reg * 8,
+                                              localGet(regLocal(reg))));
+            }
+            return flushes;
+        }
+
+        function returnUnsupported() {
+            return [
+                ...flushAllRegisterLocals(),
+                ...i32StoreAtPtr(exitPtr, 0, i32Const(Number(statusUnsupported))),
+                ...i64StoreAtPtr(exitPtr, 32, i64Const(0n)),
+                ...i64Const(statusUnsupported),
+            ];
+        }
+
+        for (let reg = 0; reg < 16; reg++) {
+            emitted.push(...localSet(regLocal(reg),
+                                     i64LoadAtPtr(regs, reg * 8)));
+        }
+
+        if (terminalIndex < 0) {
+            throw new Error("live generated-output body has no terminal");
+        }
+
+        for (let index = 0; index < words.length; index++) {
+            const insn = words[index] >>> 0;
+            const opc = bits(insn, 0, 8);
+            const r0 = bits(insn, 8, 4);
+            const r1 = bits(insn, 12, 4);
+            const r2 = bits(insn, 16, 4);
+            const currentTbPtr = (index + 1) * 4;
+
+            executedOps++;
+            if (opc === ops.goto_tb || opc === ops.exit_tb) {
+                const ptrOffset = currentTbPtr + sextract(insn, 12, 20);
+
+                terminal = {
+                    kind: opc,
+                    ptrOffset,
+                };
+                break;
+            } else if (opc === ops.ld32u) {
+                emitted.push(...localSet(regLocal(r0), i64ExtendI32U(
+                    i32Load(addressAdd(localGet(regLocal(r1)),
+                                       BigInt(sextract(insn, 16, 16)))))));
+                inlineLoads++;
+            } else if (opc === ops.ld) {
+                emitted.push(...localSet(regLocal(r0),
+                    i64Load(addressAdd(localGet(regLocal(r1)),
+                                       BigInt(sextract(insn, 16, 16))))));
+                inlineLoads++;
+            } else if (opc === ops.tci_movi) {
+                emitted.push(...localSet(regLocal(r0),
+                                         i64Const(sextract(insn, 12, 20))));
+            } else if (opc === ops.tci_setcond32) {
+                const condition = bits(insn, 20, 4);
+
+                if (condition !== 2) {
+                    throw new Error("unsupported live one-TB condition");
+                }
+                emitted.push(...localSet(regLocal(r0), i64ExtendI32U([
+                    ...i32WrapI64(localGet(regLocal(r1))),
+                    ...i32WrapI64(localGet(regLocal(r2))),
+                    0x48, /* i32.lt_s */
+                ])));
+            } else if (opc === ops.brcond) {
+                const targetOffset = currentTbPtr + sextract(insn, 12, 20);
+                const targetIndex = targetOffset / 4;
+
+                if (targetOffset % 4 !== 0 || targetIndex <= index) {
+                    throw new Error("unsupported live one-TB branch target");
+                }
+                if (targetIndex > terminalIndex) {
+                    emitted.push(...[
+                        ...localGet(regLocal(r0)),
+                        0x50, 0x45,       /* i64 truthy */
+                        0x04, 0x40,       /* if */
+                        ...returnUnsupported(),
+                        0x0b,             /* end */
+                    ]);
+                } else {
+                    throw new Error("unsupported live one-TB in-range branch");
+                }
+            } else if (opc === ops.st8) {
+                emitted.push(...i32Store8(
+                    addressAdd(localGet(regLocal(r1)),
+                               BigInt(sextract(insn, 16, 16))),
+                    i32WrapI64(localGet(regLocal(r0)))));
+                inlineStores++;
+            } else if (opc === ops.st) {
+                emitted.push(...i64Store(
+                    addressAdd(localGet(regLocal(r1)),
+                               BigInt(sextract(insn, 16, 16))),
+                    localGet(regLocal(r0))));
+                inlineStores++;
+            } else if (opc === ops.add) {
+                emitted.push(...localSet(regLocal(r0), i64Add(
+                    localGet(regLocal(r1)), localGet(regLocal(r2)))));
+            } else {
+                throw new Error(`unsupported live one-TB opcode ${opc}`);
+            }
+        }
+
+        if (terminal === null) {
+            throw new Error("live generated-output body has no terminal");
+        }
+
+        emitted.push(...flushAllRegisterLocals());
+        emitted.push(...i32StoreAtPtr(exitPtr, 0, i32Const(terminalStatus)));
+        emitted.push(...i64StoreAtPtr(
+            exitPtr, 32,
+            terminal.kind === ops.goto_tb
+                ? i64Load(addressAdd(localGet(codeBasePtr),
+                                      BigInt(terminal.ptrOffset)))
+                : i64Add(localGet(codeBasePtr), i64Const(terminal.ptrOffset))));
+        emitted.push(...incrementCounter(countersPtr, 0, guestInsns));
+        emitted.push(...incrementCounter(countersPtr, 80, 1));
+        emitted.push(...incrementCounter(countersPtr, 88, inlineLoads));
+        emitted.push(...incrementCounter(countersPtr, 96, inlineStores));
+        emitted.push(...i64Const(BigInt(terminalStatus)));
+        runInstructions.generatedTciOps = executedOps;
+        runInstructions.inlineLoads = inlineLoads;
+        runInstructions.inlineStores = inlineStores;
+        return emitted;
     }
 
     function bits(value, start, length) {
@@ -1860,6 +2012,18 @@ EM_JS(int, tcg_wasm64_live_one_tb_differential_js,
     let initialMemory = null;
 
     try {
+        const generatedOutput = readGeneratedOutputWords();
+        if (generatedOutput.status !== 0) {
+            setResult(0, BigInt(generatedOutput.status));
+            return generatedOutput.status;
+        }
+        const words = generatedOutput.words;
+
+        if (!generatedOutputShapeSupported(words)) {
+            setResult(0, 5n);
+            return 5;
+        }
+
         for (let i = 0; i < words.length; i++) {
             if ((HEAPU32[tbPtr / 4 + i] >>> 0) !== words[i]) {
                 setResult(0, 3n);
@@ -1884,11 +2048,15 @@ EM_JS(int, tcg_wasm64_live_one_tb_differential_js,
                 [...name("wasmjit_run"), 0x00, ...encodeU32(0)],
             ])),
             ...section(10, vector([
-                functionBody(runInstructions(), [
-                    { count: 9, type: valueI64 },
+                functionBody(runInstructions(words), [
+                    { count: 20, type: valueI64 },
                 ]),
             ])),
         ]);
+        if (!WebAssembly.validate(bytes)) {
+            setResult(0, 7n);
+            return 7;
+        }
         const compileStart = performance.now();
         const module = new WebAssembly.Module(bytes);
         const compileNs = BigInt(Math.round(
@@ -1910,8 +2078,8 @@ EM_JS(int, tcg_wasm64_live_one_tb_differential_js,
         const generatedRet = getU64(exit + 32);
         const generatedRegsChecksum = checksumRegs();
         const generatedMemoryChecksum = checksumObservedMemory();
-        const generatedTciOps = HEAPU64[counters / 8];
-        const generatedWrites = 2n;
+        const generatedTciOps = BigInt(runInstructions.generatedTciOps);
+        const generatedWrites = BigInt(runInstructions.inlineStores);
 
         initInputState();
         restoreObservedMemory(initialMemory);
@@ -1930,8 +2098,8 @@ EM_JS(int, tcg_wasm64_live_one_tb_differential_js,
         HEAPU64[counters / 8 + 8] = compileNs;
         HEAPU64[counters / 8 + 9] = instantiateNs;
         HEAPU64[counters / 8 + 10] = 1n;
-        HEAPU64[counters / 8 + 11] = 2n;
-        HEAPU64[counters / 8 + 12] = 2n;
+        HEAPU64[counters / 8 + 11] = BigInt(runInstructions.inlineLoads);
+        HEAPU64[counters / 8 + 12] = BigInt(runInstructions.inlineStores);
 
         setResult(1, generatedStatus);
         setResult(2, reference.status);
@@ -1956,6 +2124,7 @@ EM_JS(int, tcg_wasm64_live_one_tb_differential_js,
                generatedRegsChecksum === referenceRegsChecksum &&
                generatedMemoryChecksum === referenceMemoryChecksum &&
                guestInsns > 0n &&
+               HEAPU64[counters / 8] === guestInsns &&
                generatedTciOps === BigInt(reference.executed) &&
                generatedTciOps === 11n &&
                generatedWrites === BigInt(reference.writes) ? 0 : 2;
@@ -1963,8 +2132,8 @@ EM_JS(int, tcg_wasm64_live_one_tb_differential_js,
         if (initialMemory) {
             restoreObservedMemory(initialMemory);
         }
-        setResult(0, 1n);
-        return 1;
+        setResult(0, 6n);
+        return 6;
     }
 });
 #endif
@@ -2439,21 +2608,64 @@ static void tcg_wasm64_one_tb_differential_maybe(CPUArchState *env)
     tcg_wasm64_report_one_tb_differential(&counters, &exit, result, ok);
 }
 
-static bool tcg_wasm64_live_one_tb_shape_matches(
-    const TCGWasm64TBMetadata *metadata, const void *tb_ptr)
+static uint32_t tcg_wasm64_tci_word_op(uint32_t word)
 {
-    const uint32_t *code = tb_ptr;
+    return word & 0xffu;
+}
 
-    if (!metadata || !tb_ptr ||
-        metadata->op_count < ARRAY_SIZE(tcg_wasm64_live_one_tb_words)) {
+static bool tcg_wasm64_live_one_tb_generated_output_shape_supported(
+    const TCGWasm64TBMetadata *metadata)
+{
+    const uint32_t *words;
+
+    if (!tcg_wasm64_translate_generated_output_available(metadata) ||
+        metadata->generated_output_op_count !=
+            ARRAY_SIZE(tcg_wasm64_live_one_tb_ops)) {
         return false;
     }
-    for (size_t i = 0; i < ARRAY_SIZE(tcg_wasm64_live_one_tb_words); i++) {
-        if (code[i] != tcg_wasm64_live_one_tb_words[i]) {
+
+    words = metadata->generated_output;
+    for (size_t i = 0; i < ARRAY_SIZE(tcg_wasm64_live_one_tb_ops); i++) {
+        if (tcg_wasm64_tci_word_op(words[i]) !=
+            tcg_wasm64_live_one_tb_ops[i]) {
             return false;
         }
     }
     return true;
+}
+
+static bool tcg_wasm64_live_one_tb_selected_hot_shape(
+    const TCGWasm64TBMetadata *metadata)
+{
+    if (!metadata) {
+        return false;
+    }
+    return metadata->op_count == ARRAY_SIZE(tcg_wasm64_live_one_tb_ops) &&
+           metadata->first_op == INDEX_op_ld32u;
+}
+
+static const char *tcg_wasm64_live_one_tb_js_status_name(uint64_t status)
+{
+    switch (status) {
+    case 0:
+        return "ok";
+    case 1:
+        return "runtime-unavailable";
+    case 2:
+        return "differential-mismatch";
+    case 3:
+        return "metadata-output-tb-code-mismatch";
+    case 4:
+        return "generated-output-unavailable";
+    case 5:
+        return "selected-hot-shape-unsupported";
+    case 6:
+        return "module-emission-failed";
+    case 7:
+        return "module-validation-failed";
+    default:
+        return "unknown";
+    }
 }
 
 static void tcg_wasm64_report_live_one_tb_differential(
@@ -2480,6 +2692,9 @@ static void tcg_wasm64_report_live_one_tb_differential(
             "\"tb_icount\":%" PRIu16 ","
             "\"metadata_op_count\":%" PRIu32 ","
             "\"metadata_generated_output_available\":%s,"
+            "\"metadata_generated_output_size\":%" PRIu32 ","
+            "\"metadata_generated_output_op_count\":%" PRIu32 ","
+            "\"metadata_generated_output_checksum\":%" PRIu32 ","
             "\"generated_guest_instructions\":%" PRIu64 ","
             "\"reference_guest_instructions\":%" PRIu64 ","
             "\"generated_tci_op_equivalents\":%" PRIu64 ","
@@ -2509,7 +2724,8 @@ static void tcg_wasm64_report_live_one_tb_differential(
             "\"reference_memory_writes\":%" PRIu64 ","
             "\"expected_memory_writes\":%u,"
             "\"scanned_live_tbs_before_match\":%" PRIu64 ","
-            "\"js_status\":%" PRIu64 "}\n",
+            "\"js_status\":%" PRIu64 ","
+            "\"js_status_name\":\"%s\"}\n",
             TCG_WASM64_LIVE_ONE_TB_NAME,
             ok ? "true" : "false",
             (uintptr_t)tb->tc.ptr,
@@ -2522,6 +2738,9 @@ static void tcg_wasm64_report_live_one_tb_differential(
             metadata->op_count,
             tcg_wasm64_translate_generated_output_available(metadata) ?
                 "true" : "false",
+            metadata->generated_output_size,
+            metadata->generated_output_op_count,
+            metadata->generated_output_checksum,
             result[TCG_WASM64_LIVE_ONE_TB_RESULT_GENERATED_GUEST_INSNS],
             result[TCG_WASM64_LIVE_ONE_TB_RESULT_REFERENCE_GUEST_INSNS],
             result[TCG_WASM64_LIVE_ONE_TB_RESULT_GENERATED_TCI_OPS],
@@ -2551,7 +2770,59 @@ static void tcg_wasm64_report_live_one_tb_differential(
             result[TCG_WASM64_LIVE_ONE_TB_RESULT_REFERENCE_MEMORY_WRITES],
             TCG_WASM64_ONE_TB_MEMORY_WRITES,
             live_one_tb_differential_scanned,
-            result[TCG_WASM64_LIVE_ONE_TB_RESULT_JS_STATUS]);
+            result[TCG_WASM64_LIVE_ONE_TB_RESULT_JS_STATUS],
+            tcg_wasm64_live_one_tb_js_status_name(
+                result[TCG_WASM64_LIVE_ONE_TB_RESULT_JS_STATUS]));
+}
+
+static void tcg_wasm64_report_live_one_tb_failure(
+    const char *blocker, const void *tb_ptr,
+    const TCGWasm64TBMetadata *metadata, const TranslationBlock *tb,
+    uint64_t js_status)
+{
+    fprintf(stderr,
+            "qemu-wasm64-runloop: {\"format\":1,"
+            "\"event\":\"live-one-tb-differential\","
+            "\"name\":\"%s\","
+            "\"ok\":false,"
+            "\"blocker\":\"%s\","
+            "\"tb_ptr\":\"0x%" PRIxPTR "\","
+            "\"has_metadata\":%s,"
+            "\"metadata_op_count\":%" PRIu32 ","
+            "\"metadata_first_op\":%" PRIu32 ","
+            "\"metadata_first_op_name\":\"%s\","
+            "\"metadata_generated_output_available\":%s,"
+            "\"metadata_generated_output_size\":%" PRIu32 ","
+            "\"metadata_generated_output_op_count\":%" PRIu32 ","
+            "\"metadata_generated_output_checksum\":%" PRIu32 ","
+            "\"metadata_first_generated_unsupported_op\":%" PRIu32 ","
+            "\"metadata_first_generated_unsupported_op_name\":\"%s\","
+            "\"has_tb\":%s,"
+            "\"tb_icount\":%u,"
+            "\"scanned_live_tbs_before_match\":%" PRIu64 ","
+            "\"generated_guest_instructions\":0,"
+            "\"js_status\":%" PRIu64 ","
+            "\"js_status_name\":\"%s\"}\n",
+            TCG_WASM64_LIVE_ONE_TB_NAME,
+            blocker,
+            (uintptr_t)tb_ptr,
+            metadata ? "true" : "false",
+            metadata ? metadata->op_count : 0,
+            metadata ? metadata->first_op : UINT32_MAX,
+            metadata ? tcg_wasm64_op_name(metadata->first_op) : "none",
+            tcg_wasm64_translate_generated_output_available(metadata) ?
+                "true" : "false",
+            metadata ? metadata->generated_output_size : 0,
+            metadata ? metadata->generated_output_op_count : 0,
+            metadata ? metadata->generated_output_checksum : 0,
+            metadata ? metadata->first_generated_unsupported_op : UINT32_MAX,
+            metadata ? tcg_wasm64_op_name(
+                metadata->first_generated_unsupported_op) : "none",
+            tb ? "true" : "false",
+            tb ? tb->icount : 0,
+            live_one_tb_differential_scanned,
+            js_status,
+            tcg_wasm64_live_one_tb_js_status_name(js_status));
 }
 
 static void tcg_wasm64_record_live_one_tb_generated_metrics(
@@ -2582,7 +2853,32 @@ static void tcg_wasm64_live_one_tb_differential_maybe(
     }
 
     live_one_tb_differential_scanned++;
-    if (!tcg_wasm64_live_one_tb_shape_matches(metadata, tb_ptr)) {
+    if (!metadata) {
+        if (!live_one_tb_metadata_missing_reported) {
+            live_one_tb_metadata_missing_reported = true;
+            tcg_wasm64_report_live_one_tb_failure(
+                "metadata missing for live TB", tb_ptr, NULL, NULL, 4);
+        }
+        return;
+    }
+    if (!tcg_wasm64_translate_generated_output_available(metadata)) {
+        if (!live_one_tb_output_unavailable_reported &&
+            tcg_wasm64_live_one_tb_selected_hot_shape(metadata)) {
+            live_one_tb_output_unavailable_reported = true;
+            tcg_wasm64_report_live_one_tb_failure(
+                "generated output unavailable for selected hot shape",
+                tb_ptr, metadata, NULL, 4);
+        }
+        return;
+    }
+    if (!tcg_wasm64_live_one_tb_generated_output_shape_supported(metadata)) {
+        if (!live_one_tb_unsupported_shape_reported &&
+            tcg_wasm64_live_one_tb_selected_hot_shape(metadata)) {
+            live_one_tb_unsupported_shape_reported = true;
+            tcg_wasm64_report_live_one_tb_failure(
+                "selected hot shape unsupported by live per-TB emitter",
+                tb_ptr, metadata, NULL, 5);
+        }
         return;
     }
     live_one_tb_differential_checked = true;
@@ -2622,7 +2918,9 @@ static void tcg_wasm64_live_one_tb_differential_maybe(
         int js_status = tcg_wasm64_live_one_tb_differential_js(
             (uintptr_t)&context, (uintptr_t)scratch,
             (uintptr_t)&run_counters, (uintptr_t)&exit, (uintptr_t)result,
-            (uintptr_t)tb_ptr, (uintptr_t)env, guest_insns);
+            (uintptr_t)tb_ptr, (uintptr_t)env, guest_insns,
+            (uintptr_t)metadata->generated_output,
+            metadata->generated_output_size);
 
         result[TCG_WASM64_LIVE_ONE_TB_RESULT_JS_STATUS] = js_status;
     }
@@ -2653,6 +2951,8 @@ static void tcg_wasm64_live_one_tb_differential_maybe(
              TCG_WASM64_ONE_TB_MEMORY_WRITES &&
          result[TCG_WASM64_LIVE_ONE_TB_RESULT_REFERENCE_MEMORY_WRITES] ==
              TCG_WASM64_ONE_TB_MEMORY_WRITES &&
+         tcg_wasm64_translate_generated_output_available(metadata) &&
+         tcg_wasm64_live_one_tb_generated_output_shape_supported(metadata) &&
          run_counters.generated_guest_instructions == guest_insns &&
          run_counters.inline_tlb_hit_loads == TCG_WASM64_ONE_TB_MEMORY_LOADS &&
          run_counters.inline_tlb_hit_stores ==
@@ -3242,6 +3542,7 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
         tcg_wasm64_summary_maybe_report();
     } else {
         translated_counters.translated_metadata_misses++;
+        tcg_wasm64_live_one_tb_differential_maybe(env, tb_ptr, NULL);
     }
     active_counters = counters;
     ret = tcg_tci_qemu_tb_exec(env, tb_ptr);

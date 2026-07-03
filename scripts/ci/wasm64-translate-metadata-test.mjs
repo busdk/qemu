@@ -12,12 +12,6 @@ function read(path) {
   return readFileSync(join(root, path), "utf8");
 }
 
-function parseHexWords(body) {
-  return [...body.matchAll(/0x[0-9a-f]+/gi)].map((match) =>
-    Number.parseInt(match[0].slice(2), 16) >>> 0
-  );
-}
-
 const target = read("tcg/wasm64/tcg-target.c.inc");
 const runtime = read("tcg/wasm64.c");
 const header = read("tcg/wasm64.h");
@@ -137,25 +131,30 @@ assert.match(runtime, /QEMU_WASM64_ONE_TB_DIFFERENTIAL/);
 assert.match(runtime, /QEMU_WASM64_LIVE_ONE_TB_DIFFERENTIAL/);
 assert.match(runtime, /TCG_WASM64_ONE_TB_NAME "live-x86-pre-r4i-ld32u-goto-tb-13"/);
 assert.match(runtime, /TCG_WASM64_LIVE_ONE_TB_NAME "live-x86-r4i-ld32u-goto-tb-11"/);
-assert.match(runtime, /tcg_wasm64_live_one_tb_words\[\]/);
-assert.match(runtime, /0x00020d04/);
-assert.match(runtime, /metadata->op_count < ARRAY_SIZE\(tcg_wasm64_live_one_tb_words\)/);
-const liveShapeWords = parseHexWords(
-  runtime.match(
-    /static const uint32_t tcg_wasm64_live_one_tb_words\[\] = \{([\s\S]*?)\};/,
-  )?.[1] || "",
-);
-const liveJsWords = parseHexWords(
+assert.doesNotMatch(runtime, /tcg_wasm64_live_one_tb_words\[\]/);
+assert.match(runtime, /tcg_wasm64_live_one_tb_ops\[\]/);
+assert.match(runtime, /INDEX_op_brcond/);
+assert.match(runtime, /generatedOutputPtr = Number\(generated_output_arg\)/);
+assert.match(runtime, /generatedOutputSize = Number\(generated_output_size_arg\)/);
+assert.match(runtime, /readGeneratedOutputWords/);
+assert.match(runtime, /generatedOutputShapeSupported/);
+assert.match(runtime, /tcg_wasm64_live_one_tb_generated_output_shape_supported/);
+assert.match(runtime, /tcg_wasm64_live_one_tb_selected_hot_shape/);
+assert.match(runtime, /metadata->generated_output,\s*\n\s*metadata->generated_output_size/);
+assert.match(runtime, /metadata missing for live TB/);
+assert.match(runtime, /generated output unavailable for selected hot shape/);
+assert.match(runtime, /selected hot shape unsupported by live per-TB emitter/);
+assert.match(runtime, /module-emission-failed/);
+assert.match(runtime, /module-validation-failed/);
+assert.match(runtime, /metadata_generated_output_size/);
+assert.match(runtime, /metadata_generated_output_op_count/);
+assert.match(runtime, /js_status_name/);
+assert.doesNotMatch(
   runtime.match(
     /EM_JS\(int, tcg_wasm64_live_one_tb_differential_js,[\s\S]*?const words = \[([\s\S]*?)\];/,
-  )?.[1] || "",
+  )?.[0] || "",
+  /const words = \[/,
 );
-assert.deepEqual(liveJsWords, liveShapeWords);
-assert.deepEqual(liveShapeWords, [
-  0xfff0e41c, 0x0000057d, 0x00254d88, 0x00020d04,
-  0x0000147d, 0xfff4e435, 0x0100e41e, 0xfff9057d,
-  0x00054407, 0x0100e438, 0xfff74049,
-]);
 assert.match(runtime, /tcg_wasm64_one_tb_differential_js/);
 assert.match(runtime, /tcg_wasm64_live_one_tb_differential_js/);
 assert.match(runtime, /\.\.\.name\("wasmjit_run"\)/);
@@ -163,7 +162,7 @@ assert.match(runtime, /one-tb-differential/);
 assert.match(runtime, /live-one-tb-differential/);
 assert.match(runtime, /live_shape_fixture/);
 assert.match(runtime, /real_live_state_capture/);
-assert.match(runtime, /tcg_wasm64_live_one_tb_shape_matches/);
+assert.match(runtime, /tcg_wasm64_live_one_tb_generated_output_shape_supported/);
 assert.match(runtime, /tcg_tb_lookup\(\(uintptr_t\)tb_ptr\)/);
 assert.match(runtime, /tb->icount == 0/);
 assert.match(runtime, /generated_guest_instructions/);
