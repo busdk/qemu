@@ -1753,6 +1753,21 @@ run that reaches a weaker marker than normal multi-user readiness.
   live generated body with nonzero generated guest-instruction retirement; and
   the next R4l attempt is only allowed when the preflight predicts nonzero
   useful generated execution.
+- [x] R7 - Dispatch available RISC-V generated output from the live wasm64
+  run loop before TCI fallback. DoD: when live TB metadata reports
+  `tcg_wasm64_translate_generated_output_available()` and the RV64
+  generated-output shape is supported by the run/exit emitter,
+  `tcg_wasm64_tb_exec()` executes that generated body, returns its dispatch
+  target, updates generated execution and coverage counters, and records a
+  `live-tb-coverage` event; unavailable, unsupported, or stale shapes keep
+  explicit TCI compatibility fallback. Accepted 2026-07-04:
+  `tcg/wasm64.c` now routes supported available generated output through the
+  live coverage run/exit emitter before `tcg_tci_qemu_tb_exec()`, while the
+  scan-limit diagnostic no longer prevents a later supported generated-output
+  TB from running. Deterministic coverage was added to
+  `scripts/ci/wasm-generated-output-equivalence-test.mjs` and
+  `scripts/ci/wasm64-translate-metadata-test.mjs`. No browser run, artifact
+  build, R4c speed claim, or Bus Engine OS proof was run in this slice.
 - [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
   accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
   cold in browser-hosted QEMU/WASM with the accelerator and reaches

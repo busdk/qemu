@@ -87,6 +87,13 @@ const R4I_LIVE_X86_SHAPE = [
   "st",
   "goto_tb",
 ];
+const R7_AVAILABLE_GENERATED_OUTPUT_SHAPE = [
+  "tci_movi",
+  "mov",
+  "add",
+  "xor",
+  "goto_tb",
+];
 
 const STATUS_EXIT = 1n;
 const STATUS_DISPATCH = 2n;
@@ -150,6 +157,14 @@ function opMem(op, r0, r1, offset) {
   return (op | (r0 << 8) | (r1 << 12) |
           (((offset & 0xffff) << 16) >>> 0)) >>> 0;
 }
+
+const R7_AVAILABLE_GENERATED_OUTPUT_WORDS = [
+  opImm20(OPS.tci_movi, 1, 7),
+  opReg(OPS.mov, 2, 1),
+  opReg(OPS.add, 3, 1, 2),
+  opReg(OPS.xor, 4, 3, 2),
+  opImm20(OPS.goto_tb, 0, -8),
+];
 
 function vector(items) {
   return [...encodeU32(items.length), ...items.flat()];
@@ -1179,6 +1194,79 @@ function routeLiveGeneratedOutput(metadata) {
     shape,
     moduleValid: emission.moduleValid,
     moduleByteLength: emission.moduleByteLength,
+  };
+}
+
+function routeAvailableGeneratedOutput(metadata) {
+  if (!metadata) {
+    return {
+      ok: false,
+      reason: "metadata-missing",
+      generatedGuestInstructions: 0,
+      generatedCoverageNumerator: 0,
+    };
+  }
+  if (!metadata.generatedOutputAvailable || metadata.generatedOutputSize === 0 ||
+      metadata.generatedOutputSize % 4 !== 0) {
+    return {
+      ok: false,
+      reason: "generated-output-unavailable",
+      generatedGuestInstructions: 0,
+      generatedCoverageNumerator: 0,
+    };
+  }
+
+  const shape = decodedShape(metadata.words);
+  const supportedOps = new Set([
+    "add",
+    "and",
+    "exit_tb",
+    "goto_tb",
+    "mb",
+    "mov",
+    "or",
+    "shl",
+    "shr",
+    "sub",
+    "tci_movi",
+    "tci_movl",
+    "xor",
+  ]);
+  const terminal = shape.find((op) => op === "goto_tb" || op === "exit_tb");
+
+  if (!terminal || !shape.every((op) => supportedOps.has(op))) {
+    return {
+      ok: false,
+      reason: "generated-output-shape-unsupported",
+      generatedGuestInstructions: 0,
+      generatedCoverageNumerator: 0,
+      shape,
+    };
+  }
+  if (metadata.tbWords &&
+      (metadata.tbWords.length !== metadata.words.length ||
+       metadata.tbWords.some((word, index) =>
+         (word >>> 0) !== (metadata.words[index] >>> 0)))) {
+    return {
+      ok: false,
+      reason: "metadata-output-tb-code-mismatch",
+      runExitReason: "invalidated",
+      generatedGuestInstructions: 0,
+      generatedCoverageNumerator: 0,
+      shape,
+    };
+  }
+
+  return {
+    ok: true,
+    reason: null,
+    shape,
+    terminal,
+    generatedGuestInstructions: metadata.guestInstructions,
+    generatedCoverageNumerator: metadata.guestInstructions,
+    generatedChainLength: 1,
+    generatedExecuted: 1,
+    returnedDispatchTarget: terminal === "goto_tb",
   };
 }
 
@@ -3761,6 +3849,128 @@ assert.equal(
     .compatFallback,
   true,
 );
+
+function simulateR7AvailableGeneratedOutputExec({
+  name,
+  liveCoverageEnabled,
+  metadata,
+}) {
+  if (!liveCoverageEnabled) {
+    return {
+      name,
+      liveCoverageEnabled,
+      ok: true,
+      path: "tci",
+      generatedGuestInstructions: 0,
+      generatedCoverageNumerator: 0,
+      generatedExecuted: 0,
+      compatFallback: false,
+    };
+  }
+
+  const route = routeAvailableGeneratedOutput(metadata);
+  if (!route.ok) {
+    return {
+      name,
+      liveCoverageEnabled,
+      ok: false,
+      path: "tci-fallback",
+      reason: route.reason,
+      generatedGuestInstructions: 0,
+      generatedCoverageNumerator: 0,
+      generatedExecuted: 0,
+      compatFallback: true,
+    };
+  }
+
+  return {
+    name,
+    liveCoverageEnabled,
+    ok: true,
+    path: "generated",
+    reason: null,
+    shape: route.shape,
+    terminal: route.terminal,
+    generatedGuestInstructions: route.generatedGuestInstructions,
+    generatedCoverageNumerator: route.generatedCoverageNumerator,
+    generatedExecuted: route.generatedExecuted,
+    generatedChainLength: route.generatedChainLength,
+    returnedDispatchTarget: route.returnedDispatchTarget,
+    compatFallback: false,
+  };
+}
+
+const r7AvailableGeneratedOutputExecCases = [
+  simulateR7AvailableGeneratedOutputExec({
+    name: "r7-live-coverage-disabled-keeps-tci",
+    liveCoverageEnabled: false,
+    metadata: null,
+  }),
+  simulateR7AvailableGeneratedOutputExec({
+    name: "r7-available-generated-output-executes",
+    liveCoverageEnabled: true,
+    metadata: {
+      opCount: R7_AVAILABLE_GENERATED_OUTPUT_SHAPE.length,
+      generatedOutputAvailable: true,
+      generatedOutputSize: R7_AVAILABLE_GENERATED_OUTPUT_WORDS.length * 4,
+      words: R7_AVAILABLE_GENERATED_OUTPUT_WORDS,
+      tbWords: R7_AVAILABLE_GENERATED_OUTPUT_WORDS,
+      guestInstructions: 23,
+    },
+  }),
+  simulateR7AvailableGeneratedOutputExec({
+    name: "r7-available-generated-output-unsupported-falls-back",
+    liveCoverageEnabled: true,
+    metadata: {
+      opCount: R7_AVAILABLE_GENERATED_OUTPUT_SHAPE.length,
+      generatedOutputAvailable: true,
+      generatedOutputSize: R7_AVAILABLE_GENERATED_OUTPUT_WORDS.length * 4,
+      words: [
+        ...R7_AVAILABLE_GENERATED_OUTPUT_WORDS.slice(0, -1),
+        opCall(0),
+      ],
+      guestInstructions: 23,
+    },
+  }),
+  simulateR7AvailableGeneratedOutputExec({
+    name: "r7-generated-output-unavailable-falls-back",
+    liveCoverageEnabled: true,
+    metadata: {
+      opCount: R7_AVAILABLE_GENERATED_OUTPUT_SHAPE.length,
+      generatedOutputAvailable: false,
+      generatedOutputSize: 0,
+      words: [],
+      guestInstructions: 23,
+    },
+  }),
+];
+assert.deepEqual(
+  r7AvailableGeneratedOutputExecCases.map((entry) => entry.path),
+  ["tci", "generated", "tci-fallback", "tci-fallback"],
+);
+assert.deepEqual(
+  r7AvailableGeneratedOutputExecCases.find((entry) =>
+    entry.name === "r7-available-generated-output-executes").shape,
+  R7_AVAILABLE_GENERATED_OUTPUT_SHAPE,
+);
+assert.equal(
+  r7AvailableGeneratedOutputExecCases.find((entry) =>
+    entry.name === "r7-available-generated-output-executes")
+    .generatedGuestInstructions,
+  23,
+);
+assert.equal(
+  r7AvailableGeneratedOutputExecCases.find((entry) =>
+    entry.name === "r7-available-generated-output-executes")
+    .generatedCoverageNumerator,
+  23,
+);
+assert.equal(
+  r7AvailableGeneratedOutputExecCases.find((entry) =>
+    entry.name === "r7-available-generated-output-unsupported-falls-back")
+    .compatFallback,
+  true,
+);
 r4kInvalidationResults.push({
   name: "r4k-invalidation-generated-output-mismatch",
   success: false,
@@ -4034,6 +4244,14 @@ console.log(JSON.stringify({
       entry.failedClosed).length,
     compatFallbackFixtures: r4mLiveGeneratedExecCases.filter((entry) =>
       entry.compatFallback).length,
+  },
+  r7AvailableGeneratedOutputExec: {
+    fixtureCount: r7AvailableGeneratedOutputExecCases.length,
+    fixtures: r7AvailableGeneratedOutputExecCases,
+    generatedFixtures: r7AvailableGeneratedOutputExecCases.filter((entry) =>
+      entry.path === "generated").length,
+    compatFallbackFixtures: r7AvailableGeneratedOutputExecCases.filter(
+      (entry) => entry.compatFallback).length,
   },
   r4kLiveMetadataRouting: r4kLiveRoutingCases,
   unsupportedX86StateFixtures: unsupportedX86StateResults,

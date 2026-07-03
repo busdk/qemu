@@ -3252,6 +3252,13 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
                 return Number(statusUnsupported);
             }
         }
+        for (let i = 0; i < words.length; i++) {
+            if ((HEAPU32[tbPtr / 4 + i] >>> 0) !== words[i]) {
+                HEAPU32[exit / 4] = 8;
+                setResult(0, 3n);
+                return 3;
+            }
+        }
 
         const bytes = Uint8Array.from([
             0x00, 0x61, 0x73, 0x6d,
@@ -4217,7 +4224,7 @@ static void tcg_wasm64_report_live_tb_coverage(
             "\"name\":\"%s\","
             "\"ok\":%s,"
             "\"real_live_tb\":true,"
-            "\"guest_state_commit\":false,"
+            "\"guest_state_commit\":%s,"
             "\"tb_ptr\":\"0x%" PRIxPTR "\","
             "\"tb_pc\":\"0x%" PRIx64 "\","
             "\"tb_cs_base\":\"0x%" PRIx64 "\","
@@ -4248,6 +4255,7 @@ static void tcg_wasm64_report_live_tb_coverage(
             "\"scanned_live_tbs_before_match\":%" PRIu64 ","
             "\"js_status\":%" PRIu64 "}\n",
             TCG_WASM64_LIVE_TB_COVERAGE_NAME,
+            ok ? "true" : "false",
             ok ? "true" : "false",
             (uintptr_t)tb->tc.ptr,
             (uint64_t)tb->pc,
@@ -4347,9 +4355,9 @@ static void tcg_wasm64_count_live_tb_coverage_denominator(const void *tb_ptr)
     }
 }
 
-static void tcg_wasm64_live_tb_coverage_maybe(
+static bool tcg_wasm64_execute_available_generated_output_try(
     CPUArchState *env, const void *tb_ptr,
-    const TCGWasm64TBMetadata *metadata)
+    const TCGWasm64TBMetadata *metadata, uintptr_t *ret)
 {
     TranslationBlock *tb;
     TCGWasm64RunCounters run_counters;
@@ -4361,29 +4369,31 @@ static void tcg_wasm64_live_tb_coverage_maybe(
 
     if (live_tb_coverage_checked ||
         !tcg_wasm64_live_tb_coverage_enabled()) {
-        return;
-    }
-    if (live_tb_coverage_scanned >= live_tb_coverage_scan_limit) {
-        if (!live_tb_coverage_no_shape_reported) {
-            live_tb_coverage_no_shape_reported = true;
-            tcg_wasm64_report_live_tb_coverage_skip(
-                "scan limit reached before a generated live TB shape ran",
-                tb_ptr, metadata);
-        }
-        return;
+        return false;
     }
 
-    live_tb_coverage_scanned++;
     if (!metadata ||
         !tcg_wasm64_live_tb_coverage_shape_supported(metadata)) {
+        if (live_tb_coverage_scanned < live_tb_coverage_scan_limit) {
+            live_tb_coverage_scanned++;
+        }
+        if (!live_tb_coverage_no_shape_reported) {
+            if (live_tb_coverage_scanned >= live_tb_coverage_scan_limit) {
+                live_tb_coverage_no_shape_reported = true;
+                tcg_wasm64_report_live_tb_coverage_skip(
+                    "scan limit reached before a generated live TB shape ran",
+                    tb_ptr, metadata);
+            }
+        }
         if (metadata) {
             translated_counters.fallback_runtime++;
             tcg_wasm64_count_exit(&translated_counters,
                                   TCG_WASM64_EXIT_UNSUPPORTED);
         }
-        return;
+        return false;
     }
 
+    live_tb_coverage_scanned++;
     tb = tcg_tb_lookup((uintptr_t)tb_ptr);
     if (!tb || tb->icount == 0) {
         if (!live_tb_coverage_no_shape_reported) {
@@ -4393,7 +4403,7 @@ static void tcg_wasm64_live_tb_coverage_maybe(
                 "or icount was missing",
                 tb_ptr, metadata);
         }
-        return;
+        return false;
     }
     guest_insns = tb->icount;
 
@@ -4431,14 +4441,19 @@ static void tcg_wasm64_live_tb_coverage_maybe(
     if (ok) {
         tcg_wasm64_record_live_tb_generated_metrics(guest_insns);
         live_tb_coverage_checked = true;
+        *ret = (uintptr_t)exit.value;
     } else {
+        TCGWasm64ExitReason reason =
+            result[0] == 3 ? TCG_WASM64_EXIT_INVALIDATION :
+                              TCG_WASM64_EXIT_UNSUPPORTED;
+
         translated_counters.generated_attempts++;
         translated_counters.fallback_runtime++;
-        tcg_wasm64_count_exit(&translated_counters,
-                              TCG_WASM64_EXIT_UNSUPPORTED);
+        tcg_wasm64_count_exit(&translated_counters, reason);
     }
     tcg_wasm64_report_live_tb_coverage(
         tb, metadata, &run_counters, &exit, result, ok);
+    return ok;
 }
 
 static void tcg_wasm64_live_generated_exec_count_reject(
@@ -5363,10 +5378,10 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
     tcg_wasm64_one_tb_differential_maybe(env);
 
     /*
-     * Native wasm64 lowering grows behind this boundary.  The TCI fallback
-     * owns live register state today, so it receives the active counter
-     * contract and may execute generated WebAssembly blocks only after it has
-     * validated the TCI bytecode shape.
+     * Native wasm64 lowering grows behind this boundary.  Metadata-backed
+     * generated output gets the first chance only after the live TB identity
+     * and generated-output shape are validated; the TCI fallback remains the
+     * correctness path for anything the generated runner cannot execute.
      */
     (void)ctx;
     if (counters) {
@@ -5377,8 +5392,12 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
     if (metadata) {
         tcg_wasm64_count_live_translation_metadata(metadata);
         tcg_wasm64_count_live_tb_coverage_denominator(tb_ptr);
+        if (tcg_wasm64_execute_available_generated_output_try(
+                env, tb_ptr, metadata, &ret)) {
+            tcg_wasm64_summary_maybe_report();
+            return ret;
+        }
         tcg_wasm64_live_one_tb_differential_maybe(env, tb_ptr, metadata);
-        tcg_wasm64_live_tb_coverage_maybe(env, tb_ptr, metadata);
         if (tcg_wasm64_live_generated_exec_try(env, tb_ptr, metadata,
                                                counters, &ret)) {
             tcg_wasm64_summary_maybe_report();
@@ -5388,8 +5407,9 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
     } else {
         translated_counters.translated_metadata_misses++;
         tcg_wasm64_count_live_tb_coverage_denominator(tb_ptr);
+        (void)tcg_wasm64_execute_available_generated_output_try(
+            env, tb_ptr, NULL, &ret);
         tcg_wasm64_live_one_tb_differential_maybe(env, tb_ptr, NULL);
-        tcg_wasm64_live_tb_coverage_maybe(env, tb_ptr, NULL);
         if (tcg_wasm64_live_generated_exec_try(env, tb_ptr, NULL,
                                                counters, &ret)) {
             tcg_wasm64_summary_maybe_report();

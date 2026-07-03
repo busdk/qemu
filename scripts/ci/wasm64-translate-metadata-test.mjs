@@ -292,8 +292,13 @@ assert.match(runtime, /tcg_wasm64_report_summary\("interval",\s*&zero\)/);
 assert.match(runtime, /tcg_wasm64_live_tb_coverage_js/);
 assert.match(runtime, /tcg_wasm64_live_tb_coverage_shape_supported/);
 assert.match(runtime, /tcg_wasm64_live_tb_coverage_op_supported/);
+assert.match(runtime, /HEAPU32\[tbPtr \/ 4 \+ i\]/);
 assert.match(runtime, /tcg_wasm64_count_live_tb_coverage_denominator/);
-assert.match(runtime, /tcg_wasm64_live_tb_coverage_maybe\(env, tb_ptr, metadata\)/);
+assert.match(runtime, /tcg_wasm64_execute_available_generated_output_try/);
+assert.match(
+  runtime,
+  /tcg_wasm64_execute_available_generated_output_try\(\s*\n\s*env, tb_ptr, metadata, &ret\)/,
+);
 assert.match(runtime, /tcg_wasm64_live_generated_exec_enabled/);
 assert.match(runtime, /tcg_wasm64_live_generated_exec_no_fallback/);
 assert.match(runtime, /tcg_wasm64_live_generated_exec_js/);
@@ -326,7 +331,7 @@ assert.match(runtime, /TCG_WASM64_RUN_MODE_COMPAT/);
 assert.match(runtime, /TCG_WASM64_RUN_MODE_PERF_PROOF/);
 assert.match(runtime, /tcg_tci_qemu_tb_exec\(env, tb_ptr\)/);
 assert.match(runtime, /\\"event\\":\\"live-tb-coverage\\"/);
-assert.match(runtime, /\\"guest_state_commit\\":false/);
+assert.match(runtime, /\\"guest_state_commit\\":%s/);
 assert.match(runtime, /TCG_WASM64_LIVE_TB_COVERAGE_ENV/);
 assert.match(runtime, /INDEX_op_add, INDEX_op_and, INDEX_op_exit_tb, INDEX_op_goto_tb/);
 const liveTbCoverageSupportedBody = runtime.match(
@@ -391,6 +396,11 @@ assert.match(
 );
 assert.match(tbExecBody, /tcg_wasm64_summary_maybe_report\(\)/);
 assert.match(tbExecBody, /tcg_wasm64_counters_reset\(counters\)/);
+assert.match(
+  tbExecBody,
+  /tcg_wasm64_execute_available_generated_output_try\(\s*\n\s*env, tb_ptr, metadata, &ret\)/,
+);
+assert.match(tbExecBody, /return ret;/);
 assert.doesNotMatch(
   tbExecBody,
   /tcg_wasm64_counters_add_translation\(&translated_counters,\s*counters\)/,
@@ -449,6 +459,9 @@ assert.match(generatedEquivalence, /r4m-supported-metadata-backed-live-tb-genera
 assert.match(generatedEquivalence, /r4m-unsupported-no-silent-fallback-fails-closed/);
 assert.match(generatedEquivalence, /r4m-stale-output-invalidates-zero-generated-work/);
 assert.match(generatedEquivalence, /r4m-compat-fallback-explicit-and-counted/);
+assert.match(generatedEquivalence, /r7AvailableGeneratedOutputExec/);
+assert.match(generatedEquivalence, /r7-available-generated-output-executes/);
+assert.match(generatedEquivalence, /r7-available-generated-output-unsupported-falls-back/);
 assert.match(generatedEquivalence, /RV64_ENV_RELATIVE_BASE_REG/);
 assert.match(generatedEquivalence, /rv64-env-relative-load-store-family/);
 assert.match(generatedEquivalence, /rv64-env-relative-non-env-base-fails-closed/);
