@@ -15,6 +15,13 @@ TCI proof; it is an accepted Bus Engine OS `riscv64` `virtual-server` guest
 running in browser-hosted QEMU/WASM through an opt-in RISC-V 64 to WebAssembly
 accelerator.
 
+This file is shared by the x86_64 and RISC-V supervisor environments. RISC-V
+items remain valid for the separate RISC-V lane. The current executor lane in
+the Linux supervisor environment owns only the `x86_64-softmmu` accelerator
+items, currently R4f-R4l and the x86 final proof item. Do not project x86_64
+boot timing from RISC-V measurements, and do not remove RISC-V items merely
+because they are out of scope for the x86_64 lane.
+
 The goal is complete only when the real browser-hosted QEMU/WASM path boots
 the accepted package-built Bus Engine OS `riscv64` `virtual-server` kernel and
 root filesystem to multi-user readiness within `300000` ms. The proof must use
@@ -596,38 +603,85 @@ run that reaches a weaker marker than normal multi-user readiness.
     load/store lowering, TB chaining/hotset dispatch, and invalidation rules.
     The output must name the first deterministic x86_64 tests to write and
     the first top hot TB/op shapes that would block real generated coverage.
-  - [ ] R4g - Prove the shared accelerator contract in an `x86_64-softmmu`
-    artifact without enabling real x86 acceleration. DoD: build an
-    `x86_64-softmmu` Emscripten artifact with the wasm64 backend gate enabled,
-    run the deterministic runloop/parser/contract tests, run the opt-in
-    runtime smoke in Chrome/Chromium, and verify that default x86_64 TCI smoke
-    behavior remains unchanged. The accepted result must record artifact
-    hashes, browser version, result JSON path, runtime smoke counters, and a
-    statement that real x86 guest TB generated coverage is still zero until
-    later items implement x86 lowering.
-  - [ ] R4h - Implement the x86_64 CPU-state and generated-body ABI needed for
-    real x86 generated execution. DoD: define how generated Wasm reads and
-    writes the required x86 `CPUArchState` fields, keeps hot temporaries in
-    Wasm locals, handles or exits for flags/condition codes, and preserves
-    guest-visible state when falling back to TCI. Deterministic tests must
-    cover matching generated/fallback state updates for ALU, branch, and flag
-    cases before any browser speed gate is run.
-  - [ ] R4i - Implement x86_64 generated ALU/branch TB bodies with internal
-    chaining or hotset dispatch. DoD: generated x86_64 bodies retire counted
-    guest-instruction-equivalent work inside Wasm, avoid returning to the QEMU
-    main loop per TB on the deterministic hotset path, and return only for
-    budget expiry, unsupported helper, invalidation, interrupt, or another
-    synthetic exit. Tests must prove no-silent-fallback performance mode fails
-    loudly for unsupported hot x86 paths instead of hiding work in TCI.
-  - [ ] R4j - Implement x86_64 inline SoftMMU/TLB-hit RAM load/store fast
-    paths. DoD: common x86_64 generated RAM loads and stores check the TLB
-    hit path in generated Wasm and do not call `qemu_ld`/`qemu_st` helpers on
-    deterministic TLB-hit micro-workloads. Miss, MMIO, permission fault,
-    page-crossing, and unsupported access cases must exit or fall back with
-    precise reason counters. The item is not accepted from helper-backed
-    loads/stores that merely report generated-boundary coverage.
-  - [ ] R4k - Run the x86_64 same-commit generic Chromium speed gate only
-    after R4g-R4j have deterministic evidence. DoD: build one default-TCI
+  - [ ] R4g - Record the current x86_64 baseline and shared accelerator
+    contract evidence without accepting it as real x86 acceleration. DoD:
+    build current default-TCI and backend-gated `x86_64-softmmu` Emscripten
+    artifacts, run the deterministic runloop/parser/contract tests, run the
+    opt-in runtime smoke in Chrome/Chromium, verify default x86_64 TCI smoke
+    behavior, and explicitly record that real x86 guest TB generated coverage
+    remains zero until R4i. Evidence captured 2026-07-03 from QEMU commit
+    `b4bc035facc9956f9a81bf4ef9649d83e8a627bf`: default artifact
+    `qemu-system-x86_64.js`
+    `105d0404f8f105be8604cff8f4f094c665a663c9696bd5dab3f7ab7e20e69870`,
+    `qemu-system-x86_64.wasm`
+    `6fe1613185bcbdb0fdfd7fddfac6c1ea384a0ebb92893887c1081c5d6af7c50e`,
+    manifest
+    `d9c96709f2984502d92097397efcbf7c05dc695de05be9e9dd5e86e35190cad0`;
+    backend-gated artifact `qemu-system-x86_64.js`
+    `f2cd3daf6f04af351f23316de5156d7a3d1bd94a14526c40a0a4ae7c8e0c39b4`,
+    `qemu-system-x86_64.wasm`
+    `183fee2e9a51e1870e60384d32ba8fd07a3e84f8b0cc0718fa8e42331c47de01`,
+    manifest
+    `e2304da4745f1d92f13a380e2e39098325ba81289152124b6aa4197f4d34e6a9`.
+    Chrome/Chromium `149.0.7827.55` default TuxBoot smoke reached
+    `QEMU_WASM_LINUX_BOOT_OK` in `86715` ms with result JSON
+    `tmp/qemu-x86_64-current-guest-20260703-06/wasm-browser-smoke-result.json`
+    SHA256
+    `096401f6c8ffa05aa55705daeae059f6690935842a7d4e8fb6040cfffd01ed7f`.
+    The backend-gated run with `wasm64RunloopSmoke=1` reached the same marker
+    in `86074` ms with result JSON
+    `tmp/qemu-x86_64-current-backend-smoke-20260703-06/wasm-browser-smoke-result.json`
+    SHA256
+    `c92ec0621522245a390faa033bf2002507783013df58d901ea3a4d0e42f88930`.
+    The runtime smoke reported aggregate generated/fallback
+    guest-instruction-equivalent counts `8000000`/`8000000`, generated body
+    time `9125000` ns, TCI-like dispatch time `89932000` ns, and zero
+    helper/`qemu_ld`/`qemu_st` calls for synthetic micro-workloads. Live x86
+    TB summaries remained empty (`wasm64Tcg.summaryCount=0`), so this is
+    baseline/contract evidence only, not a performance pass.
+  - [ ] R4h - Fix x86_64 live-TB instrumentation correctness before relying
+    on generated-coverage counters. DoD: reproduce and fix, or prove absent
+    on the current x86_64 lane, both correctness signals from the supervisor
+    review: the RCU unlock abort (`p_rcu_reader->depth != 0`) during an
+    attach-probe run, and counter instability where
+    `translated_generated_output_tbs` can fall from about `22000` to `0`
+    between adjacent near-identical runs. The accepted result must include
+    deterministic tests or a bounded browser/fixture proof showing stable
+    translated-output counters for the same artifact and no guest-crashing
+    diagnostic path.
+  - [ ] R4i - Prove one real translated x86 Linux TB through
+    `wasmjit_run()` before any more structural accelerator widening. DoD:
+    choose one highest-frequency attachable live x86_64 TB shape from a real
+    generic Linux or Bus Engine OS boot; use the measured `ld32u`-first family
+    unless fresh attribution proves a better attachable target. Capture the
+    same input state for generated execution and TCI, execute the TB through a
+    generated Wasm body reached from `wasmjit_run()`, and differentially
+    verify guest-visible register state, memory writes, and exit/dispatch
+    target against TCI. The standard metrics must record nonzero generated
+    guest-instruction retirement for that real TB. `call`-heavy TBs stay on
+    fallback until a helper-exit design exists. Descriptor fields may be added
+    only when required by this single TB proof.
+  - [ ] R4j - Decide whether the bespoke descriptor ABI remains viable or the
+    x86 lane switches to a reference-shaped per-TB generated function body.
+    DoD: after R4i, record whether the descriptor ABI expressed the dominant
+    real TB shape without per-shape special cases. Continue the descriptor ABI
+    only with that evidence. Otherwise switch the emission strategy to a
+    per-TB generated function body modeled on the `ktock/qemu-wasm`
+    `wasm64-tcg-b` reference while preserving this branch's run/exit loop,
+    internal chaining/hotset target, no-silent-fallback mode, and metrics
+    contract. Do not accept sunk-cost arguments as evidence.
+  - [ ] R4k - Expand from the one-TB proof to x86_64 generated bodies with
+    internal chaining and inline SoftMMU/TLB-hit RAM load/store fast paths.
+    DoD: generated x86_64 bodies retire counted guest instructions inside
+    Wasm, avoid returning to the QEMU main loop per TB on deterministic hot
+    paths, keep hot CPU state in Wasm locals where safe, and do not call
+    `qemu_ld`/`qemu_st` helpers on common TLB-hit RAM loads/stores. Miss,
+    MMIO, permission fault, page-crossing, unsupported helper, invalidation,
+    interrupt, and budget expiry must exit or fall back with precise reason
+    counters. No-silent-fallback performance mode must fail loudly for
+    unsupported hot x86 paths.
+  - [ ] R4l - Run the x86_64 same-commit generic Chromium speed gate only
+    after R4h-R4k have deterministic evidence. DoD: build one default-TCI
     `x86_64-softmmu` artifact and one accelerator artifact from the same
     commit, run the same generic x86_64 browser guest/marker, record hashes,
     browser version, result JSON paths, generated/fallback instruction counts,
@@ -641,11 +695,19 @@ run that reaches a weaker marker than normal multi-user readiness.
   `Reached target Multi-User System.` plus login prompt or
   `QEMU_WASM_SERVICE_READY` within `300000` ms, with all logs and hashes
   archived.
+- [ ] R5x - Run the x86_64 Bus Engine OS proof for the x86 supervisor lane
+  only after R4l passes. DoD: the accepted package-built Bus Engine OS
+  `x86_64` `virtual-server` kernel/rootfs boots cold in browser-hosted
+  QEMU/WASM with the x86_64 accelerator and reaches `Reached target
+  Multi-User System.` plus login prompt or `QEMU_WASM_SERVICE_READY` within
+  `300000` ms, with current artifact hashes, browser version, result JSON,
+  screenshot, serial log, and milestone timings archived. This item must not
+  use RISC-V smoke measurements to estimate or accept x86_64 progress.
 
 Historical x86_64/WASM evidence below remains useful for rejected mechanisms,
 measurement discipline, and non-regression checks. Do not execute the old W2
 items as the active implementation path unless they are explicitly rewritten
-for `riscv64-softmmu`.
+for the current checked goal lane.
 
 - [x] Keep `PLAN.md` limited to the current five-minute multi-user boot goal and keep unrelated work in `BACKLOG.md`.
 - [x] Add opt-in TCI CPU attribution counters and smoke-runner plumbing for

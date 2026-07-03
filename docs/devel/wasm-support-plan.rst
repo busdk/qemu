@@ -28,10 +28,10 @@ Settled MVP decisions
 The Bus Engine browser target needs 64-bit guest environments only.  The MVP
 therefore uses the upstream ``wasm64`` Emscripten host baseline.  The original
 browser boot proof used the ``x86_64-softmmu`` system emulator; that path
-remains a non-regression gate.  The active five-minute Bus Engine OS boot lane
-now targets ``riscv64-softmmu`` because the downstream guest architecture,
-kernel, userland, QEMU machine shape, and browser harness can be optimized
-together.  ``wasm32`` compatibility is not an MVP goal.  Existing ``wasm32``
+remains a non-regression gate and is the current Linux-supervisor accelerator
+lane.  A separate supervisor environment owns the ``riscv64-softmmu`` lane, so
+RISC-V evidence remains recorded here but must not be used to estimate x86_64
+boot time.  ``wasm32`` compatibility is not an MVP goal.  Existing ``wasm32``
 material in experimental forks remains useful only as historical design input
 for browser packaging, JavaScript integration, and TCG-to-WebAssembly ideas.
 
@@ -42,8 +42,81 @@ Chromium or Chrome is the preferred browser target for the MVP acceptance
 path.  Firefox remains compatibility tracking, not a first-MVP requirement,
 unless Chromium stops being a viable proof browser.
 
+x86_64 accelerator executor lane
+================================
+
+The current Linux-supervisor lane is limited to ``x86_64-softmmu``.  The next
+accepted milestone is not another structural ABI expansion and not another
+direct-boundary measurement.  One real translated x86 Linux TB from a live
+boot must execute through ``wasmjit_run()`` generated WebAssembly, and its
+guest-visible register state, memory writes, and exit or dispatch target must
+be differentially verified against TCI from the same input state.  The standard
+metrics must report nonzero generated guest-instruction retirement for that
+real TB.
+
+Before relying on live generated-coverage instrumentation, the x86 lane must
+settle the attach-probe correctness signals recorded by supervisor review:
+the RCU unlock abort (``p_rcu_reader->depth != 0``) and the unstable
+``translated_generated_output_tbs`` counter that changed from about ``22000``
+to ``0`` between adjacent near-identical runs.  A crashing or unstable
+diagnostic path is not acceptable steering evidence.
+
+The first live TB should be selected from the highest-frequency attachable
+x86 shape, currently the measured ``ld32u``-first family unless fresh
+attribution names a better attachable target.  TBs dominated by generic
+``call`` helper semantics remain fallback until a helper-exit design exists.
+When this one-TB milestone is attempted, the implementation must decide whether
+the bespoke descriptor ABI can express the dominant real TB shapes without
+per-shape special cases.  If not, the x86 lane should switch to a per-TB
+generated function body modeled on the ``ktock/qemu-wasm`` reference while
+keeping this branch's run/exit loop, no-silent-fallback mode, internal
+chaining or hotset target, and metrics contract.
+
+Current x86_64 baseline and contract evidence
+---------------------------------------------
+
+On 2026-07-03, QEMU commit ``b4bc035facc9956f9a81bf4ef9649d83e8a627bf`` was
+rebuilt and measured with the pinned x86_64 TuxBoot browser smoke in
+Chrome/Chromium ``149.0.7827.55``.  The default-TCI artifact produced:
+
+* ``qemu-system-x86_64.js`` =
+  ``105d0404f8f105be8604cff8f4f094c665a663c9696bd5dab3f7ab7e20e69870``
+* ``qemu-system-x86_64.wasm`` =
+  ``6fe1613185bcbdb0fdfd7fddfac6c1ea384a0ebb92893887c1081c5d6af7c50e``
+* manifest =
+  ``d9c96709f2984502d92097397efcbf7c05dc695de05be9e9dd5e86e35190cad0``
+
+It reached ``QEMU_WASM_LINUX_BOOT_OK`` in ``86715`` ms and wrote
+``tmp/qemu-x86_64-current-guest-20260703-06/wasm-browser-smoke-result.json``
+with SHA-256
+``096401f6c8ffa05aa55705daeae059f6690935842a7d4e8fb6040cfffd01ed7f``.
+
+The backend-gated artifact produced:
+
+* ``qemu-system-x86_64.js`` =
+  ``f2cd3daf6f04af351f23316de5156d7a3d1bd94a14526c40a0a4ae7c8e0c39b4``
+* ``qemu-system-x86_64.wasm`` =
+  ``183fee2e9a51e1870e60384d32ba8fd07a3e84f8b0cc0718fa8e42331c47de01``
+* manifest =
+  ``e2304da4745f1d92f13a380e2e39098325ba81289152124b6aa4197f4d34e6a9``
+
+With ``wasm64RunloopSmoke=1``, it reached the same marker in ``86074`` ms and
+wrote
+``tmp/qemu-x86_64-current-backend-smoke-20260703-06/wasm-browser-smoke-result.json``
+with SHA-256
+``c92ec0621522245a390faa033bf2002507783013df58d901ea3a4d0e42f88930``.
+The synthetic runtime smoke still reported useful contract ratios:
+``8000000`` generated and ``8000000`` fallback guest-instruction-equivalent
+operations, ``9125000`` ns generated body time, ``89932000`` ns TCI-like
+dispatch time, and zero helper/``qemu_ld``/``qemu_st`` calls.  Live x86 TB
+summaries remained empty (``wasm64Tcg.summaryCount=0``), so this evidence is a
+baseline and contract check only, not a real x86 acceleration pass.
+
 RISC-V 64 accelerator boundary
 ==============================
+
+This section records the separate RISC-V lane.  It is valid shared project
+evidence, but it is not owned by the current x86-only executor goal.
 
 The active performance goal is not an opcode-at-a-time interpreter shortcut.
 It is a guarded ``riscv64-softmmu`` path for WebAssembly-hosted QEMU that keeps
