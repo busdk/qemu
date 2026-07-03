@@ -185,6 +185,68 @@ The RISC-V browser/native ratio for this generic smoke is therefore about
 ``x86_64`` browser TCI W2l-c evidence of ``100472`` ms for
 ``QEMU_WASM_LINUX_BOOT_OK``.
 
+RISC-V 64 run-loop runtime smoke
+================================
+
+The current ``riscv64-softmmu`` backend branch has a descriptor-backed
+``wasmjit_run()`` runtime smoke.  This is not yet translated Linux guest code:
+it is a QEMU-owned run/exit ABI proof that executes a C-owned hotset
+descriptor through the same browser/Emscripten runtime path intended for later
+translated TB hotsets.
+
+The RISC-V backend artifact was built with:
+
+.. code-block:: console
+
+  $ python3 scripts/ci/wasm-build-artifacts-local.py \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3-runloop-riscv64-backend-artifacts \
+      --target riscv64 \
+      --tcg-wasm64-backend \
+      --jobs auto
+
+Meson reported ``TCG backend: experimental wasm64 with TCI fallback``.
+Artifact SHA-256 values were:
+
+* ``qemu-system-riscv64.js``:
+  ``0e210c3597fdb1eb33eac18fd618a59878817e75916ef413c693302345d094b7``
+* ``qemu-system-riscv64.wasm``:
+  ``99d3a2892dc0d337f42849a9899c4bd0d558f0c25f6ebf4fb4adcc41be49a7a9``
+* manifest:
+  ``fa989b2ff6c74c78db28120d90098319fb7a8cd2285cd30d49854e81e986093a``
+
+The browser proof used Chromium ``149.0.7827.55`` and a freshly regenerated
+TuxBoot RISC-V rootfs because the earlier rootfs copy had been used as a
+writable guest disk.  The command was:
+
+.. code-block:: console
+
+  $ npm exec --yes --package=playwright -- node \
+      scripts/ci/wasm-browser-smoke-runner.mjs \
+      --artifact-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3-runloop-riscv64-backend-artifacts \
+      --guest-manifest /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3-riscv64-guest/tuxboot-browser-smoke-guest.json \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3-runloop-riscv64-browser-smoke/wasm-browser-smoke-result.json \
+      --screenshot /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3-runloop-riscv64-browser-smoke/wasm-browser-smoke.png \
+      --timeout-ms 180000 \
+      --progress-sample-interval-ms 10000 \
+      --progress-sample-limit 40 \
+      --wasm64-runloop-smoke
+
+The generic RISC-V smoke reached ``Welcome to TuxTest`` in ``142864`` ms.  The
+run-loop summary was emitted at ``10704`` ms and reported ``ok=true``,
+``budget=1000000``, ``exit_reason=budget``,
+``generated_guest_instructions=4000000``, ``fallback_guest_instructions=0``,
+``generated_body_time_ns=5045000``, ``compile_time_ns=245000``,
+``instantiate_time_ns=50000``, ``generated_chain_length=1000000``,
+``inline_tlb_hit_loads=1000000``, ``inline_tlb_hit_stores=1000000``, zero
+helper/``qemu_ld``/``qemu_st`` calls, and one budget exit with no MMIO, TLB,
+interrupt, helper, unsupported, HLT, or invalidation exits.
+
+This proof keeps the runtime ABI alive on the active RISC-V artifact family,
+but it does not satisfy the speed gate.  The generic smoke was slightly slower
+than the R1 default-TCI baseline of ``140119`` ms.  The next accelerator item
+therefore remains attaching the descriptor-backed run-loop ABI to real
+translated RISC-V TB metadata before another same-commit browser speed gate.
+
 Strict definition of done
 =========================
 
