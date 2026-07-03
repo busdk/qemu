@@ -329,6 +329,59 @@ ratio about ``24.9x`` for this generic TuxBoot marker.  This completes the
 generic RISC-V default-TCI baseline for accelerator development.  It is not
 the final Bus Engine OS ``riscv64`` ``virtual-server`` multi-user proof.
 
+R4a deterministic run-loop benchmark gate
+-----------------------------------------
+
+R4a adds a cheap deterministic preflight for the generated run-loop before
+another expensive browser speed gate is attempted.  The gate is intentionally
+narrow: it compares the current generated ``wasmjit_run()`` micro-workloads
+against the local TCI-like interpreter model for the ALU/branch and TLB-hit RAM
+paths.  Passing it does not prove Linux boot acceleration.  Failing it would
+make a browser speed gate pointless because the run-loop shape would not yet
+beat the fallback model on the workloads it is designed to accelerate.
+
+Command:
+
+.. code-block:: console
+
+  $ node scripts/ci/wasmjit-runloop-benchmark-gate.mjs \
+      --out /Users/test/git/busdk/agent-supervisor/tmp/qemu-r4-wasmjit-preflight-local/runloop-benchmark-gate.json
+
+Result JSON SHA-256:
+``8deed1a988f7f778792a93f7e9db06fc1a5ea512e472246a97addc1f22861849``.
+
+The archived result used budget ``1000000``, rounds ``7``, and the default
+minimum ratio ``3``.  ``alu-branch`` passed with wasm best
+``0.38574999999999804`` ms, TCI-like best ``34.14274999999998`` ms, ratio
+``88.51004536617019``.  ``tlb-hit-ram`` passed with wasm best
+``1.9760410000000093`` ms, TCI-like best ``64.48566600000004`` ms, ratio
+``32.6337692385936``.
+
+The same slice also passed a full ``riscv64-softmmu`` backend artifact compile
+gate:
+
+.. code-block:: console
+
+  $ python3 scripts/ci/wasm-build-artifacts-local.py \
+      --out /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-runloop-preflight \
+      --target riscv64 --tcg-wasm64-backend --build-image
+
+Artifact SHA-256 hashes:
+
+.. code-block:: text
+
+  qemu-system-riscv64.js
+    c398c19673c3de5c3d4331cda83ba48b14470627c582072385e751cf75e9ff3f
+  qemu-system-riscv64.wasm
+    60ea302e6600f4dfd0637a7ca5df9dbff30fedd3e2de655f7a709cb978b46959
+  qemu-system-wasm-artifacts.json
+    c0d15b7d992acfbb49e79f7f31bbdf7a7deeffd24826838dcf3b50a0a96ea82a
+
+This is the R4 preflight only.  The next required step is an in-binary
+Emscripten runtime microbench that compares ``wasmjit_run()`` with the
+C/TCI-like hotset interpreter path inside the QEMU/WASM artifact, followed by
+the same-commit generic Chromium speed gate.
+
 Strict definition of done
 =========================
 
@@ -7494,3 +7547,96 @@ The next W2 step is QEMU-facing integration of this contract plus measured
 ALU/branch and TLB-hit RAM microbenches against a TCI-like baseline.  A
 generic Linux or Bus Engine OS browser speed gate must not run again until
 that microbench gate shows a multiple-times win from the run/exit shape.
+
+W2o-a run/exit ABI and model benchmark
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The QEMU-facing scaffolding now has a run/exit ABI in ``tcg/wasm64.h``:
+
+* ``TCGWasm64RunMode`` separates compatibility mode from performance-proof
+  mode.
+* ``TCGWasm64RunExitReason`` names the synthetic exits: budget, MMIO,
+  TLB miss or fault, interrupt, helper, unsupported, HLT, and invalidation.
+* ``TCGWasm64RunExit`` carries the exit payload.
+* ``TCGWasm64RunCounters`` carries the W2 metrics: generated and fallback
+  guest instructions, generated-body time, TCI dispatch time, TB lookup time,
+  helper/``qemu_ld``/``qemu_st`` time and call counts, compile/instantiate
+  time, generated chain length, inline TLB-hit loads and stores, and per-exit
+  counters.
+* ``TCGWasm64RunContext`` is the C-side context for the eventual
+  ``wasmjit_run()`` boundary.
+
+The deterministic model benchmark was updated so measured run time excludes
+module construction, compilation, instantiation, context initialization, and
+expected-value calculation.  The speed evidence is recorded in the R4a and
+W2o-b microbench gate sections; W2o-a is the ABI contract slice.
+
+This is not a QEMU generic smoke result and not a Bus Engine OS proof.  It is
+the deterministic micro-hotset evidence that the run/exit shape can clear the
+model-level speed gate when setup and bookkeeping are kept out of the measured
+run.  The remaining W2 work is to move this shape into QEMU runtime execution
+without falling back to the rejected per-TB generated wrapper.
+
+W2o-b QEMU-facing microbench split
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The deterministic run-loop model now uses the same run-context and exit-frame
+offsets declared in ``tcg/wasm64.h``.  The header exposes
+``TCG_WASM64_RUN_CTX_*`` and ``TCG_WASM64_RUN_EXIT_*`` offset macros, and
+``tcg/wasm64.c`` guards them with ``QEMU_BUILD_BUG_ON()`` checks.  The
+JavaScript contract test reads those macros and verifies that the generated
+Wasm model uses the same offsets for ``guest_ram``, ``counters``, and
+``exit``.  This keeps the deterministic microbench tied to the ABI QEMU will
+use instead of a private JS-only layout.
+
+The benchmark now runs two workload families:
+
+* ``alu-branch``: internal two-TB dispatch with arithmetic and branches only.
+* ``tlb-hit-ram``: the same dispatch shape plus inline guest-RAM load/store
+  operations through the run context's ``guest_ram`` pointer.
+
+The accepted local command was:
+
+.. code-block:: text
+
+  node scripts/ci/wasmjit-runloop-benchmark-gate.mjs \
+    --out /Users/test/git/busdk/agent-supervisor/tmp/qemu-r4-wasmjit-preflight-local/runloop-benchmark-gate.json
+
+Results:
+
+.. code-block:: text
+
+  alu-branch:
+    wasmBestMs=0.38574999999999804
+    tciLikeBestMs=34.14274999999998
+    bestRatio=88.51004536617019
+
+  tlb-hit-ram:
+    wasmBestMs=1.9760410000000093
+    tciLikeBestMs=64.48566600000004
+    bestRatio=32.6337692385936
+
+For both workloads the generated run loop executed one ``1000000``-step
+budget before returning for budget expiry, recorded
+``generatedGuestInstructions=4000000`` and
+``generatedChainLength=1000000``, and recorded zero helper,
+``qemu_ld``, and ``qemu_st`` calls.
+
+The full backend artifact compile gate also passed with:
+
+.. code-block:: text
+
+  python3 scripts/ci/wasm-build-artifacts-local.py --out /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-runloop-preflight --target riscv64 --tcg-wasm64-backend --build-image
+
+The produced hashes were ``qemu-system-riscv64.js``
+``c398c19673c3de5c3d4331cda83ba48b14470627c582072385e751cf75e9ff3f``,
+``qemu-system-riscv64.wasm``
+``60ea302e6600f4dfd0637a7ca5df9dbff30fedd3e2de655f7a709cb978b46959``, and
+``qemu-system-wasm-artifacts.json``
+``c0d15b7d992acfbb49e79f7f31bbdf7a7deeffd24826838dcf3b50a0a96ea82a``.
+
+This is still not a generic Chromium smoke and not a Bus Engine OS proof.  It
+does, however, satisfy the deterministic W2 microbench gate for the run/exit
+shape.  The next step is to execute this ABI from the actual Emscripten/QEMU
+runtime path and export the same metrics in result JSON before attempting the
+W3 generic speed gate again.

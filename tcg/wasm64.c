@@ -13,6 +13,39 @@
 
 #define TCG_WASM64_TRANSLATE_CACHE_SIZE 8192u
 
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, env) !=
+                  TCG_WASM64_RUN_CTX_ENV_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, guest_ram) !=
+                  TCG_WASM64_RUN_CTX_GUEST_RAM_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, budget) !=
+                  TCG_WASM64_RUN_CTX_BUDGET_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, counters) !=
+                  TCG_WASM64_RUN_CTX_COUNTERS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, exit) !=
+                  TCG_WASM64_RUN_CTX_EXIT_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, mode) !=
+                  TCG_WASM64_RUN_CTX_MODE_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, flags) !=
+                  TCG_WASM64_RUN_CTX_FLAGS_OFFSET);
+QEMU_BUILD_BUG_ON(sizeof(TCGWasm64RunContext) != TCG_WASM64_RUN_CTX_SIZE);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, reason) !=
+                  TCG_WASM64_RUN_EXIT_REASON_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, tb_id) !=
+                  TCG_WASM64_RUN_EXIT_TB_ID_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, pc) !=
+                  TCG_WASM64_RUN_EXIT_PC_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, vaddr) !=
+                  TCG_WASM64_RUN_EXIT_VADDR_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, paddr) !=
+                  TCG_WASM64_RUN_EXIT_PADDR_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, value) !=
+                  TCG_WASM64_RUN_EXIT_VALUE_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, size) !=
+                  TCG_WASM64_RUN_EXIT_SIZE_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, flags) !=
+                  TCG_WASM64_RUN_EXIT_FLAGS_OFFSET);
+QEMU_BUILD_BUG_ON(sizeof(TCGWasm64RunExit) != TCG_WASM64_RUN_EXIT_SIZE);
+
 typedef struct TCGWasm64TranslateEntry {
     const void *tb_ptr;
     TCGWasm64TBMetadata metadata;
@@ -208,6 +241,107 @@ void tcg_wasm64_count_exit(TCGWasm64Counters *counters,
         return;
     }
     counters->generated_exits[reason]++;
+}
+
+void tcg_wasm64_run_counters_reset(TCGWasm64RunCounters *counters)
+{
+    if (counters) {
+        memset(counters, 0, sizeof(*counters));
+    }
+}
+
+void tcg_wasm64_run_counters_add(TCGWasm64RunCounters *dst,
+                                 const TCGWasm64RunCounters *src)
+{
+    if (!dst || !src) {
+        return;
+    }
+
+    dst->generated_guest_instructions += src->generated_guest_instructions;
+    dst->fallback_guest_instructions += src->fallback_guest_instructions;
+    dst->generated_body_time_ns += src->generated_body_time_ns;
+    dst->tci_dispatch_time_ns += src->tci_dispatch_time_ns;
+    dst->tb_lookup_time_ns += src->tb_lookup_time_ns;
+    dst->helper_call_time_ns += src->helper_call_time_ns;
+    dst->qemu_ld_time_ns += src->qemu_ld_time_ns;
+    dst->qemu_st_time_ns += src->qemu_st_time_ns;
+    dst->compile_time_ns += src->compile_time_ns;
+    dst->instantiate_time_ns += src->instantiate_time_ns;
+    dst->generated_chain_length += src->generated_chain_length;
+    dst->inline_tlb_hit_loads += src->inline_tlb_hit_loads;
+    dst->inline_tlb_hit_stores += src->inline_tlb_hit_stores;
+    dst->helper_calls += src->helper_calls;
+    dst->qemu_ld_calls += src->qemu_ld_calls;
+    dst->qemu_st_calls += src->qemu_st_calls;
+    dst->exits_budget += src->exits_budget;
+    dst->exits_mmio += src->exits_mmio;
+    dst->exits_tlb_miss_or_fault += src->exits_tlb_miss_or_fault;
+    dst->exits_interrupt += src->exits_interrupt;
+    dst->exits_helper += src->exits_helper;
+    dst->exits_unsupported += src->exits_unsupported;
+    dst->exits_hlt += src->exits_hlt;
+    dst->exits_invalidated += src->exits_invalidated;
+}
+
+void tcg_wasm64_run_count_exit(TCGWasm64RunCounters *counters,
+                               TCGWasm64RunExitReason reason)
+{
+    if (!counters) {
+        return;
+    }
+
+    switch (reason) {
+    case TCG_WASM64_RUN_EXIT_BUDGET:
+        counters->exits_budget++;
+        break;
+    case TCG_WASM64_RUN_EXIT_MMIO:
+        counters->exits_mmio++;
+        break;
+    case TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT:
+        counters->exits_tlb_miss_or_fault++;
+        break;
+    case TCG_WASM64_RUN_EXIT_INTERRUPT:
+        counters->exits_interrupt++;
+        break;
+    case TCG_WASM64_RUN_EXIT_HELPER:
+        counters->exits_helper++;
+        break;
+    case TCG_WASM64_RUN_EXIT_UNSUPPORTED:
+        counters->exits_unsupported++;
+        break;
+    case TCG_WASM64_RUN_EXIT_HLT:
+        counters->exits_hlt++;
+        break;
+    case TCG_WASM64_RUN_EXIT_INVALIDATED:
+        counters->exits_invalidated++;
+        break;
+    default:
+        g_assert_not_reached();
+    }
+}
+
+const char *tcg_wasm64_run_exit_reason_name(TCGWasm64RunExitReason reason)
+{
+    switch (reason) {
+    case TCG_WASM64_RUN_EXIT_BUDGET:
+        return "budget";
+    case TCG_WASM64_RUN_EXIT_MMIO:
+        return "mmio";
+    case TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT:
+        return "tlb-miss-or-fault";
+    case TCG_WASM64_RUN_EXIT_INTERRUPT:
+        return "interrupt";
+    case TCG_WASM64_RUN_EXIT_HELPER:
+        return "helper";
+    case TCG_WASM64_RUN_EXIT_UNSUPPORTED:
+        return "unsupported";
+    case TCG_WASM64_RUN_EXIT_HLT:
+        return "hlt";
+    case TCG_WASM64_RUN_EXIT_INVALIDATED:
+        return "invalidated";
+    default:
+        return "unknown";
+    }
 }
 
 static bool tcg_wasm64_translate_op_supported(uint32_t op)
