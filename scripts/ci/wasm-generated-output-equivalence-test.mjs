@@ -42,6 +42,22 @@ const OPS = {
   tci_qemu_ld_rrr: 138,
   tci_qemu_st_rrr: 139,
 };
+const OP_NAMES = Object.fromEntries(Object.entries(OPS).map(([name, op]) => [op, name]));
+const R4I_LIVE_X86_SHAPE = [
+  "ld32u",
+  "tci_movi",
+  "tci_setcond32",
+  "brcond",
+  "tci_movi",
+  "st8",
+  "ld",
+  "tci_movi",
+  "add",
+  "st",
+  "goto_tb",
+  "exit_tb",
+  "exit_tb",
+];
 
 const STATUS_EXIT = 1n;
 const STATUS_DISPATCH = 2n;
@@ -151,6 +167,10 @@ function sextract(value, start, length) {
     extracted |= ~mask;
   }
   return extracted;
+}
+
+function decodedShape(words) {
+  return words.map((insn) => OP_NAMES[bits(insn >>> 0, 0, 8)] || "unknown");
 }
 
 function toU64(value) {
@@ -564,6 +584,8 @@ function interpretGeneratedOutput(words, state, relativeBase) {
   const regs = state.regs.slice();
   const view = state.view;
   let index = 0;
+  let executed = 0;
+  let memoryWrites = 0;
 
   for (;;) {
     const insn = words[index] >>> 0;
@@ -573,6 +595,7 @@ function interpretGeneratedOutput(words, state, relativeBase) {
     const r2 = bits(insn, 16, 4);
     const tbPtr = relativeBase + (index + 1) * 4;
 
+    executed++;
     if (opc === OPS.ld32u) {
       const ofs = sextract(insn, 16, 16);
       regs[r0] = BigInt(view.getUint32(Number(regs[r1]) + ofs, true));
@@ -618,14 +641,17 @@ function interpretGeneratedOutput(words, state, relativeBase) {
     } else if (opc === OPS.st8) {
       const ofs = sextract(insn, 16, 16);
       view.setUint8(Number(regs[r1]) + ofs, Number(regs[r0] & 0xffn));
+      memoryWrites++;
       index++;
     } else if (opc === OPS.st32) {
       const ofs = sextract(insn, 16, 16);
       view.setUint32(Number(regs[r1]) + ofs, Number(regs[r0] & 0xffffffffn), true);
+      memoryWrites++;
       index++;
     } else if (opc === OPS.st) {
       const ofs = sextract(insn, 16, 16);
       view.setBigUint64(Number(regs[r1]) + ofs, regs[r0], true);
+      memoryWrites++;
       index++;
     } else if (opc === OPS.add) {
       regs[r0] = toU64(regs[r1] + regs[r2]);
@@ -668,13 +694,15 @@ function interpretGeneratedOutput(words, state, relativeBase) {
       index++;
     } else if (opc === OPS.exit_tb) {
       const ptr = BigInt(tbPtr + sextract(insn, 12, 20));
-      return { status: STATUS_EXIT, ret: ptr, regs };
+      return { status: STATUS_EXIT, ret: ptr, regs, executed, memoryWrites };
     } else if (opc === OPS.goto_tb) {
       const ptr = tbPtr + sextract(insn, 12, 20);
       return {
         status: STATUS_DISPATCH,
         ret: view.getBigUint64(ptr, true),
         regs,
+        executed,
+        memoryWrites,
       };
     } else {
       throw new Error(`unsupported fixture opcode ${opc} at index ${index}`);
@@ -823,13 +851,15 @@ async function runFixture(fixture, seed) {
     seed,
     status: status.toString(),
     ret: generatedState.ret,
+    generatedGuestInstructions: expected.executed,
+    memoryWrites: expected.memoryWrites,
     helpers: generatedState.helpers,
   };
 }
 
 const fixtures = [
   {
-    name: "trace-goto-13",
+    name: "live-x86-r4i-ld32u-goto-tb-13",
     terminal: "goto_tb",
     relativeBase: 0x4000,
     words: [
@@ -897,6 +927,14 @@ const fixtures = [
   },
 ];
 
+const liveX86Fixture = fixtures.find((fixture) =>
+  fixture.name === "live-x86-r4i-ld32u-goto-tb-13");
+assert.deepEqual(
+  decodedShape(liveX86Fixture.words),
+  R4I_LIVE_X86_SHAPE,
+  "R4i live x86 fixture shape drifted",
+);
+
 const unsupportedFixtures = [
   {
     name: "qemu-helper-mixed-unsupported-fallback",
@@ -934,11 +972,28 @@ const helperBoundaryResults = results.filter((entry) =>
   entry.helpers.loads > 0 || entry.helpers.stores > 0);
 const simpleGapResults = results.filter((entry) =>
   entry.name === "simple-gap-ops-validate");
+const liveX86Results = results.filter((entry) =>
+  entry.name === "live-x86-r4i-ld32u-goto-tb-13");
+assert.equal(liveX86Results.length, 2);
+assert.equal(
+  liveX86Results.filter((entry) =>
+    entry.generatedGuestInstructions === 11 &&
+    entry.memoryWrites === 2 &&
+    entry.terminal === "goto_tb").length,
+  2,
+);
 console.log(JSON.stringify({
   format: 1,
   event: "generated-output-equivalence",
   fixtures: results.length,
   unsupportedFixtures: unsupportedResults.length,
+  liveX86R4iFixtures: liveX86Results.length,
+  liveX86R4iShape: R4I_LIVE_X86_SHAPE,
+  liveX86R4iGeneratedGuestInstructions:
+    liveX86Results.reduce((count, entry) =>
+      count + entry.generatedGuestInstructions, 0),
+  liveX86R4iMemoryWrites:
+    liveX86Results.reduce((count, entry) => count + entry.memoryWrites, 0),
   helperBoundaryFixtures: helperBoundaryResults.length,
   simpleGapFixtures: simpleGapResults.length,
   helperCalls: {

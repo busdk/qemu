@@ -126,6 +126,15 @@ assert.match(runtime, /tcg_wasm64_translate_lookup_mutable/);
 assert.match(runtime, /tcg_wasm64_count_live_translation_metadata/);
 assert.match(runtime, /QEMU_WASM64_TCG_SUMMARY/);
 assert.match(runtime, /QEMU_WASM64_TCG_SUMMARY_INTERVAL/);
+assert.match(runtime, /QEMU_WASM64_ONE_TB_DIFFERENTIAL/);
+assert.match(runtime, /TCG_WASM64_ONE_TB_NAME "live-x86-r4i-ld32u-goto-tb-13"/);
+assert.match(runtime, /tcg_wasm64_one_tb_differential_js/);
+assert.match(runtime, /\.\.\.name\("wasmjit_run"\)/);
+assert.match(runtime, /one-tb-differential/);
+assert.match(runtime, /generated_guest_instructions/);
+assert.match(runtime, /generated_dispatch_target/);
+assert.match(runtime, /reference_dispatch_target/);
+assert.match(runtime, /tcg_wasm64_one_tb_differential_maybe\(env\)/);
 assert.match(runtime, /tcg_wasm64_summary_maybe_report/);
 assert.match(runtime, /tcg_wasm64_report_summary\("interval",\s*&zero\)/);
 const liveMetadataCounterBody = runtime.match(

@@ -52,9 +52,10 @@ const browserSmokePath = fileURLToPath(new URL("./wasm-browser-smoke.mjs", impor
 const browserSmokeSource = readFileSync(browserSmokePath, "utf8");
 
 assert.match(browserSmokeSource, /QEMU_WASM64_TCG_SUMMARY/);
+assert.match(browserSmokeSource, /QEMU_WASM64_ONE_TB_DIFFERENTIAL/);
 assert.match(
   browserSmokeSource,
-  /config\.tciProgress \|\|\s*config\.tciWasmGeneratedTrace \|\|\s*config\.wasm64RunloopSmoke \|\|\s*config\.wasm64TcgSummary/,
+  /config\.tciProgress \|\|\s*config\.tciWasmGeneratedTrace \|\|\s*config\.wasm64RunloopSmoke \|\|\s*config\.wasm64OneTbDifferential \|\|\s*config\.wasm64TcgSummary/,
 );
 
 for (const status of [
@@ -1122,11 +1123,13 @@ for (const status of [
     tciProgressInterval: 2000000,
     timeoutMs: 30000,
     visualMarker: "",
+    wasm64OneTbDifferential: true,
     wasm64RunloopSmoke: true,
   });
 
   assert.equal(url.searchParams.get("tciProgress"), "1");
   assert.equal(url.searchParams.get("tciProgressInterval"), "2000000");
+  assert.equal(url.searchParams.get("wasm64OneTbDifferential"), "1");
   assert.equal(url.searchParams.get("wasm64RunloopSmoke"), "1");
 }
 
@@ -1403,6 +1406,7 @@ for (const status of [
     tciWasmGeneratedTraceLimit: 7,
     userDataDir: "/tmp/qemu-wasm-profile",
     visualMarker: "login",
+    wasm64OneTbDifferential: true,
     wasm64RunloopSmoke: true,
   }, "HeadlessChrome/141.0.7390.37");
 
@@ -1444,6 +1448,7 @@ for (const status of [
   assert.equal(result.tciProgressInterval, 2000000);
   assert.equal(result.tciWasmGeneratedTrace, true);
   assert.equal(result.tciWasmGeneratedTraceLimit, 7);
+  assert.equal(result.wasm64OneTbDifferential, true);
   assert.equal(result.wasm64RunloopSmoke, true);
   assert.equal(Object.hasOwn(result, "tciWasmSubset"), false);
   assert.equal(Object.hasOwn(result, "tciWasmGeneratedOnly"), false);

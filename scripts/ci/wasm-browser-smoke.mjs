@@ -1525,6 +1525,7 @@ function buildConfig() {
       nonNegativeNumberOption("tciWasmGeneratedTraceLimit", 64),
     timeoutMs: numberOption("timeoutMs", 180000),
     visualMarker: option("visualMarker", ""),
+    wasm64OneTbDifferential: boolOption("wasm64OneTbDifferential", false),
     wasm64RunloopSmoke: boolOption("wasm64RunloopSmoke", false),
     wasm64TcgSummary: boolOption("wasm64TcgSummary", false),
     wasm64TcgSummaryInterval: numberOption("wasm64TcgSummaryInterval", 10000),
@@ -1717,7 +1718,8 @@ async function run() {
       lastSummary: null,
     },
     wasm64Runloop: {
-      enabled: Boolean(config.wasm64RunloopSmoke),
+      enabled: Boolean(config.wasm64RunloopSmoke ||
+                       config.wasm64OneTbDifferential),
       maxSummaries: 16,
       summaryCount: 0,
       summaries: [],
@@ -2117,6 +2119,9 @@ async function run() {
     ...(config.wasm64RunloopSmoke ? {
       QEMU_WASM64_RUNLOOP_SMOKE: "1",
     } : {}),
+    ...(config.wasm64OneTbDifferential ? {
+      QEMU_WASM64_ONE_TB_DIFFERENTIAL: "1",
+    } : {}),
     ...(config.wasm64TcgSummary ? {
       QEMU_WASM64_TCG_SUMMARY: "1",
       QEMU_WASM64_TCG_SUMMARY_INTERVAL: String(config.wasm64TcgSummaryInterval),
@@ -2183,6 +2188,7 @@ async function run() {
           config.tciProgress ||
           config.tciWasmGeneratedTrace ||
           config.wasm64RunloopSmoke ||
+          config.wasm64OneTbDifferential ||
           config.wasm64TcgSummary
         ) {
           const lines = Object.entries(tciEnv)

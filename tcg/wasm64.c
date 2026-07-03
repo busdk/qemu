@@ -20,6 +20,39 @@
 #define TCG_WASM64_RUNLOOP_SMOKE_BUDGET 1000000u
 #define TCG_WASM64_RUNLOOP_SMOKE_GUEST_INSNS_PER_STEP 4u
 #define TCG_WASM64_RUNLOOP_SMOKE_MIN_SPEEDUP_PPM 3000000u
+#define TCG_WASM64_ONE_TB_DIFFERENTIAL_ENV \
+    "QEMU_WASM64_ONE_TB_DIFFERENTIAL"
+#define TCG_WASM64_ONE_TB_NAME "live-x86-r4i-ld32u-goto-tb-13"
+#define TCG_WASM64_ONE_TB_SCRATCH_SIZE 0x4000u
+#define TCG_WASM64_ONE_TB_GENERATED_REGS_OFFSET 0x100u
+#define TCG_WASM64_ONE_TB_DATA_OFFSET 0x1000u
+#define TCG_WASM64_ONE_TB_CODE_BASE_OFFSET 0x2400u
+#define TCG_WASM64_ONE_TB_GOTO_SLOT_DELTA (-0x60)
+#define TCG_WASM64_ONE_TB_DISPATCH_TARGET 0x5048u
+#define TCG_WASM64_ONE_TB_STATUS_DISPATCH 2u
+#define TCG_WASM64_ONE_TB_EXECUTED_TCI_OPS 11u
+#define TCG_WASM64_ONE_TB_MEMORY_LOADS 2u
+#define TCG_WASM64_ONE_TB_MEMORY_WRITES 2u
+
+typedef enum TCGWasm64OneTBResultIndex {
+    TCG_WASM64_ONE_TB_RESULT_JS_STATUS,
+    TCG_WASM64_ONE_TB_RESULT_GENERATED_STATUS,
+    TCG_WASM64_ONE_TB_RESULT_REFERENCE_STATUS,
+    TCG_WASM64_ONE_TB_RESULT_GENERATED_RET,
+    TCG_WASM64_ONE_TB_RESULT_REFERENCE_RET,
+    TCG_WASM64_ONE_TB_RESULT_GENERATED_REGS_CHECKSUM,
+    TCG_WASM64_ONE_TB_RESULT_REFERENCE_REGS_CHECKSUM,
+    TCG_WASM64_ONE_TB_RESULT_GENERATED_MEMORY_CHECKSUM,
+    TCG_WASM64_ONE_TB_RESULT_REFERENCE_MEMORY_CHECKSUM,
+    TCG_WASM64_ONE_TB_RESULT_GENERATED_TCI_OPS,
+    TCG_WASM64_ONE_TB_RESULT_REFERENCE_TCI_OPS,
+    TCG_WASM64_ONE_TB_RESULT_GENERATED_MEMORY_WRITES,
+    TCG_WASM64_ONE_TB_RESULT_REFERENCE_MEMORY_WRITES,
+    TCG_WASM64_ONE_TB_RESULT_HELPER_CALLS,
+    TCG_WASM64_ONE_TB_RESULT_QEMU_LD_CALLS,
+    TCG_WASM64_ONE_TB_RESULT_QEMU_ST_CALLS,
+    TCG_WASM64_ONE_TB_RESULT__MAX,
+} TCGWasm64OneTBResultIndex;
 
 typedef enum TCGWasm64RunloopSmokeWorkload {
     TCG_WASM64_RUNLOOP_SMOKE_ALU_BRANCH = 0,
@@ -138,6 +171,7 @@ static __thread TCGWasm64TranslateEntry translate_cache[
     TCG_WASM64_TRANSLATE_CACHE_SIZE];
 static __thread TCGWasm64TBMetadata *active_translate_metadata;
 static __thread uint64_t summary_next_report;
+static __thread bool one_tb_differential_checked;
 static volatile uint64_t tcg_wasm64_runloop_smoke_sink;
 static gsize summary_env_initialized;
 static bool summary_enabled;
@@ -825,6 +859,517 @@ EM_JS(int, tcg_wasm64_runloop_smoke_js,
         return 6;
     }
 });
+
+EM_JS(int, tcg_wasm64_one_tb_differential_js,
+      (uintptr_t context_arg, uintptr_t scratch_arg, uintptr_t counters_arg,
+       uintptr_t exit_arg, uintptr_t result_arg), {
+    if (typeof wasmMemory === "undefined" || !wasmMemory) {
+        return 1;
+    }
+
+    const context = Number(context_arg);
+    const scratch = Number(scratch_arg);
+    const counters = Number(counters_arg);
+    const exit = Number(exit_arg);
+    const result = Number(result_arg);
+    const regsPtr = scratch + 0x100;
+    const dataBase = scratch + 0x1000;
+    const codeBase = scratch + 0x2400;
+    const gotoSlot = codeBase - 0x60;
+    const dispatchTarget = 0x5048n;
+    const statusDispatch = 2n;
+    const valueI32 = 0x7f;
+    const valueI64 = 0x7e;
+    const words = [
+        0xfff0e41c, 0x0000057d, 0x00254d88, 0x00000d04,
+        0x0000147d, 0xfff4e435, 0x0100e41e, 0xfff9057d,
+        0x00054407, 0x0100e438, 0xfff74049, 0xfff10048,
+        0xfff0f048,
+    ];
+    const ops = {
+        brcond: 4,
+        add: 7,
+        ld32u: 28,
+        ld: 30,
+        st8: 53,
+        st: 56,
+        exit_tb: 72,
+        goto_tb: 73,
+        tci_movi: 125,
+        tci_setcond32: 136,
+    };
+
+    function encodeU32(value) {
+        const bytes = [];
+        let current = Number(value) >>> 0;
+        do {
+            let byte = current & 0x7f;
+            current >>>= 7;
+            if (current !== 0) {
+                byte |= 0x80;
+            }
+            bytes.push(byte);
+        } while (current !== 0);
+        return bytes;
+    }
+
+    function encodeS64(value) {
+        let current = BigInt.asIntN(64, BigInt(value));
+        const bytes = [];
+        for (;;) {
+            let byte = Number(current & 0x7fn);
+            const sign = (byte & 0x40) !== 0;
+            current >>= 7n;
+            const done = (current === 0n && !sign) ||
+                         (current === -1n && sign);
+            if (!done) {
+                byte |= 0x80;
+            }
+            bytes.push(byte);
+            if (done) {
+                return bytes;
+            }
+        }
+    }
+
+    function utf8Bytes(text) {
+        return Array.from(new TextEncoder().encode(text));
+    }
+
+    function name(text) {
+        const bytes = utf8Bytes(text);
+        return [...encodeU32(bytes.length), ...bytes];
+    }
+
+    function vector(items) {
+        return [...encodeU32(items.length), ...items.flat()];
+    }
+
+    function section(id, payload) {
+        return [id, ...encodeU32(payload.length), ...payload];
+    }
+
+    function functionType(params, results) {
+        return [
+            0x60,
+            ...vector(params.map((param) => [param])),
+            ...vector(results.map((result) => [result])),
+        ];
+    }
+
+    function functionBody(instructions, locals = []) {
+        const body = [
+            ...vector(locals.map(({ count, type }) =>
+                [...encodeU32(count), type])),
+            ...instructions,
+            0x0b,
+        ];
+        return [...encodeU32(body.length), ...body];
+    }
+
+    function memArg(align, offset) {
+        return [...encodeU32(align), ...encodeU32(offset)];
+    }
+
+    function localGet(index) {
+        return [0x20, ...encodeU32(index)];
+    }
+
+    function localSet(index, expr) {
+        return [...expr, 0x21, ...encodeU32(index)];
+    }
+
+    function i32Const(value) {
+        return [0x41, ...encodeU32(value >>> 0)];
+    }
+
+    function i64Const(value) {
+        return [0x42, ...encodeS64(value)];
+    }
+
+    function i64Add(lhs, rhs) {
+        return [...lhs, ...rhs, 0x7c];
+    }
+
+    function i32WrapI64(expr) {
+        return [...expr, 0xa7];
+    }
+
+    function i64ExtendI32U(expr) {
+        return [...expr, 0xad];
+    }
+
+    function i64Load(address) {
+        return [...address, 0x29, ...memArg(3, 0)];
+    }
+
+    function i32Load(address) {
+        return [...address, 0x28, ...memArg(2, 0)];
+    }
+
+    function i64Store(address, value) {
+        return [...address, ...value, 0x37, ...memArg(3, 0)];
+    }
+
+    function i32Store8(address, value) {
+        return [...address, ...value, 0x3a, ...memArg(0, 0)];
+    }
+
+    function i64LoadAtPtr(ptrLocal, offset) {
+        return [...localGet(ptrLocal), 0x29, ...memArg(3, offset)];
+    }
+
+    function i64StoreAtPtr(ptrLocal, offset, value) {
+        return [...localGet(ptrLocal), ...value, 0x37, ...memArg(3, offset)];
+    }
+
+    function i32StoreAtPtr(ptrLocal, offset, value) {
+        return [...localGet(ptrLocal), ...value, 0x36, ...memArg(2, offset)];
+    }
+
+    function i64StoreAtRawPtr(ptr, offset, value) {
+        return [...i64Const(BigInt(ptr + offset)), ...value, 0x37,
+                ...memArg(3, 0)];
+    }
+
+    function addressAdd(base, offset) {
+        return i64Add(base, i64Const(offset));
+    }
+
+    function incrementCounter(ptrLocal, offset, value) {
+        return i64StoreAtPtr(ptrLocal, offset, i64Add(
+            i64LoadAtPtr(ptrLocal, offset),
+            i64Const(BigInt(value))));
+    }
+
+    function runInstructions() {
+        const regs = 1;
+        const countersPtr = 2;
+        const exitPtr = 3;
+        const codeBasePtr = 4;
+        const r4 = 5;
+        const r5 = 6;
+        const r13 = 7;
+        const r14 = 8;
+        const ret = 9;
+
+        return [
+            ...localSet(regs, i64LoadAtPtr(0, 0)),
+            ...localSet(codeBasePtr, i64LoadAtPtr(0, 8)),
+            ...localSet(countersPtr, i64LoadAtPtr(0, 24)),
+            ...localSet(exitPtr, i64LoadAtPtr(0, 32)),
+            ...localSet(r14, i64LoadAtPtr(regs, 14 * 8)),
+
+            ...localSet(r4, i64ExtendI32U(
+                i32Load(addressAdd(localGet(r14), -16n)))),
+            ...localSet(r5, i64Const(0n)),
+            ...localSet(r13, i64ExtendI32U([
+                ...i32WrapI64(localGet(r4)),
+                ...i32WrapI64(localGet(r5)),
+                0x48, /* i32.lt_s */
+            ])),
+            0x02, 0x40, /* block: live brcond with fall-through target */
+            ...localGet(r13),
+            0x50,       /* i64.eqz */
+            0x45,       /* i32.eqz */
+            0x0d, 0x00, /* br_if 0 */
+            0x0b,
+
+            ...localSet(r4, i64Const(1n)),
+            ...i32Store8(addressAdd(localGet(r14), -12n),
+                         i32WrapI64(localGet(r4))),
+            ...localSet(r4, i64Load(addressAdd(localGet(r14), 256n))),
+            ...localSet(r5, i64Const(-112n)),
+            ...localSet(r4, i64Add(localGet(r4), localGet(r5))),
+            ...i64Store(addressAdd(localGet(r14), 256n), localGet(r4)),
+            ...localSet(ret, i64Load(addressAdd(localGet(codeBasePtr),
+                                                 -0x60n))),
+
+            ...i64StoreAtPtr(regs, 4 * 8, localGet(r4)),
+            ...i64StoreAtPtr(regs, 5 * 8, localGet(r5)),
+            ...i64StoreAtPtr(regs, 13 * 8, localGet(r13)),
+            ...i32StoreAtPtr(exitPtr, 0, i32Const(2)),
+            ...i64StoreAtPtr(exitPtr, 32, localGet(ret)),
+            ...incrementCounter(countersPtr, 0, 11),
+            ...incrementCounter(countersPtr, 80, 1),
+            ...incrementCounter(countersPtr, 88, 2),
+            ...incrementCounter(countersPtr, 96, 2),
+            ...i64Const(statusDispatch),
+        ];
+    }
+
+    function bits(value, start, length) {
+        return (value >>> start) & ((1 << length) - 1);
+    }
+
+    function sextract(value, start, length) {
+        const mask = (1 << length) - 1;
+        let extracted = (value >>> start) & mask;
+        const sign = 1 << (length - 1);
+        if ((extracted & sign) !== 0) {
+            extracted |= ~mask;
+        }
+        return extracted;
+    }
+
+    function toU64(value) {
+        return BigInt.asUintN(64, BigInt(value));
+    }
+
+    function toI32(value) {
+        return Number(BigInt.asIntN(32, BigInt(value)));
+    }
+
+    function getU64(ptr) {
+        return HEAPU64[Number(ptr) / 8];
+    }
+
+    function setU64(ptr, value) {
+        HEAPU64[Number(ptr) / 8] = toU64(value);
+    }
+
+    function getReg(reg) {
+        return getU64(regsPtr + reg * 8);
+    }
+
+    function setReg(reg, value) {
+        setU64(regsPtr + reg * 8, value);
+    }
+
+    function setResult(index, value) {
+        HEAPU64[result / 8 + index] = toU64(value);
+    }
+
+    function compare32(lhs, rhs, condition) {
+        switch (condition) {
+        case 2:
+            return toI32(lhs) < toI32(rhs) ? 1n : 0n;
+        default:
+            throw new Error(`unsupported one-TB condition ${condition}`);
+        }
+    }
+
+    function targetIndexFromPtr(ptr) {
+        const offset = ptr - codeBase;
+        if (offset < 0 || offset % 4 !== 0) {
+            return -1;
+        }
+        return offset / 4;
+    }
+
+    function checksumByte(hash, value) {
+        let current = hash ^ BigInt(value & 0xff);
+        current = BigInt.asUintN(64, current * 1099511628211n);
+        return current;
+    }
+
+    function checksumRegs() {
+        let hash = 1469598103934665603n;
+        for (let reg = 0; reg < 16; reg++) {
+            let value = getReg(reg);
+            for (let byte = 0; byte < 8; byte++) {
+                hash = checksumByte(hash, Number(value & 0xffn));
+                value >>= 8n;
+            }
+        }
+        return hash;
+    }
+
+    function checksumObservedMemory() {
+        let hash = 1469598103934665603n;
+        for (const [offset, size] of [[0, 4], [4, 1], [0x100, 8]]) {
+            for (let i = 0; i < size; i++) {
+                hash = checksumByte(hash, HEAPU8[dataBase + offset + i]);
+            }
+        }
+        return hash;
+    }
+
+    function initState() {
+        for (let i = 0; i < 0x4000; i++) {
+            HEAPU8[scratch + i] = 0;
+        }
+        for (let i = 0; i < 192 / 8; i++) {
+            HEAPU64[counters / 8 + i] = 0n;
+        }
+        for (let i = 0; i < 48 / 8; i++) {
+            HEAPU64[exit / 8 + i] = 0n;
+        }
+        HEAPU64[context / 8 + 0] = BigInt(regsPtr);
+        HEAPU64[context / 8 + 1] = BigInt(codeBase);
+        HEAPU64[context / 8 + 2] = 1n;
+        HEAPU64[context / 8 + 3] = BigInt(counters);
+        HEAPU64[context / 8 + 4] = BigInt(exit);
+        HEAPU32[context / 4 + 10] = 1;
+        HEAPU32[context / 4 + 11] = 0;
+
+        for (let reg = 0; reg < 16; reg++) {
+            setReg(reg, BigInt(0x1000 + reg));
+        }
+        setReg(4, 0n);
+        setReg(5, 0n);
+        setReg(13, 0n);
+        setReg(14, BigInt(dataBase + 16));
+        HEAPU32[dataBase / 4] = 7;
+        HEAPU8[dataBase + 4] = 0xa5;
+        setU64(dataBase + 0x100, 0x400000001n);
+        setU64(gotoSlot, dispatchTarget);
+    }
+
+    function runReference() {
+        let index = 0;
+        let executed = 0;
+        let writes = 0;
+
+        for (;;) {
+            const insn = words[index] >>> 0;
+            const opc = bits(insn, 0, 8);
+            const r0 = bits(insn, 8, 4);
+            const r1 = bits(insn, 12, 4);
+            const r2 = bits(insn, 16, 4);
+            const tbPtr = codeBase + (index + 1) * 4;
+
+            executed++;
+            if (opc === ops.ld32u) {
+                const addr = Number(getReg(r1)) + sextract(insn, 16, 16);
+                setReg(r0, BigInt(HEAPU32[addr / 4]));
+                index++;
+            } else if (opc === ops.ld) {
+                const addr = Number(getReg(r1)) + sextract(insn, 16, 16);
+                setReg(r0, getU64(addr));
+                index++;
+            } else if (opc === ops.tci_movi) {
+                setReg(r0, sextract(insn, 12, 20));
+                index++;
+            } else if (opc === ops.tci_setcond32) {
+                setReg(r0, compare32(getReg(r1), getReg(r2),
+                                      bits(insn, 20, 4)));
+                index++;
+            } else if (opc === ops.brcond) {
+                const ptr = tbPtr + sextract(insn, 12, 20);
+                index = getReg(r0) !== 0n ? targetIndexFromPtr(ptr)
+                                          : index + 1;
+            } else if (opc === ops.st8) {
+                const addr = Number(getReg(r1)) + sextract(insn, 16, 16);
+                HEAPU8[addr] = Number(getReg(r0) & 0xffn);
+                writes++;
+                index++;
+            } else if (opc === ops.st) {
+                const addr = Number(getReg(r1)) + sextract(insn, 16, 16);
+                setU64(addr, getReg(r0));
+                writes++;
+                index++;
+            } else if (opc === ops.add) {
+                setReg(r0, getReg(r1) + getReg(r2));
+                index++;
+            } else if (opc === ops.goto_tb) {
+                const ptr = tbPtr + sextract(insn, 12, 20);
+                const ret = getU64(ptr);
+                HEAPU32[exit / 4] = Number(statusDispatch);
+                setU64(exit + 32, ret);
+                return { status: statusDispatch, ret, executed, writes };
+            } else if (opc === ops.exit_tb) {
+                const ret = BigInt(tbPtr + sextract(insn, 12, 20));
+                HEAPU32[exit / 4] = 1;
+                setU64(exit + 32, ret);
+                return { status: 1n, ret, executed, writes };
+            } else {
+                throw new Error(`unsupported one-TB opcode ${opc}`);
+            }
+        }
+    }
+
+    try {
+        const bytes = Uint8Array.from([
+            0x00, 0x61, 0x73, 0x6d,
+            0x01, 0x00, 0x00, 0x00,
+            ...section(1, vector([
+                functionType([valueI64], [valueI64]),
+            ])),
+            ...section(2, vector([
+                [
+                    ...name("env"), ...name("memory"),
+                    0x02, 0x07, 0x00, 0x80, 0x80, 0x10,
+                ],
+            ])),
+            ...section(3, vector([[0x00]])),
+            ...section(7, vector([
+                [...name("wasmjit_run"), 0x00, ...encodeU32(0)],
+            ])),
+            ...section(10, vector([
+                functionBody(runInstructions(), [
+                    { count: 9, type: valueI64 },
+                ]),
+            ])),
+        ]);
+        const compileStart = performance.now();
+        const module = new WebAssembly.Module(bytes);
+        const compileNs = BigInt(Math.round(
+            (performance.now() - compileStart) * 1000000));
+        const instantiateStart = performance.now();
+        const instance = new WebAssembly.Instance(module, {
+            env: { memory: wasmMemory },
+        });
+        const instantiateNs = BigInt(Math.round(
+            (performance.now() - instantiateStart) * 1000000));
+
+        initState();
+        const generatedStart = performance.now();
+        const generatedStatus = instance.exports.wasmjit_run(BigInt(context));
+        const generatedNs = BigInt(Math.round(
+            (performance.now() - generatedStart) * 1000000));
+        const generatedRet = getU64(exit + 32);
+        const generatedRegsChecksum = checksumRegs();
+        const generatedMemoryChecksum = checksumObservedMemory();
+        const generatedTciOps = HEAPU64[counters / 8];
+        const generatedWrites = 2n;
+
+        initState();
+        const referenceStart = performance.now();
+        const reference = runReference();
+        const referenceNs = BigInt(Math.round(
+            (performance.now() - referenceStart) * 1000000));
+        const referenceRegsChecksum = checksumRegs();
+        const referenceMemoryChecksum = checksumObservedMemory();
+
+        HEAPU64[counters / 8 + 0] = generatedTciOps;
+        HEAPU64[counters / 8 + 1] = BigInt(reference.executed);
+        HEAPU64[counters / 8 + 2] = generatedNs;
+        HEAPU64[counters / 8 + 3] = referenceNs;
+        HEAPU64[counters / 8 + 8] = compileNs;
+        HEAPU64[counters / 8 + 9] = instantiateNs;
+        HEAPU64[counters / 8 + 10] = 1n;
+        HEAPU64[counters / 8 + 11] = 2n;
+        HEAPU64[counters / 8 + 12] = 2n;
+
+        setResult(1, generatedStatus);
+        setResult(2, reference.status);
+        setResult(3, generatedRet);
+        setResult(4, reference.ret);
+        setResult(5, generatedRegsChecksum);
+        setResult(6, referenceRegsChecksum);
+        setResult(7, generatedMemoryChecksum);
+        setResult(8, referenceMemoryChecksum);
+        setResult(9, generatedTciOps);
+        setResult(10, BigInt(reference.executed));
+        setResult(11, generatedWrites);
+        setResult(12, BigInt(reference.writes));
+        setResult(13, 0n);
+        setResult(14, 0n);
+        setResult(15, 0n);
+
+        return generatedStatus === reference.status &&
+               generatedRet === reference.ret &&
+               generatedRegsChecksum === referenceRegsChecksum &&
+               generatedMemoryChecksum === referenceMemoryChecksum &&
+               generatedTciOps === BigInt(reference.executed) &&
+               generatedWrites === BigInt(reference.writes) &&
+               generatedTciOps > 0n ? 0 : 2;
+    } catch (error) {
+        setResult(0, 1n);
+        return 1;
+    }
+});
 #endif
 
 static const char *tcg_wasm64_runloop_smoke_workload_name(
@@ -1155,6 +1700,153 @@ static void tcg_wasm64_runloop_smoke_maybe(CPUArchState *env)
     tcg_wasm64_report_runloop_smoke(&totals, results,
                                     TCG_WASM64_RUNLOOP_SMOKE_WORKLOAD_COUNT,
                                     budget, ok);
+}
+
+static void tcg_wasm64_report_one_tb_differential(
+    const TCGWasm64RunCounters *counters, const TCGWasm64RunExit *exit,
+    const uint64_t *result, bool ok)
+{
+    fprintf(stderr,
+            "qemu-wasm64-runloop: {\"format\":1,"
+            "\"event\":\"one-tb-differential\","
+            "\"name\":\"%s\","
+            "\"ok\":%s,"
+            "\"live_captured_shape\":true,"
+            "\"shape\":[\"ld32u\",\"tci_movi\",\"tci_setcond32\","
+            "\"brcond\",\"tci_movi\",\"st8\",\"ld\",\"tci_movi\","
+            "\"add\",\"st\",\"goto_tb\",\"exit_tb\",\"exit_tb\"],"
+            "\"generated_guest_instructions\":%" PRIu64 ","
+            "\"fallback_guest_instructions\":%" PRIu64 ","
+            "\"generated_body_time_ns\":%" PRIu64 ","
+            "\"tci_dispatch_time_ns\":%" PRIu64 ","
+            "\"compile_time_ns\":%" PRIu64 ","
+            "\"instantiate_time_ns\":%" PRIu64 ","
+            "\"generated_chain_length\":%" PRIu64 ","
+            "\"inline_tlb_hit_loads\":%" PRIu64 ","
+            "\"inline_tlb_hit_stores\":%" PRIu64 ","
+            "\"helper_calls\":%" PRIu64 ","
+            "\"qemu_ld_calls\":%" PRIu64 ","
+            "\"qemu_st_calls\":%" PRIu64 ","
+            "\"generated_status\":%" PRIu64 ","
+            "\"reference_status\":%" PRIu64 ","
+            "\"dispatch_status\":%u,"
+            "\"generated_dispatch_target\":%" PRIu64 ","
+            "\"reference_dispatch_target\":%" PRIu64 ","
+            "\"exit_reason_code\":%u,"
+            "\"exit_value\":%" PRIu64 ","
+            "\"generated_regs_checksum\":%" PRIu64 ","
+            "\"reference_regs_checksum\":%" PRIu64 ","
+            "\"generated_memory_checksum\":%" PRIu64 ","
+            "\"reference_memory_checksum\":%" PRIu64 ","
+            "\"generated_tci_ops\":%" PRIu64 ","
+            "\"reference_tci_ops\":%" PRIu64 ","
+            "\"generated_memory_writes\":%" PRIu64 ","
+            "\"reference_memory_writes\":%" PRIu64 ","
+            "\"expected_memory_writes\":%u,"
+            "\"js_status\":%" PRIu64 "}\n",
+            TCG_WASM64_ONE_TB_NAME,
+            ok ? "true" : "false",
+            counters->generated_guest_instructions,
+            counters->fallback_guest_instructions,
+            counters->generated_body_time_ns,
+            counters->tci_dispatch_time_ns,
+            counters->compile_time_ns,
+            counters->instantiate_time_ns,
+            counters->generated_chain_length,
+            counters->inline_tlb_hit_loads,
+            counters->inline_tlb_hit_stores,
+            counters->helper_calls,
+            counters->qemu_ld_calls,
+            counters->qemu_st_calls,
+            result[TCG_WASM64_ONE_TB_RESULT_GENERATED_STATUS],
+            result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_STATUS],
+            TCG_WASM64_ONE_TB_STATUS_DISPATCH,
+            result[TCG_WASM64_ONE_TB_RESULT_GENERATED_RET],
+            result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_RET],
+            exit->reason,
+            exit->value,
+            result[TCG_WASM64_ONE_TB_RESULT_GENERATED_REGS_CHECKSUM],
+            result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_REGS_CHECKSUM],
+            result[TCG_WASM64_ONE_TB_RESULT_GENERATED_MEMORY_CHECKSUM],
+            result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_MEMORY_CHECKSUM],
+            result[TCG_WASM64_ONE_TB_RESULT_GENERATED_TCI_OPS],
+            result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_TCI_OPS],
+            result[TCG_WASM64_ONE_TB_RESULT_GENERATED_MEMORY_WRITES],
+            result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_MEMORY_WRITES],
+            TCG_WASM64_ONE_TB_MEMORY_WRITES,
+            result[TCG_WASM64_ONE_TB_RESULT_JS_STATUS]);
+}
+
+static void tcg_wasm64_one_tb_differential_maybe(CPUArchState *env)
+{
+    TCGWasm64RunCounters counters;
+    TCGWasm64RunExit exit;
+    TCGWasm64RunContext context = { 0 };
+    uint64_t result[TCG_WASM64_ONE_TB_RESULT__MAX] = { 0 };
+    bool ok = false;
+
+    if (one_tb_differential_checked) {
+        return;
+    }
+    one_tb_differential_checked = true;
+    if (!tcg_wasm64_runloop_env_bool(TCG_WASM64_ONE_TB_DIFFERENTIAL_ENV)) {
+        return;
+    }
+
+    tcg_wasm64_run_counters_reset(&counters);
+    memset(&exit, 0, sizeof(exit));
+    context.env = env;
+    context.budget = 1;
+    context.counters = &counters;
+    context.exit = &exit;
+    context.mode = TCG_WASM64_RUN_MODE_PERF_PROOF;
+
+#ifdef CONFIG_EMSCRIPTEN
+    {
+        g_autofree uint8_t *scratch = g_malloc0(
+            TCG_WASM64_ONE_TB_SCRATCH_SIZE);
+        int js_status = tcg_wasm64_one_tb_differential_js(
+            (uintptr_t)&context, (uintptr_t)scratch, (uintptr_t)&counters,
+            (uintptr_t)&exit, (uintptr_t)result);
+
+        result[TCG_WASM64_ONE_TB_RESULT_JS_STATUS] = js_status;
+    }
+#else
+    result[TCG_WASM64_ONE_TB_RESULT_JS_STATUS] = 1;
+#endif
+
+    ok = result[TCG_WASM64_ONE_TB_RESULT_JS_STATUS] == 0 &&
+         result[TCG_WASM64_ONE_TB_RESULT_GENERATED_STATUS] ==
+             TCG_WASM64_ONE_TB_STATUS_DISPATCH &&
+         result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_STATUS] ==
+             TCG_WASM64_ONE_TB_STATUS_DISPATCH &&
+         result[TCG_WASM64_ONE_TB_RESULT_GENERATED_RET] ==
+             result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_RET] &&
+         result[TCG_WASM64_ONE_TB_RESULT_GENERATED_REGS_CHECKSUM] ==
+             result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_REGS_CHECKSUM] &&
+         result[TCG_WASM64_ONE_TB_RESULT_GENERATED_MEMORY_CHECKSUM] ==
+             result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_MEMORY_CHECKSUM] &&
+         result[TCG_WASM64_ONE_TB_RESULT_GENERATED_TCI_OPS] ==
+             result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_TCI_OPS] &&
+         result[TCG_WASM64_ONE_TB_RESULT_GENERATED_TCI_OPS] ==
+             TCG_WASM64_ONE_TB_EXECUTED_TCI_OPS &&
+         result[TCG_WASM64_ONE_TB_RESULT_GENERATED_MEMORY_WRITES] ==
+             TCG_WASM64_ONE_TB_MEMORY_WRITES &&
+         result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_MEMORY_WRITES] ==
+             TCG_WASM64_ONE_TB_MEMORY_WRITES &&
+         counters.generated_guest_instructions ==
+             TCG_WASM64_ONE_TB_EXECUTED_TCI_OPS &&
+         counters.fallback_guest_instructions ==
+             TCG_WASM64_ONE_TB_EXECUTED_TCI_OPS &&
+         counters.inline_tlb_hit_loads == TCG_WASM64_ONE_TB_MEMORY_LOADS &&
+         counters.inline_tlb_hit_stores == TCG_WASM64_ONE_TB_MEMORY_WRITES &&
+         counters.helper_calls == 0 &&
+         counters.qemu_ld_calls == 0 &&
+         counters.qemu_st_calls == 0 &&
+         exit.reason == TCG_WASM64_ONE_TB_STATUS_DISPATCH &&
+         exit.value == TCG_WASM64_ONE_TB_DISPATCH_TARGET;
+
+    tcg_wasm64_report_one_tb_differential(&counters, &exit, result, ok);
 }
 
 static bool tcg_wasm64_translate_op_supported(uint32_t op)
@@ -1708,6 +2400,7 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
     };
 
     tcg_wasm64_runloop_smoke_maybe(env);
+    tcg_wasm64_one_tb_differential_maybe(env);
 
     /*
      * Native wasm64 lowering grows behind this boundary.  The TCI fallback

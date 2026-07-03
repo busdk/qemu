@@ -173,6 +173,8 @@ Options:
                     Browser profile directory reused for OPFS restart proofs
   --visual-marker TEXT
                      Expected visual marker metadata for display proofs
+  --wasm64-one-tb-differential
+                     Enable opt-in generated-vs-TCI proof for one live x86 TB
   --wasm64-runloop-smoke
                      Enable opt-in QEMU wasm64 run/exit runtime smoke
   --wasm64-tcg-summary
@@ -269,6 +271,7 @@ function parseArgs(argv) {
     timeoutMs: 180000,
     userDataDir: null,
     visualMarker: "",
+    wasm64OneTbDifferential: false,
     wasm64RunloopSmoke: false,
     wasm64TcgSummary: false,
     wasm64TcgSummaryInterval: 10000,
@@ -498,6 +501,9 @@ function parseArgs(argv) {
     } else if (arg === "--visual-marker") {
       options.visualMarker = argv[++i];
       explicit.add("visualMarker");
+    } else if (arg === "--wasm64-one-tb-differential") {
+      options.wasm64OneTbDifferential = true;
+      explicit.add("wasm64OneTbDifferential");
     } else if (arg === "--wasm64-runloop-smoke") {
       options.wasm64RunloopSmoke = true;
       explicit.add("wasm64RunloopSmoke");
@@ -528,6 +534,7 @@ function parseArgs(argv) {
       "tciFastGates",
       "tciProgress",
       "tciWasmGeneratedTrace",
+      "wasm64OneTbDifferential",
       "wasm64RunloopSmoke",
       "wasm64TcgSummary",
     ],
@@ -1418,6 +1425,9 @@ export function browserSmokeUrl(options) {
   if (options.wasm64RunloopSmoke) {
     url.searchParams.set("wasm64RunloopSmoke", "1");
   }
+  if (options.wasm64OneTbDifferential) {
+    url.searchParams.set("wasm64OneTbDifferential", "1");
+  }
   if (options.wasm64TcgSummary) {
     url.searchParams.set("wasm64TcgSummary", "1");
     url.searchParams.set(
@@ -1543,6 +1553,7 @@ export function initialSmokeResult(options, browserVersion) {
         ? options.tciWasmGeneratedTraceLimit
         : 64,
     wasm64RunloopSmoke: Boolean(options.wasm64RunloopSmoke),
+    wasm64OneTbDifferential: Boolean(options.wasm64OneTbDifferential),
     wasm64TcgSummary: Boolean(options.wasm64TcgSummary),
     wasm64TcgSummaryInterval: Number.isInteger(options.wasm64TcgSummaryInterval)
       ? options.wasm64TcgSummaryInterval
