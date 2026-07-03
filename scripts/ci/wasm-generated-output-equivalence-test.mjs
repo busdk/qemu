@@ -29,6 +29,8 @@ const VALUE_I64 = 0x7e;
 const OPS = {
   call: 2,
   brcond: 4,
+  mb: 5,
+  mov: 6,
   add: 7,
   and: 8,
   deposit: 16,
@@ -36,7 +38,9 @@ const OPS = {
   ld32u: 28,
   ld32s: 29,
   ld: 30,
+  mul: 32,
   neg: 38,
+  or: 42,
   sextract: 50,
   shl: 51,
   shr: 52,
@@ -44,6 +48,8 @@ const OPS = {
   st8: 53,
   st32: 55,
   st: 56,
+  sub: 57,
+  xor: 58,
   exit_tb: 72,
   goto_tb: 73,
   tci_movi: 125,
@@ -110,6 +116,23 @@ const X86_REG_ENUMS = [
   "R_EAX", "R_ECX", "R_EDX", "R_EBX", "R_ESP", "R_EBP", "R_ESI", "R_EDI",
   "R_R8", "R_R9", "R_R10", "R_R11", "R_R12", "R_R13", "R_R14", "R_R15",
 ];
+
+function opReg(op, r0, r1 = 0, r2 = 0) {
+  return (op | (r0 << 8) | (r1 << 12) | (r2 << 16)) >>> 0;
+}
+
+function opImm20(op, r0, imm) {
+  return (op | (r0 << 8) | (((imm & 0xfffff) << 12) >>> 0)) >>> 0;
+}
+
+function opBranch(reg, imm) {
+  return (OPS.brcond | (reg << 8) | (((imm & 0xfffff) << 12) >>> 0)) >>> 0;
+}
+
+function opSetcond(op, r0, r1, r2, condition) {
+  return (op | (r0 << 8) | (r1 << 12) | (r2 << 16) |
+          (condition << 20)) >>> 0;
+}
 
 function vector(items) {
   return [...encodeU32(items.length), ...items.flat()];
@@ -334,6 +357,46 @@ function compare32(lhs, rhs, condition) {
   }
 }
 
+function compare64(lhs, rhs, condition) {
+  const lhsSigned = BigInt.asIntN(64, BigInt(lhs));
+  const rhsSigned = BigInt.asIntN(64, BigInt(rhs));
+  const lhsUnsigned = BigInt.asUintN(64, BigInt(lhs));
+  const rhsUnsigned = BigInt.asUintN(64, BigInt(rhs));
+
+  switch (condition) {
+  case 0:
+    return 0n;
+  case 1:
+    return 1n;
+  case 8:
+    return lhsUnsigned === rhsUnsigned ? 1n : 0n;
+  case 9:
+    return lhsUnsigned !== rhsUnsigned ? 1n : 0n;
+  case 12:
+    return (lhsUnsigned & rhsUnsigned) === 0n ? 1n : 0n;
+  case 13:
+    return (lhsUnsigned & rhsUnsigned) !== 0n ? 1n : 0n;
+  case 2:
+    return lhsSigned < rhsSigned ? 1n : 0n;
+  case 3:
+    return lhsSigned >= rhsSigned ? 1n : 0n;
+  case 6:
+    return lhsSigned > rhsSigned ? 1n : 0n;
+  case 7:
+    return lhsSigned <= rhsSigned ? 1n : 0n;
+  case 10:
+    return lhsUnsigned < rhsUnsigned ? 1n : 0n;
+  case 11:
+    return lhsUnsigned >= rhsUnsigned ? 1n : 0n;
+  case 14:
+    return lhsUnsigned > rhsUnsigned ? 1n : 0n;
+  case 15:
+    return lhsUnsigned <= rhsUnsigned ? 1n : 0n;
+  default:
+    throw new Error(`unsupported TCGCond in fixture: ${condition}`);
+  }
+}
+
 function compare64Expr(lhs, rhs, condition) {
   switch (condition) {
   case 0:
@@ -503,11 +566,24 @@ function compileSharedGeneratedOutputOp(op) {
     return i64Store(memoryAddress(localGet(regLocal(r1)), ofs),
                     localGet(regLocal(r0)));
   }
-  if (opc === OPS.add || opc === OPS.and) {
+  if (opc === OPS.mb) {
+    return [];
+  }
+  if (opc === OPS.mov) {
+    return localSet(regLocal(r0), localGet(regLocal(r1)));
+  }
+  if (opc === OPS.add || opc === OPS.sub || opc === OPS.mul ||
+      opc === OPS.and || opc === OPS.or || opc === OPS.xor) {
+    const opByte = opc === OPS.add ? 0x7c :
+      opc === OPS.sub ? 0x7d :
+      opc === OPS.mul ? 0x7e :
+      opc === OPS.and ? 0x83 :
+      opc === OPS.or ? 0x84 : 0x85;
+
     return localSet(regLocal(r0), [
       ...localGet(regLocal(r1)),
       ...localGet(regLocal(r2)),
-      opc === OPS.add ? 0x7c : 0x83,
+      opByte,
     ]);
   }
   if (opc === OPS.neg) {
@@ -1094,7 +1170,7 @@ function interpretGeneratedOutput(words, state, relativeBase) {
       index++;
     } else if (opc === OPS.setcond) {
       const condition = bits(insn, 20, 4);
-      regs[r0] = compare32(regs[r1], regs[r2], condition);
+      regs[r0] = compare64(regs[r1], regs[r2], condition);
       index++;
     } else if (opc === OPS.tci_qemu_ld_rrr) {
       const taddr = regs[r1];
@@ -1131,6 +1207,23 @@ function interpretGeneratedOutput(words, state, relativeBase) {
       index++;
     } else if (opc === OPS.and) {
       regs[r0] = toU64(regs[r1] & regs[r2]);
+      index++;
+    } else if (opc === OPS.or) {
+      regs[r0] = toU64(regs[r1] | regs[r2]);
+      index++;
+    } else if (opc === OPS.xor) {
+      regs[r0] = toU64(regs[r1] ^ regs[r2]);
+      index++;
+    } else if (opc === OPS.sub) {
+      regs[r0] = toU64(regs[r1] - regs[r2]);
+      index++;
+    } else if (opc === OPS.mul) {
+      regs[r0] = toU64(regs[r1] * regs[r2]);
+      index++;
+    } else if (opc === OPS.mov) {
+      regs[r0] = regs[r1];
+      index++;
+    } else if (opc === OPS.mb) {
       index++;
     } else if (opc === OPS.neg) {
       regs[r0] = toU64(-regs[r1]);
@@ -2426,6 +2519,38 @@ const fixtures = [
       OPS.exit_tb,
     ],
   },
+  {
+    name: "rv64-boot-move-logic-family",
+    terminal: "goto_tb",
+    relativeBase: 0x5900,
+    words: [
+      opImm20(OPS.tci_movi, 1, 0x123),
+      opImm20(OPS.tci_movl, 9, 0),
+      opImm20(OPS.tci_movi, 2, 0x55),
+      opReg(OPS.mov, 3, 1),
+      opReg(OPS.or, 4, 3, 2),
+      opReg(OPS.xor, 5, 4, 2),
+      opReg(OPS.and, 6, 4, 2),
+      opReg(OPS.sub, 7, 5, 6),
+      opReg(OPS.mul, 8, 7, 2),
+      OPS.mb,
+      opImm20(OPS.goto_tb, 0, -36),
+    ],
+  },
+  {
+    name: "rv64-boot-setcond-branch-family",
+    terminal: "exit_tb",
+    relativeBase: 0x5a00,
+    words: [
+      opImm20(OPS.tci_movi, 1, 3),
+      opImm20(OPS.tci_movi, 2, 9),
+      opSetcond(OPS.setcond, 3, 1, 2, 10),
+      opBranch(3, 4),
+      opImm20(OPS.tci_movi, 4, 99),
+      opImm20(OPS.tci_movi, 4, 7),
+      OPS.exit_tb,
+    ],
+  },
 ];
 
 const liveX86Fixture = fixtures.find((fixture) =>
@@ -2831,13 +2956,15 @@ for (const fixture of r4kSoftmmuFixtures) {
   r4kSoftmmuResults.push(await runSoftmmuFixture(fixture));
 }
 
-assert.equal(results.length, 13);
-assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 5);
-assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 8);
+assert.equal(results.length, 17);
+assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 7);
+assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 10);
 const helperBoundaryResults = results.filter((entry) =>
   entry.helpers.loads > 0 || entry.helpers.stores > 0);
 const simpleGapResults = results.filter((entry) =>
   entry.name === "simple-gap-ops-validate");
+const rv64BootPathResults = results.filter((entry) =>
+  entry.name.startsWith("rv64-boot-"));
 const liveX86Results = results.filter((entry) =>
   entry.name === "live-x86-pre-r4i-ld32u-goto-tb-13");
 const r4iEmitterResults = results.filter((entry) =>
@@ -2861,6 +2988,31 @@ assert.equal(r4iEmitterResults[0].memoryWrites, 2);
 assert.equal(r4iEmitterResults[0].helpers.loads, 0);
 assert.equal(r4iEmitterResults[0].helpers.stores, 0);
 assert.equal(r4iEmitterResults[0].x86CpuStateContract.ok, true);
+assert.equal(rv64BootPathResults.length, 4);
+assert.deepEqual(
+  [...new Set(rv64BootPathResults.map((entry) => entry.name))],
+  [
+    "rv64-boot-move-logic-family",
+    "rv64-boot-setcond-branch-family",
+  ],
+);
+assert.deepEqual(
+  [...new Set(rv64BootPathResults.map((entry) => entry.emitter))],
+  [PER_TB_EMITTER_NAME],
+);
+assert.equal(
+  rv64BootPathResults.every((entry) =>
+    entry.moduleValid &&
+    entry.registerStateMatched &&
+    entry.memoryStateMatched &&
+    entry.helpers.loads === 0 &&
+    entry.helpers.stores === 0),
+  true,
+);
+assert.deepEqual(
+  rv64BootPathResults.map((entry) => entry.generatedTciOpEquivalents),
+  [11, 11, 6, 6],
+);
 assert.deepEqual(
   r4iEmitterResults[0].x86CpuStateContract.generalRegisters.loadedInputRegisters,
   [x86RegField(14)],
@@ -3256,6 +3408,22 @@ console.log(JSON.stringify({
   unsupportedX86StateFixtures: unsupportedX86StateResults,
   helperBoundaryFixtures: helperBoundaryResults.length,
   simpleGapFixtures: simpleGapResults.length,
+  rv64BootPathFixtures: {
+    fixtureExecutions: rv64BootPathResults.length,
+    fixtureNames: [...new Set(rv64BootPathResults.map((entry) => entry.name))],
+    generatedTciOpEquivalents: rv64BootPathResults.reduce((count, entry) =>
+      count + entry.generatedTciOpEquivalents, 0),
+    helperCalls: rv64BootPathResults.reduce((count, entry) =>
+      count + entry.helpers.loads + entry.helpers.stores, 0),
+    opFamilies: [
+      "move-immediate-literal",
+      "barrier-noop",
+      "add-sub-mul",
+      "and-or-xor",
+      "setcond-brcond",
+      "goto-exit-terminal",
+    ],
+  },
   helperCalls: {
     loads: helperBoundaryResults.reduce((count, entry) =>
       count + entry.helpers.loads, 0),

@@ -644,6 +644,29 @@ run that reaches a weaker marker than normal multi-user readiness.
     R4d remains open until the supervisor-run Chrome proof reports nonzero
     real RV64 generated coverage and the top remaining fallback PCs/TBs or op
     shapes before `Welcome to TuxTest`.
+  - [x] R4d-c - Expand deterministic RV64 boot-path generated-output
+    equivalence fixtures before the next live coverage browser proof. DoD:
+    `scripts/ci/wasm-generated-output-equivalence-test.mjs` covers the
+    side-effect-free RV64 boot-path op families accepted by the live
+    generated-coverage probe, including move/immediate/literal, barrier
+    no-op, add/sub/mul, and/or/xor, 64-bit `setcond` plus `brcond`, and
+    `goto_tb`/`exit_tb` terminals, with generated module validity, matched
+    register/memory state, and zero helper/`qemu_ld`/`qemu_st` calls. Accepted
+    2026-07-03: the equivalence gate now models `mb`, `mov`, `or`, `sub`,
+    `xor`, `mul`, and true 64-bit `setcond` in the shared JS compiler and
+    reference interpreter. New fixtures `rv64-boot-move-logic-family` and
+    `rv64-boot-setcond-branch-family` execute with both deterministic seeds;
+    the JSON summary reports `fixtures=17`, `emittedModuleFixtures=17`,
+    `rv64BootPathFixtures.fixtureExecutions=4`,
+    `rv64BootPathFixtures.generatedTciOpEquivalents=34`, and
+    `rv64BootPathFixtures.helperCalls=0`. Checks:
+    `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+    `node --check scripts/ci/wasm64-translate-metadata-test.mjs`, and
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`. No browser run,
+    artifact build, speed claim, BusDK work, or Bus Engine OS proof was run
+    or enabled; R4d remains open for the supervisor-run Chrome proof of
+    nonzero real RV64 generated coverage and remaining fallback attribution.
   - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
