@@ -79,6 +79,15 @@ function ramGeneratedOutput(binaryOp, immediate) {
   ];
 }
 
+function traceLd32uBranchStoreOutput() {
+  return [
+    0xfff0e41c, 0x0000057d, 0x00254d88, 0x00000d04,
+    0x0000147d, 0xfff4e435, 0x0100e41e, 0xfff9057d,
+    0x00054407, 0x0100e438, 0xfff74049, 0xfff10048,
+    0xfff0f048,
+  ];
+}
+
 function generatedMetadata({
   checksum = 1,
   flags = WASMJIT_TB_METADATA_FLAGS.valid |
@@ -133,6 +142,43 @@ function generatedMetadata({
     ["1", "23130", "3"],
   );
 }
+
+{
+  const built = buildHotsetFromMetadataModel([
+    generatedMetadata({ generatedOutput: traceLd32uBranchStoreOutput() }),
+  ], { opcodes });
+
+  assert.equal(built.ok, true);
+  assert.equal(built.status, WASMJIT_HOTSET_BUILD_STATUS.ok);
+  assert.equal(built.hotset.tbCount, 1);
+  assert.equal(
+    built.hotset.tbs[0].op,
+    WASMJIT_HOTSET_OP.traceLd32uBranchStore,
+  );
+  assert.equal(built.hotset.tbs[0].guestInstructions, 13);
+  assert.equal(built.hotset.tbs[0].immediate.toString(), "0");
+  assert.equal(built.hotset.tbs[0].valueReg, 4);
+  assert.equal(built.hotset.tbs[0].baseReg, 14);
+  assert.equal(built.hotset.tbs[0].loadOffset, -16);
+  assert.equal(built.hotset.tbs[0].storeOffset, -12);
+  assert.equal(built.hotset.tbs[0].branchReg, 13);
+  assert.equal(built.hotset.tbs[0].storeReg, 4);
+  assert.equal(built.hotset.tbs[0].branchCond, 2);
+  assert.equal(built.hotset.tbs[0].terminalOp, opcodes.goto_tb);
+  assert.equal(built.hotset.tbs[0].terminalDiff, -140);
+}
+
+assert.equal(
+  buildHotsetFromMetadataModel([
+    generatedMetadata({
+      generatedOutput: [
+        0xfff0e41c, 0x0000057d, 0x00254d88, 0x00000d04,
+        0xfff74049,
+      ],
+    }),
+  ], { opcodes }).status,
+  WASMJIT_HOTSET_BUILD_STATUS.unsupportedHotTb,
+);
 
 assert.equal(
   buildHotsetFromMetadataModel([

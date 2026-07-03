@@ -225,6 +225,7 @@ typedef enum TCGWasm64RunHotsetOp {
     TCG_WASM64_RUN_HOTSET_OP_RAM_XOR_CONST = 2,
     TCG_WASM64_RUN_HOTSET_OP_ALU_ADD_CONST = 3,
     TCG_WASM64_RUN_HOTSET_OP_ALU_XOR_CONST = 4,
+    TCG_WASM64_RUN_HOTSET_OP_TRACE_LD32U_BRANCH_STORE = 5,
 } TCGWasm64RunHotsetOp;
 
 typedef struct TCGWasm64RunHotsetTB {
@@ -233,6 +234,16 @@ typedef struct TCGWasm64RunHotsetTB {
     uint32_t op;
     uint32_t guest_instructions;
     uint64_t immediate;
+    uint32_t value_reg;
+    uint32_t base_reg;
+    int32_t load_offset;
+    int32_t store_offset;
+    uint32_t branch_reg;
+    uint32_t store_reg;
+    uint32_t branch_cond;
+    uint32_t terminal_op;
+    int32_t terminal_diff;
+    uint32_t flags;
 } TCGWasm64RunHotsetTB;
 
 typedef struct TCGWasm64RunHotset {
@@ -246,7 +257,17 @@ typedef struct TCGWasm64RunHotset {
 #define TCG_WASM64_RUN_HOTSET_TB_OP_OFFSET 8u
 #define TCG_WASM64_RUN_HOTSET_TB_GUEST_INSTRUCTIONS_OFFSET 12u
 #define TCG_WASM64_RUN_HOTSET_TB_IMMEDIATE_OFFSET 16u
-#define TCG_WASM64_RUN_HOTSET_TB_SIZE 24u
+#define TCG_WASM64_RUN_HOTSET_TB_VALUE_REG_OFFSET 24u
+#define TCG_WASM64_RUN_HOTSET_TB_BASE_REG_OFFSET 28u
+#define TCG_WASM64_RUN_HOTSET_TB_LOAD_OFFSET_OFFSET 32u
+#define TCG_WASM64_RUN_HOTSET_TB_STORE_OFFSET_OFFSET 36u
+#define TCG_WASM64_RUN_HOTSET_TB_BRANCH_REG_OFFSET 40u
+#define TCG_WASM64_RUN_HOTSET_TB_STORE_REG_OFFSET 44u
+#define TCG_WASM64_RUN_HOTSET_TB_BRANCH_COND_OFFSET 48u
+#define TCG_WASM64_RUN_HOTSET_TB_TERMINAL_OP_OFFSET 52u
+#define TCG_WASM64_RUN_HOTSET_TB_TERMINAL_DIFF_OFFSET 56u
+#define TCG_WASM64_RUN_HOTSET_TB_FLAGS_OFFSET 60u
+#define TCG_WASM64_RUN_HOTSET_TB_SIZE 64u
 
 #define TCG_WASM64_RUN_HOTSET_TB_COUNT_OFFSET 0u
 #define TCG_WASM64_RUN_HOTSET_ENTRY_TB_ID_OFFSET 4u

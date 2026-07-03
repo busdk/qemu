@@ -1068,6 +1068,78 @@ descriptor path to represent load-first translated-output shapes dominated by
 ``ld32u``, while separately deciding whether ``call``-heavy TBs become helper
 exits, fallback markers, or a later generated-helper boundary.
 
+R4g trace-shaped descriptor expansion
+-------------------------------------
+
+R4g is a deterministic descriptor-ABI slice, not a browser speed result.  The
+expected gate effect was no marker-time improvement by itself because live
+Linux TBs still execute through TCI until these descriptors are connected to
+the runtime executor.  The purpose was to prove that the dominant R4f
+``ld32u`` semantic-shape rejects can be represented without returning to the
+rejected direct-boundary path.
+
+``TCGWasm64RunHotsetTB`` now reserves descriptor fields for value and base
+registers, load and store offsets, branch register and condition, terminal op,
+terminal displacement, and flags.  The hotset decoder records those fields for
+the existing ALU and RAM patterns and accepts one conservative trace-shaped
+``ld32u``/``tci_movi``/``tci_setcond32``/``brcond``/.../``st8`` fixture from
+the generated-output equivalence suite.  It now scans for the first terminal
+op instead of assuming the final TCI word is terminal, because the real fixture
+contains additional TCI words after the first ``goto_tb``.  Unsupported
+variants, including the same prefix without an ``st8`` before the first
+terminal, still fail closed with ``unsupported_hot_tb``.
+
+Focused checks passed:
+
+.. code-block:: console
+
+  $ git diff --check
+  $ node --check scripts/ci/wasmjit-runloop-model.mjs
+  $ node --check scripts/ci/wasmjit-runloop-model-test.mjs
+  $ node scripts/ci/wasmjit-runloop-model-test.mjs
+  $ node scripts/ci/wasm64-runloop-contract-test.mjs
+  $ node scripts/ci/wasm64-translate-metadata-test.mjs
+  $ node --check scripts/ci/wasm-generated-output-equivalence-test.mjs
+  $ node scripts/ci/wasm-generated-output-equivalence-test.mjs
+  $ python3 scripts/ci/wasm-build-artifacts-local-test.py
+  $ node --check scripts/ci/wasm-browser-smoke-runner.mjs
+  $ node --check scripts/ci/wasm-browser-smoke.mjs
+
+``node scripts/ci/wasm-browser-smoke-runner-test.mjs`` also passed outside
+the sandbox after the sandboxed run returned empty stderr for its known
+negative subprocess fixture.
+
+The backend artifact was built with:
+
+.. code-block:: console
+
+  $ python3 scripts/ci/wasm-build-artifacts-local.py \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4g-riscv64-trace-descriptor-artifacts \
+      --target riscv64 \
+      --tcg-wasm64-backend \
+      --jobs auto \
+      --build-image
+
+Meson reported ``TCG backend: experimental wasm64 with TCI fallback``.
+Artifact SHA-256 values were:
+
+* ``qemu-system-riscv64.js``:
+  ``2d66b91c96e8ed14374a27d55080fe509194b8030ae8a25a1ecae0e636e14914``
+* ``qemu-system-riscv64.wasm``:
+  ``36def90e41d8064745206ea29c93db281686c5027a8cf23528ffa9713b329088``
+* manifest:
+  ``62a643bd794becab933ed07aaa8c2584d0868562cd1aaddbd1e2fb5da458023e``
+* ``SHA256SUMS``:
+  ``9bdd207cb722b4c5875561f89f0df3624deecb7d0f0f1111c1eee17a6abe3292``
+
+This slice did not run a browser speed gate.  It does not yet connect the
+trace descriptor to runtime execution, does not prove live attach coverage
+improvement, and does not report generated Linux TB execution.  The next
+accelerator step must either wire this descriptor into ``wasmjit_run()``
+execution with measured instruction and wall-time metrics, or rerun the attach
+probe to prove the descriptor gap actually narrowed before any browser speed
+gate.
+
 Strict definition of done
 =========================
 

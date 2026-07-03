@@ -72,7 +72,17 @@ export const WASMJIT_HOTSET_TB = {
   op: 8,
   guestInstructions: 12,
   immediate: 16,
-  size: 24,
+  valueReg: 24,
+  baseReg: 28,
+  loadOffset: 32,
+  storeOffset: 36,
+  branchReg: 40,
+  storeReg: 44,
+  branchCond: 48,
+  terminalOp: 52,
+  terminalDiff: 56,
+  flags: 60,
+  size: 64,
 };
 
 export const WASMJIT_HOTSET = {
@@ -87,6 +97,7 @@ export const WASMJIT_HOTSET_OP = {
   ramXorConst: 2,
   aluAddConst: 3,
   aluXorConst: 4,
+  traceLd32uBranchStore: 5,
 };
 
 export const WASMJIT_TB_METADATA_FLAGS = {
@@ -173,6 +184,10 @@ function tciOffset16(insn) {
   return signExtend(insn >>> 16, 16);
 }
 
+function tciCond4(insn) {
+  return (insn >>> 20) & 0xf;
+}
+
 function terminalOp(opcodes, op) {
   return op === opcodes.goto_tb || op === opcodes.exit_tb;
 }
@@ -183,12 +198,16 @@ function decodeSemanticHotsetTB(metadata, opcodes) {
     return null;
   }
 
-  const terminal = tciOp(words[words.length - 1]);
-  if (!terminalOp(opcodes, terminal)) {
+  const terminalIndex = words.findIndex((word) =>
+    terminalOp(opcodes, tciOp(word)));
+  if (terminalIndex < 0) {
     return null;
   }
+  const terminal = tciOp(words[terminalIndex]);
+  const terminalDiff = tciImm20(words[terminalIndex]);
 
-  if (words.length === 4 &&
+  if (terminalIndex === 3 &&
+      words.length === 4 &&
       tciOp(words[0]) === opcodes.tci_movi &&
       (tciOp(words[1]) === opcodes.add || tciOp(words[1]) === opcodes.xor) &&
       tciOp(words[2]) === opcodes.brcond) {
@@ -203,10 +222,52 @@ function decodeSemanticHotsetTB(metadata, opcodes) {
         ? WASMJIT_HOTSET_OP.aluAddConst
         : WASMJIT_HOTSET_OP.aluXorConst,
       immediate: BigInt.asUintN(64, BigInt(tciImm20(words[0]))),
+      valueReg: dstReg,
+      branchReg: tciR0(words[2]),
+      terminalOp: terminal,
+      terminalDiff,
     };
   }
 
-  if (words.length === 5 &&
+  if (terminalIndex >= 6 &&
+      words.length >= 7 &&
+      tciOp(words[0]) === opcodes.ld32u &&
+      tciOp(words[1]) === opcodes.tci_movi &&
+      tciOp(words[2]) === opcodes.tci_setcond32 &&
+      tciOp(words[3]) === opcodes.brcond) {
+    const loadReg = tciR0(words[0]);
+    const baseReg = tciR1(words[0]);
+    const compareConstReg = tciR0(words[1]);
+    const branchReg = tciR0(words[3]);
+
+    if (tciR0(words[2]) !== branchReg ||
+        tciR1(words[2]) !== loadReg ||
+        tciR2(words[2]) !== compareConstReg) {
+      return null;
+    }
+
+    for (let index = 4; index < terminalIndex; index++) {
+      if (tciOp(words[index]) === opcodes.st8) {
+        return {
+          op: WASMJIT_HOTSET_OP.traceLd32uBranchStore,
+          immediate: BigInt.asUintN(64, BigInt(tciImm20(words[1]))),
+          valueReg: loadReg,
+          baseReg,
+          loadOffset: tciOffset16(words[0]),
+          storeOffset: tciOffset16(words[index]),
+          branchReg,
+          storeReg: tciR0(words[index]),
+          branchCond: tciCond4(words[2]),
+          terminalOp: terminal,
+          terminalDiff,
+        };
+      }
+    }
+    return null;
+  }
+
+  if (terminalIndex === 4 &&
+      words.length === 5 &&
       tciOp(words[0]) === opcodes.ld &&
       tciOp(words[1]) === opcodes.tci_movi &&
       (tciOp(words[2]) === opcodes.add || tciOp(words[2]) === opcodes.xor) &&
@@ -228,6 +289,13 @@ function decodeSemanticHotsetTB(metadata, opcodes) {
         ? WASMJIT_HOTSET_OP.ramAddConst
         : WASMJIT_HOTSET_OP.ramXorConst,
       immediate: BigInt.asUintN(64, BigInt(tciImm20(words[1]))),
+      valueReg,
+      baseReg,
+      loadOffset: tciOffset16(words[0]),
+      storeOffset: tciOffset16(words[3]),
+      storeReg: tciR0(words[3]),
+      terminalOp: terminal,
+      terminalDiff,
     };
   }
 
@@ -367,6 +435,16 @@ export function buildHotsetFromMetadataModel(metadata, {
       op: semantic.op,
       guestInstructions: current.generatedOutputOpCount,
       immediate: semantic.immediate,
+      valueReg: semantic.valueReg ?? 0,
+      baseReg: semantic.baseReg ?? 0,
+      loadOffset: semantic.loadOffset ?? 0,
+      storeOffset: semantic.storeOffset ?? 0,
+      branchReg: semantic.branchReg ?? 0,
+      storeReg: semantic.storeReg ?? 0,
+      branchCond: semantic.branchCond ?? 0,
+      terminalOp: semantic.terminalOp ?? 0,
+      terminalDiff: semantic.terminalDiff ?? 0,
+      flags: semantic.flags ?? 0,
     });
   }
 

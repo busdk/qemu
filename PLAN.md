@@ -898,6 +898,68 @@ run that reaches a weaker marker than normal multi-user readiness.
     become helper exits, fallback markers, or a later generated-helper
     boundary. This is the evidence-backed next step toward a real
     `wasmjit_run()` accelerator.
+  - [x] R4g - Expand the run-loop descriptor ABI for trace-shaped
+    `ld32u`-first translated output before another browser run. Prediction:
+    this should not improve marker time by itself, because live Linux TBs
+    still execute through TCI until the descriptor can be connected to the
+    runtime executor. It should move the accelerator closer to real
+    execution by proving the dominant R4f semantic-shape rejects can be
+    represented without returning to the old direct-boundary path. DoD:
+    deterministic tests cover at least one real trace-shaped
+    `ld32u`/`tci_setcond32`/`brcond`/`st8` fixture from
+    `scripts/ci/wasm-generated-output-equivalence-test.mjs`; the descriptor
+    records the register, offset, branch, and terminal information required
+    to execute the trace through `wasmjit_run()` later; unsupported variants
+    still fail closed with explicit no-silent-fallback statuses; existing
+    ALU/branch and TLB-hit RAM run-loop tests still pass; and no browser
+    speed-gate claim is made from this slice. Accepted 2026-07-03:
+    `TCGWasm64RunHotsetTB` now reserves descriptor fields for value/base
+    registers, load/store offsets, branch register/condition, terminal op,
+    terminal displacement, and flags. The hotset decoder now records those
+    fields for existing ALU and RAM patterns and accepts one conservative
+    trace-shaped `ld32u`/`tci_movi`/`tci_setcond32`/`brcond`/.../`st8`
+    shape from the generated-output fixture family. It scans for the first
+    terminal op instead of assuming the final TCI word is terminal, because
+    the real fixture contains additional words after the first `goto_tb`.
+    Unsupported variants, including the same prefix without an `st8` before
+    the first terminal, still return `unsupported_hot_tb`.
+
+    Checks: `git diff --check`,
+    `node --check scripts/ci/wasmjit-runloop-model.mjs`,
+    `node --check scripts/ci/wasmjit-runloop-model-test.mjs`,
+    `node scripts/ci/wasmjit-runloop-model-test.mjs`,
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`,
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+    `python3 scripts/ci/wasm-build-artifacts-local-test.py`,
+    `node --check scripts/ci/wasm-browser-smoke-runner.mjs`, and
+    `node --check scripts/ci/wasm-browser-smoke.mjs`. The runner test
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs` passed outside the
+    sandbox after the sandboxed run returned empty stderr for its known
+    negative subprocess fixture.
+
+    Artifact build command:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4g-riscv64-trace-descriptor-artifacts
+    --target riscv64 --tcg-wasm64-backend --jobs auto --build-image`.
+    Meson reported `TCG backend: experimental wasm64 with TCI fallback`.
+    Artifact hashes: `qemu-system-riscv64.js`
+    `2d66b91c96e8ed14374a27d55080fe509194b8030ae8a25a1ecae0e636e14914`,
+    `qemu-system-riscv64.wasm`
+    `36def90e41d8064745206ea29c93db281686c5027a8cf23528ffa9713b329088`,
+    manifest
+    `62a643bd794becab933ed07aaa8c2584d0868562cd1aaddbd1e2fb5da458023e`,
+    SHA256SUMS
+    `9bdd207cb722b4c5875561f89f0df3624deecb7d0f0f1111c1eee17a6abe3292`.
+
+    This slice deliberately did not run a browser speed gate. It does not yet
+    connect the trace descriptor to runtime execution, does not prove live
+    attach coverage improvement, and does not report generated Linux TB
+    execution. The next accelerator step must either wire this descriptor
+    into `wasmjit_run()` execution with measured instruction/wall-time
+    metrics or rerun the attach probe to prove the descriptor gap actually
+    narrowed before any browser speed gate.
 - [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
   accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
   cold in browser-hosted QEMU/WASM with the accelerator and reaches

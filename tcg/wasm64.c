@@ -118,6 +118,26 @@ QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, guest_instructions) !=
                   TCG_WASM64_RUN_HOTSET_TB_GUEST_INSTRUCTIONS_OFFSET);
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, immediate) !=
                   TCG_WASM64_RUN_HOTSET_TB_IMMEDIATE_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, value_reg) !=
+                  TCG_WASM64_RUN_HOTSET_TB_VALUE_REG_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, base_reg) !=
+                  TCG_WASM64_RUN_HOTSET_TB_BASE_REG_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, load_offset) !=
+                  TCG_WASM64_RUN_HOTSET_TB_LOAD_OFFSET_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, store_offset) !=
+                  TCG_WASM64_RUN_HOTSET_TB_STORE_OFFSET_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, branch_reg) !=
+                  TCG_WASM64_RUN_HOTSET_TB_BRANCH_REG_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, store_reg) !=
+                  TCG_WASM64_RUN_HOTSET_TB_STORE_REG_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, branch_cond) !=
+                  TCG_WASM64_RUN_HOTSET_TB_BRANCH_COND_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, terminal_op) !=
+                  TCG_WASM64_RUN_HOTSET_TB_TERMINAL_OP_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, terminal_diff) !=
+                  TCG_WASM64_RUN_HOTSET_TB_TERMINAL_DIFF_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, flags) !=
+                  TCG_WASM64_RUN_HOTSET_TB_FLAGS_OFFSET);
 QEMU_BUILD_BUG_ON(sizeof(TCGWasm64RunHotsetTB) !=
                   TCG_WASM64_RUN_HOTSET_TB_SIZE);
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotset, tb_count) !=
@@ -846,7 +866,7 @@ EM_JS(int, tcg_wasm64_runloop_smoke_js,
     const hotsetTbOpOffset = 8;
     const hotsetTbGuestInstructionsOffset = 12;
     const hotsetTbImmediateOffset = 16;
-    const hotsetTbSize = 24;
+    const hotsetTbSize = 64;
     const hotsetOpRamAddConst = 1;
     const hotsetOpRamXorConst = 2;
     const hotsetOpAluAddConst = 3;
@@ -1187,6 +1207,7 @@ static uint32_t tcg_wasm64_tci_r1(uint32_t insn);
 static uint32_t tcg_wasm64_tci_r2(uint32_t insn);
 static int32_t tcg_wasm64_tci_imm20(uint32_t insn);
 static int32_t tcg_wasm64_tci_offset16(uint32_t insn);
+static uint32_t tcg_wasm64_tci_cond4(uint32_t insn);
 static bool tcg_wasm64_tci_terminal_op(uint32_t op);
 
 static uint64_t tcg_wasm64_runloop_now_ns(void)
@@ -1998,6 +2019,11 @@ static int32_t tcg_wasm64_tci_offset16(uint32_t insn)
     return sextract32(insn, 16, 16);
 }
 
+static uint32_t tcg_wasm64_tci_cond4(uint32_t insn)
+{
+    return extract32(insn, 20, 4);
+}
+
 static uint32_t tcg_wasm64_tci_encode_ri(TCGOpcode op, uint32_t r0,
                                          int32_t imm)
 {
@@ -2068,7 +2094,9 @@ static bool tcg_wasm64_run_hotset_decode_semantic(
 {
     const uint32_t *words;
     size_t count;
+    size_t terminal_index = SIZE_MAX;
     uint32_t terminal_op;
+    int32_t terminal_diff;
 
     if (!metadata || !tb || !metadata->generated_output) {
         return false;
@@ -2080,12 +2108,20 @@ static bool tcg_wasm64_run_hotset_decode_semantic(
     }
 
     words = metadata->generated_output;
-    terminal_op = tcg_wasm64_tci_op(words[count - 1]);
-    if (!tcg_wasm64_tci_terminal_op(terminal_op)) {
+    for (size_t index = 0; index < count; index++) {
+        if (tcg_wasm64_tci_terminal_op(tcg_wasm64_tci_op(words[index]))) {
+            terminal_index = index;
+            break;
+        }
+    }
+    if (terminal_index == SIZE_MAX) {
         return false;
     }
+    terminal_op = tcg_wasm64_tci_op(words[terminal_index]);
+    terminal_diff = tcg_wasm64_tci_imm20(words[terminal_index]);
 
-    if (count == 4 &&
+    if (terminal_index == 3 &&
+        count == 4 &&
         tcg_wasm64_tci_op(words[0]) == INDEX_op_tci_movi &&
         (tcg_wasm64_tci_op(words[1]) == INDEX_op_add ||
          tcg_wasm64_tci_op(words[1]) == INDEX_op_xor) &&
@@ -2102,10 +2138,52 @@ static bool tcg_wasm64_run_hotset_decode_semantic(
             TCG_WASM64_RUN_HOTSET_OP_ALU_ADD_CONST :
             TCG_WASM64_RUN_HOTSET_OP_ALU_XOR_CONST;
         tb->immediate = (uint64_t)(int64_t)tcg_wasm64_tci_imm20(words[0]);
+        tb->value_reg = dst_reg;
+        tb->branch_reg = tcg_wasm64_tci_r0(words[2]);
+        tb->terminal_op = terminal_op;
+        tb->terminal_diff = terminal_diff;
         return true;
     }
 
-    if (count == 5 &&
+    if (terminal_index >= 6 &&
+        count >= 7 &&
+        tcg_wasm64_tci_op(words[0]) == INDEX_op_ld32u &&
+        tcg_wasm64_tci_op(words[1]) == INDEX_op_tci_movi &&
+        tcg_wasm64_tci_op(words[2]) == INDEX_op_tci_setcond32 &&
+        tcg_wasm64_tci_op(words[3]) == INDEX_op_brcond) {
+        uint32_t load_reg = tcg_wasm64_tci_r0(words[0]);
+        uint32_t base_reg = tcg_wasm64_tci_r1(words[0]);
+        uint32_t cmp_const_reg = tcg_wasm64_tci_r0(words[1]);
+        uint32_t branch_reg = tcg_wasm64_tci_r0(words[3]);
+
+        if (tcg_wasm64_tci_r0(words[2]) != branch_reg ||
+            tcg_wasm64_tci_r1(words[2]) != load_reg ||
+            tcg_wasm64_tci_r2(words[2]) != cmp_const_reg) {
+            return false;
+        }
+
+        for (size_t index = 4; index < terminal_index; index++) {
+            if (tcg_wasm64_tci_op(words[index]) == INDEX_op_st8) {
+                tb->op = TCG_WASM64_RUN_HOTSET_OP_TRACE_LD32U_BRANCH_STORE;
+                tb->immediate =
+                    (uint64_t)(int64_t)tcg_wasm64_tci_imm20(words[1]);
+                tb->value_reg = load_reg;
+                tb->base_reg = base_reg;
+                tb->load_offset = tcg_wasm64_tci_offset16(words[0]);
+                tb->store_offset = tcg_wasm64_tci_offset16(words[index]);
+                tb->branch_reg = branch_reg;
+                tb->store_reg = tcg_wasm64_tci_r0(words[index]);
+                tb->branch_cond = tcg_wasm64_tci_cond4(words[2]);
+                tb->terminal_op = terminal_op;
+                tb->terminal_diff = terminal_diff;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if (terminal_index == 4 &&
+        count == 5 &&
         tcg_wasm64_tci_op(words[0]) == INDEX_op_ld &&
         tcg_wasm64_tci_op(words[1]) == INDEX_op_tci_movi &&
         (tcg_wasm64_tci_op(words[2]) == INDEX_op_add ||
@@ -2128,6 +2206,13 @@ static bool tcg_wasm64_run_hotset_decode_semantic(
             TCG_WASM64_RUN_HOTSET_OP_RAM_ADD_CONST :
             TCG_WASM64_RUN_HOTSET_OP_RAM_XOR_CONST;
         tb->immediate = (uint64_t)(int64_t)tcg_wasm64_tci_imm20(words[1]);
+        tb->value_reg = value_reg;
+        tb->base_reg = base_reg;
+        tb->load_offset = tcg_wasm64_tci_offset16(words[0]);
+        tb->store_offset = tcg_wasm64_tci_offset16(words[3]);
+        tb->store_reg = tcg_wasm64_tci_r0(words[3]);
+        tb->terminal_op = terminal_op;
+        tb->terminal_diff = terminal_diff;
         return true;
     }
 
@@ -2166,6 +2251,7 @@ bool tcg_wasm64_run_hotset_build_from_metadata(
         TCGWasm64RunHotsetTB *tb = &out_tbs[index];
         uint32_t tb_id = index + 1;
 
+        memset(tb, 0, sizeof(*tb));
         if (!tcg_wasm64_run_hotset_metadata_ready(current, status)) {
             memset(out_tbs, 0, sizeof(*out_tbs) * out_capacity);
             return false;

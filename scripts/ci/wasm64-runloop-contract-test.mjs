@@ -215,8 +215,25 @@ assert.match(header, /TCG_WASM64_RUN_HOTSET_OP_RAM_ADD_CONST = 1/);
 assert.match(header, /TCG_WASM64_RUN_HOTSET_OP_RAM_XOR_CONST = 2/);
 assert.match(header, /TCG_WASM64_RUN_HOTSET_OP_ALU_ADD_CONST = 3/);
 assert.match(header, /TCG_WASM64_RUN_HOTSET_OP_ALU_XOR_CONST = 4/);
+assert.match(header, /TCG_WASM64_RUN_HOTSET_OP_TRACE_LD32U_BRANCH_STORE = 5/);
 assert.match(header, /typedef struct TCGWasm64RunHotsetTB/);
-for (const field of ["tb_id", "next_tb_id", "op", "guest_instructions", "immediate"]) {
+for (const field of [
+  "tb_id",
+  "next_tb_id",
+  "op",
+  "guest_instructions",
+  "immediate",
+  "value_reg",
+  "base_reg",
+  "load_offset",
+  "store_offset",
+  "branch_reg",
+  "store_reg",
+  "branch_cond",
+  "terminal_op",
+  "terminal_diff",
+  "flags",
+]) {
   assert.match(header, new RegExp(field));
 }
 assert.equal(
@@ -238,6 +255,46 @@ assert.equal(
 assert.equal(
   macroValue("TCG_WASM64_RUN_HOTSET_TB_IMMEDIATE_OFFSET"),
   WASMJIT_HOTSET_TB.immediate,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_VALUE_REG_OFFSET"),
+  WASMJIT_HOTSET_TB.valueReg,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_BASE_REG_OFFSET"),
+  WASMJIT_HOTSET_TB.baseReg,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_LOAD_OFFSET_OFFSET"),
+  WASMJIT_HOTSET_TB.loadOffset,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_STORE_OFFSET_OFFSET"),
+  WASMJIT_HOTSET_TB.storeOffset,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_BRANCH_REG_OFFSET"),
+  WASMJIT_HOTSET_TB.branchReg,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_STORE_REG_OFFSET"),
+  WASMJIT_HOTSET_TB.storeReg,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_BRANCH_COND_OFFSET"),
+  WASMJIT_HOTSET_TB.branchCond,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_TERMINAL_OP_OFFSET"),
+  WASMJIT_HOTSET_TB.terminalOp,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_TERMINAL_DIFF_OFFSET"),
+  WASMJIT_HOTSET_TB.terminalDiff,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_FLAGS_OFFSET"),
+  WASMJIT_HOTSET_TB.flags,
 );
 assert.equal(macroValue("TCG_WASM64_RUN_HOTSET_TB_SIZE"), WASMJIT_HOTSET_TB.size);
 assert.match(header, /typedef struct TCGWasm64RunHotset/);
@@ -288,7 +345,7 @@ assert.match(runtime, /qemu-wasm64-runloop: /);
 assert.match(runtime, /tcg_wasm64_runloop_smoke_js/);
 assert.match(runtime, /runCtxHotsetOffset = 48/);
 assert.match(runtime, /runExitValueOffset = 32/);
-assert.match(runtime, /hotsetTbSize = 24/);
+assert.match(runtime, /hotsetTbSize = 64/);
 assert.match(runtime, /hotsetOpRamAddConst = 1/);
 assert.match(runtime, /hotsetOpRamXorConst = 2/);
 assert.match(runtime, /hotsetOpAluAddConst = 3/);
@@ -312,6 +369,10 @@ assert.match(runtime, /tcg_wasm64_tci_encode_ri\(INDEX_op_tci_movi/);
 assert.match(runtime, /tcg_wasm64_tci_encode_rrr\(INDEX_op_add/);
 assert.match(runtime, /tcg_wasm64_tci_encode_rl\(INDEX_op_brcond/);
 assert.match(runtime, /tcg_wasm64_tci_op\(words\[2\]\) == INDEX_op_brcond/);
+assert.match(runtime, /TCG_WASM64_RUN_HOTSET_OP_TRACE_LD32U_BRANCH_STORE/);
+assert.match(runtime, /tcg_wasm64_tci_op\(words\[0\]\) == INDEX_op_ld32u/);
+assert.match(runtime, /tcg_wasm64_tci_cond4\(words\[2\]\)/);
+assert.match(runtime, /tcg_wasm64_tci_terminal_op\(tcg_wasm64_tci_op\(words\[index\]\)\)/);
 assert.match(runtime, /TCG_WASM64_TB_METADATA_GENERATED_CANDIDATE/);
 assert.match(runtime, /TCG_WASM64_TB_METADATA_TERMINAL/);
 assert.match(runtime, /TCG_WASM64_TB_METADATA_OUTPUT_TRUNCATED/);
