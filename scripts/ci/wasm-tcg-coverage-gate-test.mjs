@@ -9,10 +9,12 @@ import assert from "node:assert/strict";
 
 import {
   COVERAGE_GATE_MODEL_VERSION,
+  coverageFromHotBlockSummaries,
   coverageFromHotBlockSummary,
   coverageGate,
   hotBlockSummariesFromResult,
   latestHotBlockSummary,
+  opHistogramFromHotBlockSummaries,
 } from "./wasm-tcg-coverage-gate.mjs";
 
 const result = {
@@ -31,6 +33,7 @@ const result = {
           { op: "ld", count: 20 },
           { op: "brcond", count: 10 },
           { op: "mb", count: 10 },
+          { op: "mul", count: 30 },
         ],
       },
       {
@@ -51,7 +54,7 @@ const result = {
   },
 };
 
-assert.equal(COVERAGE_GATE_MODEL_VERSION, 1);
+assert.equal(COVERAGE_GATE_MODEL_VERSION, 2);
 assert.equal(hotBlockSummariesFromResult(result).length, 2);
 assert.equal(latestHotBlockSummary(result).reason, "exit");
 assert.deepEqual(hotBlockSummariesFromResult({
@@ -80,6 +83,35 @@ assert.deepEqual(deterministicCoverage.unsupported, [
   { op: "call", count: 40 },
 ]);
 
+const histogram = opHistogramFromHotBlockSummaries(
+  hotBlockSummariesFromResult(result),
+);
+assert.deepEqual(histogram, [
+  { op: "tci_movi", count: 80 },
+  { op: "add", count: 40 },
+  { op: "brcond", count: 40 },
+  { op: "call", count: 40 },
+  { op: "mul", count: 30 },
+  { op: "ld", count: 20 },
+  { op: "st", count: 20 },
+  { op: "mb", count: 10 },
+]);
+
+const histogramCoverage = coverageFromHotBlockSummaries(
+  hotBlockSummariesFromResult(result),
+  new Set(["tci_movi", "add", "brcond"]),
+);
+assert.equal(histogramCoverage.measuredCount, 280);
+assert.equal(histogramCoverage.supportedCount, 160);
+assert.equal(histogramCoverage.unsupportedCount, 120);
+assert.deepEqual(histogramCoverage.unsupported, [
+  { op: "call", count: 40 },
+  { op: "mul", count: 30 },
+  { op: "ld", count: 20 },
+  { op: "st", count: 20 },
+  { op: "mb", count: 10 },
+]);
+
 const deterministicGate = coverageGate(result, {
   profile: "deterministic",
   minRatio: 0.9,
@@ -88,6 +120,7 @@ assert.equal(deterministicGate.format, 1);
 assert.equal(deterministicGate.purpose, "qemu-wasm64-tcg-coverage-gate");
 assert.equal(deterministicGate.version, COVERAGE_GATE_MODEL_VERSION);
 assert.equal(deterministicGate.profile, "deterministic");
+assert.equal(deterministicGate.scope, "latest");
 assert.equal(deterministicGate.ok, false);
 assert.equal(deterministicGate.coverage.unsupportedCount, 40);
 assert.deepEqual(deterministicGate.coverage.unsupported, [
@@ -100,7 +133,22 @@ assert.deepEqual(deterministicGate.summary, {
   helperCalls: 2,
   qemuLoads: 4,
   qemuStores: 6,
+  sourceSummaries: 1,
 });
+
+const histogramGate = coverageGate(result, {
+  profile: "deterministic",
+  scope: "histogram",
+  minRatio: 0.5,
+});
+assert.equal(histogramGate.ok, true);
+assert.equal(histogramGate.scope, "histogram");
+assert.equal(histogramGate.summary.sourceSummaries, 2);
+assert.equal(histogramGate.coverage.measuredCount, 280);
+assert.deepEqual(histogramGate.coverage.unsupported, [
+  { op: "call", count: 40 },
+  { op: "mul", count: 30 },
+]);
 
 const plannedGate = coverageGate(result, {
   profile: "planned-hotblock",
@@ -131,6 +179,10 @@ assert.throws(
 assert.throws(
   () => coverageGate(result, { profile: "missing-profile" }),
   /unknown lowering profile/,
+);
+assert.throws(
+  () => coverageGate(result, { scope: "missing-scope" }),
+  /unknown coverage scope/,
 );
 
 console.log("wasm-tcg-coverage-gate-test: ok");

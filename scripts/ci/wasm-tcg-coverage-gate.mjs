@@ -8,7 +8,7 @@
 
 import fs from "node:fs";
 
-export const COVERAGE_GATE_MODEL_VERSION = 1;
+export const COVERAGE_GATE_MODEL_VERSION = 2;
 
 export const LOWERING_PROFILES = {
   /*
@@ -83,6 +83,8 @@ function usage() {
 Options:
   --profile NAME       Lowering profile: deterministic, planned-hotblock
                        (default: deterministic)
+  --scope SCOPE        Hot-block evidence scope: latest, histogram
+                       (default: latest)
   --min-ratio RATIO    Minimum supported top-op ratio from 0 to 1
                        (default: 0.80)
   --require-op OP      Require a specific operation to be covered by the
@@ -115,15 +117,38 @@ export function latestHotBlockSummary(result) {
   return summaries.length === 0 ? null : summaries[summaries.length - 1];
 }
 
-export function coverageFromHotBlockSummary(summary, supportedOps) {
-  const topOps = Array.isArray(summary?.top_tci_ops)
-    ? summary.top_tci_ops
-    : [];
+export function opHistogramFromHotBlockSummaries(summaries) {
+  const countsByOp = new Map();
+  for (const summary of summaries) {
+    const topOps = Array.isArray(summary?.top_tci_ops)
+      ? summary.top_tci_ops
+      : [];
+    for (const entry of topOps) {
+      const op = entry?.op;
+      const count = Number(entry?.count);
+      if (typeof op !== "string" || !Number.isFinite(count) || count < 0) {
+        continue;
+      }
+      /*
+       * QEMU hot-block summaries report cumulative opcode counters.  The
+       * histogram uses the maximum observed value per opcode so an opcode that
+       * drops out of a later top-N list remains visible without double-counting
+       * repeated cumulative samples.
+       */
+      countsByOp.set(op, Math.max(countsByOp.get(op) ?? 0, count));
+    }
+  }
+  return Array.from(countsByOp, ([op, count]) => ({ op, count }))
+    .sort((a, b) => b.count - a.count || a.op.localeCompare(b.op));
+}
+
+export function coverageFromOpHistogram(histogram, supportedOps) {
   let supportedCount = 0;
   let unsupportedCount = 0;
   const supported = [];
   const unsupported = [];
 
+  const topOps = Array.isArray(histogram) ? histogram : [];
   for (const entry of topOps) {
     const op = entry?.op;
     const count = Number(entry?.count);
@@ -151,29 +176,51 @@ export function coverageFromHotBlockSummary(summary, supportedOps) {
   };
 }
 
+export function coverageFromHotBlockSummary(summary, supportedOps) {
+  return coverageFromOpHistogram(
+    opHistogramFromHotBlockSummaries([summary]),
+    supportedOps,
+  );
+}
+
+export function coverageFromHotBlockSummaries(summaries, supportedOps) {
+  return coverageFromOpHistogram(
+    opHistogramFromHotBlockSummaries(summaries),
+    supportedOps,
+  );
+}
+
 export function coverageGate(result, options = {}) {
   const profileName = normalizeProfileName(options.profile || "deterministic");
   const supportedOps = LOWERING_PROFILES[profileName];
   const minRatio = options.minRatio ?? 0.80;
+  const scope = options.scope || "latest";
   const requiredOps = Array.isArray(options.requiredOps)
     ? options.requiredOps
     : [];
+  const summaries = hotBlockSummariesFromResult(result);
   const summary = latestHotBlockSummary(result);
 
   if (!supportedOps) {
     throw new Error(`unknown lowering profile: ${options.profile}`);
   }
+  if (scope !== "latest" && scope !== "histogram") {
+    throw new Error(`unknown coverage scope: ${scope}`);
+  }
   if (!summary) {
     throw new Error("result does not contain hotBlocks summaries");
   }
 
-  const coverage = coverageFromHotBlockSummary(summary, supportedOps);
+  const coverage = scope === "histogram"
+    ? coverageFromHotBlockSummaries(summaries, supportedOps)
+    : coverageFromHotBlockSummary(summary, supportedOps);
   const missingRequiredOps = requiredOps.filter((op) => !supportedOps.has(op));
   return {
     format: 1,
     purpose: "qemu-wasm64-tcg-coverage-gate",
     version: COVERAGE_GATE_MODEL_VERSION,
     profile: profileName,
+    scope,
     minRatio,
     requiredOps,
     missingRequiredOps,
@@ -185,6 +232,7 @@ export function coverageGate(result, options = {}) {
       helperCalls: summary.helper_calls,
       qemuLoads: summary.qemu_loads,
       qemuStores: summary.qemu_stores,
+      sourceSummaries: scope === "histogram" ? summaries.length : 1,
     },
     coverage,
   };
@@ -193,6 +241,7 @@ export function coverageGate(result, options = {}) {
 function parseArgs(argv) {
   const options = {
     profile: "deterministic",
+    scope: "latest",
     minRatio: 0.80,
     requiredOps: [],
     json: false,
@@ -203,6 +252,8 @@ function parseArgs(argv) {
       options.result = argv[++index];
     } else if (arg === "--profile") {
       options.profile = argv[++index];
+    } else if (arg === "--scope") {
+      options.scope = argv[++index];
     } else if (arg === "--min-ratio") {
       options.minRatio = Number(argv[++index]);
     } else if (arg === "--require-op") {
@@ -232,6 +283,9 @@ async function run() {
       options.minRatio > 1) {
     throw new Error("--min-ratio must be a number from 0 to 1");
   }
+  if (options.scope !== "latest" && options.scope !== "histogram") {
+    throw new Error("--scope must be latest or histogram");
+  }
 
   const result = JSON.parse(fs.readFileSync(options.result, "utf8"));
   const gate = coverageGate(result, options);
@@ -240,6 +294,7 @@ async function run() {
   } else {
     process.stdout.write(
       `qemu-wasm64-tcg-coverage-gate: profile=${gate.profile} ` +
+      `scope=${gate.scope} ` +
       `supported=${gate.coverage.supportedCount} ` +
       `unsupported=${gate.coverage.unsupportedCount} ` +
       `ratio=${gate.coverage.supportedRatio.toFixed(4)} ` +

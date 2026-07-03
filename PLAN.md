@@ -694,6 +694,27 @@ run that reaches a weaker marker than normal multi-user readiness.
     run, artifact build, speed claim, BusDK work, or Bus Engine OS proof was
     run or enabled; R4d remains open for the supervisor-run Chrome proof of
     nonzero real RV64 generated coverage and remaining fallback attribution.
+  - [x] R4d-e - Add deterministic hot-block opcode histogram coverage to the
+    R4d coverage planning gate. DoD: `scripts/ci/wasm-tcg-coverage-gate.mjs`
+    can evaluate either the latest hot-block summary or a max-per-op histogram
+    across all retained hot-block summaries, preserving strict latest-summary
+    behavior as the default while letting planning runs keep unsupported op
+    shapes that dropped out of the latest top-N sample. Accepted 2026-07-03:
+    the coverage gate now exposes `--scope latest|histogram`, records the
+    selected scope and source summary count in JSON output, and uses maximum
+    observed cumulative opcode counts for histogram mode so repeated
+    cumulative hot-block samples are not double-counted. Deterministic tests
+    cover default latest behavior, histogram aggregation, supported and
+    unsupported counts, and invalid scope rejection. Checks passed:
+    `node --check scripts/ci/wasm-tcg-coverage-gate.mjs`;
+    `node --check scripts/ci/wasm-tcg-coverage-gate-test.mjs`;
+    `node scripts/ci/wasm-tcg-coverage-gate-test.mjs`; and
+    `git diff --check --
+    scripts/ci/wasm-tcg-coverage-gate.mjs
+    scripts/ci/wasm-tcg-coverage-gate-test.mjs`. No browser run, artifact
+    build, speed claim, BusDK work, or Bus Engine OS proof was run or enabled;
+    R4d remains open for the supervisor-run Chrome proof of nonzero real RV64
+    generated coverage and remaining fallback attribution.
   - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
