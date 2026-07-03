@@ -7,6 +7,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -47,6 +48,14 @@ import {
 
 const marker = "QEMU_WASM_LINUX_BOOT_OK";
 const runnerPath = fileURLToPath(new URL("./wasm-browser-smoke-runner.mjs", import.meta.url));
+const browserSmokePath = fileURLToPath(new URL("./wasm-browser-smoke.mjs", import.meta.url));
+const browserSmokeSource = readFileSync(browserSmokePath, "utf8");
+
+assert.match(browserSmokeSource, /QEMU_WASM64_TCG_SUMMARY/);
+assert.match(
+  browserSmokeSource,
+  /config\.tciProgress \|\|\s*config\.tciWasmGeneratedTrace \|\|\s*config\.wasm64RunloopSmoke \|\|\s*config\.wasm64TcgSummary/,
+);
 
 for (const status of [
   `marker reached: ${marker}`,

@@ -211,6 +211,7 @@ typedef enum TCGWasm64TBMetadataFlags {
     TCG_WASM64_TB_METADATA_TERMINAL = 1u << 5,
     TCG_WASM64_TB_METADATA_GENERATED_OUTPUT = 1u << 6,
     TCG_WASM64_TB_METADATA_OUTPUT_TRUNCATED = 1u << 7,
+    TCG_WASM64_TB_METADATA_TRANSLATION_COUNTED = 1u << 8,
 } TCGWasm64TBMetadataFlags;
 
 typedef enum TCGWasm64TranslateFallbackReason {

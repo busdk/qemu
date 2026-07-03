@@ -10,10 +10,9 @@ file and then implemented.
 ## Active Goal
 
 Follow the supervisor-root `GOAL.md` for the active five-minute browser
-multi-user boot goal. The current target is no longer the older x86_64 browser
-TCI proof; it is an accepted Bus Engine OS `riscv64` `virtual-server` guest
-running in browser-hosted QEMU/WASM through an opt-in RISC-V 64 to WebAssembly
-accelerator.
+multi-user boot goal. This shared plan contains both the separate RISC-V
+accelerator lane and the Linux-supervisor `x86_64-softmmu` accelerator lane.
+The supervisor-root `GOAL.md` selects which lane the current executor owns.
 
 This file is shared by the x86_64 and RISC-V supervisor environments. RISC-V
 items remain valid for the separate RISC-V lane. The current executor lane in
@@ -22,14 +21,13 @@ items, currently R4f-R4l and the x86 final proof item. Do not project x86_64
 boot timing from RISC-V measurements, and do not remove RISC-V items merely
 because they are out of scope for the x86_64 lane.
 
-The goal is complete only when the real browser-hosted QEMU/WASM path boots
-the accepted package-built Bus Engine OS `riscv64` `virtual-server` kernel and
-root filesystem to multi-user readiness within `300000` ms. The proof must use
-Chrome or Chromium, the QEMU WebAssembly artifacts produced by this branch, and
-the standard `virtual-server` boot path. Shell-only init bypasses, synthetic
-guests, stale artifacts, native-QEMU-only boots, snapshots, hibernate/restore,
-preinitialized RAM, and heavily reduced product profiles do not satisfy this
-goal.
+Each lane is complete only against its own accepted Bus Engine OS
+`virtual-server` kernel/rootfs pair. The proof must use Chrome or Chromium,
+the QEMU WebAssembly artifacts produced by this branch, and the standard
+`virtual-server` boot path. Shell-only init bypasses, synthetic guests, stale
+artifacts, native-QEMU-only boots, snapshots, hibernate/restore,
+preinitialized RAM, and heavily reduced product profiles do not satisfy either
+lane.
 
 Keep unrelated downstream work out of scope. Do not take over bus-pkg, OPFS
 persistence, virtio-net, virtual-desktop packaging, Codex packaging, or Engine
@@ -45,12 +43,16 @@ accepted work.
 
 ## Exact Definition of Done
 
-This goal is done only when all of the following are true:
+The current executor lane is done only when all of the following are true for
+that lane's target architecture. For this Linux-supervisor goal, read these as
+the `x86_64-softmmu` accelerator and accepted Bus Engine OS `x86_64`
+`virtual-server` kernel/rootfs. The RISC-V environment owns the equivalent
+`riscv64-softmmu` checklist.
 
-- [ ] Current `riscv64-softmmu` QEMU WASM artifacts are built from this branch
-  and their JavaScript/WebAssembly SHA-256 hashes are recorded.
-- [ ] The proof uses the accepted Bus Engine OS `riscv64` `virtual-server`
-  kernel and root filesystem, and their SHA-256 hashes are recorded.
+- [ ] Current QEMU WASM artifacts for the lane target are built from this
+  branch and their JavaScript/WebAssembly SHA-256 hashes are recorded.
+- [ ] The proof uses the accepted Bus Engine OS `virtual-server` kernel and
+  root filesystem for the lane target, and their SHA-256 hashes are recorded.
 - [ ] The proof runs in Chrome or Chromium and records the exact browser
   version, command line, timeout, QEMU arguments, kernel arguments, and result
   JSON path.
@@ -63,10 +65,10 @@ This goal is done only when all of the following are true:
   hostname, journald, or basic target do not satisfy this item.
 - [ ] The result JSON records the boot milestone timings, final readiness
   marker, final serial state, screenshot path, and QEMU artifact hashes.
-- [ ] A generic RISC-V Linux browser smoke test still passes with the same QEMU
-  WASM artifact family.
-- [ ] Existing x86_64 QEMU/WASM TCI smoke behavior remains working or any
-  deviation is recorded with an explicit acceptance decision.
+- [ ] A generic Linux browser smoke test for the lane target still passes with
+  the same QEMU WASM artifact family.
+- [ ] Existing QEMU/WASM TCI smoke behavior for the non-owned target remains
+  working or any deviation is recorded with an explicit acceptance decision.
 - [ ] The accepted evidence is recorded in this file and in
   `docs/devel/wasm-support-plan.rst`.
 - [ ] QEMU `develop` is committed and pushed to `origin/develop`.
@@ -639,7 +641,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     helper/`qemu_ld`/`qemu_st` calls for synthetic micro-workloads. Live x86
     TB summaries remained empty (`wasm64Tcg.summaryCount=0`), so this is
     baseline/contract evidence only, not a performance pass.
-  - [ ] R4h - Fix x86_64 live-TB instrumentation correctness before relying
+  - [x] R4h - Fix x86_64 live-TB instrumentation correctness before relying
     on generated-coverage counters. DoD: reproduce and fix, or prove absent
     on the current x86_64 lane, both correctness signals from the supervisor
     review: the RCU unlock abort (`p_rcu_reader->depth != 0`) during an
@@ -648,7 +650,54 @@ run that reaches a weaker marker than normal multi-user readiness.
     between adjacent near-identical runs. The accepted result must include
     deterministic tests or a bounded browser/fixture proof showing stable
     translated-output counters for the same artifact and no guest-crashing
-    diagnostic path.
+    diagnostic path. Accepted 2026-07-03: live translation metadata counting
+    now happens once per valid metadata record through
+    `TCG_WASM64_TB_METADATA_TRANSLATION_COUNTED`, and interval summaries are
+    emitted from the live x86_64 backend path through the browser smoke
+    harness. Checks: `git diff --check`,
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`,
+    `node scripts/ci/wasmjit-runloop-model-test.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke-runner-test.mjs`, and
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs` passed; the final
+    runner test was outside the sandbox because sandboxed `spawnSync` returns
+    `EPERM`. Backend artifact build command:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86_64-r4h-summary-20260703
+    --target x86_64 --jobs 20 --tcg-wasm64-backend --build-image`.
+    Artifact hashes: `qemu-system-x86_64.js`
+    `04bf7aabf5c108c7da990c6b8545cc6a1c5913ea4fdf90b7ef96345caf751e2f`,
+    `qemu-system-x86_64.wasm`
+    `fb4b2b989776e034099efd9199f096b1336e177ff695d3c494fe5315f4700943`,
+    manifest
+    `78bd3ca1af4c6a6c1e97ab9f3a6e4ca952478cc72dc2484d69b6db7acac10653`.
+    An initial Chromium run reached `QEMU_WASM_LINUX_BOOT_OK` in `86261` ms
+    but recorded `summaryCount=0`; this exposed and fixed that
+    `wasm64TcgSummary` did not cause `/qemu-tci-env` to be written unless
+    another diagnostic mode was also enabled. Two adjacent runs with the same
+    artifact and `QEMU_WASM64_TCG_SUMMARY_INTERVAL=1000` then reached the
+    marker without the RCU abort: run 2 wrote
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86_64-r4h-summary-run2-20260703/wasm-browser-smoke-result.json`
+    SHA256
+    `4c43c94a95a6a91ecc59ef6eb0acfdb42e078c8184ed0fb45d7071ad1107b8ce`
+    and reached the marker in `90679` ms; run 3 wrote
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86_64-r4h-summary-run3-20260703/wasm-browser-smoke-result.json`
+    SHA256
+    `3b7cffcdc73714b5761d79e6c053552bc82b80c58cd6da31fe2a6c16e664221e`
+    with screenshot SHA256
+    `42173b91ea8fd92405f08e4a53f3124a134480437283e70c81e0252ec3b20e64`
+    and reached the marker in `89035` ms. Both summary-enabled runs used
+    Chromium `149.0.7827.55`, recorded `summaryCount=44`, and retained stable
+    monotonic summaries from `translated_tbs=29000` through `44000`; in both
+    final summaries `translated_generated_output_tbs=0`,
+    `translated_generated_output_unavailable_tbs=44000`,
+    `exec_generated_output_lookup_tbs=44000`,
+    `exec_generated_output_available_tbs=0`, and the first unsupported
+    generated ops were `ld32u=43978` and `st8=22`. This accepts R4h as
+    instrumentation stability only. It is not acceleration evidence:
+    `generated_compiled=0`, `generated_executed=0`, and R4i remains the next
+    x86 implementation gate.
   - [ ] R4i - Prove one real translated x86 Linux TB through
     `wasmjit_run()` before any more structural accelerator widening. DoD:
     choose one highest-frequency attachable live x86_64 TB shape from a real

@@ -137,7 +137,11 @@ static __thread uint64_t translated_generated_first_unsupported_ops[NB_OPS];
 static __thread TCGWasm64TranslateEntry translate_cache[
     TCG_WASM64_TRANSLATE_CACHE_SIZE];
 static __thread TCGWasm64TBMetadata *active_translate_metadata;
+static __thread uint64_t summary_next_report;
 static volatile uint64_t tcg_wasm64_runloop_smoke_sink;
+static gsize summary_env_initialized;
+static bool summary_enabled;
+static uint64_t summary_interval;
 
 static TCGWasm64TranslateEntry *tcg_wasm64_translate_entry(const void *tb_ptr)
 {
@@ -474,6 +478,64 @@ static bool tcg_wasm64_runloop_env_bool(const char *name)
 #else
     return false;
 #endif
+}
+
+static uint64_t tcg_wasm64_env_u64(const char *name, uint64_t fallback)
+{
+#ifdef CONFIG_EMSCRIPTEN
+    g_autofree char *owned = NULL;
+    const char *raw = g_getenv(name);
+    char *endptr = NULL;
+    uint64_t value;
+
+    if (raw == NULL) {
+        owned = tcg_wasm64_runloop_file_getenv(name);
+        raw = owned;
+    }
+    if (raw == NULL || *raw == '\0') {
+        return fallback;
+    }
+
+    value = g_ascii_strtoull(raw, &endptr, 0);
+    if (endptr == raw || *endptr != '\0') {
+        return fallback;
+    }
+    return value;
+#else
+    return fallback;
+#endif
+}
+
+static bool tcg_wasm64_summary_enabled(void)
+{
+    if (unlikely(g_once_init_enter(&summary_env_initialized))) {
+        summary_enabled = tcg_wasm64_runloop_env_bool(
+            "QEMU_WASM64_TCG_SUMMARY");
+        summary_interval = tcg_wasm64_env_u64(
+            "QEMU_WASM64_TCG_SUMMARY_INTERVAL", 10000);
+        summary_interval = MAX(summary_interval, 1);
+        g_once_init_leave(&summary_env_initialized, 1);
+    }
+    return summary_enabled;
+}
+
+static void tcg_wasm64_summary_maybe_report(void)
+{
+    TCGWasm64Counters zero;
+
+    if (!tcg_wasm64_summary_enabled()) {
+        return;
+    }
+    if (summary_next_report == 0) {
+        summary_next_report = summary_interval;
+    }
+    if (translated_counters.translated_tbs < summary_next_report) {
+        return;
+    }
+
+    tcg_wasm64_counters_reset(&zero);
+    tcg_wasm64_report_summary("interval", &zero);
+    summary_next_report = translated_counters.translated_tbs + summary_interval;
 }
 
 #ifdef CONFIG_EMSCRIPTEN
@@ -1318,6 +1380,27 @@ const TCGWasm64TBMetadata *tcg_wasm64_translate_lookup(const void *tb_ptr)
     return metadata;
 }
 
+static TCGWasm64TBMetadata *tcg_wasm64_translate_lookup_mutable(
+    const void *tb_ptr)
+{
+    TCGWasm64TranslateEntry *entry;
+    TCGWasm64TBMetadata *metadata;
+
+    if (!tb_ptr) {
+        return NULL;
+    }
+
+    entry = tcg_wasm64_translate_entry(tb_ptr);
+    metadata = &entry->metadata;
+    if (entry->tb_ptr != tb_ptr ||
+        metadata->magic != TCG_WASM64_TB_METADATA_MAGIC ||
+        metadata->version != TCG_WASM64_TB_METADATA_VERSION ||
+        !(metadata->flags & TCG_WASM64_TB_METADATA_VALID)) {
+        return NULL;
+    }
+    return metadata;
+}
+
 bool tcg_wasm64_translate_generated_candidate(
     const TCGWasm64TBMetadata *metadata)
 {
@@ -1549,11 +1632,74 @@ void tcg_wasm64_report_summary(const char *reason,
     fprintf(stderr, "]}\n");
 }
 
+static void tcg_wasm64_count_live_translation_metadata(
+    TCGWasm64TBMetadata *metadata)
+{
+    TCGWasm64Counters *counters = &translated_counters;
+
+    if (!metadata ||
+        (metadata->flags & TCG_WASM64_TB_METADATA_TRANSLATION_COUNTED)) {
+        return;
+    }
+
+    metadata->flags |= TCG_WASM64_TB_METADATA_TRANSLATION_COUNTED;
+    counters->translated_tbs++;
+    counters->translated_ops += metadata->op_count;
+    counters->exec_generated_output_lookup_tbs++;
+    if (metadata->flags & TCG_WASM64_TB_METADATA_FALLBACK) {
+        counters->translated_fallback_markers++;
+    }
+    if (metadata->flags & TCG_WASM64_TB_METADATA_LOWERING_PROFILE) {
+        counters->translated_profiled_tbs++;
+        counters->translated_profile_supported_ops +=
+            metadata->supported_op_count;
+        counters->translated_profile_unsupported_ops +=
+            metadata->unsupported_op_count;
+        if (metadata->flags & TCG_WASM64_TB_METADATA_PROFILE_LOWERABLE) {
+            counters->translated_lowerable_tbs++;
+        }
+        counters->translated_generated_supported_ops +=
+            metadata->generated_supported_op_count;
+        counters->translated_generated_unsupported_ops +=
+            metadata->generated_unsupported_op_count;
+        if (tcg_wasm64_translate_generated_candidate(metadata)) {
+            counters->translated_generated_candidate_tbs++;
+        }
+        if (tcg_wasm64_translate_generated_output_available(metadata)) {
+            counters->exec_generated_output_available_tbs++;
+            counters->translated_generated_output_tbs++;
+            counters->translated_generated_output_bytes +=
+                metadata->generated_output_size;
+            counters->translated_generated_output_ops +=
+                metadata->generated_output_op_count;
+        } else {
+            counters->exec_generated_output_unavailable_tbs++;
+            counters->translated_generated_output_unavailable_tbs++;
+            if (!(metadata->flags &
+                  TCG_WASM64_TB_METADATA_GENERATED_CANDIDATE)) {
+                counters->exec_generated_output_missing_candidate_tbs++;
+                counters->translated_generated_output_missing_candidate_tbs++;
+            } else {
+                counters->exec_generated_output_incomplete_tbs++;
+                counters->translated_generated_output_incomplete_tbs++;
+            }
+            if (metadata->first_generated_unsupported_op != UINT32_MAX) {
+                tcg_wasm64_count_generated_first_unsupported(
+                    metadata->first_generated_unsupported_op);
+            }
+        }
+        if (metadata->flags & TCG_WASM64_TB_METADATA_OUTPUT_TRUNCATED) {
+            counters->translated_generated_output_truncated++;
+        }
+    }
+    tcg_wasm64_summary_maybe_report();
+}
+
 uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
                              TCGWasm64Counters *counters)
 {
     TCGWasm64Counters *previous_counters = active_counters;
-    const TCGWasm64TBMetadata *metadata;
+    TCGWasm64TBMetadata *metadata;
     uintptr_t ret;
     TCGWasm64Context ctx = {
         .tb_ptr = (void *)tb_ptr,
@@ -1570,68 +1716,19 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
      * validated the TCI bytecode shape.
      */
     (void)ctx;
-    metadata = tcg_wasm64_translate_lookup(tb_ptr);
     if (counters) {
-        if (metadata) {
-            counters->translated_tbs++;
-            counters->translated_ops += metadata->op_count;
-            counters->exec_generated_output_lookup_tbs++;
-            if (metadata->flags & TCG_WASM64_TB_METADATA_FALLBACK) {
-                counters->translated_fallback_markers++;
-            }
-            if (metadata->flags & TCG_WASM64_TB_METADATA_LOWERING_PROFILE) {
-                counters->translated_profiled_tbs++;
-                counters->translated_profile_supported_ops +=
-                    metadata->supported_op_count;
-                counters->translated_profile_unsupported_ops +=
-                    metadata->unsupported_op_count;
-                if (metadata->flags &
-                    TCG_WASM64_TB_METADATA_PROFILE_LOWERABLE) {
-                    counters->translated_lowerable_tbs++;
-                }
-                counters->translated_generated_supported_ops +=
-                    metadata->generated_supported_op_count;
-                counters->translated_generated_unsupported_ops +=
-                    metadata->generated_unsupported_op_count;
-                if (tcg_wasm64_translate_generated_candidate(metadata)) {
-                    counters->translated_generated_candidate_tbs++;
-                }
-                if (tcg_wasm64_translate_generated_output_available(
-                        metadata)) {
-                    counters->exec_generated_output_available_tbs++;
-                    counters->translated_generated_output_tbs++;
-                    counters->translated_generated_output_bytes +=
-                        metadata->generated_output_size;
-                    counters->translated_generated_output_ops +=
-                        metadata->generated_output_op_count;
-                } else {
-                    counters->exec_generated_output_unavailable_tbs++;
-                    counters->translated_generated_output_unavailable_tbs++;
-                    if (!(metadata->flags &
-                          TCG_WASM64_TB_METADATA_GENERATED_CANDIDATE)) {
-                        counters->exec_generated_output_missing_candidate_tbs++;
-                        counters->translated_generated_output_missing_candidate_tbs++;
-                    } else {
-                        counters->exec_generated_output_incomplete_tbs++;
-                        counters->translated_generated_output_incomplete_tbs++;
-                    }
-                    if (metadata->first_generated_unsupported_op != UINT32_MAX) {
-                        tcg_wasm64_count_generated_first_unsupported(
-                            metadata->first_generated_unsupported_op);
-                    }
-                }
-                if (metadata->flags &
-                    TCG_WASM64_TB_METADATA_OUTPUT_TRUNCATED) {
-                    counters->translated_generated_output_truncated++;
-                }
-            }
-        } else {
-            counters->translated_metadata_misses++;
-        }
+        tcg_wasm64_counters_reset(counters);
+    }
+
+    metadata = tcg_wasm64_translate_lookup_mutable(tb_ptr);
+    if (metadata) {
+        tcg_wasm64_count_live_translation_metadata(metadata);
+        tcg_wasm64_summary_maybe_report();
+    } else {
+        translated_counters.translated_metadata_misses++;
     }
     active_counters = counters;
     ret = tcg_tci_qemu_tb_exec(env, tb_ptr);
-    tcg_wasm64_counters_add_translation(&translated_counters, counters);
     active_counters = previous_counters;
     return ret;
 }

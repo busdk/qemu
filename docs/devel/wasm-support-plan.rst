@@ -112,6 +112,59 @@ dispatch time, and zero helper/``qemu_ld``/``qemu_st`` calls.  Live x86 TB
 summaries remained empty (``wasm64Tcg.summaryCount=0``), so this evidence is a
 baseline and contract check only, not a real x86 acceleration pass.
 
+Current x86_64 live-TB instrumentation evidence
+-----------------------------------------------
+
+On 2026-07-03, QEMU built an ``x86_64-softmmu`` backend-gated artifact with
+live wasm64 TCG summaries enabled from the browser harness.  Build command::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86_64-r4h-summary-20260703 \
+      --target x86_64 --jobs 20 --tcg-wasm64-backend --build-image
+
+Artifact hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``04bf7aabf5c108c7da990c6b8545cc6a1c5913ea4fdf90b7ef96345caf751e2f``
+* ``qemu-system-x86_64.wasm`` =
+  ``fb4b2b989776e034099efd9199f096b1336e177ff695d3c494fe5315f4700943``
+* manifest =
+  ``78bd3ca1af4c6a6c1e97ab9f3a6e4ca952478cc72dc2484d69b6db7acac10653``
+
+The first browser run reached ``QEMU_WASM_LINUX_BOOT_OK`` in ``86261`` ms but
+recorded ``summaryCount=0``.  That exposed a harness bug: the page only wrote
+``/qemu-tci-env`` for other diagnostic modes, so ``QEMU_WASM64_TCG_SUMMARY``
+was not delivered when the summary mode was used alone.
+
+After fixing that delivery path, two adjacent Chromium ``149.0.7827.55`` runs
+with the same artifact and ``QEMU_WASM64_TCG_SUMMARY_INTERVAL=1000`` reached
+the marker without the earlier RCU unlock abort:
+
+* Run 2 reached the marker in ``90679`` ms and wrote
+  ``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86_64-r4h-summary-run2-20260703/wasm-browser-smoke-result.json``
+  with SHA-256
+  ``4c43c94a95a6a91ecc59ef6eb0acfdb42e078c8184ed0fb45d7071ad1107b8ce``.
+* Run 3 reached the marker in ``89035`` ms and wrote
+  ``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86_64-r4h-summary-run3-20260703/wasm-browser-smoke-result.json``
+  with SHA-256
+  ``3b7cffcdc73714b5761d79e6c053552bc82b80c58cd6da31fe2a6c16e664221e``.
+  The screenshot SHA-256 was
+  ``42173b91ea8fd92405f08e4a53f3124a134480437283e70c81e0252ec3b20e64``.
+
+Both summary-enabled runs recorded ``summaryCount=44`` and retained monotonic
+summaries from ``translated_tbs=29000`` through ``44000``.  In both final
+summaries, ``translated_generated_output_tbs=0``,
+``translated_generated_output_unavailable_tbs=44000``,
+``exec_generated_output_lookup_tbs=44000``, and
+``exec_generated_output_available_tbs=0``.  The first unsupported generated
+ops were stable at ``ld32u=43978`` and ``st8=22``.
+
+This accepts the x86 live-TB instrumentation as stable steering evidence only.
+It is not acceleration evidence: ``generated_compiled=0`` and
+``generated_executed=0``.  The next x86 milestone remains one real translated
+Linux TB executing through ``wasmjit_run()`` and differentially verified
+against TCI from the same input state.
+
 RISC-V 64 accelerator boundary
 ==============================
 

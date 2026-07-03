@@ -175,6 +175,11 @@ Options:
                      Expected visual marker metadata for display proofs
   --wasm64-runloop-smoke
                      Enable opt-in QEMU wasm64 run/exit runtime smoke
+  --wasm64-tcg-summary
+                     Enable opt-in qemu-wasm64-tcg summary emission
+  --wasm64-tcg-summary-interval N
+                     Live translated-TB interval between wasm64 TCG summaries
+                     (default: 10000)
   --help              Show this help
 
 Environment:
@@ -265,6 +270,8 @@ function parseArgs(argv) {
     userDataDir: null,
     visualMarker: "",
     wasm64RunloopSmoke: false,
+    wasm64TcgSummary: false,
+    wasm64TcgSummaryInterval: 10000,
   };
   const explicit = new Set();
 
@@ -494,6 +501,12 @@ function parseArgs(argv) {
     } else if (arg === "--wasm64-runloop-smoke") {
       options.wasm64RunloopSmoke = true;
       explicit.add("wasm64RunloopSmoke");
+    } else if (arg === "--wasm64-tcg-summary") {
+      options.wasm64TcgSummary = true;
+      explicit.add("wasm64TcgSummary");
+    } else if (arg === "--wasm64-tcg-summary-interval") {
+      options.wasm64TcgSummaryInterval = Number(argv[++i]);
+      explicit.add("wasm64TcgSummaryInterval");
     } else if (arg === "--help") {
       usage(0);
     } else {
@@ -516,6 +529,7 @@ function parseArgs(argv) {
       "tciProgress",
       "tciWasmGeneratedTrace",
       "wasm64RunloopSmoke",
+      "wasm64TcgSummary",
     ],
     checksumFields: ["kernel", "initrd", "rootfs"],
     integerFields: [
@@ -528,6 +542,7 @@ function parseArgs(argv) {
       "persistentDiskSizeBytes",
       "performanceAttributionInterval",
       "performanceAttributionTciInterval",
+      "wasm64TcgSummaryInterval",
       "port",
       "preKeyboardWaitMs",
       "postKeyboardWaitMs",
@@ -1403,6 +1418,13 @@ export function browserSmokeUrl(options) {
   if (options.wasm64RunloopSmoke) {
     url.searchParams.set("wasm64RunloopSmoke", "1");
   }
+  if (options.wasm64TcgSummary) {
+    url.searchParams.set("wasm64TcgSummary", "1");
+    url.searchParams.set(
+      "wasm64TcgSummaryInterval",
+      String(options.wasm64TcgSummaryInterval),
+    );
+  }
   url.searchParams.set("rootfsDevice", options.rootfsDevice);
   if (rootfsStorage !== "memfs") {
     url.searchParams.set("rootfsStorage", rootfsStorage);
@@ -1521,6 +1543,10 @@ export function initialSmokeResult(options, browserVersion) {
         ? options.tciWasmGeneratedTraceLimit
         : 64,
     wasm64RunloopSmoke: Boolean(options.wasm64RunloopSmoke),
+    wasm64TcgSummary: Boolean(options.wasm64TcgSummary),
+    wasm64TcgSummaryInterval: Number.isInteger(options.wasm64TcgSummaryInterval)
+      ? options.wasm64TcgSummaryInterval
+      : 10000,
     userDataDir: options.userDataDir,
     visualMarker: options.visualMarker,
     success: false,

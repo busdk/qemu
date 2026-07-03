@@ -46,6 +46,7 @@ assert.match(header, /generated_supported_op_count/);
 assert.match(header, /generated_unsupported_op_count/);
 assert.match(header, /TCG_WASM64_TB_METADATA_GENERATED_OUTPUT/);
 assert.match(header, /TCG_WASM64_TB_METADATA_OUTPUT_TRUNCATED/);
+assert.match(header, /TCG_WASM64_TB_METADATA_TRANSLATION_COUNTED/);
 assert.match(header, /TCG_WASM64_TRANSLATE_OUTPUT_MAX/);
 assert.match(header, /translated_generated_output_tbs/);
 assert.match(header, /translated_generated_output_bytes/);
@@ -121,6 +122,42 @@ assert.match(runtime, /generated_output_op_count ==\s*\n\s*metadata->generated_o
 assert.match(runtime, /TCG_WASM64_TB_METADATA_TERMINAL/);
 assert.match(runtime, /tcg_wasm64_translate_generated_candidate\(metadata\)/);
 assert.doesNotMatch(runtime, /uintptr_t tcg_tci_qemu_tb_exec\(CPUArchState \*env,\s*const void \*tb_ptr\);/);
+assert.match(runtime, /tcg_wasm64_translate_lookup_mutable/);
+assert.match(runtime, /tcg_wasm64_count_live_translation_metadata/);
+assert.match(runtime, /QEMU_WASM64_TCG_SUMMARY/);
+assert.match(runtime, /QEMU_WASM64_TCG_SUMMARY_INTERVAL/);
+assert.match(runtime, /tcg_wasm64_summary_maybe_report/);
+assert.match(runtime, /tcg_wasm64_report_summary\("interval",\s*&zero\)/);
+const liveMetadataCounterBody = runtime.match(
+  /static void tcg_wasm64_count_live_translation_metadata\([\s\S]*?\n\}\n\nuintptr_t/,
+)?.[0] || "";
+assert.match(
+  liveMetadataCounterBody,
+  /TCG_WASM64_TB_METADATA_TRANSLATION_COUNTED/,
+);
+assert.match(
+  liveMetadataCounterBody,
+  /metadata->flags \|= TCG_WASM64_TB_METADATA_TRANSLATION_COUNTED/,
+);
+assert.match(
+  liveMetadataCounterBody,
+  /counters->translated_generated_output_tbs\+\+/,
+);
+assert.match(liveMetadataCounterBody, /tcg_wasm64_summary_maybe_report\(\)/);
+const tbExecBody = runtime.match(
+  /uintptr_t tcg_wasm64_tb_exec\(CPUArchState \*env,[\s\S]*?\n\}/,
+)?.[0] || "";
+assert.match(
+  tbExecBody,
+  /tcg_wasm64_count_live_translation_metadata\(metadata\)/,
+);
+assert.match(tbExecBody, /tcg_wasm64_summary_maybe_report\(\)/);
+assert.match(tbExecBody, /tcg_wasm64_counters_reset\(counters\)/);
+assert.doesNotMatch(
+  tbExecBody,
+  /tcg_wasm64_counters_add_translation\(&translated_counters,\s*counters\)/,
+);
+assert.doesNotMatch(tbExecBody, /counters->translated_generated_output_tbs\+\+/);
 
 assert.doesNotMatch(tci, /tci_wasm_metadata_generated_candidate/);
 assert.match(tci, /tci_wasm_generated_signature\(tb_start,\s*tb_start,\s*code_ops\)/);

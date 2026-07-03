@@ -5,20 +5,30 @@ work. Keep changes generic to QEMU unless a task explicitly says otherwise.
 
 ## WebAssembly Goal
 
-The active target is making the 64-bit Bus Engine OS `virtual-server` guest
+The shared target is making the 64-bit Bus Engine OS `virtual-server` guest
 reach normal multi-user boot in browser-hosted QEMU/WASM within five minutes.
+This repository is shared by separate executor environments. Read the
+supervisor-root `GOAL.md` and this repository's `PLAN.md` before acting, then
+advance only the architecture lane assigned to the current executor.
+
 Keep the scope narrow:
 
 - Emscripten `wasm64` host builds.
-- `riscv64-softmmu` system emulation as the active browser target.
+- `x86_64-softmmu` and `riscv64-softmmu` system emulation lanes as recorded
+  in `PLAN.md`.
 - Chrome or Chromium as the first browser acceptance target.
 - TCI console boot must keep working as the regression gate.
 - Browser execution through modern APIs with cross-origin isolation.
 - Generic QEMU changes only; downstream Bus Engine product work stays
   downstream.
 
-Existing `x86_64-softmmu` QEMU/WASM smoke behavior remains a non-regression
-gate. Do not remove or weaken it while adding the RISC-V path.
+Do not apply RISC-V smoke-test improvements to x86_64 estimates, or the
+reverse. A cross-ISA result may guide reusable accelerator architecture, but
+it changes a target's boot estimate only after the same mechanism is enabled
+and measured on that target with a comparable same-commit smoke or Bus Engine
+OS proof. Existing QEMU/WASM smoke behavior for the non-owned target remains a
+non-regression gate. Do not remove or weaken it while advancing the current
+lane.
 
 Graphics, keyboard input, native WebAssembly TCG, persistence, networking, and
 other browser runtime features belong in `BACKLOG.md` unless `PLAN.md`
