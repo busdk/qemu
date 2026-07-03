@@ -924,6 +924,31 @@ run that reaches a weaker marker than normal multi-user readiness.
     page-crossing tests and zero `qemu_ld`/`qemu_st` calls on proven hits;
     (6) add stale-TB/address-space invalidation rejection and metrics tests.
     Browser smokes remain blocked until these deterministic slices pass.
+    Slice 1 accepted 2026-07-03 on branch
+    `qemu-r4k-per-tb-emitter-20260703-10`: the deterministic
+    `scripts/ci/wasm-generated-output-equivalence-test.mjs` gate now routes
+    fixture execution through named emitter
+    `r4k-per-tb-function-body-emitter`, validates generated module bytes with
+    `WebAssembly.validate`, and covers the accepted R4i live word shape
+    `ld32u, tci_movi, tci_setcond32, brcond, tci_movi, st8, ld, tci_movi,
+    add, st, goto_tb` from recorded TCI words rather than the hard-coded
+    one-TB body. Unsupported shapes fail closed with explicit reason data; the
+    R4i fixture also records a fail-closed runtime guard for the taken
+    out-of-recorded-range `brcond` target. Local evidence reported
+    `fixtures=13`, `unsupportedFixtures=1`, `emittedModuleFixtures=13`,
+    `r4iPerTBEmitterFixtures=1`, register and memory state matched, dispatch
+    target `20618`, `r4iPerTBEmitterGeneratedGuestInstructions=1`,
+    `r4iPerTBEmitterGeneratedTciOpEquivalents=11`,
+    `r4iPerTBEmitterInlineTlbHitLoads=2`,
+    `r4iPerTBEmitterInlineTlbHitStores=2`,
+    `r4iPerTBEmitterMemoryWrites=2`, and zero helper, `qemu_ld`, and
+    `qemu_st` calls. Checks: `git diff --check`,
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`, and
+    `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`.
+    No browser smoke, live guest routing, broad chaining, x86 CPU-state
+    contract, no-silent-fallback performance mode, or generic SoftMMU/TLB
+    lowering was run or enabled; R4k remains open for slices 2-6.
   - [ ] R4l - Run the x86_64 same-commit generic Chromium speed gate only
     after R4h-R4k have deterministic evidence. DoD: build one default-TCI
     `x86_64-softmmu` artifact and one accelerator artifact from the same

@@ -58,9 +58,24 @@ const PRE_R4I_LIVE_X86_SHAPE = [
   "exit_tb",
   "exit_tb",
 ];
+const R4I_LIVE_X86_SHAPE = [
+  "ld32u",
+  "tci_movi",
+  "tci_setcond32",
+  "brcond",
+  "tci_movi",
+  "st8",
+  "ld",
+  "tci_movi",
+  "add",
+  "st",
+  "goto_tb",
+];
 
 const STATUS_EXIT = 1n;
 const STATUS_DISPATCH = 2n;
+const STATUS_UNSUPPORTED = 6n;
+const PER_TB_EMITTER_NAME = "r4k-per-tb-function-body-emitter";
 
 function vector(items) {
   return [...encodeU32(items.length), ...items.flat()];
@@ -148,6 +163,14 @@ function callFunc(index, args) {
 
 function brIf(depth, condition) {
   return [...condition, 0x0d, ...encodeU32(depth)];
+}
+
+function returnExpr(expr) {
+  return [...expr, 0x0f];
+}
+
+function ifBlock(condition, body) {
+  return [...condition, 0x04, 0x40, ...body, 0x0b];
 }
 
 function i64Truthy(expr) {
@@ -312,11 +335,15 @@ function targetIndexFromPtr(ptr, relativeBase) {
   return offset / 4;
 }
 
-function compileGeneratedOutputModule(words, relativeBase) {
+function compileGeneratedOutputModule(words, relativeBase, diagnostics = null) {
   const instructions = [];
   const ops = [];
   let terminal = null;
 
+  if (diagnostics) {
+    diagnostics.emitter = PER_TB_EMITTER_NAME;
+    diagnostics.runtimeUnsupportedGuards = [];
+  }
   instructions.push(...localSet(1, i32WrapI64(i64Load(localGet(0), 0))));
   instructions.push(...localSet(2, i32WrapI64(i64Load(localGet(0), 8))));
   for (let reg = 0; reg < 16; reg++) {
@@ -513,8 +540,24 @@ function compileGeneratedOutputModule(words, relativeBase) {
         const targetPtr = op.tbPtr + sextract(op.insn, 12, 20);
         const targetIndex = targetIndexFromPtr(targetPtr, relativeBase);
 
-        if (targetIndex <= index || targetIndex > end) {
+        if (targetIndex <= index) {
           return null;
+        }
+        if (targetIndex > end) {
+          if (diagnostics) {
+            diagnostics.runtimeUnsupportedGuards.push({
+              index,
+              op: "brcond",
+              reason: "branch-target-outside-recorded-words",
+              targetIndex,
+            });
+          }
+          code.push(...ifBlock(
+            i64Truthy(localGet(regLocal(op.r0))),
+            returnExpr(i64Const(STATUS_UNSUPPORTED)),
+          ));
+          index++;
+          continue;
         }
         const body = compileRange(index + 1, targetIndex);
 
@@ -580,11 +623,66 @@ function compileGeneratedOutputModule(words, relativeBase) {
   ]);
 }
 
+function failClosedReason(error) {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (/must terminate/.test(message)) {
+    return "missing-terminal";
+  }
+  if (/unsupported generated-output shape/.test(message)) {
+    return "unsupported-shape";
+  }
+  return "module-emission-failed";
+}
+
+function emitPerTBFunctionBody(words, relativeBase) {
+  const diagnostics = {};
+
+  try {
+    const moduleBytes = compileGeneratedOutputModule(words, relativeBase,
+                                                     diagnostics);
+    const moduleValid = WebAssembly.validate(moduleBytes);
+
+    if (!moduleValid) {
+      return {
+        ok: false,
+        emitter: PER_TB_EMITTER_NAME,
+        reason: "module-validation-failed",
+        shape: decodedShape(words),
+        moduleBytes,
+        moduleValid,
+        runtimeUnsupportedGuards: diagnostics.runtimeUnsupportedGuards,
+      };
+    }
+    return {
+      ok: true,
+      emitter: PER_TB_EMITTER_NAME,
+      reason: null,
+      shape: decodedShape(words),
+      moduleBytes,
+      moduleValid,
+      moduleByteLength: moduleBytes.length,
+      runtimeUnsupportedGuards: diagnostics.runtimeUnsupportedGuards,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      emitter: PER_TB_EMITTER_NAME,
+      reason: failClosedReason(error),
+      error: error instanceof Error ? error.message : String(error),
+      shape: decodedShape(words),
+      moduleValid: false,
+      runtimeUnsupportedGuards: diagnostics.runtimeUnsupportedGuards || [],
+    };
+  }
+}
+
 function interpretGeneratedOutput(words, state, relativeBase) {
   const regs = state.regs.slice();
   const view = state.view;
   let index = 0;
   let executed = 0;
+  let memoryLoads = 0;
   let memoryWrites = 0;
 
   for (;;) {
@@ -599,14 +697,17 @@ function interpretGeneratedOutput(words, state, relativeBase) {
     if (opc === OPS.ld32u) {
       const ofs = sextract(insn, 16, 16);
       regs[r0] = BigInt(view.getUint32(Number(regs[r1]) + ofs, true));
+      memoryLoads++;
       index++;
     } else if (opc === OPS.ld32s) {
       const ofs = sextract(insn, 16, 16);
       regs[r0] = toU64(BigInt(view.getInt32(Number(regs[r1]) + ofs, true)));
+      memoryLoads++;
       index++;
     } else if (opc === OPS.ld) {
       const ofs = sextract(insn, 16, 16);
       regs[r0] = view.getBigUint64(Number(regs[r1]) + ofs, true);
+      memoryLoads++;
       index++;
     } else if (opc === OPS.tci_movi) {
       regs[r0] = toU64(sextract(insn, 12, 20));
@@ -694,7 +795,10 @@ function interpretGeneratedOutput(words, state, relativeBase) {
       index++;
     } else if (opc === OPS.exit_tb) {
       const ptr = BigInt(tbPtr + sextract(insn, 12, 20));
-      return { status: STATUS_EXIT, ret: ptr, regs, executed, memoryWrites };
+      return {
+        status: STATUS_EXIT, ret: ptr, regs, executed,
+        memoryLoads, memoryWrites,
+      };
     } else if (opc === OPS.goto_tb) {
       const ptr = tbPtr + sextract(insn, 12, 20);
       return {
@@ -702,6 +806,7 @@ function interpretGeneratedOutput(words, state, relativeBase) {
         ret: view.getBigUint64(ptr, true),
         regs,
         executed,
+        memoryLoads,
         memoryWrites,
       };
     } else {
@@ -819,8 +924,13 @@ async function runFixture(fixture, seed) {
   const reference = createState(relativeBase, fixture.words, seed);
   const expected = interpretGeneratedOutput(fixture.words, reference, relativeBase);
   const generated = createState(relativeBase, fixture.words, seed);
-  const moduleBytes = compileGeneratedOutputModule(fixture.words, relativeBase);
-  const compiled = await WebAssembly.compile(moduleBytes);
+  const emission = emitPerTBFunctionBody(fixture.words, relativeBase);
+
+  assert.equal(emission.ok, true, `${fixture.name} emitter failed closed`);
+  assert.equal(emission.emitter, PER_TB_EMITTER_NAME);
+  assert.equal(emission.moduleValid, true,
+               `${fixture.name} emitted invalid module bytes`);
+  const compiled = await WebAssembly.compile(emission.moduleBytes);
   const instance = await WebAssembly.instantiate(compiled, {
     env: {
       memory: generated.memory,
@@ -851,8 +961,17 @@ async function runFixture(fixture, seed) {
     seed,
     status: status.toString(),
     ret: generatedState.ret,
+    registerStateMatched: true,
+    memoryStateMatched: true,
+    generatedGuestInstructions: fixture.guestInstructions || 0,
     generatedTciOpEquivalents: expected.executed,
+    inlineTlbHitLoads: expected.memoryLoads,
+    inlineTlbHitStores: expected.memoryWrites,
     memoryWrites: expected.memoryWrites,
+    emitter: emission.emitter,
+    moduleValid: emission.moduleValid,
+    moduleByteLength: emission.moduleByteLength,
+    runtimeUnsupportedGuards: emission.runtimeUnsupportedGuards,
     helpers: generatedState.helpers,
   };
 }
@@ -867,6 +986,18 @@ const fixtures = [
       0x0000147d, 0xfff4e435, 0x0100e41e, 0xfff9057d,
       0x00054407, 0x0100e438, 0xfff74049, 0xfff10048,
       0xfff0f048,
+    ],
+  },
+  {
+    name: "live-x86-r4i-ld32u-goto-tb-11",
+    terminal: "goto_tb",
+    relativeBase: 0x4400,
+    seeds: [1],
+    guestInstructions: 1,
+    words: [
+      0xfff0e41c, 0x0000057d, 0x00254d88, 0x00020d04,
+      0x0000147d, 0xfff4e435, 0x0100e41e, 0xfff9057d,
+      0x00054407, 0x0100e438, 0xfff74049,
     ],
   },
   {
@@ -934,6 +1065,13 @@ assert.deepEqual(
   PRE_R4I_LIVE_X86_SHAPE,
   "pre-R4i live x86 fixture shape drifted",
 );
+const r4iLiveX86Fixture = fixtures.find((fixture) =>
+  fixture.name === "live-x86-r4i-ld32u-goto-tb-11");
+assert.deepEqual(
+  decodedShape(r4iLiveX86Fixture.words),
+  R4I_LIVE_X86_SHAPE,
+  "R4i live x86 fixture shape drifted",
+);
 
 const unsupportedFixtures = [
   {
@@ -951,22 +1089,23 @@ const results = [];
 const unsupportedResults = [];
 
 for (const fixture of fixtures) {
-  for (const seed of [1, 2]) {
+  for (const seed of fixture.seeds || [1, 2]) {
     results.push(await runFixture(fixture, seed));
   }
 }
 
 for (const fixture of unsupportedFixtures) {
-  assert.throws(
-    () => compileGeneratedOutputModule(fixture.words, fixture.relativeBase),
-    /unsupported generated-output shape/,
-    `${fixture.name} should fail closed`,
-  );
+  const emission = emitPerTBFunctionBody(fixture.words, fixture.relativeBase);
+
+  assert.equal(emission.ok, false, `${fixture.name} should fail closed`);
+  assert.equal(emission.emitter, PER_TB_EMITTER_NAME);
+  assert.equal(emission.reason, "unsupported-shape");
+  assert.deepEqual(emission.runtimeUnsupportedGuards, []);
   unsupportedResults.push(fixture.name);
 }
 
-assert.equal(results.length, 12);
-assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 4);
+assert.equal(results.length, 13);
+assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 5);
 assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 8);
 const helperBoundaryResults = results.filter((entry) =>
   entry.helpers.loads > 0 || entry.helpers.stores > 0);
@@ -974,6 +1113,8 @@ const simpleGapResults = results.filter((entry) =>
   entry.name === "simple-gap-ops-validate");
 const liveX86Results = results.filter((entry) =>
   entry.name === "live-x86-pre-r4i-ld32u-goto-tb-13");
+const r4iEmitterResults = results.filter((entry) =>
+  entry.name === "live-x86-r4i-ld32u-goto-tb-11");
 assert.equal(liveX86Results.length, 2);
 assert.equal(
   liveX86Results.filter((entry) =>
@@ -982,11 +1123,28 @@ assert.equal(
     entry.terminal === "goto_tb").length,
   2,
 );
+assert.equal(r4iEmitterResults.length, 1);
+assert.equal(r4iEmitterResults[0].emitter, PER_TB_EMITTER_NAME);
+assert.equal(r4iEmitterResults[0].moduleValid, true);
+assert.equal(r4iEmitterResults[0].generatedGuestInstructions, 1);
+assert.equal(r4iEmitterResults[0].generatedTciOpEquivalents, 11);
+assert.equal(r4iEmitterResults[0].inlineTlbHitLoads, 2);
+assert.equal(r4iEmitterResults[0].inlineTlbHitStores, 2);
+assert.equal(r4iEmitterResults[0].memoryWrites, 2);
+assert.equal(r4iEmitterResults[0].helpers.loads, 0);
+assert.equal(r4iEmitterResults[0].helpers.stores, 0);
+assert.deepEqual(
+  r4iEmitterResults[0].runtimeUnsupportedGuards.map((guard) => guard.reason),
+  ["branch-target-outside-recorded-words"],
+);
 console.log(JSON.stringify({
   format: 1,
   event: "generated-output-equivalence",
   fixtures: results.length,
   unsupportedFixtures: unsupportedResults.length,
+  emitter: PER_TB_EMITTER_NAME,
+  emittedModuleFixtures: results.filter((entry) =>
+    entry.emitter === PER_TB_EMITTER_NAME && entry.moduleValid).length,
   liveX86PreR4iFixtures: liveX86Results.length,
   liveX86PreR4iShape: PRE_R4I_LIVE_X86_SHAPE,
   liveX86PreR4iGeneratedTciOpEquivalents:
@@ -994,6 +1152,39 @@ console.log(JSON.stringify({
       count + entry.generatedTciOpEquivalents, 0),
   liveX86PreR4iMemoryWrites:
     liveX86Results.reduce((count, entry) => count + entry.memoryWrites, 0),
+  r4iPerTBEmitterFixtures: r4iEmitterResults.length,
+  r4iPerTBEmitterShape: R4I_LIVE_X86_SHAPE,
+  r4iPerTBEmitterRegisterStateMatched:
+    r4iEmitterResults.every((entry) => entry.registerStateMatched),
+  r4iPerTBEmitterMemoryStateMatched:
+    r4iEmitterResults.every((entry) => entry.memoryStateMatched),
+  r4iPerTBEmitterDispatchTargets:
+    r4iEmitterResults.map((entry) => entry.ret),
+  r4iPerTBEmitterGeneratedGuestInstructions:
+    r4iEmitterResults.reduce((count, entry) =>
+      count + entry.generatedGuestInstructions, 0),
+  r4iPerTBEmitterGeneratedTciOpEquivalents:
+    r4iEmitterResults.reduce((count, entry) =>
+      count + entry.generatedTciOpEquivalents, 0),
+  r4iPerTBEmitterInlineTlbHitLoads:
+    r4iEmitterResults.reduce((count, entry) =>
+      count + entry.inlineTlbHitLoads, 0),
+  r4iPerTBEmitterInlineTlbHitStores:
+    r4iEmitterResults.reduce((count, entry) =>
+      count + entry.inlineTlbHitStores, 0),
+  r4iPerTBEmitterMemoryWrites:
+    r4iEmitterResults.reduce((count, entry) => count + entry.memoryWrites, 0),
+  r4iPerTBEmitterHelperCalls:
+    r4iEmitterResults.reduce((count, entry) =>
+      count + entry.helpers.loads + entry.helpers.stores, 0),
+  r4iPerTBEmitterQemuLdCalls:
+    r4iEmitterResults.reduce((count, entry) =>
+      count + entry.helpers.loads, 0),
+  r4iPerTBEmitterQemuStCalls:
+    r4iEmitterResults.reduce((count, entry) =>
+      count + entry.helpers.stores, 0),
+  r4iPerTBEmitterRuntimeUnsupportedGuards:
+    r4iEmitterResults.flatMap((entry) => entry.runtimeUnsupportedGuards),
   helperBoundaryFixtures: helperBoundaryResults.length,
   simpleGapFixtures: simpleGapResults.length,
   helperCalls: {
