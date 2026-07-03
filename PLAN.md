@@ -574,6 +574,67 @@ run that reaches a weaker marker than normal multi-user readiness.
     next R4c attempt must use the same-commit default/accelerator comparison
     and beat the `25%` marker-time gate before any Bus Engine OS browser proof
     is run.
+  - [ ] R4e - Preserve the target-neutral accelerator pieces so the RISC-V
+    runtime work can be reused by an x86_64 accelerator lane without copying
+    or re-inventing the proof contract. DoD: document and test that the
+    reusable surface is target-neutral: `TCGWasm64RunContext`, synthetic exit
+    reasons, `TCGWasm64RunCounters`, the `wasmjit_run(ctx,budget)` C/Wasm
+    boundary, the Emscripten module-instantiation path, browser result JSON
+    parsing, and the `alu-branch`/`tlb-hit-ram` runtime smoke workloads. The
+    item is not accepted if it introduces x86_64 lowering or claims any x86_64
+    Linux speedup; it is only the shared contract that both `riscv64-softmmu`
+    and future `x86_64-softmmu` accelerator work must use.
+  - [ ] R4f - Add an x86_64 reuse and gap map before implementing x86_64
+    generated execution. DoD: using current `x86_64-softmmu` browser smoke
+    evidence or a fresh bounded smoke, record which parts are reusable from
+    R4b/R4e and which are x86-specific. The reusable list must include the
+    run/exit ABI, counters, browser harness parser, module-instantiation
+    path, runtime ratio smoke, no-silent-fallback mode, and same-commit speed
+    gate shape. The x86-specific list must include CPU state/register mapping,
+    flags and condition-code handling, segmentation/privilege-sensitive state,
+    x86 helper exits, x86 TCG op lowering, real x86 SoftMMU/TLB-hit
+    load/store lowering, TB chaining/hotset dispatch, and invalidation rules.
+    The output must name the first deterministic x86_64 tests to write and
+    the first top hot TB/op shapes that would block real generated coverage.
+  - [ ] R4g - Prove the shared accelerator contract in an `x86_64-softmmu`
+    artifact without enabling real x86 acceleration. DoD: build an
+    `x86_64-softmmu` Emscripten artifact with the wasm64 backend gate enabled,
+    run the deterministic runloop/parser/contract tests, run the opt-in
+    runtime smoke in Chrome/Chromium, and verify that default x86_64 TCI smoke
+    behavior remains unchanged. The accepted result must record artifact
+    hashes, browser version, result JSON path, runtime smoke counters, and a
+    statement that real x86 guest TB generated coverage is still zero until
+    later items implement x86 lowering.
+  - [ ] R4h - Implement the x86_64 CPU-state and generated-body ABI needed for
+    real x86 generated execution. DoD: define how generated Wasm reads and
+    writes the required x86 `CPUArchState` fields, keeps hot temporaries in
+    Wasm locals, handles or exits for flags/condition codes, and preserves
+    guest-visible state when falling back to TCI. Deterministic tests must
+    cover matching generated/fallback state updates for ALU, branch, and flag
+    cases before any browser speed gate is run.
+  - [ ] R4i - Implement x86_64 generated ALU/branch TB bodies with internal
+    chaining or hotset dispatch. DoD: generated x86_64 bodies retire counted
+    guest-instruction-equivalent work inside Wasm, avoid returning to the QEMU
+    main loop per TB on the deterministic hotset path, and return only for
+    budget expiry, unsupported helper, invalidation, interrupt, or another
+    synthetic exit. Tests must prove no-silent-fallback performance mode fails
+    loudly for unsupported hot x86 paths instead of hiding work in TCI.
+  - [ ] R4j - Implement x86_64 inline SoftMMU/TLB-hit RAM load/store fast
+    paths. DoD: common x86_64 generated RAM loads and stores check the TLB
+    hit path in generated Wasm and do not call `qemu_ld`/`qemu_st` helpers on
+    deterministic TLB-hit micro-workloads. Miss, MMIO, permission fault,
+    page-crossing, and unsupported access cases must exit or fall back with
+    precise reason counters. The item is not accepted from helper-backed
+    loads/stores that merely report generated-boundary coverage.
+  - [ ] R4k - Run the x86_64 same-commit generic Chromium speed gate only
+    after R4g-R4j have deterministic evidence. DoD: build one default-TCI
+    `x86_64-softmmu` artifact and one accelerator artifact from the same
+    commit, run the same generic x86_64 browser guest/marker, record hashes,
+    browser version, result JSON paths, generated/fallback instruction counts,
+    generated body time, TCI dispatch time, helper/`qemu_ld`/`qemu_st` counts,
+    internal chain or hotset residency, and marker timings. The accelerator
+    must beat same-commit default TCI by at least `25%`; otherwise record the
+    failed gate and re-plan before another x86 browser run.
 - [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
   accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
   cold in browser-hosted QEMU/WASM with the accelerator and reaches
