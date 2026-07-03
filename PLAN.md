@@ -41,6 +41,16 @@ documentation update, commit, push, and BusDK submodule-pin update for this
 goal must be represented by a checkbox in this file before it is treated as
 accepted work.
 
+This boot goal is expected to close through cumulative, deterministic
+improvements rather than one isolated speedup. Smaller QEMU/WASM wins may be
+accepted as progress when they are measured on the active lane, preserve
+correctness and fallback behavior, and improve the real cold-boot execution
+path or the generic gate that guards it. Record the before/after timings,
+generated-vs-fallback counters, artifact hashes, browser version, commands,
+and remaining gap here. Such wins do not satisfy the final proof until the
+accepted Bus Engine OS image reaches normal multi-user readiness within
+`300000` ms.
+
 ## Exact Definition of Done
 
 The current executor lane is done only when all of the following are true for
@@ -602,6 +612,23 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-browser-smoke-runner-test.mjs`. No browser run, artifact
     build, or real RV64 generated-coverage proof was run in this harness slice,
     so R4d remains open.
+  - [ ] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
+    experiments under the cumulative-improvement strategy. DoD: review the
+    supervisor memos and this plan for experiments that were measurably faster
+    but rejected only because they did not close the whole five-minute gap;
+    classify each as already on `develop`, intentionally rejected, or
+    unpromoted; for each unpromoted candidate, rebase or recreate it on current
+    `develop`, run deterministic checks and a same-commit browser comparison
+    before promotion, and record commands, artifact hashes, timings, percentage
+    change, and non-regression evidence. Only promote a candidate if current
+    evidence still shows an improvement on an active gate or final cold-boot
+    path. Initial classification from 2026-07-03: the RISC-V R4c `15.46%`
+    same-commit improvement is already reachable from current `develop` but
+    remains below the R4c `25%` gate; opt-in TCI fast gates commit
+    `484370d4d2` is already on `develop`; W1 address-limited Memory64 evidence
+    was a `5.8%` comparison but did not change the selected artifact family;
+    `origin/qemu-r4-wasmjit-speed-gate` remains the main unpromoted branch
+    requiring review and current retest before any integration.
   - [x] R4e - Preserve the target-neutral accelerator pieces so the RISC-V
     runtime work can be reused by an x86_64 accelerator lane without copying
     or re-inventing the proof contract. DoD: document and test that the
