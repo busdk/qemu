@@ -43,7 +43,7 @@ const OPS = {
   tci_qemu_st_rrr: 139,
 };
 const OP_NAMES = Object.fromEntries(Object.entries(OPS).map(([name, op]) => [op, name]));
-const R4I_LIVE_X86_SHAPE = [
+const PRE_R4I_LIVE_X86_SHAPE = [
   "ld32u",
   "tci_movi",
   "tci_setcond32",
@@ -851,7 +851,7 @@ async function runFixture(fixture, seed) {
     seed,
     status: status.toString(),
     ret: generatedState.ret,
-    generatedGuestInstructions: expected.executed,
+    generatedTciOpEquivalents: expected.executed,
     memoryWrites: expected.memoryWrites,
     helpers: generatedState.helpers,
   };
@@ -859,7 +859,7 @@ async function runFixture(fixture, seed) {
 
 const fixtures = [
   {
-    name: "live-x86-r4i-ld32u-goto-tb-13",
+    name: "live-x86-pre-r4i-ld32u-goto-tb-13",
     terminal: "goto_tb",
     relativeBase: 0x4000,
     words: [
@@ -928,11 +928,11 @@ const fixtures = [
 ];
 
 const liveX86Fixture = fixtures.find((fixture) =>
-  fixture.name === "live-x86-r4i-ld32u-goto-tb-13");
+  fixture.name === "live-x86-pre-r4i-ld32u-goto-tb-13");
 assert.deepEqual(
   decodedShape(liveX86Fixture.words),
-  R4I_LIVE_X86_SHAPE,
-  "R4i live x86 fixture shape drifted",
+  PRE_R4I_LIVE_X86_SHAPE,
+  "pre-R4i live x86 fixture shape drifted",
 );
 
 const unsupportedFixtures = [
@@ -973,11 +973,11 @@ const helperBoundaryResults = results.filter((entry) =>
 const simpleGapResults = results.filter((entry) =>
   entry.name === "simple-gap-ops-validate");
 const liveX86Results = results.filter((entry) =>
-  entry.name === "live-x86-r4i-ld32u-goto-tb-13");
+  entry.name === "live-x86-pre-r4i-ld32u-goto-tb-13");
 assert.equal(liveX86Results.length, 2);
 assert.equal(
   liveX86Results.filter((entry) =>
-    entry.generatedGuestInstructions === 11 &&
+    entry.generatedTciOpEquivalents === 11 &&
     entry.memoryWrites === 2 &&
     entry.terminal === "goto_tb").length,
   2,
@@ -987,12 +987,12 @@ console.log(JSON.stringify({
   event: "generated-output-equivalence",
   fixtures: results.length,
   unsupportedFixtures: unsupportedResults.length,
-  liveX86R4iFixtures: liveX86Results.length,
-  liveX86R4iShape: R4I_LIVE_X86_SHAPE,
-  liveX86R4iGeneratedGuestInstructions:
+  liveX86PreR4iFixtures: liveX86Results.length,
+  liveX86PreR4iShape: PRE_R4I_LIVE_X86_SHAPE,
+  liveX86PreR4iGeneratedTciOpEquivalents:
     liveX86Results.reduce((count, entry) =>
-      count + entry.generatedGuestInstructions, 0),
-  liveX86R4iMemoryWrites:
+      count + entry.generatedTciOpEquivalents, 0),
+  liveX86PreR4iMemoryWrites:
     liveX86Results.reduce((count, entry) => count + entry.memoryWrites, 0),
   helperBoundaryFixtures: helperBoundaryResults.length,
   simpleGapFixtures: simpleGapResults.length,

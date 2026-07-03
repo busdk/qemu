@@ -22,7 +22,7 @@
 #define TCG_WASM64_RUNLOOP_SMOKE_MIN_SPEEDUP_PPM 3000000u
 #define TCG_WASM64_ONE_TB_DIFFERENTIAL_ENV \
     "QEMU_WASM64_ONE_TB_DIFFERENTIAL"
-#define TCG_WASM64_ONE_TB_NAME "live-x86-r4i-ld32u-goto-tb-13"
+#define TCG_WASM64_ONE_TB_NAME "live-x86-pre-r4i-ld32u-goto-tb-13"
 #define TCG_WASM64_ONE_TB_SCRATCH_SIZE 0x4000u
 #define TCG_WASM64_ONE_TB_GENERATED_REGS_OFFSET 0x100u
 #define TCG_WASM64_ONE_TB_DATA_OFFSET 0x1000u
@@ -30,7 +30,7 @@
 #define TCG_WASM64_ONE_TB_GOTO_SLOT_DELTA (-0x60)
 #define TCG_WASM64_ONE_TB_DISPATCH_TARGET 0x5048u
 #define TCG_WASM64_ONE_TB_STATUS_DISPATCH 2u
-#define TCG_WASM64_ONE_TB_EXECUTED_TCI_OPS 11u
+#define TCG_WASM64_ONE_TB_EXECUTED_TCI_OP_EQUIVALENTS 11u
 #define TCG_WASM64_ONE_TB_MEMORY_LOADS 2u
 #define TCG_WASM64_ONE_TB_MEMORY_WRITES 2u
 
@@ -1323,6 +1323,7 @@ EM_JS(int, tcg_wasm64_one_tb_differential_js,
         const generatedMemoryChecksum = checksumObservedMemory();
         const generatedTciOps = HEAPU64[counters / 8];
         const generatedWrites = 2n;
+        HEAPU64[counters / 8] = 0n;
 
         initState();
         const referenceStart = performance.now();
@@ -1332,8 +1333,8 @@ EM_JS(int, tcg_wasm64_one_tb_differential_js,
         const referenceRegsChecksum = checksumRegs();
         const referenceMemoryChecksum = checksumObservedMemory();
 
-        HEAPU64[counters / 8 + 0] = generatedTciOps;
-        HEAPU64[counters / 8 + 1] = BigInt(reference.executed);
+        HEAPU64[counters / 8 + 0] = 0n;
+        HEAPU64[counters / 8 + 1] = 0n;
         HEAPU64[counters / 8 + 2] = generatedNs;
         HEAPU64[counters / 8 + 3] = referenceNs;
         HEAPU64[counters / 8 + 8] = compileNs;
@@ -1711,12 +1712,13 @@ static void tcg_wasm64_report_one_tb_differential(
             "\"event\":\"one-tb-differential\","
             "\"name\":\"%s\","
             "\"ok\":%s,"
-            "\"live_captured_shape\":true,"
+            "\"live_shape_fixture\":true,"
+            "\"real_live_state_capture\":false,"
             "\"shape\":[\"ld32u\",\"tci_movi\",\"tci_setcond32\","
             "\"brcond\",\"tci_movi\",\"st8\",\"ld\",\"tci_movi\","
             "\"add\",\"st\",\"goto_tb\",\"exit_tb\",\"exit_tb\"],"
-            "\"generated_guest_instructions\":%" PRIu64 ","
-            "\"fallback_guest_instructions\":%" PRIu64 ","
+            "\"generated_tci_op_equivalents\":%" PRIu64 ","
+            "\"reference_tci_op_equivalents\":%" PRIu64 ","
             "\"generated_body_time_ns\":%" PRIu64 ","
             "\"tci_dispatch_time_ns\":%" PRIu64 ","
             "\"compile_time_ns\":%" PRIu64 ","
@@ -1738,16 +1740,14 @@ static void tcg_wasm64_report_one_tb_differential(
             "\"reference_regs_checksum\":%" PRIu64 ","
             "\"generated_memory_checksum\":%" PRIu64 ","
             "\"reference_memory_checksum\":%" PRIu64 ","
-            "\"generated_tci_ops\":%" PRIu64 ","
-            "\"reference_tci_ops\":%" PRIu64 ","
             "\"generated_memory_writes\":%" PRIu64 ","
             "\"reference_memory_writes\":%" PRIu64 ","
             "\"expected_memory_writes\":%u,"
             "\"js_status\":%" PRIu64 "}\n",
             TCG_WASM64_ONE_TB_NAME,
             ok ? "true" : "false",
-            counters->generated_guest_instructions,
-            counters->fallback_guest_instructions,
+            result[TCG_WASM64_ONE_TB_RESULT_GENERATED_TCI_OPS],
+            result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_TCI_OPS],
             counters->generated_body_time_ns,
             counters->tci_dispatch_time_ns,
             counters->compile_time_ns,
@@ -1769,8 +1769,6 @@ static void tcg_wasm64_report_one_tb_differential(
             result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_REGS_CHECKSUM],
             result[TCG_WASM64_ONE_TB_RESULT_GENERATED_MEMORY_CHECKSUM],
             result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_MEMORY_CHECKSUM],
-            result[TCG_WASM64_ONE_TB_RESULT_GENERATED_TCI_OPS],
-            result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_TCI_OPS],
             result[TCG_WASM64_ONE_TB_RESULT_GENERATED_MEMORY_WRITES],
             result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_MEMORY_WRITES],
             TCG_WASM64_ONE_TB_MEMORY_WRITES,
@@ -1829,15 +1827,11 @@ static void tcg_wasm64_one_tb_differential_maybe(CPUArchState *env)
          result[TCG_WASM64_ONE_TB_RESULT_GENERATED_TCI_OPS] ==
              result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_TCI_OPS] &&
          result[TCG_WASM64_ONE_TB_RESULT_GENERATED_TCI_OPS] ==
-             TCG_WASM64_ONE_TB_EXECUTED_TCI_OPS &&
+             TCG_WASM64_ONE_TB_EXECUTED_TCI_OP_EQUIVALENTS &&
          result[TCG_WASM64_ONE_TB_RESULT_GENERATED_MEMORY_WRITES] ==
              TCG_WASM64_ONE_TB_MEMORY_WRITES &&
          result[TCG_WASM64_ONE_TB_RESULT_REFERENCE_MEMORY_WRITES] ==
              TCG_WASM64_ONE_TB_MEMORY_WRITES &&
-         counters.generated_guest_instructions ==
-             TCG_WASM64_ONE_TB_EXECUTED_TCI_OPS &&
-         counters.fallback_guest_instructions ==
-             TCG_WASM64_ONE_TB_EXECUTED_TCI_OPS &&
          counters.inline_tlb_hit_loads == TCG_WASM64_ONE_TB_MEMORY_LOADS &&
          counters.inline_tlb_hit_stores == TCG_WASM64_ONE_TB_MEMORY_WRITES &&
          counters.helper_calls == 0 &&
