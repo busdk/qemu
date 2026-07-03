@@ -1600,6 +1600,32 @@ run that reaches a weaker marker than normal multi-user readiness.
     internal chain or hotset residency, and marker timings. The accelerator
     must beat same-commit default TCI by at least `25%`; otherwise record the
     failed gate and re-plan before another x86 browser run.
+
+    2026-07-03 latest-QEMU check: `origin/develop` was fetched and
+    `projects/qemu` was already current at
+    `4a1892102dc3d2737d47966509ecd4c5e5720021` (`Added tmp/ to
+    .gitignore`). A clean detached source worktree at the same commit was used
+    for both builds. Default artifact hashes: JS
+    `105d0404f8f105be8604cff8f4f094c665a663c9696bd5dab3f7ab7e20e69870`,
+    WASM `6fe1613185bcbdb0fdfd7fddfac6c1ea384a0ebb92893887c1081c5d6af7c50e`,
+    manifest
+    `d9c96709f2984502d92097397efcbf7c05dc695de05be9e9dd5e86e35190cad0`.
+    Accelerator artifact hashes: JS
+    `42451a03589f280d98e441056a5841b29a5fd64c1cb8a4edbc46be2d7915bf54`,
+    WASM `978c665ff6349866a2daf8359b56bf4112ba92c517756c8d9c9e9804aa8a22d8`,
+    manifest
+    `f1e622aaedc0e63ee718f7fd491f2dab6cfd273ceb0cf3fe4102c96f4878953f`.
+    Both ran in Chrome for Testing `149.0.7827.55` using the same
+    `microvm,acpi=off` generic x86_64 TuxBoot smoke guest. Default TCI reached
+    `QEMU_WASM_LINUX_BOOT_OK` in `88838` ms with result JSON
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-current-default-direct-smoke-20260703-20/wasm-browser-smoke-result.json`.
+    The accelerator artifact reached the marker in `93182` ms with result JSON
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-current-accelerator-direct-smoke-20260703-20/wasm-browser-smoke-result.json`.
+    That is `4.9%` slower than default TCI, not `25%` faster. These speed runs
+    did not enable `--wasm64-tcg-summary`, so they are sufficient to reject the
+    current artifact as a speed gate but not sufficient to close R4l's dynamic
+    metric requirements. Do not start an x86_64 Bus Engine OS browser proof
+    from this artifact.
 - [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
   accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
   cold in browser-hosted QEMU/WASM with the accelerator and reaches
