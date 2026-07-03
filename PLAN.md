@@ -667,6 +667,33 @@ run that reaches a weaker marker than normal multi-user readiness.
     artifact build, speed claim, BusDK work, or Bus Engine OS proof was run
     or enabled; R4d remains open for the supervisor-run Chrome proof of
     nonzero real RV64 generated coverage and remaining fallback attribution.
+  - [x] R4d-d - Lower bounded env-relative RV64 direct-memory operations in
+    the deterministic generated-output emitter before the next live coverage
+    proof. DoD: translation metadata records direct `ld32u` and companion
+    direct-memory op words so the operand-level emitter can inspect them,
+    generated output lowers only bounded env-relative forms, unsafe non-env
+    bases and out-of-range offsets fail closed, equivalence fixtures cover
+    `ld32u`, `ld32s`, `ld`, `st8`, `st32`, and `st`, and deterministic tests
+    pass without a browser run. Accepted 2026-07-03:
+    `tcg/wasm64.c` now records direct `ld`, `ld32s`, `ld32u`, `st`, `st8`,
+    and `st32` generated-output words and keeps operand safety in the
+    embedded live one-TB emitter by allowing only the bounded env-relative
+    window. `scripts/ci/wasm-generated-output-equivalence-test.mjs` now
+    enforces the same bounds in the shared per-TB emitter and adds the
+    `rv64-env-relative-load-store-family` fixture plus fail-closed
+    `rv64-env-relative-non-env-base-fails-closed` and
+    `rv64-env-relative-out-of-range-fails-closed` fixtures. Checks passed:
+    `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`;
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`
+    (`fixtures=19`, `unsupportedFixtures=3`,
+    `rv64EnvRelativeFixtures.fixtureExecutions=2`, env-relative helper calls
+    `0`); `node --check scripts/ci/wasm64-translate-metadata-test.mjs`;
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`; and
+    `git diff --check -- scripts/ci/wasm-generated-output-equivalence-test.mjs
+    scripts/ci/wasm64-translate-metadata-test.mjs tcg/wasm64.c`. No browser
+    run, artifact build, speed claim, BusDK work, or Bus Engine OS proof was
+    run or enabled; R4d remains open for the supervisor-run Chrome proof of
+    nonzero real RV64 generated coverage and remaining fallback attribution.
   - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster

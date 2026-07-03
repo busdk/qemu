@@ -151,7 +151,7 @@ assert.match(runtime, /CPUTLBDesc \*desc = &cpu->neg\.tlb\.d\[mmu_idx\]/);
 const generatedSupportedBody = runtime.match(
   /static bool tcg_wasm64_translate_op_generated_supported\(uint32_t op\)\s*\{[\s\S]*?switch \(\(TCGOpcode\)op\) \{([\s\S]*?)default:/,
 )?.[1] || "";
-for (const unsafeHostMemoryOp of [
+for (const envRelativeHostMemoryOp of [
   "INDEX_op_ld",
   "INDEX_op_ld32u",
   "INDEX_op_ld32s",
@@ -159,11 +159,15 @@ for (const unsafeHostMemoryOp of [
   "INDEX_op_st8",
   "INDEX_op_st32",
 ]) {
-  assert.doesNotMatch(
+  assert.match(
     generatedSupportedBody,
-    new RegExp(`case\\s+${unsafeHostMemoryOp}:`),
+    new RegExp(`case\\s+${envRelativeHostMemoryOp}:`),
   );
 }
+assert.match(
+  runtime,
+  /operand-level\s*\n\s*\* generated-output emitter can lower only bounded env-relative forms/,
+);
 assert.match(generatedSupportedBody, /case INDEX_op_tci_qemu_ld_rrr:/);
 assert.match(generatedSupportedBody, /case INDEX_op_tci_qemu_st_rrr:/);
 assert.match(runtime, /case INDEX_op_mb:/);
@@ -388,6 +392,11 @@ for (const fixtureName of [
   assert.match(generatedEquivalence, new RegExp(fixtureName));
 }
 assert.match(generatedEquivalence, /r4kSoftmmuFastPath/);
+assert.match(generatedEquivalence, /RV64_ENV_RELATIVE_BASE_REG/);
+assert.match(generatedEquivalence, /rv64-env-relative-load-store-family/);
+assert.match(generatedEquivalence, /rv64-env-relative-non-env-base-fails-closed/);
+assert.match(generatedEquivalence, /rv64-env-relative-out-of-range-fails-closed/);
+assert.match(generatedEquivalence, /rv64EnvRelativeFixtures/);
 assert.match(generatedEquivalence, /R4K_SOFTMMU_EMITTER_NAME/);
 assert.match(generatedEquivalence, /WASMJIT_TLB_MIRROR/);
 assert.match(generatedEquivalence, /inlineTlbHitLoads/);

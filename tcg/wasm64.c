@@ -1651,6 +1651,9 @@ EM_JS(int, tcg_wasm64_live_one_tb_differential_js,
         "ld32u", "tci_movi", "tci_setcond32", "brcond", "tci_movi",
         "st8", "ld", "tci_movi", "add", "st", "goto_tb",
     ];
+    const envRelativeBaseReg = 14;
+    const envRelativeMinOffset = -16;
+    const envRelativeMaxExclusive = 0x120;
     const ops = {
         brcond: 4,
         add: 7,
@@ -1796,6 +1799,16 @@ EM_JS(int, tcg_wasm64_live_one_tb_differential_js,
         return i64Add(base, i64Const(offset));
     }
 
+    function envRelativeOffset(insn, r1, size) {
+        const offset = sextract(insn, 16, 16);
+        if (r1 !== envRelativeBaseReg ||
+            offset < envRelativeMinOffset ||
+            offset + size > envRelativeMaxExclusive) {
+            throw new Error("unsupported live one-TB env-relative memory");
+        }
+        return BigInt(offset);
+    }
+
     function incrementCounter(ptrLocal, offset, value) {
         return i64StoreAtPtr(ptrLocal, offset, i64Add(
             i64LoadAtPtr(ptrLocal, offset),
@@ -1912,12 +1925,12 @@ EM_JS(int, tcg_wasm64_live_one_tb_differential_js,
             } else if (opc === ops.ld32u) {
                 emitted.push(...localSet(regLocal(r0), i64ExtendI32U(
                     i32Load(addressAdd(localGet(regLocal(r1)),
-                                       BigInt(sextract(insn, 16, 16)))))));
+                                       envRelativeOffset(insn, r1, 4))))));
                 inlineLoads++;
             } else if (opc === ops.ld) {
                 emitted.push(...localSet(regLocal(r0),
                     i64Load(addressAdd(localGet(regLocal(r1)),
-                                       BigInt(sextract(insn, 16, 16))))));
+                                       envRelativeOffset(insn, r1, 8)))));
                 inlineLoads++;
             } else if (opc === ops.tci_movi) {
                 emitted.push(...localSet(regLocal(r0),
@@ -1954,13 +1967,13 @@ EM_JS(int, tcg_wasm64_live_one_tb_differential_js,
             } else if (opc === ops.st8) {
                 emitted.push(...i32Store8(
                     addressAdd(localGet(regLocal(r1)),
-                               BigInt(sextract(insn, 16, 16))),
+                               envRelativeOffset(insn, r1, 1)),
                     i32WrapI64(localGet(regLocal(r0)))));
                 inlineStores++;
             } else if (opc === ops.st) {
                 emitted.push(...i64Store(
                     addressAdd(localGet(regLocal(r1)),
-                               BigInt(sextract(insn, 16, 16))),
+                               envRelativeOffset(insn, r1, 8)),
                     localGet(regLocal(r0))));
                 inlineStores++;
             } else if (opc === ops.add) {
@@ -3932,6 +3945,14 @@ static bool tcg_wasm64_translate_op_generated_supported(uint32_t op)
     case INDEX_op_deposit:
     case INDEX_op_exit_tb:
     case INDEX_op_goto_tb:
+    /*
+     * Direct TCI host-memory ld/st operations are recorded so the operand-level
+     * generated-output emitter can lower only bounded env-relative forms and
+     * fail closed for unsafe bases or offsets.
+     */
+    case INDEX_op_ld:
+    case INDEX_op_ld32s:
+    case INDEX_op_ld32u:
     case INDEX_op_mb:
     case INDEX_op_mov:
     case INDEX_op_movcond:
@@ -3941,14 +3962,12 @@ static bool tcg_wasm64_translate_op_generated_supported(uint32_t op)
     case INDEX_op_setcond:
     case INDEX_op_shl:
     case INDEX_op_shr:
+    case INDEX_op_st:
+    case INDEX_op_st8:
+    case INDEX_op_st32:
     case INDEX_op_sub:
     case INDEX_op_tci_movi:
     case INDEX_op_tci_movl:
-    /*
-     * Direct TCI host-memory ld/st operations need a validated aligned
-     * memory-access model before they can be generated safely in browsers.
-     * Helper-backed guest RAM accesses are still allowed below.
-     */
     case INDEX_op_tci_qemu_ld_rrr:
     case INDEX_op_tci_qemu_st_rrr:
     case INDEX_op_tci_setcond32:

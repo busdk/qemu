@@ -108,6 +108,9 @@ const R4K_SOFTMMU_MMU_IDX = 2;
 const R4K_SOFTMMU_PAGE_BITS = WASMJIT_TLB_CONSTANTS.targetPageBits;
 const R4K_SOFTMMU_PAGE_MASK = WASMJIT_TLB_CONSTANTS.targetPageMask;
 const R4K_SOFTMMU_TLB_ENTRY_BITS = WASMJIT_TLB_ENTRY.bits;
+const RV64_ENV_RELATIVE_BASE_REG = 14;
+const RV64_ENV_RELATIVE_MIN_OFFSET = -16;
+const RV64_ENV_RELATIVE_MAX_EXCLUSIVE = 0x120;
 const MO_8 = 0;
 const MO_16 = 1;
 const MO_32 = 2;
@@ -132,6 +135,11 @@ function opBranch(reg, imm) {
 function opSetcond(op, r0, r1, r2, condition) {
   return (op | (r0 << 8) | (r1 << 12) | (r2 << 16) |
           (condition << 20)) >>> 0;
+}
+
+function opMem(op, r0, r1, offset) {
+  return (op | (r0 << 8) | (r1 << 12) |
+          (((offset & 0xffff) << 16) >>> 0)) >>> 0;
 }
 
 function vector(items) {
@@ -479,6 +487,20 @@ function memoryAddress(regExpr, ofs) {
   return i32WrapI64([...regExpr, ...i64Const(ofs), 0x7c]);
 }
 
+function envRelativeAccessSupported(op, size) {
+  const offset = sextract(op.insn, 16, 16);
+
+  return op.r1 === RV64_ENV_RELATIVE_BASE_REG &&
+         offset >= RV64_ENV_RELATIVE_MIN_OFFSET &&
+         offset + size <= RV64_ENV_RELATIVE_MAX_EXCLUSIVE;
+}
+
+function envRelativeMemoryAddress(op, size) {
+  return envRelativeAccessSupported(op, size)
+    ? memoryAddress(localGet(regLocal(op.r1)), sextract(op.insn, 16, 16))
+    : null;
+}
+
 function targetIndexFromPtr(ptr, relativeBase) {
   const offset = ptr - relativeBase;
 
@@ -535,36 +557,39 @@ function compileSharedGeneratedOutputOp(op) {
     return localSet(regLocal(r0), i64Load(i32Const(ptr), 0));
   }
   if (opc === OPS.ld32u || opc === OPS.ld32s) {
-    const ofs = sextract(insn, 16, 16);
-    const loaded = i32Load(memoryAddress(localGet(regLocal(r1)), ofs));
+    const address = envRelativeMemoryAddress(op, 4);
+
+    if (address === null) {
+      return null;
+    }
+    const loaded = i32Load(address);
 
     return localSet(regLocal(r0),
                     opc === OPS.ld32u ? i64ExtendI32U(loaded)
                                       : i64ExtendI32S(loaded));
   }
   if (opc === OPS.ld) {
-    const ofs = sextract(insn, 16, 16);
+    const address = envRelativeMemoryAddress(op, 8);
 
-    return localSet(regLocal(r0),
-                    i64Load(memoryAddress(localGet(regLocal(r1)), ofs)));
+    return address === null ? null : localSet(regLocal(r0), i64Load(address));
   }
   if (opc === OPS.st8) {
-    const ofs = sextract(insn, 16, 16);
+    const address = envRelativeMemoryAddress(op, 1);
 
-    return i32Store8(memoryAddress(localGet(regLocal(r1)), ofs),
-                     i32WrapI64(localGet(regLocal(r0))));
+    return address === null ? null
+      : i32Store8(address, i32WrapI64(localGet(regLocal(r0))));
   }
   if (opc === OPS.st32) {
-    const ofs = sextract(insn, 16, 16);
+    const address = envRelativeMemoryAddress(op, 4);
 
-    return i32Store(memoryAddress(localGet(regLocal(r1)), ofs),
-                    i32WrapI64(localGet(regLocal(r0))));
+    return address === null ? null
+      : i32Store(address, i32WrapI64(localGet(regLocal(r0))));
   }
   if (opc === OPS.st) {
-    const ofs = sextract(insn, 16, 16);
+    const address = envRelativeMemoryAddress(op, 8);
 
-    return i64Store(memoryAddress(localGet(regLocal(r1)), ofs),
-                    localGet(regLocal(r0)));
+    return address === null ? null
+      : i64Store(address, localGet(regLocal(r0)));
   }
   if (opc === OPS.mb) {
     return [];
@@ -1371,6 +1396,7 @@ function captureState(view, regsPtr, retPtr, dataBase, helpers) {
     ret: view.getBigUint64(retPtr, true).toString(),
     data: [
       view.getUint32(dataBase, true),
+      view.getUint8(dataBase + 4),
       view.getBigUint64(dataBase + 0x10, true).toString(),
       view.getBigUint64(dataBase + 0x100, true).toString(),
       view.getBigUint64(dataBase + 0x110, true).toString(),
@@ -2551,6 +2577,21 @@ const fixtures = [
       OPS.exit_tb,
     ],
   },
+  {
+    name: "rv64-env-relative-load-store-family",
+    terminal: "exit_tb",
+    relativeBase: 0x5b00,
+    words: [
+      opMem(OPS.ld32u, 1, RV64_ENV_RELATIVE_BASE_REG, -16),
+      opMem(OPS.ld32s, 2, RV64_ENV_RELATIVE_BASE_REG, -16),
+      opMem(OPS.ld, 3, RV64_ENV_RELATIVE_BASE_REG, 0),
+      opImm20(OPS.tci_movi, 4, 0x55),
+      opMem(OPS.st8, 4, RV64_ENV_RELATIVE_BASE_REG, -12),
+      opMem(OPS.st32, 1, RV64_ENV_RELATIVE_BASE_REG, 0x100),
+      opMem(OPS.st, 3, RV64_ENV_RELATIVE_BASE_REG, 0x108),
+      OPS.exit_tb,
+    ],
+  },
 ];
 
 const liveX86Fixture = fixtures.find((fixture) =>
@@ -2890,6 +2931,23 @@ const unsupportedFixtures = [
       OPS.exit_tb,
     ],
   },
+  {
+    name: "rv64-env-relative-non-env-base-fails-closed",
+    relativeBase: 0x5c00,
+    words: [
+      opMem(OPS.ld32u, 1, 3, 0),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "rv64-env-relative-out-of-range-fails-closed",
+    relativeBase: 0x5d00,
+    words: [
+      opMem(OPS.st, 1, RV64_ENV_RELATIVE_BASE_REG,
+            RV64_ENV_RELATIVE_MAX_EXCLUSIVE - 7),
+      OPS.exit_tb,
+    ],
+  },
 ];
 
 const unsupportedX86StateFixtures = [
@@ -2956,15 +3014,17 @@ for (const fixture of r4kSoftmmuFixtures) {
   r4kSoftmmuResults.push(await runSoftmmuFixture(fixture));
 }
 
-assert.equal(results.length, 17);
+assert.equal(results.length, 19);
 assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 7);
-assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 10);
+assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 12);
 const helperBoundaryResults = results.filter((entry) =>
   entry.helpers.loads > 0 || entry.helpers.stores > 0);
 const simpleGapResults = results.filter((entry) =>
   entry.name === "simple-gap-ops-validate");
 const rv64BootPathResults = results.filter((entry) =>
   entry.name.startsWith("rv64-boot-"));
+const rv64EnvRelativeResults = results.filter((entry) =>
+  entry.name.startsWith("rv64-env-relative-"));
 const liveX86Results = results.filter((entry) =>
   entry.name === "live-x86-pre-r4i-ld32u-goto-tb-13");
 const r4iEmitterResults = results.filter((entry) =>
@@ -3012,6 +3072,24 @@ assert.equal(
 assert.deepEqual(
   rv64BootPathResults.map((entry) => entry.generatedTciOpEquivalents),
   [11, 11, 6, 6],
+);
+assert.equal(rv64EnvRelativeResults.length, 2);
+assert.deepEqual(
+  [...new Set(rv64EnvRelativeResults.map((entry) => entry.name))],
+  ["rv64-env-relative-load-store-family"],
+);
+assert.deepEqual(
+  rv64EnvRelativeResults.map((entry) => [
+    entry.generatedTciOpEquivalents,
+    entry.inlineTlbHitLoads,
+    entry.inlineTlbHitStores,
+    entry.helpers.loads,
+    entry.helpers.stores,
+  ]),
+  [
+    [8, 3, 3, 0, 0],
+    [8, 3, 3, 0, 0],
+  ],
 );
 assert.deepEqual(
   r4iEmitterResults[0].x86CpuStateContract.generalRegisters.loadedInputRegisters,
@@ -3408,6 +3486,32 @@ console.log(JSON.stringify({
   unsupportedX86StateFixtures: unsupportedX86StateResults,
   helperBoundaryFixtures: helperBoundaryResults.length,
   simpleGapFixtures: simpleGapResults.length,
+  rv64EnvRelativeFixtures: {
+    fixtureExecutions: rv64EnvRelativeResults.length,
+    fixtureNames: [...new Set(rv64EnvRelativeResults.map((entry) =>
+      entry.name))],
+    baseRegister: `tcg-temp-${RV64_ENV_RELATIVE_BASE_REG}`,
+    minOffset: RV64_ENV_RELATIVE_MIN_OFFSET,
+    maxExclusiveOffset: RV64_ENV_RELATIVE_MAX_EXCLUSIVE,
+    generatedTciOpEquivalents: rv64EnvRelativeResults.reduce((count, entry) =>
+      count + entry.generatedTciOpEquivalents, 0),
+    inlineTlbHitLoads: rv64EnvRelativeResults.reduce((count, entry) =>
+      count + entry.inlineTlbHitLoads, 0),
+    inlineTlbHitStores: rv64EnvRelativeResults.reduce((count, entry) =>
+      count + entry.inlineTlbHitStores, 0),
+    helperCalls: rv64EnvRelativeResults.reduce((count, entry) =>
+      count + entry.helpers.loads + entry.helpers.stores, 0),
+    opFamilies: [
+      "ld32u-env-relative",
+      "ld32s-env-relative",
+      "ld-env-relative",
+      "st8-env-relative",
+      "st32-env-relative",
+      "st-env-relative",
+      "non-env-base-fail-closed",
+      "out-of-range-fail-closed",
+    ],
+  },
   rv64BootPathFixtures: {
     fixtureExecutions: rv64BootPathResults.length,
     fixtureNames: [...new Set(rv64BootPathResults.map((entry) => entry.name))],
