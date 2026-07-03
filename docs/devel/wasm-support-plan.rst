@@ -8208,3 +8208,77 @@ validation diagnostics testable in-process under piped Node execution.
 
 This is target-neutral contract evidence only.  It does not claim x86_64
 lowering, x86_64 Linux speedup, or any live R4i generated-TB result.
+
+R4d live-coverage attribution - 2026-07-03
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The accepted RISC-V accelerator chain through QEMU commit ``e00cb87892``
+added the R4d-b live RV64 generated-coverage probe, fixed live translation
+metadata side-cache collisions in ``4cee31ce5e``, added RV64 boot-path
+equivalence fixtures in ``a20a292b4b``, added bounded env-relative
+direct-memory lowering in ``890c05cd26``, and added the hot-block histogram
+coverage gate in ``e00cb87892``.
+
+Supervisor Chrome coverage runs r1-r5 were recorded under
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-r4d-coverage``.
+They used Chrome ``149.0.7827.201`` with the saved CDP harness
+``node /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-r4d-coverage/cdp-runner.mjs``
+against Chrome CDP port ``9229`` and smoke server port ``8109``.  The smoke
+URL used ``machine=virt``, blank ``cpu``, ``memory=512M``, ``network=none``,
+``rootfsDevice=virtio-pci``, marker ``Welcome to TuxTest``,
+``timeoutMs=180000``, ``wasm64LiveTbCoverage=1``, the pinned TuxBoot RISC-V
+kernel/rootfs, and the accepted R4b accelerator artifacts:
+
+* ``qemu-system-riscv64.js`` =
+  ``64f5c1aaab099fd5340971359f2d84c79d1f3933f4c7cf89d2276c56fbcc1b0a``;
+* ``qemu-system-riscv64.wasm`` =
+  ``c7395de68e9cfde1e1648dbc4656044cfc7caaeb5135ab90509af25830c9b7c2``;
+* manifest =
+  ``22308952901e5978f2fa4fef282404bc7328b4a41161938352faf34e0bbf2714``.
+
+The result JSONs and marker timings were:
+
+* r1:
+  ``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-r4d-coverage/cdp-r4d-coverage-result.json``
+  (SHA256
+  ``a5224191967e5811369e74368e6fccafa265493e28bf12a99f32d5a008652cd1``),
+  marker at ``37758`` ms;
+* r2:
+  ``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-r4d-coverage/cdp-r4d-coverage-r2-result.json``
+  (SHA256
+  ``9d862d3a63a8d7ac4f3ce09be8a599c2695c3f6ae18d0cb43ea059041cda45d9``),
+  marker at ``35819`` ms;
+* r3:
+  ``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-r4d-coverage/cdp-r4d-coverage-r3-result.json``
+  (SHA256
+  ``626ff659d1949f749a2141421219544c626e97415d34fe498e74fbc3667876b6``),
+  marker at ``58899`` ms;
+* r4:
+  ``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-r4d-coverage/cdp-r4d-coverage-r4-result.json``
+  (SHA256
+  ``3250fe857f763564a35a489297650615574ce79ea9dbc1675600100954073e36``),
+  marker at ``43282`` ms;
+* r5:
+  ``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-r4d-coverage/cdp-r4d-coverage-r5-result.json``
+  (SHA256
+  ``e024c95c355674617e693e5df503c7c0bf767a036d982702a7a35811c3e2b60d``),
+  marker at ``38300`` ms.
+
+The accepted coverage progression was:
+
+* r1/r2 were pre-fix probes.  Each scanned ``50000`` live TBs and found zero
+  resolvable metadata, so no generated live TB shape could run.
+* r3, after metadata side-cache collision fix ``4cee31ce5e``, reported
+  ``has_metadata=true``.  The first blocker op was ``ld32u``.
+* r4/r5, after bounded env-relative lowering ``890c05cd26``, reported
+  ``56`` of ``58`` metadata ops generated, ``224`` generated-output bytes,
+  and next blocker op ``call``.
+
+This is R4d attribution evidence, not an R4c speed-gate pass and not a Bus
+Engine OS proof.  The live probe still did not retire a fully generated live
+TB before the marker; generated execution/cache-hit coverage for the measured
+path therefore remained zero, with ``0 / 50000`` fully generated live TBs in
+the probe scan for each run.  The useful result is the narrowed next blocker:
+metadata now resolves on the live boot path, env-relative direct-memory ops
+lower in the bounded fixture-supported shape, and the next R4d implementation
+target is the ``call`` blocker before another R4c comparison.

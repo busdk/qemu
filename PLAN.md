@@ -612,6 +612,21 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-browser-smoke-runner-test.mjs`. No browser run, artifact
     build, or real RV64 generated-coverage proof was run in this harness slice,
     so R4d remains open.
+    Accepted supervisor evidence 2026-07-03: Chrome `149.0.7827.201` R4d
+    live-coverage runs r1-r5 are recorded under
+    `/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-r4d-coverage`.
+    Runs r1/r2 scanned `50000` live TBs with zero resolvable metadata before
+    the metadata side-cache collision fix `4cee31ce5e`; r3 after the fix
+    reported `has_metadata=true` and first blocker op `ld32u`; r4/r5 after
+    bounded env-relative direct-memory lowering `890c05cd26` reported `56` of
+    `58` metadata ops generated (`224` bytes) with next blocker op `call`.
+    The same accepted chain also includes the R4d-b live coverage probe,
+    rv64 boot-path equivalence fixtures `a20a292b4b`, and hot-block histogram
+    coverage gate `e00cb87892`. TuxTest marker times for r1-r5 were
+    `37758`, `35819`, `58899`, `43282`, and `38300` ms. These runs provide
+    R4d attribution evidence only: no R4c speed-pass claim or Bus Engine OS
+    proof is made, and R4d remains open for nonzero real generated execution
+    coverage.
   - [x] R4d-b - Add the opt-in live RV64 generated-coverage probe before the
     next browser proof. DoD: a deterministic implementation slice exposes a
     browser-runner flag for live generated TB coverage, automatically enables
