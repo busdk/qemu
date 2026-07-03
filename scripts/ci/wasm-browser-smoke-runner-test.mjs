@@ -26,6 +26,7 @@ import {
   requestPowerOperation,
   serialIdleDiagnostic,
   smokeResultSummary,
+  wasm64TcgMetricGate,
 } from "./wasm-browser-smoke-runner.mjs";
 import {
   bootMilestoneForLine,
@@ -692,6 +693,13 @@ for (const status of [
     translated_metadata_misses: 1,
     fallback_unsupported: 88,
     fallback_runtime: 1,
+    translated_generated_first_unsupported_ops: [
+      {
+        op: 1,
+        name: "ld32u",
+        count: 64,
+      },
+    ],
   });
   const parsed = wasm64TcgSummary(line);
   assert.equal(parsed.event, "summary");
@@ -715,6 +723,7 @@ for (const status of [
   assert.equal(parsed.translated_fallback_markers, 8);
   assert.equal(parsed.translated_metadata_misses, 1);
   assert.equal(parsed.fallback_unsupported, 88);
+  assert.equal(parsed.translated_generated_first_unsupported_ops[0].name, "ld32u");
   assert.equal(wasm64TcgSummary("ordinary serial line"), null);
   assert.equal(wasm64TcgSummary("qemu-wasm64-tcg: not-json"), null);
 }
@@ -739,6 +748,112 @@ for (const status of [
   assert.equal(state.wasm64Tcg.summaries.length, 2);
   assert.equal(state.wasm64Tcg.summaries[0].generated_executed, 2);
   assert.equal(state.wasm64Tcg.lastSummary.elapsedMs, 30);
+}
+
+{
+  const gate = wasm64TcgMetricGate({
+    wasm64Tcg: {
+      lastSummary: {
+        generated_executed: 12,
+        generated_cache_hits: 8,
+        generated_coverage_numerator: 20,
+        generated_coverage_denominator: 1000,
+        generated_coverage_ppm: 20000,
+        translated_tbs: 128,
+        translated_generated_first_unsupported_ops: [
+          {
+            op: 1,
+            name: "ld32u",
+            count: 64,
+          },
+        ],
+      },
+    },
+  }, {
+    minCoveragePpm: 1000,
+    requireFallbackAttribution: true,
+  });
+
+  assert.equal(gate.ok, true);
+  assert.deepEqual(gate.metrics, {
+    generatedExecutions: 20,
+    coverageNumerator: 20,
+    coverageDenominator: 1000,
+    coveragePpm: 20000,
+    translatedTbs: 128,
+    unsupportedOpShapes: 1,
+    hotBlocks: 0,
+  });
+}
+
+{
+  const gate = wasm64TcgMetricGate({
+    wasm64Tcg: {
+      lastSummary: {
+        generated_executed: 0,
+        generated_cache_hits: 0,
+        generated_coverage_numerator: 0,
+        generated_coverage_denominator: 1000,
+        generated_coverage_ppm: 0,
+        translated_tbs: 128,
+        translated_generated_first_unsupported_ops: [],
+      },
+    },
+  }, {
+    requireFallbackAttribution: true,
+  });
+
+  assert.equal(gate.ok, false);
+  assert.match(
+    gate.failures.join("\n"),
+    /generated coverage numerator is zero/,
+  );
+  assert.match(
+    gate.failures.join("\n"),
+    /generated execution\/cache-hit count is zero/,
+  );
+  assert.match(
+    gate.failures.join("\n"),
+    /missing fallback attribution/,
+  );
+}
+
+{
+  const gate = wasm64TcgMetricGate({
+    hotBlocks: {
+      lastSummary: {
+        top_blocks: [
+          {
+            pc: "0xffffffff81000000",
+            execs: 1000,
+          },
+        ],
+      },
+    },
+    wasm64Tcg: {
+      lastSummary: {
+        generated_executed: 1,
+        generated_cache_hits: 0,
+        generated_coverage_numerator: 1,
+        generated_coverage_denominator: 10,
+        generated_coverage_ppm: 100000,
+        translated_tbs: 10,
+        translated_generated_first_unsupported_ops: [],
+      },
+    },
+  }, {
+    requireFallbackAttribution: true,
+  });
+
+  assert.equal(gate.ok, true);
+  assert.equal(gate.metrics.hotBlocks, 1);
+}
+
+{
+  const gate = wasm64TcgMetricGate({});
+
+  assert.equal(gate.ok, false);
+  assert.deepEqual(gate.failures, ["missing wasm64Tcg.lastSummary"]);
 }
 
 {
@@ -1404,6 +1519,9 @@ for (const status of [
     tciProgressInterval: 2000000,
     tciWasmGeneratedTrace: true,
     tciWasmGeneratedTraceLimit: 7,
+    requireWasm64TcgCoverage: true,
+    minWasm64TcgCoveragePpm: 42,
+    requireWasm64TcgFallbackAttribution: true,
     userDataDir: "/tmp/qemu-wasm-profile",
     visualMarker: "login",
     wasm64OneTbDifferential: true,
@@ -1448,6 +1566,9 @@ for (const status of [
   assert.equal(result.tciProgressInterval, 2000000);
   assert.equal(result.tciWasmGeneratedTrace, true);
   assert.equal(result.tciWasmGeneratedTraceLimit, 7);
+  assert.equal(result.requireWasm64TcgCoverage, true);
+  assert.equal(result.minWasm64TcgCoveragePpm, 42);
+  assert.equal(result.requireWasm64TcgFallbackAttribution, true);
   assert.equal(result.wasm64OneTbDifferential, true);
   assert.equal(result.wasm64RunloopSmoke, true);
   assert.equal(Object.hasOwn(result, "tciWasmSubset"), false);
@@ -1527,6 +1648,25 @@ for (const status of [
   assert.match(
     `${child.stdout}${child.stderr}`,
     /--rootfs-opfs-name must be a non-empty file name/,
+  );
+}
+
+{
+  const child = spawnSync(process.execPath, [
+    runnerPath,
+    "--artifact-dir", "/tmp/artifacts",
+    "--kernel", "/tmp/kernel",
+    "--initrd", "/tmp/initrd",
+    "--min-wasm64-tcg-coverage-ppm", "0",
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+  });
+
+  assert.equal(child.status, 2);
+  assert.match(
+    `${child.stdout}${child.stderr}`,
+    /--min-wasm64-tcg-coverage-ppm must be an integer from 1 to 1000000/,
   );
 }
 

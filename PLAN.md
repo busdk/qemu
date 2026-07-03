@@ -582,7 +582,26 @@ run that reaches a weaker marker than normal multi-user readiness.
     deterministic test proving strict TCI fallback remains the default. The
     next R4c attempt must use the same-commit default/accelerator comparison
     and beat the `25%` marker-time gate before any Bus Engine OS browser proof
-    is run.
+    is run. Progress 2026-07-03: added an opt-in browser harness metric gate
+    for the next R4d/R4c run. `scripts/ci/wasm-browser-smoke-runner.mjs` now
+    accepts `--require-wasm64-tcg-coverage`,
+    `--min-wasm64-tcg-coverage-ppm`, and
+    `--require-wasm64-tcg-fallback-attribution`; the require flags
+    automatically enable wasm64 TCG summary collection and fail the run if the
+    final result lacks nonzero generated execution/cache-hit coverage, live
+    coverage numerator/denominator/ppm, translated TBs, or requested fallback
+    attribution from unsupported op shapes or hot-block summaries.
+    Deterministic coverage in `scripts/ci/wasm-browser-smoke-runner-test.mjs`
+    exercises passing coverage, zero-coverage failure, hot-block fallback
+    attribution, missing-summary failure, CLI option parsing, and invalid
+    coverage threshold rejection. Verification passed: `node --check
+    scripts/ci/wasm-browser-smoke-runner.mjs`; `node --check
+    scripts/ci/wasm-browser-smoke-runner-test.mjs`; `git diff --check --
+    scripts/ci/wasm-browser-smoke-runner.mjs
+    scripts/ci/wasm-browser-smoke-runner-test.mjs`; and `node
+    scripts/ci/wasm-browser-smoke-runner-test.mjs`. No browser run, artifact
+    build, or real RV64 generated-coverage proof was run in this harness slice,
+    so R4d remains open.
   - [ ] R4e - Preserve the target-neutral accelerator pieces so the RISC-V
     runtime work can be reused by an x86_64 accelerator lane without copying
     or re-inventing the proof contract. DoD: document and test that the

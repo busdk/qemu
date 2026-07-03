@@ -182,6 +182,15 @@ Options:
   --wasm64-tcg-summary-interval N
                      Live translated-TB interval between wasm64 TCG summaries
                      (default: 10000)
+  --require-wasm64-tcg-coverage
+                     Fail unless the final wasm64 TCG summary reports
+                     nonzero generated live-TB coverage
+  --min-wasm64-tcg-coverage-ppm N
+                     Minimum generated coverage ppm for
+                     --require-wasm64-tcg-coverage (default: 1)
+  --require-wasm64-tcg-fallback-attribution
+                     Fail unless the final wasm64 TCG evidence includes
+                     unsupported op shapes or hot-block fallback context
   --help              Show this help
 
 Environment:
@@ -275,6 +284,9 @@ function parseArgs(argv) {
     wasm64RunloopSmoke: false,
     wasm64TcgSummary: false,
     wasm64TcgSummaryInterval: 10000,
+    requireWasm64TcgCoverage: false,
+    minWasm64TcgCoveragePpm: 1,
+    requireWasm64TcgFallbackAttribution: false,
   };
   const explicit = new Set();
 
@@ -513,6 +525,15 @@ function parseArgs(argv) {
     } else if (arg === "--wasm64-tcg-summary-interval") {
       options.wasm64TcgSummaryInterval = Number(argv[++i]);
       explicit.add("wasm64TcgSummaryInterval");
+    } else if (arg === "--require-wasm64-tcg-coverage") {
+      options.requireWasm64TcgCoverage = true;
+      explicit.add("requireWasm64TcgCoverage");
+    } else if (arg === "--min-wasm64-tcg-coverage-ppm") {
+      options.minWasm64TcgCoveragePpm = Number(argv[++i]);
+      explicit.add("minWasm64TcgCoveragePpm");
+    } else if (arg === "--require-wasm64-tcg-fallback-attribution") {
+      options.requireWasm64TcgFallbackAttribution = true;
+      explicit.add("requireWasm64TcgFallbackAttribution");
     } else if (arg === "--help") {
       usage(0);
     } else {
@@ -537,6 +558,8 @@ function parseArgs(argv) {
       "wasm64OneTbDifferential",
       "wasm64RunloopSmoke",
       "wasm64TcgSummary",
+      "requireWasm64TcgCoverage",
+      "requireWasm64TcgFallbackAttribution",
     ],
     checksumFields: ["kernel", "initrd", "rootfs"],
     integerFields: [
@@ -549,6 +572,7 @@ function parseArgs(argv) {
       "persistentDiskSizeBytes",
       "performanceAttributionInterval",
       "performanceAttributionTciInterval",
+      "minWasm64TcgCoveragePpm",
       "wasm64TcgSummaryInterval",
       "port",
       "preKeyboardWaitMs",
@@ -737,6 +761,14 @@ function parseArgs(argv) {
     usage(2);
   }
   if (
+    !Number.isInteger(options.minWasm64TcgCoveragePpm) ||
+    options.minWasm64TcgCoveragePpm <= 0 ||
+    options.minWasm64TcgCoveragePpm > 1000000
+  ) {
+    console.error("--min-wasm64-tcg-coverage-ppm must be an integer from 1 to 1000000");
+    usage(2);
+  }
+  if (
     !Number.isInteger(options.displayMinNonblackPixels) ||
     options.displayMinNonblackPixels <= 0
   ) {
@@ -839,6 +871,12 @@ function parseArgs(argv) {
   }
   if (options.wasm === null) {
     options.wasm = defaultWasmForProgram(options.program);
+  }
+  if (
+    options.requireWasm64TcgCoverage ||
+    options.requireWasm64TcgFallbackAttribution
+  ) {
+    options.wasm64TcgSummary = true;
   }
 
   return options;
@@ -1291,6 +1329,111 @@ export function displayContextErrorEvidence(error) {
   };
 }
 
+function numericMetric(object, field) {
+  const value = object && object[field];
+  return Number.isFinite(value) ? value : 0;
+}
+
+export function wasm64TcgMetricGate(result, {
+  minCoveragePpm = 1,
+  requireFallbackAttribution = false,
+} = {}) {
+  const failures = [];
+  const wasm64Tcg = result && result.wasm64Tcg ? result.wasm64Tcg : null;
+  const summary = wasm64Tcg && wasm64Tcg.lastSummary
+    ? wasm64Tcg.lastSummary
+    : null;
+
+  if (summary === null) {
+    return {
+      ok: false,
+      failures: ["missing wasm64Tcg.lastSummary"],
+      metrics: null,
+    };
+  }
+
+  const generatedExecutions =
+    numericMetric(summary, "generated_executed") +
+    numericMetric(summary, "generated_cache_hits");
+  const coverageNumerator =
+    numericMetric(summary, "generated_coverage_numerator");
+  const coverageDenominator =
+    numericMetric(summary, "generated_coverage_denominator");
+  const coveragePpm = numericMetric(summary, "generated_coverage_ppm");
+  const translatedTbs = numericMetric(summary, "translated_tbs");
+  const unsupportedOps = Array.isArray(
+    summary.translated_generated_first_unsupported_ops,
+  )
+    ? summary.translated_generated_first_unsupported_ops
+    : [];
+  const hotBlocks =
+    result &&
+    result.hotBlocks &&
+    result.hotBlocks.lastSummary &&
+    Array.isArray(result.hotBlocks.lastSummary.top_blocks)
+      ? result.hotBlocks.lastSummary.top_blocks
+      : [];
+
+  if (translatedTbs <= 0) {
+    failures.push("wasm64 TCG summary did not report live translated TBs");
+  }
+  if (coverageDenominator <= 0) {
+    failures.push("generated coverage denominator is zero");
+  }
+  if (coverageNumerator <= 0) {
+    failures.push("generated coverage numerator is zero");
+  }
+  if (generatedExecutions <= 0) {
+    failures.push("generated execution/cache-hit count is zero");
+  }
+  if (coveragePpm < minCoveragePpm) {
+    failures.push(
+      `generated coverage ${coveragePpm} ppm is below required ${minCoveragePpm} ppm`,
+    );
+  }
+  if (
+    requireFallbackAttribution &&
+    unsupportedOps.length === 0 &&
+    hotBlocks.length === 0
+  ) {
+    failures.push(
+      "missing fallback attribution: no unsupported op shapes or hot blocks",
+    );
+  }
+
+  return {
+    ok: failures.length === 0,
+    failures,
+    metrics: {
+      generatedExecutions,
+      coverageNumerator,
+      coverageDenominator,
+      coveragePpm,
+      translatedTbs,
+      unsupportedOpShapes: unsupportedOps.length,
+      hotBlocks: hotBlocks.length,
+    },
+  };
+}
+
+function validateWasm64TcgMetricGate(options, result) {
+  if (
+    !options.requireWasm64TcgCoverage &&
+    !options.requireWasm64TcgFallbackAttribution
+  ) {
+    return;
+  }
+
+  const gate = wasm64TcgMetricGate(result, {
+    minCoveragePpm: options.minWasm64TcgCoveragePpm,
+    requireFallbackAttribution: options.requireWasm64TcgFallbackAttribution,
+  });
+  result.wasm64TcgMetricGate = gate;
+  if (!gate.ok) {
+    throw new Error(`wasm64 TCG metric gate failed: ${gate.failures.join("; ")}`);
+  }
+}
+
 function displayPixelSummarySource() {
   return `(${displayPixelSummary.toString()})`;
 }
@@ -1558,6 +1701,12 @@ export function initialSmokeResult(options, browserVersion) {
     wasm64TcgSummaryInterval: Number.isInteger(options.wasm64TcgSummaryInterval)
       ? options.wasm64TcgSummaryInterval
       : 10000,
+    requireWasm64TcgCoverage: Boolean(options.requireWasm64TcgCoverage),
+    minWasm64TcgCoveragePpm: Number.isInteger(options.minWasm64TcgCoveragePpm)
+      ? options.minWasm64TcgCoveragePpm
+      : 1,
+    requireWasm64TcgFallbackAttribution:
+      Boolean(options.requireWasm64TcgFallbackAttribution),
     userDataDir: options.userDataDir,
     visualMarker: options.visualMarker,
     success: false,
@@ -1962,6 +2111,7 @@ async function run() {
     await flushDiagnostics();
     await sampleSmokeProgress(page, result, startTime, "final", options.progressSampleLimit);
     await capturePageText(page, result, options.pageTextTailBytes);
+    validateWasm64TcgMetricGate(options, result);
     await captureDisplayEvidence(page, result);
     validateDisplayEvidence(options, result);
     await captureScreenshot(page, options, result);
