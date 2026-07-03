@@ -810,6 +810,94 @@ run that reaches a weaker marker than normal multi-user readiness.
     translated-output Linux TBs to `wasmjit_run()`. The next accelerator
     item must close that semantic descriptor gap with deterministic tests and
     then rerun this probe before another speed gate.
+  - [x] R4f - Attribute live run-loop attach failures before broadening the
+    descriptor ABI. Prediction: this should not improve marker time; it
+    should split `unsupported_hot_tb` into generated-op rejections,
+    semantic-shape rejections, and other rejects, and report the top first op
+    for semantic-shape rejects. The result decides whether the next
+    implementation step should support more generated-output opcodes or
+    teach `wasmjit_run()` descriptors to represent existing generated-output
+    shapes. DoD: deterministic tests cover the new counters and JSON shape,
+    the browser diagnostic records the split counts from a current backend
+    artifact, and no generated Linux TB execution or speed-gate claim is made
+    from this diagnostic. Accepted 2026-07-03: `TCGWasm64Counters` now
+    reports `runloop_attach_probe_unsupported_generated_ops`,
+    `runloop_attach_probe_unsupported_semantic_shape`,
+    `runloop_attach_probe_unsupported_other`, and the top
+    `runloop_attach_probe_semantic_first_ops`. The first R4f artifact was
+    rejected because the semantic first-op histogram was a static
+    thread-global and could exceed the semantic-shape rejection count; the
+    accepted implementation keeps the histogram inside `TCGWasm64Counters`
+    and merges it through the normal summary aggregation paths.
+
+    Checks: `git diff --check`,
+    `node --check scripts/ci/wasm-browser-smoke-runner.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke.mjs`,
+    `python3 scripts/ci/wasm-build-artifacts-local-test.py`,
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`,
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node scripts/ci/wasmjit-runloop-model-test.mjs`, and
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs` outside the sandbox
+    because sandboxed child-process spawning drops the expected stderr.
+
+    Artifact build command:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4f-riscv64-attach-attribution-v2-artifacts
+    --target riscv64 --tcg-wasm64-backend --jobs auto --build-image`.
+    Meson reported `TCG backend: experimental wasm64 with TCI fallback`.
+    Artifact hashes: `qemu-system-riscv64.js`
+    `610a375edc8d25c8e782babb266bcf0cc8fec367e191b45172750e57f1dc51cd`,
+    `qemu-system-riscv64.wasm`
+    `a83bf6a5cabaa1ad43aed41a1dfefc19a077d188bdb5712c979d2a9fa5d217de`,
+    manifest
+    `404ec1c35ff81074cce28d3371598e5654f979ebd069876db3a45177b6daccd2`,
+    SHA256SUMS
+    `0998eba96bb21041b3564b2c43d044296412cfc18133614920f00729a85700ef`.
+
+    Browser diagnostic command:
+    `npm exec --yes --package=playwright -- node
+    scripts/ci/wasm-browser-smoke-runner.mjs --artifact-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4f-riscv64-attach-attribution-v2-artifacts
+    --guest-manifest
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-guest/tuxboot-browser-smoke-guest.json
+    --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4f-riscv64-attach-attribution-v2-smoke/wasm-browser-smoke-result.json
+    --screenshot
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4f-riscv64-attach-attribution-v2-smoke/wasm-browser-smoke.png
+    --timeout-ms 180000 --progress-sample-interval-ms 10000
+    --progress-sample-limit 40 --wasm64-tcg-summary
+    --wasm64-tcg-summary-interval 50000 --wasm64-tcg-summary-limit 4
+    --wasm64-runloop-attach-probe`. Chromium `149.0.7827.55` reached
+    `Welcome to TuxTest` in `145265` ms. Result JSON hash:
+    `bd816e344e9ca83c97dc028f11061fc66d1eede4b54ba95191da9fe42b70c316`;
+    screenshot hash:
+    `62325f7c3d749a4efa8a683a015664c8951cf4be1ba5c194519e43ee54655343`.
+
+    The final summary again reported zero generated attempts, compiled
+    blocks, or executed blocks, so R4f is not a speed-gate result. It
+    reported `translated_tbs=42614`, `translated_ops=1494226`,
+    `translated_metadata_misses=157386`,
+    `translated_generated_output_tbs=22346`,
+    `translated_generated_output_ops=733451`,
+    `exec_generated_output_lookup_tbs=42614`, and
+    `exec_generated_output_available_tbs=22346`. The attach probe sampled
+    `200000` TB entries and found `ready_tbs=0`, `ready_ops=0`,
+    `missing_metadata=157386`, `unsupported_hot_tb=42614`,
+    `unsupported_generated_ops=20268`,
+    `unsupported_semantic_shape=22346`, `unsupported_other=0`,
+    `no_generated_output=0`, and `output_truncated=0`. The semantic
+    first-op histogram sums exactly to `unsupported_semantic_shape`:
+    `ld32u=21968` and `tci_movi=378`. The generated-op rejection histogram
+    is dominated by `call=20109`, followed by `not=107`, `sar=107`,
+    `divu=81`, `br=35`, `remu=21`, `divs=18`, and `mulu2=12`.
+
+    Accepted conclusion: the next accelerator implementation should not run
+    another browser speed gate yet. It should first teach the run-loop
+    descriptor path to represent load-first translated-output shapes
+    dominated by `ld32u`, while separately deciding whether `call`-heavy TBs
+    become helper exits, fallback markers, or a later generated-helper
+    boundary. This is the evidence-backed next step toward a real
+    `wasmjit_run()` accelerator.
 - [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
   accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
   cold in browser-hosted QEMU/WASM with the accelerator and reaches

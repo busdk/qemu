@@ -29,6 +29,8 @@ typedef enum TCGWasm64ExitReason {
     TCG_WASM64_EXIT__MAX,
 } TCGWasm64ExitReason;
 
+#define TCG_WASM64_OP_HISTOGRAM_SIZE 256u
+
 /*
  * Execution counters reported by the experimental backend.
  *
@@ -76,8 +78,13 @@ typedef struct TCGWasm64Counters {
     uint64_t runloop_attach_probe_invalid_metadata;
     uint64_t runloop_attach_probe_non_terminal;
     uint64_t runloop_attach_probe_unsupported_hot_tb;
+    uint64_t runloop_attach_probe_unsupported_generated_ops;
+    uint64_t runloop_attach_probe_unsupported_semantic_shape;
+    uint64_t runloop_attach_probe_unsupported_other;
     uint64_t runloop_attach_probe_no_generated_output;
     uint64_t runloop_attach_probe_output_truncated;
+    uint64_t runloop_attach_probe_semantic_first_ops[
+        TCG_WASM64_OP_HISTOGRAM_SIZE];
     uint64_t fallback_unsupported;
     uint64_t fallback_helper;
     uint64_t fallback_qemu_load;

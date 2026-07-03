@@ -228,10 +228,20 @@ void tcg_wasm64_counters_add(TCGWasm64Counters *dst,
         src->runloop_attach_probe_non_terminal;
     dst->runloop_attach_probe_unsupported_hot_tb +=
         src->runloop_attach_probe_unsupported_hot_tb;
+    dst->runloop_attach_probe_unsupported_generated_ops +=
+        src->runloop_attach_probe_unsupported_generated_ops;
+    dst->runloop_attach_probe_unsupported_semantic_shape +=
+        src->runloop_attach_probe_unsupported_semantic_shape;
+    dst->runloop_attach_probe_unsupported_other +=
+        src->runloop_attach_probe_unsupported_other;
     dst->runloop_attach_probe_no_generated_output +=
         src->runloop_attach_probe_no_generated_output;
     dst->runloop_attach_probe_output_truncated +=
         src->runloop_attach_probe_output_truncated;
+    for (size_t i = 0; i < TCG_WASM64_OP_HISTOGRAM_SIZE; i++) {
+        dst->runloop_attach_probe_semantic_first_ops[i] +=
+            src->runloop_attach_probe_semantic_first_ops[i];
+    }
     dst->fallback_unsupported += src->fallback_unsupported;
     dst->fallback_helper += src->fallback_helper;
     dst->fallback_qemu_load += src->fallback_qemu_load;
@@ -318,10 +328,20 @@ static void tcg_wasm64_counters_add_translation(TCGWasm64Counters *dst,
         src->runloop_attach_probe_non_terminal;
     dst->runloop_attach_probe_unsupported_hot_tb +=
         src->runloop_attach_probe_unsupported_hot_tb;
+    dst->runloop_attach_probe_unsupported_generated_ops +=
+        src->runloop_attach_probe_unsupported_generated_ops;
+    dst->runloop_attach_probe_unsupported_semantic_shape +=
+        src->runloop_attach_probe_unsupported_semantic_shape;
+    dst->runloop_attach_probe_unsupported_other +=
+        src->runloop_attach_probe_unsupported_other;
     dst->runloop_attach_probe_no_generated_output +=
         src->runloop_attach_probe_no_generated_output;
     dst->runloop_attach_probe_output_truncated +=
         src->runloop_attach_probe_output_truncated;
+    for (size_t i = 0; i < TCG_WASM64_OP_HISTOGRAM_SIZE; i++) {
+        dst->runloop_attach_probe_semantic_first_ops[i] +=
+            src->runloop_attach_probe_semantic_first_ops[i];
+    }
 }
 
 void tcg_wasm64_count_fallback(TCGWasm64Counters *counters,
@@ -493,6 +513,10 @@ const char *tcg_wasm64_run_hotset_build_status_name(
     }
 }
 
+static uint32_t tcg_wasm64_tci_op(uint32_t insn);
+static bool tcg_wasm64_metadata_base_valid(
+    const TCGWasm64TBMetadata *metadata);
+
 static void tcg_wasm64_count_runloop_attach_probe(
     TCGWasm64Counters *counters,
     TCGWasm64RunHotsetBuildStatus status,
@@ -528,6 +552,25 @@ static void tcg_wasm64_count_runloop_attach_probe(
         break;
     case TCG_WASM64_RUN_HOTSET_BUILD_UNSUPPORTED_HOT_TB:
         counters->runloop_attach_probe_unsupported_hot_tb++;
+        if (!metadata || !tcg_wasm64_metadata_base_valid(metadata)) {
+            counters->runloop_attach_probe_unsupported_other++;
+        } else if (!(metadata->flags &
+                     TCG_WASM64_TB_METADATA_GENERATED_CANDIDATE) ||
+                   metadata->generated_unsupported_op_count != 0) {
+            counters->runloop_attach_probe_unsupported_generated_ops++;
+        } else if (tcg_wasm64_translate_generated_output_available(metadata)) {
+            counters->runloop_attach_probe_unsupported_semantic_shape++;
+            if (metadata->generated_output_op_count != 0 &&
+                metadata->generated_output) {
+                uint32_t op = tcg_wasm64_tci_op(metadata->generated_output[0]);
+
+                if (op < TCG_WASM64_OP_HISTOGRAM_SIZE) {
+                    counters->runloop_attach_probe_semantic_first_ops[op]++;
+                }
+            }
+        } else {
+            counters->runloop_attach_probe_unsupported_other++;
+        }
         break;
     case TCG_WASM64_RUN_HOTSET_BUILD_NO_GENERATED_OUTPUT:
         counters->runloop_attach_probe_no_generated_output++;
@@ -2222,6 +2265,46 @@ static void tcg_wasm64_print_generated_unsupported_top(void)
     }
 }
 
+static void tcg_wasm64_print_runloop_semantic_first_top(
+    const TCGWasm64Counters *counters)
+{
+    uint32_t top_ops[8] = { 0 };
+
+    if (!counters) {
+        return;
+    }
+
+    for (uint32_t op = 0; op < TCG_WASM64_OP_HISTOGRAM_SIZE; op++) {
+        uint64_t count = counters->runloop_attach_probe_semantic_first_ops[op];
+
+        if (count == 0) {
+            continue;
+        }
+        for (size_t i = 0; i < ARRAY_SIZE(top_ops); i++) {
+            if (counters->runloop_attach_probe_semantic_first_ops[top_ops[i]] <
+                count) {
+                memmove(&top_ops[i + 1], &top_ops[i],
+                        (ARRAY_SIZE(top_ops) - i - 1) *
+                        sizeof(top_ops[0]));
+                top_ops[i] = op;
+                break;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < ARRAY_SIZE(top_ops); i++) {
+        uint32_t op = top_ops[i];
+        uint64_t count =
+            counters->runloop_attach_probe_semantic_first_ops[op];
+
+        if (count == 0) {
+            break;
+        }
+        fprintf(stderr, "%s{\"op\":%u,\"name\":\"%s\",\"count\":%" PRIu64 "}",
+                i == 0 ? "" : ",", op, tcg_wasm64_op_name(op), count);
+    }
+}
+
 void tcg_wasm64_report_summary(const char *reason,
                                const TCGWasm64Counters *counters)
 {
@@ -2291,23 +2374,12 @@ void tcg_wasm64_report_summary(const char *reason,
             "\"invalid_metadata\":%" PRIu64 ","
             "\"non_terminal\":%" PRIu64 ","
             "\"unsupported_hot_tb\":%" PRIu64 ","
+            "\"unsupported_generated_ops\":%" PRIu64 ","
+            "\"unsupported_semantic_shape\":%" PRIu64 ","
+            "\"unsupported_other\":%" PRIu64 ","
             "\"no_generated_output\":%" PRIu64 ","
             "\"output_truncated\":%" PRIu64 "},"
-            "\"fallback_unsupported\":%" PRIu64 ","
-            "\"fallback_helper\":%" PRIu64 ","
-            "\"fallback_qemu_load\":%" PRIu64 ","
-            "\"fallback_qemu_store\":%" PRIu64 ","
-            "\"fallback_runtime\":%" PRIu64 ","
-            "\"generated_compile_prereq_failed\":%" PRIu64 ","
-            "\"generated_compile_no_terminal\":%" PRIu64 ","
-            "\"generated_compile_lowering_failed\":%" PRIu64 ","
-            "\"generated_compile_module_failed\":%" PRIu64 ","
-            "\"generated_compile_table_failed\":%" PRIu64 ","
-            "\"generated_compile_instance_failed\":%" PRIu64 ","
-            "\"generated_compile_add_function_failed\":%" PRIu64 ","
-            "\"generated_compile_exception_failed\":%" PRIu64 ","
-            "\"generated_compile_unknown_failed\":%" PRIu64 ","
-            "\"translated_generated_first_unsupported_ops\":[",
+            "\"runloop_attach_probe_semantic_first_ops\":[",
             reason ? reason : "unknown",
             counters->generated_attempts,
             counters->generated_compiled,
@@ -2357,8 +2429,28 @@ void tcg_wasm64_report_summary(const char *reason,
             counters->runloop_attach_probe_invalid_metadata,
             counters->runloop_attach_probe_non_terminal,
             counters->runloop_attach_probe_unsupported_hot_tb,
+            counters->runloop_attach_probe_unsupported_generated_ops,
+            counters->runloop_attach_probe_unsupported_semantic_shape,
+            counters->runloop_attach_probe_unsupported_other,
             counters->runloop_attach_probe_no_generated_output,
-            counters->runloop_attach_probe_output_truncated,
+            counters->runloop_attach_probe_output_truncated);
+    tcg_wasm64_print_runloop_semantic_first_top(counters);
+    fprintf(stderr, "],"
+            "\"fallback_unsupported\":%" PRIu64 ","
+            "\"fallback_helper\":%" PRIu64 ","
+            "\"fallback_qemu_load\":%" PRIu64 ","
+            "\"fallback_qemu_store\":%" PRIu64 ","
+            "\"fallback_runtime\":%" PRIu64 ","
+            "\"generated_compile_prereq_failed\":%" PRIu64 ","
+            "\"generated_compile_no_terminal\":%" PRIu64 ","
+            "\"generated_compile_lowering_failed\":%" PRIu64 ","
+            "\"generated_compile_module_failed\":%" PRIu64 ","
+            "\"generated_compile_table_failed\":%" PRIu64 ","
+            "\"generated_compile_instance_failed\":%" PRIu64 ","
+            "\"generated_compile_add_function_failed\":%" PRIu64 ","
+            "\"generated_compile_exception_failed\":%" PRIu64 ","
+            "\"generated_compile_unknown_failed\":%" PRIu64 ","
+            "\"translated_generated_first_unsupported_ops\":[",
             counters->fallback_unsupported,
             counters->fallback_helper,
             counters->fallback_qemu_load,

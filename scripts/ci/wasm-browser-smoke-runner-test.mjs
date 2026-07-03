@@ -682,8 +682,14 @@ for (const status of [
       ready_ops: 35,
       missing_metadata: 10,
       unsupported_hot_tb: 70,
+      unsupported_generated_ops: 40,
+      unsupported_semantic_shape: 30,
+      unsupported_other: 0,
       no_generated_output: 13,
     },
+    runloop_attach_probe_semantic_first_ops: [
+      { op: 1, name: "add", count: 30 },
+    ],
     translated_tbs: 8,
     translated_ops: 144,
     translated_fallback_markers: 8,
@@ -711,6 +717,12 @@ for (const status of [
   assert.equal(parsed.runloop_attach_probe.ready_tbs, 7);
   assert.equal(parsed.runloop_attach_probe.ready_ops, 35);
   assert.equal(parsed.runloop_attach_probe.unsupported_hot_tb, 70);
+  assert.equal(parsed.runloop_attach_probe.unsupported_generated_ops, 40);
+  assert.equal(parsed.runloop_attach_probe.unsupported_semantic_shape, 30);
+  assert.equal(parsed.runloop_attach_probe.unsupported_other, 0);
+  assert.deepEqual(parsed.runloop_attach_probe_semantic_first_ops, [
+    { op: 1, name: "add", count: 30 },
+  ]);
   assert.equal(parsed.translated_tbs, 8);
   assert.equal(parsed.translated_ops, 144);
   assert.equal(parsed.translated_fallback_markers, 8);
