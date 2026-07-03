@@ -976,6 +976,38 @@ run that reaches a weaker marker than normal multi-user readiness.
     No browser smoke, live guest routing, broad chaining, x86 CPU-state
     contract, no-silent-fallback performance mode, or generic SoftMMU/TLB
     lowering was run or enabled; R4k remains open for slices 2-6.
+    Slice 2 accepted 2026-07-03 on branch
+    `qemu-r4k-x86-cpu-state-20260703-10`: the deterministic per-TB emitter
+    gate now records `r4iX86CpuStateContract` for the accepted R4i word shape.
+    The contract names QEMU's x86 TCG globals and backing `CPUX86State`
+    fields: general register input `CPUX86State.regs[R_R14]`,
+    dirty/required flush registers `CPUX86State.regs[R_ESP]`,
+    `CPUX86State.regs[R_EBP]`, and `CPUX86State.regs[R_R13]`,
+    `CPUX86State.eip`/`cpu_eip` as not read or written by the generated body
+    with dispatch target supplied by the recorded `goto_tb` slot, and lazy
+    condition-code fields `CPUX86State.cc_dst`, `cc_src`, `cc_src2`, and
+    `cc_op` as unmodeled except for the explicit `tci_setcond32` comparison
+    inputs from the TCI register operands. The test requires all generated
+    register locals to flush before `goto_tb`/`exit_tb` terminal return and
+    before a runtime `STATUS_UNSUPPORTED` return; the taken
+    out-of-recorded-range `brcond` guard returns status `6` with dirty locals
+    flushed (`R_ESP=4294967295`, `R_EBP=0`, `R_R13=1`). Explicit negative
+    fixtures fail closed for direct RIP/EIP write
+    (`unmodeled-rip-eip-write`), lazy CC state read
+    (`unmodeled-lazy-condition-code-state`), segment state read
+    (`unmodeled-segment-state`), and helper-sensitive state
+    (`unmodeled-helper-sensitive-state`). Local evidence reported
+    `fixtures=13`, `unsupportedFixtures=1`, `r4iPerTBEmitterFixtures=1`,
+    `r4iPerTBEmitterGeneratedGuestInstructions=1`,
+    `r4iPerTBEmitterGeneratedTciOpEquivalents=11`, zero helper, `qemu_ld`,
+    and `qemu_st` calls, and the contract fields above. Checks:
+    `git diff --check`, `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+    `node --check scripts/ci/wasm64-translate-metadata-test.mjs`, and
+    `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`.
+    No browser smoke, live guest routing, broad chaining,
+    no-silent-fallback performance mode, or generic SoftMMU/TLB lowering was
+    run or enabled; R4k remains open for slices 3-6.
   - [ ] R4l - Run the x86_64 same-commit generic Chromium speed gate only
     after R4h-R4k have deterministic evidence. DoD: build one default-TCI
     `x86_64-softmmu` artifact and one accelerator artifact from the same

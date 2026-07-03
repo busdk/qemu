@@ -23,6 +23,7 @@ const runtime = read("tcg/wasm64.c");
 const header = read("tcg/wasm64.h");
 const tci = read("tcg/tci.c");
 const tciTarget = read("tcg/tci/tcg-target.c.inc");
+const generatedEquivalence = read("scripts/ci/wasm-generated-output-equivalence-test.mjs");
 
 assert.match(target, /#define\s+tcg_out_tci_note_op\s+tcg_wasm64_note_tci_op/);
 assert.match(target, /#define\s+tcg_out32\s+tcg_wasm64_tci_out32/);
@@ -232,5 +233,21 @@ assert.doesNotMatch(tci, /addFunction\(instance\.exports\.run, "ii"\)/);
 assert.doesNotMatch(tci, /tcg_wasm64_translate_generated_output_available\(metadata\)/);
 assert.doesNotMatch(tci, /tci_wasm_generated_try_exec/);
 assert.doesNotMatch(tci, /return \[0xfe, 0x03, 0x00\]; \/\* atomic\.fence \*\//);
+
+assert.match(generatedEquivalence, /X86_CPU_STATE_CONTRACT_VERSION/);
+assert.match(generatedEquivalence, /analyzeX86CpuStateContract/);
+assert.match(generatedEquivalence, /CPUX86State\.regs\[\]/);
+assert.match(generatedEquivalence, /CPUX86State\.eip/);
+assert.match(generatedEquivalence, /CPUX86State\.cc_dst/);
+assert.match(generatedEquivalence, /CPUX86State\.cc_src/);
+assert.match(generatedEquivalence, /CPUX86State\.cc_src2/);
+assert.match(generatedEquivalence, /CPUX86State\.cc_op/);
+assert.match(generatedEquivalence, /CPUX86State\.segs\[\]/);
+assert.match(generatedEquivalence, /unmodeled-rip-eip-write/);
+assert.match(generatedEquivalence, /unmodeled-lazy-condition-code-state/);
+assert.match(generatedEquivalence, /unmodeled-segment-state/);
+assert.match(generatedEquivalence, /unmodeled-helper-sensitive-state/);
+assert.match(generatedEquivalence, /runtime unsupported return/);
+assert.match(generatedEquivalence, /r4iX86CpuStateContract/);
 
 console.log("wasm64 translate metadata contract: ok");

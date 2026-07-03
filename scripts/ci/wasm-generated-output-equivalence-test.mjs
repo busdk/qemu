@@ -76,6 +76,11 @@ const STATUS_EXIT = 1n;
 const STATUS_DISPATCH = 2n;
 const STATUS_UNSUPPORTED = 6n;
 const PER_TB_EMITTER_NAME = "r4k-per-tb-function-body-emitter";
+const X86_CPU_STATE_CONTRACT_VERSION = 1;
+const X86_REG_ENUMS = [
+  "R_EAX", "R_ECX", "R_EDX", "R_EBX", "R_ESP", "R_EBP", "R_ESI", "R_EDI",
+  "R_R8", "R_R9", "R_R10", "R_R11", "R_R12", "R_R13", "R_R14", "R_R15",
+];
 
 function vector(items) {
   return [...encodeU32(items.length), ...items.flat()];
@@ -322,6 +327,10 @@ function regLocal(reg) {
   return 3 + reg;
 }
 
+function x86RegField(reg) {
+  return `CPUX86State.regs[${X86_REG_ENUMS[reg]}]`;
+}
+
 function memoryAddress(regExpr, ofs) {
   return i32WrapI64([...regExpr, ...i64Const(ofs), 0x7c]);
 }
@@ -346,6 +355,12 @@ function compileGeneratedOutputModule(words, relativeBase, diagnostics = null) {
   }
   instructions.push(...localSet(1, i32WrapI64(i64Load(localGet(0), 0))));
   instructions.push(...localSet(2, i32WrapI64(i64Load(localGet(0), 8))));
+
+  function flushAllRegisterLocals() {
+    return Array.from({ length: 16 }, (_, reg) =>
+      i64Store(localGet(1), localGet(regLocal(reg)), reg * 8)).flat();
+  }
+
   for (let reg = 0; reg < 16; reg++) {
     instructions.push(...localSet(regLocal(reg), i64Load(localGet(1), reg * 8)));
   }
@@ -554,7 +569,10 @@ function compileGeneratedOutputModule(words, relativeBase, diagnostics = null) {
           }
           code.push(...ifBlock(
             i64Truthy(localGet(regLocal(op.r0))),
-            returnExpr(i64Const(STATUS_UNSUPPORTED)),
+            [
+              ...flushAllRegisterLocals(),
+              ...returnExpr(i64Const(STATUS_UNSUPPORTED)),
+            ],
           ));
           index++;
           continue;
@@ -588,9 +606,7 @@ function compileGeneratedOutputModule(words, relativeBase, diagnostics = null) {
     throw new Error("fixture contains unsupported generated-output shape");
   }
   instructions.push(...body);
-  for (let reg = 0; reg < 16; reg++) {
-    instructions.push(...i64Store(localGet(1), localGet(regLocal(reg)), reg * 8));
-  }
+  instructions.push(...flushAllRegisterLocals());
   instructions.push(...i64Store(
     localGet(2),
     terminal.kind === "goto_tb" ? i64Load(i32Const(terminal.ret), 0)
@@ -623,6 +639,193 @@ function compileGeneratedOutputModule(words, relativeBase, diagnostics = null) {
   ]);
 }
 
+function uniqueNumbers(values) {
+  return [...new Set(values)].sort((lhs, rhs) => lhs - rhs);
+}
+
+function analyzeX86CpuStateContract(words, relativeBase) {
+  const readRegs = [];
+  const writtenRegs = [];
+  const conditionInputs = [];
+  const branchInputs = [];
+  let terminal = null;
+
+  for (let index = 0; index < words.length; index++) {
+    const insn = words[index] >>> 0;
+    const opc = bits(insn, 0, 8);
+    const r0 = bits(insn, 8, 4);
+    const r1 = bits(insn, 12, 4);
+    const r2 = bits(insn, 16, 4);
+    const tbPtr = relativeBase + (index + 1) * 4;
+
+    if (opc === OPS.exit_tb || opc === OPS.goto_tb) {
+      terminal = {
+        op: OP_NAMES[opc],
+        index,
+        dispatchTargetSource: opc === OPS.goto_tb
+          ? "recorded goto_tb slot"
+          : "exit_tb immediate return",
+        ripEipAction: "not read or written by generated body",
+      };
+      break;
+    }
+    if (opc === OPS.ld32u || opc === OPS.ld32s || opc === OPS.ld) {
+      readRegs.push(r1);
+      writtenRegs.push(r0);
+    } else if (opc === OPS.st8 || opc === OPS.st32 || opc === OPS.st) {
+      readRegs.push(r0, r1);
+    } else if (opc === OPS.add || opc === OPS.and) {
+      readRegs.push(r1, r2);
+      writtenRegs.push(r0);
+    } else if (opc === OPS.neg || opc === OPS.shl || opc === OPS.shr ||
+               opc === OPS.extract || opc === OPS.sextract ||
+               opc === OPS.deposit) {
+      readRegs.push(r1);
+      if (opc === OPS.shl || opc === OPS.shr || opc === OPS.deposit) {
+        readRegs.push(r2);
+      }
+      writtenRegs.push(r0);
+    } else if (opc === OPS.tci_movi || opc === OPS.tci_movl) {
+      writtenRegs.push(r0);
+    } else if (opc === OPS.tci_setcond32) {
+      readRegs.push(r1, r2);
+      writtenRegs.push(r0);
+      conditionInputs.push({
+        op: "tci_setcond32",
+        index,
+        condition: bits(insn, 20, 4),
+        lhs: x86RegField(r1),
+        rhs: x86RegField(r2),
+        result: x86RegField(r0),
+        lazyCcFields: [],
+      });
+    } else if (opc === OPS.setcond) {
+      readRegs.push(r1, r2);
+      writtenRegs.push(r0);
+      conditionInputs.push({
+        op: "setcond",
+        index,
+        condition: bits(insn, 20, 4),
+        lhs: x86RegField(r1),
+        rhs: x86RegField(r2),
+        result: x86RegField(r0),
+        lazyCcFields: [],
+      });
+    } else if (opc === OPS.brcond) {
+      readRegs.push(r0);
+      branchInputs.push({
+        op: "brcond",
+        index,
+        conditionRegister: x86RegField(r0),
+        targetIndex: targetIndexFromPtr(
+          tbPtr + sextract(insn, 12, 20), relativeBase),
+      });
+    } else if (opc === OPS.tci_qemu_ld_rrr ||
+               opc === OPS.tci_qemu_st_rrr || opc === OPS.call) {
+      return {
+        ok: false,
+        reason: "unmodeled-helper-sensitive-state",
+        op: OP_NAMES[opc],
+        index,
+      };
+    } else {
+      return {
+        ok: false,
+        reason: "unmodeled-x86-tcg-op-state",
+        op: OP_NAMES[opc] || `opcode-${opc}`,
+        index,
+      };
+    }
+  }
+
+  if (terminal === null) {
+    return { ok: false, reason: "missing-terminal" };
+  }
+
+  const inputRegs = uniqueNumbers(readRegs.filter((reg) =>
+    !writtenRegs.includes(reg)));
+  const dirtyRegs = uniqueNumbers(writtenRegs);
+
+  return {
+    ok: true,
+    version: X86_CPU_STATE_CONTRACT_VERSION,
+    target: "x86_64-softmmu",
+    emitter: PER_TB_EMITTER_NAME,
+    source: "recorded TCI words plus target/i386 TCG globals",
+    generalRegisters: {
+      qemuGlobal: "target/i386 cpu_regs[]",
+      cpuStateStorage: "CPUX86State.regs[]",
+      loadedInputRegisters: inputRegs.map(x86RegField),
+      dirtyRegisters: dirtyRegs.map(x86RegField),
+      flushedRegisterLocals: "all 16 CPUX86State.regs[] slots before terminal return",
+      requiredDirtyFlushRegisters: dirtyRegs.map(x86RegField),
+    },
+    ripEip: {
+      field: "CPUX86State.eip",
+      qemuGlobal: "target/i386 cpu_eip",
+      bodyAccess: terminal.ripEipAction,
+      dispatchTarget: terminal.dispatchTargetSource,
+      failClosedReasons: [
+        "unmodeled-rip-eip-read",
+        "unmodeled-rip-eip-write",
+      ],
+    },
+    lazyConditionCodes: {
+      fields: [
+        "CPUX86State.cc_dst",
+        "CPUX86State.cc_src",
+        "CPUX86State.cc_src2",
+        "CPUX86State.cc_op",
+      ],
+      bodyAccess: "not read or written by the R4i generated body",
+      modeledInputs: conditionInputs,
+      failClosedReason: "unmodeled-lazy-condition-code-state",
+    },
+    branchInputs,
+    flushPoints: [
+      {
+        before: "goto_tb dispatch or exit_tb return",
+        required: "flush dirty CPUX86State.regs[] locals before publishing return target/status",
+      },
+      {
+        before: "runtime unsupported return",
+        required: "flush CPUX86State.regs[] locals before returning STATUS_UNSUPPORTED",
+      },
+    ],
+    unmodeledFailClosedFields: [
+      "CPUX86State.eflags",
+      "CPUX86State.segs[]",
+      "CPUX86State.hflags writes",
+      "CPUX86State.cc_* lazy flag state",
+      "helper-visible architectural side effects",
+    ],
+  };
+}
+
+function x86StateRequirementSupported(requirement) {
+  if (requirement.field === "CPUX86State.regs[]" &&
+      ["read", "write", "flush"].includes(requirement.access)) {
+    return { ok: true };
+  }
+  if (requirement.field === "CPUX86State.eip" &&
+      requirement.access === "dispatch-target") {
+    return { ok: true };
+  }
+  if (requirement.field === "CPUX86State.eip") {
+    return { ok: false, reason: `unmodeled-rip-eip-${requirement.access}` };
+  }
+  if (requirement.field.startsWith("CPUX86State.cc_")) {
+    return { ok: false, reason: "unmodeled-lazy-condition-code-state" };
+  }
+  if (requirement.field.startsWith("CPUX86State.segs")) {
+    return { ok: false, reason: "unmodeled-segment-state" };
+  }
+  if (requirement.field === "helper-visible-state") {
+    return { ok: false, reason: "unmodeled-helper-sensitive-state" };
+  }
+  return { ok: false, reason: "unmodeled-x86-cpu-state" };
+}
+
 function failClosedReason(error) {
   const message = error instanceof Error ? error.message : String(error);
 
@@ -637,6 +840,7 @@ function failClosedReason(error) {
 
 function emitPerTBFunctionBody(words, relativeBase) {
   const diagnostics = {};
+  const stateContract = analyzeX86CpuStateContract(words, relativeBase);
 
   try {
     const moduleBytes = compileGeneratedOutputModule(words, relativeBase,
@@ -652,6 +856,7 @@ function emitPerTBFunctionBody(words, relativeBase) {
         moduleBytes,
         moduleValid,
         runtimeUnsupportedGuards: diagnostics.runtimeUnsupportedGuards,
+        x86CpuStateContract: stateContract,
       };
     }
     return {
@@ -663,6 +868,7 @@ function emitPerTBFunctionBody(words, relativeBase) {
       moduleValid,
       moduleByteLength: moduleBytes.length,
       runtimeUnsupportedGuards: diagnostics.runtimeUnsupportedGuards,
+      x86CpuStateContract: stateContract,
     };
   } catch (error) {
     return {
@@ -673,6 +879,7 @@ function emitPerTBFunctionBody(words, relativeBase) {
       shape: decodedShape(words),
       moduleValid: false,
       runtimeUnsupportedGuards: diagnostics.runtimeUnsupportedGuards || [],
+      x86CpuStateContract: stateContract,
     };
   }
 }
@@ -972,7 +1179,41 @@ async function runFixture(fixture, seed) {
     moduleValid: emission.moduleValid,
     moduleByteLength: emission.moduleByteLength,
     runtimeUnsupportedGuards: emission.runtimeUnsupportedGuards,
+    x86CpuStateContract: emission.x86CpuStateContract,
     helpers: generatedState.helpers,
+  };
+}
+
+async function runRuntimeUnsupportedGuardFixture(fixture, seed) {
+  const generated = createState(fixture.relativeBase, fixture.words, seed);
+  const emission = emitPerTBFunctionBody(fixture.words, fixture.relativeBase);
+
+  assert.equal(emission.ok, true, `${fixture.name} emitter failed closed`);
+  assert.deepEqual(
+    emission.runtimeUnsupportedGuards.map((guard) => guard.reason),
+    ["branch-target-outside-recorded-words"],
+  );
+
+  const compiled = await WebAssembly.compile(emission.moduleBytes);
+  const instance = await WebAssembly.instantiate(compiled, {
+    env: {
+      memory: generated.memory,
+      qemu_ld_rrr: generated.helpers.qemuLd,
+      qemu_st_rrr: generated.helpers.qemuSt,
+    },
+  });
+  const status = instance.exports.run(generated.ctxPtr);
+
+  return {
+    status: status.toString(),
+    flushedRegs: {
+      [x86RegField(4)]:
+        generated.view.getBigUint64(generated.regsPtr + 4 * 8, true).toString(),
+      [x86RegField(5)]:
+        generated.view.getBigUint64(generated.regsPtr + 5 * 8, true).toString(),
+      [x86RegField(13)]:
+        generated.view.getBigUint64(generated.regsPtr + 13 * 8, true).toString(),
+    },
   };
 }
 
@@ -1085,8 +1326,32 @@ const unsupportedFixtures = [
   },
 ];
 
+const unsupportedX86StateFixtures = [
+  {
+    name: "x86-rip-eip-write-fails-closed",
+    requirement: { field: "CPUX86State.eip", access: "write" },
+    reason: "unmodeled-rip-eip-write",
+  },
+  {
+    name: "x86-lazy-cc-state-fails-closed",
+    requirement: { field: "CPUX86State.cc_op", access: "read" },
+    reason: "unmodeled-lazy-condition-code-state",
+  },
+  {
+    name: "x86-segment-state-fails-closed",
+    requirement: { field: "CPUX86State.segs[R_FS].base", access: "read" },
+    reason: "unmodeled-segment-state",
+  },
+  {
+    name: "x86-helper-sensitive-state-fails-closed",
+    requirement: { field: "helper-visible-state", access: "read" },
+    reason: "unmodeled-helper-sensitive-state",
+  },
+];
+
 const results = [];
 const unsupportedResults = [];
+const unsupportedX86StateResults = [];
 
 for (const fixture of fixtures) {
   for (const seed of fixture.seeds || [1, 2]) {
@@ -1102,6 +1367,17 @@ for (const fixture of unsupportedFixtures) {
   assert.equal(emission.reason, "unsupported-shape");
   assert.deepEqual(emission.runtimeUnsupportedGuards, []);
   unsupportedResults.push(fixture.name);
+}
+
+for (const fixture of unsupportedX86StateFixtures) {
+  const support = x86StateRequirementSupported(fixture.requirement);
+
+  assert.equal(support.ok, false, `${fixture.name} should fail closed`);
+  assert.equal(support.reason, fixture.reason);
+  unsupportedX86StateResults.push({
+    name: fixture.name,
+    reason: support.reason,
+  });
 }
 
 assert.equal(results.length, 13);
@@ -1133,10 +1409,60 @@ assert.equal(r4iEmitterResults[0].inlineTlbHitStores, 2);
 assert.equal(r4iEmitterResults[0].memoryWrites, 2);
 assert.equal(r4iEmitterResults[0].helpers.loads, 0);
 assert.equal(r4iEmitterResults[0].helpers.stores, 0);
+assert.equal(r4iEmitterResults[0].x86CpuStateContract.ok, true);
+assert.deepEqual(
+  r4iEmitterResults[0].x86CpuStateContract.generalRegisters.loadedInputRegisters,
+  [x86RegField(14)],
+);
+assert.deepEqual(
+  r4iEmitterResults[0].x86CpuStateContract.generalRegisters.requiredDirtyFlushRegisters,
+  [x86RegField(4), x86RegField(5), x86RegField(13)],
+);
+assert.equal(
+  r4iEmitterResults[0].x86CpuStateContract.ripEip.bodyAccess,
+  "not read or written by generated body",
+);
+assert.equal(
+  r4iEmitterResults[0].x86CpuStateContract.ripEip.dispatchTarget,
+  "recorded goto_tb slot",
+);
+assert.deepEqual(
+  r4iEmitterResults[0].x86CpuStateContract.lazyConditionCodes.modeledInputs,
+  [{
+    op: "tci_setcond32",
+    index: 2,
+    condition: 2,
+    lhs: x86RegField(4),
+    rhs: x86RegField(5),
+    result: x86RegField(13),
+    lazyCcFields: [],
+  }],
+);
+assert.deepEqual(
+  r4iEmitterResults[0].x86CpuStateContract.lazyConditionCodes.fields,
+  [
+    "CPUX86State.cc_dst",
+    "CPUX86State.cc_src",
+    "CPUX86State.cc_src2",
+    "CPUX86State.cc_op",
+  ],
+);
+assert.equal(
+  r4iEmitterResults[0].x86CpuStateContract.lazyConditionCodes.bodyAccess,
+  "not read or written by the R4i generated body",
+);
 assert.deepEqual(
   r4iEmitterResults[0].runtimeUnsupportedGuards.map((guard) => guard.reason),
   ["branch-target-outside-recorded-words"],
 );
+const r4iRuntimeUnsupported = await runRuntimeUnsupportedGuardFixture(
+  r4iLiveX86Fixture, 2);
+assert.equal(r4iRuntimeUnsupported.status, STATUS_UNSUPPORTED.toString());
+assert.deepEqual(r4iRuntimeUnsupported.flushedRegs, {
+  [x86RegField(4)]: "4294967295",
+  [x86RegField(5)]: "0",
+  [x86RegField(13)]: "1",
+});
 console.log(JSON.stringify({
   format: 1,
   event: "generated-output-equivalence",
@@ -1185,6 +1511,10 @@ console.log(JSON.stringify({
       count + entry.helpers.stores, 0),
   r4iPerTBEmitterRuntimeUnsupportedGuards:
     r4iEmitterResults.flatMap((entry) => entry.runtimeUnsupportedGuards),
+  r4iX86CpuStateContract:
+    r4iEmitterResults[0].x86CpuStateContract,
+  r4iRuntimeUnsupportedFlush: r4iRuntimeUnsupported,
+  unsupportedX86StateFixtures: unsupportedX86StateResults,
   helperBoundaryFixtures: helperBoundaryResults.length,
   simpleGapFixtures: simpleGapResults.length,
   helperCalls: {
