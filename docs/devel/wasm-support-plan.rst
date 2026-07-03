@@ -56,9 +56,10 @@ The first implementation boundary is still QEMU's normal translator pipeline:
 target attaches generated WebAssembly output or an explicit fallback marker to
 the translated block.  This keeps device models, exceptions, interrupt checks,
 and helper calls under QEMU's normal semantics.  The accelerator may use
-RISC-V-specific knowledge only behind a target guard, for example when mapping
-RISC-V CPU state offsets or deciding which TCG op shapes are required by the
-``riscv64`` virtual-server guest.
+RISC-V-specific knowledge only in target-owned translation code or data.  The
+common ``tcg/wasm64.*`` runtime must stay target-neutral: it consumes explicit
+``CPUArchState`` offsets supplied by translation metadata and must not inspect
+``TARGET_RISCV64`` or ``CPURISCVState`` directly.
 
 Generated blocks receive a single ``TCGWasm64Context *``.  The context carries
 the current TB pointer, next-TB result, ``CPUArchState`` pointer, temporary
@@ -66,8 +67,9 @@ stack, counters, and flags.  Guest integer registers, PC, and CSR-visible state
 must either remain in QEMU's normal CPU state layout or be cached in generated
 locals with a precise flush point before any exit that can observe state.  For
 RISC-V this means ``CPURISCVState`` storage such as ``gpr[32]`` and ``pc`` is
-reached through QEMU's translated global-memory operations or guarded generated
-offsets, not through a separately maintained browser-only CPU-state ABI.
+reached through QEMU's translated global-memory operations or explicit
+descriptor offsets from target-owned translation data, not through a separately
+maintained browser-only CPU-state ABI.
 
 The generated path must be opt-in until the browser speed gate is accepted.
 Unsupported or unsafe TBs keep the existing TCI execution path.  A stricter
@@ -1088,6 +1090,14 @@ op instead of assuming the final TCI word is terminal, because the real fixture
 contains additional TCI words after the first ``goto_tb``.  Unsupported
 variants, including the same prefix without an ``st8`` before the first
 terminal, still fail closed with ``unsupported_hot_tb``.
+
+The next descriptor ABI step adds explicit env-offset slots
+(``value_env_offset``, ``base_env_offset``, ``branch_env_offset``, and
+``store_env_offset``) plus an invalid sentinel.  Current trace descriptors set
+those offsets to the sentinel because the existing generated-output stream only
+contains TCI register IDs.  A later translation-owned step must fill these
+offsets from QEMU global-memory metadata before the trace descriptor can
+execute real RISC-V guest register state inside ``wasmjit_run()``.
 
 Focused checks passed:
 

@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   WASMJIT_COUNTERS,
+  WASMJIT_ENV_OFFSET_INVALID,
   WASMJIT_HOTSET,
   WASMJIT_HOTSET_TB,
   WASMJIT_RUN_CTX,
@@ -29,11 +30,11 @@ const header = read("tcg/wasm64.h");
 const runtime = read("tcg/wasm64.c");
 
 function macroValue(name) {
-  const pattern = new RegExp(`#define\\s+${name}\\s+([0-9]+)u`);
+  const pattern = new RegExp(`#define\\s+${name}\\s+(0x[0-9a-fA-F]+|[0-9]+)u`);
   const match = header.match(pattern);
 
   assert.notEqual(match, null, `missing macro ${name}`);
-  return Number(match[1]);
+  return Number.parseInt(match[1], 0);
 }
 
 assert.match(header, /typedef enum TCGWasm64RunMode/);
@@ -210,6 +211,14 @@ assert.equal(
 );
 assert.equal(macroValue("TCG_WASM64_RUN_COUNTERS_SIZE"), WASMJIT_COUNTERS.size);
 
+assert.doesNotMatch(header, /TARGET_RISCV64/);
+assert.doesNotMatch(runtime, /TARGET_RISCV64/);
+assert.doesNotMatch(runtime, /offsetof\(CPUArchState, gpr/);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_ENV_OFFSET_INVALID"),
+  WASMJIT_ENV_OFFSET_INVALID,
+);
+
 assert.match(header, /typedef enum TCGWasm64RunHotsetOp/);
 assert.match(header, /TCG_WASM64_RUN_HOTSET_OP_RAM_ADD_CONST = 1/);
 assert.match(header, /TCG_WASM64_RUN_HOTSET_OP_RAM_XOR_CONST = 2/);
@@ -233,6 +242,10 @@ for (const field of [
   "terminal_op",
   "terminal_diff",
   "flags",
+  "value_env_offset",
+  "base_env_offset",
+  "branch_env_offset",
+  "store_env_offset",
 ]) {
   assert.match(header, new RegExp(field));
 }
@@ -296,6 +309,22 @@ assert.equal(
   macroValue("TCG_WASM64_RUN_HOTSET_TB_FLAGS_OFFSET"),
   WASMJIT_HOTSET_TB.flags,
 );
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_VALUE_ENV_OFFSET_OFFSET"),
+  WASMJIT_HOTSET_TB.valueEnvOffset,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_BASE_ENV_OFFSET_OFFSET"),
+  WASMJIT_HOTSET_TB.baseEnvOffset,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_BRANCH_ENV_OFFSET_OFFSET"),
+  WASMJIT_HOTSET_TB.branchEnvOffset,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_HOTSET_TB_STORE_ENV_OFFSET_OFFSET"),
+  WASMJIT_HOTSET_TB.storeEnvOffset,
+);
 assert.equal(macroValue("TCG_WASM64_RUN_HOTSET_TB_SIZE"), WASMJIT_HOTSET_TB.size);
 assert.match(header, /typedef struct TCGWasm64RunHotset/);
 assert.match(header, /typedef enum TCGWasm64RunHotsetBuildStatus/);
@@ -345,7 +374,7 @@ assert.match(runtime, /qemu-wasm64-runloop: /);
 assert.match(runtime, /tcg_wasm64_runloop_smoke_js/);
 assert.match(runtime, /runCtxHotsetOffset = 48/);
 assert.match(runtime, /runExitValueOffset = 32/);
-assert.match(runtime, /hotsetTbSize = 64/);
+assert.match(runtime, /hotsetTbSize = 80/);
 assert.match(runtime, /hotsetOpRamAddConst = 1/);
 assert.match(runtime, /hotsetOpRamXorConst = 2/);
 assert.match(runtime, /hotsetOpAluAddConst = 3/);

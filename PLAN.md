@@ -960,6 +960,52 @@ run that reaches a weaker marker than normal multi-user readiness.
     into `wasmjit_run()` execution with measured instruction/wall-time
     metrics or rerun the attach probe to prove the descriptor gap actually
     narrowed before any browser speed gate.
+  - [x] R4h - Define the target-neutral register-state offset ABI needed
+    before trace-shaped descriptors can execute. Prediction: this should not
+    improve marker time or live attach coverage by itself; it should remove
+    the next structural blocker for executing R4g descriptors by making
+    generated Wasm consume explicit `CPUArchState` env offsets from
+    translation metadata instead of treating TCI register IDs as guest
+    register addresses. Common `tcg/wasm64.*` code must not inspect
+    `TARGET_RISCV64` or `CPURISCVState`; target-specific layout knowledge has
+    to be supplied by target-owned translation data. DoD: the hotset
+    descriptor ABI carries env-offset slots with an invalid sentinel,
+    deterministic contract tests prove the layout and prove common wasm64 code
+    remains target-neutral, and no browser speed-gate claim is made from this
+    slice. Accepted 2026-07-03: the initial common-code
+    `TARGET_RISCV64`/`CPURISCVState` guard approach failed exactly because
+    QEMU poisons target macros in target-independent TCG code. The accepted
+    replacement keeps `tcg/wasm64.*` target-neutral, appends
+    `value_env_offset`, `base_env_offset`, `branch_env_offset`, and
+    `store_env_offset` to `TCGWasm64RunHotsetTB`, adds
+    `TCG_WASM64_RUN_ENV_OFFSET_INVALID`, and initializes current descriptors
+    to that sentinel until target-owned translation metadata can supply real
+    offsets. `docs/devel/wasm-support-plan.rst` now records that common
+    wasm64 runtime code consumes explicit env offsets and must not inspect
+    `TARGET_RISCV64` or `CPURISCVState` directly.
+
+    Checks: `git diff --check`,
+    `node --check scripts/ci/wasmjit-runloop-model.mjs`,
+    `node --check scripts/ci/wasmjit-runloop-model-test.mjs`,
+    `node scripts/ci/wasmjit-runloop-model-test.mjs`,
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`, and
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`.
+
+    Artifact build command:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4h-riscv64-env-offset-abi-artifacts
+    --target riscv64 --tcg-wasm64-backend --jobs auto --build-image`.
+    Meson reported `TCG backend: experimental wasm64 with TCI fallback`.
+    Artifact hashes: `qemu-system-riscv64.js`
+    `193d33378e87dc1a829c5a220a05a13bb67198a055216af6302356cf07792fe3`,
+    `qemu-system-riscv64.wasm`
+    `d7aaae2b7706eec53746ba3f2e0894b3b51be44c2499038cfdfaeb9659836da5`,
+    manifest
+    `86236168043140f2aa8a8de82f5bc501ff513b6421050c4f3a0594f8bb6a7a59`,
+    SHA256SUMS
+    `1ffe059a4267cdd7d1246584a4b446cc41e6993253bae74aa36f0d8acd5d72ff`.
+    This slice does not execute live Linux TBs, does not improve the browser
+    marker time by itself, and does not complete R4.
 - [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
   accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
   cold in browser-hosted QEMU/WASM with the accelerator and reaches

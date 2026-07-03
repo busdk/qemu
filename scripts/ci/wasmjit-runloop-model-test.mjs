@@ -24,6 +24,7 @@ import {
   runWasmjitRunloopProbe,
   validateWasmjitRunloopContract,
   WASMJIT_EXIT_BUDGET,
+  WASMJIT_ENV_OFFSET_INVALID,
   WASMJIT_HOTSET_BUILD_STATUS,
   WASMJIT_HOTSET_OP,
   WASMJIT_RUNLOOP_MODEL_VERSION,
@@ -41,6 +42,7 @@ assert.deepEqual(encodeS64(-1n), [127]);
 assert.equal(expectedRunloopValue(0n, 0), 0n);
 assert.equal(expectedRunloopValue(0n, 1), 1n);
 assert.equal(expectedRunloopValue(0n, 2), 0x5a5bn);
+assert.equal(WASMJIT_ENV_OFFSET_INVALID, 0xffffffff);
 
 function parseOpcodes(...sources) {
   const opcodes = {};
@@ -141,6 +143,14 @@ function generatedMetadata({
     built.hotset.tbs.map((tb) => tb.immediate.toString()),
     ["1", "23130", "3"],
   );
+  assert.deepEqual(
+    built.hotset.tbs.map((tb) => tb.valueEnvOffset),
+    [
+      WASMJIT_ENV_OFFSET_INVALID,
+      WASMJIT_ENV_OFFSET_INVALID,
+      WASMJIT_ENV_OFFSET_INVALID,
+    ],
+  );
 }
 
 {
@@ -166,6 +176,10 @@ function generatedMetadata({
   assert.equal(built.hotset.tbs[0].branchCond, 2);
   assert.equal(built.hotset.tbs[0].terminalOp, opcodes.goto_tb);
   assert.equal(built.hotset.tbs[0].terminalDiff, -140);
+  assert.equal(built.hotset.tbs[0].valueEnvOffset, WASMJIT_ENV_OFFSET_INVALID);
+  assert.equal(built.hotset.tbs[0].baseEnvOffset, WASMJIT_ENV_OFFSET_INVALID);
+  assert.equal(built.hotset.tbs[0].branchEnvOffset, WASMJIT_ENV_OFFSET_INVALID);
+  assert.equal(built.hotset.tbs[0].storeEnvOffset, WASMJIT_ENV_OFFSET_INVALID);
 }
 
 assert.equal(

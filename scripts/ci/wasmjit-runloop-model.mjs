@@ -66,6 +66,8 @@ export const WASMJIT_COUNTERS = {
   size: 192,
 };
 
+export const WASMJIT_ENV_OFFSET_INVALID = 0xffffffff;
+
 export const WASMJIT_HOTSET_TB = {
   tbId: 0,
   nextTbId: 4,
@@ -82,7 +84,11 @@ export const WASMJIT_HOTSET_TB = {
   terminalOp: 52,
   terminalDiff: 56,
   flags: 60,
-  size: 64,
+  valueEnvOffset: 64,
+  baseEnvOffset: 68,
+  branchEnvOffset: 72,
+  storeEnvOffset: 76,
+  size: 80,
 };
 
 export const WASMJIT_HOTSET = {
@@ -445,6 +451,10 @@ export function buildHotsetFromMetadataModel(metadata, {
       terminalOp: semantic.terminalOp ?? 0,
       terminalDiff: semantic.terminalDiff ?? 0,
       flags: semantic.flags ?? 0,
+      valueEnvOffset: semantic.valueEnvOffset ?? WASMJIT_ENV_OFFSET_INVALID,
+      baseEnvOffset: semantic.baseEnvOffset ?? WASMJIT_ENV_OFFSET_INVALID,
+      branchEnvOffset: semantic.branchEnvOffset ?? WASMJIT_ENV_OFFSET_INVALID,
+      storeEnvOffset: semantic.storeEnvOffset ?? WASMJIT_ENV_OFFSET_INVALID,
     });
   }
 

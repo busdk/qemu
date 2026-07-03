@@ -228,6 +228,8 @@ typedef enum TCGWasm64RunHotsetOp {
     TCG_WASM64_RUN_HOTSET_OP_TRACE_LD32U_BRANCH_STORE = 5,
 } TCGWasm64RunHotsetOp;
 
+#define TCG_WASM64_RUN_ENV_OFFSET_INVALID 0xffffffffu
+
 typedef struct TCGWasm64RunHotsetTB {
     uint32_t tb_id;
     uint32_t next_tb_id;
@@ -244,6 +246,10 @@ typedef struct TCGWasm64RunHotsetTB {
     uint32_t terminal_op;
     int32_t terminal_diff;
     uint32_t flags;
+    uint32_t value_env_offset;
+    uint32_t base_env_offset;
+    uint32_t branch_env_offset;
+    uint32_t store_env_offset;
 } TCGWasm64RunHotsetTB;
 
 typedef struct TCGWasm64RunHotset {
@@ -267,7 +273,11 @@ typedef struct TCGWasm64RunHotset {
 #define TCG_WASM64_RUN_HOTSET_TB_TERMINAL_OP_OFFSET 52u
 #define TCG_WASM64_RUN_HOTSET_TB_TERMINAL_DIFF_OFFSET 56u
 #define TCG_WASM64_RUN_HOTSET_TB_FLAGS_OFFSET 60u
-#define TCG_WASM64_RUN_HOTSET_TB_SIZE 64u
+#define TCG_WASM64_RUN_HOTSET_TB_VALUE_ENV_OFFSET_OFFSET 64u
+#define TCG_WASM64_RUN_HOTSET_TB_BASE_ENV_OFFSET_OFFSET 68u
+#define TCG_WASM64_RUN_HOTSET_TB_BRANCH_ENV_OFFSET_OFFSET 72u
+#define TCG_WASM64_RUN_HOTSET_TB_STORE_ENV_OFFSET_OFFSET 76u
+#define TCG_WASM64_RUN_HOTSET_TB_SIZE 80u
 
 #define TCG_WASM64_RUN_HOTSET_TB_COUNT_OFFSET 0u
 #define TCG_WASM64_RUN_HOTSET_ENTRY_TB_ID_OFFSET 4u

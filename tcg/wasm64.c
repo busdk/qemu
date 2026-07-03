@@ -138,6 +138,14 @@ QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, terminal_diff) !=
                   TCG_WASM64_RUN_HOTSET_TB_TERMINAL_DIFF_OFFSET);
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, flags) !=
                   TCG_WASM64_RUN_HOTSET_TB_FLAGS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, value_env_offset) !=
+                  TCG_WASM64_RUN_HOTSET_TB_VALUE_ENV_OFFSET_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, base_env_offset) !=
+                  TCG_WASM64_RUN_HOTSET_TB_BASE_ENV_OFFSET_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, branch_env_offset) !=
+                  TCG_WASM64_RUN_HOTSET_TB_BRANCH_ENV_OFFSET_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotsetTB, store_env_offset) !=
+                  TCG_WASM64_RUN_HOTSET_TB_STORE_ENV_OFFSET_OFFSET);
 QEMU_BUILD_BUG_ON(sizeof(TCGWasm64RunHotsetTB) !=
                   TCG_WASM64_RUN_HOTSET_TB_SIZE);
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunHotset, tb_count) !=
@@ -866,7 +874,7 @@ EM_JS(int, tcg_wasm64_runloop_smoke_js,
     const hotsetTbOpOffset = 8;
     const hotsetTbGuestInstructionsOffset = 12;
     const hotsetTbImmediateOffset = 16;
-    const hotsetTbSize = 64;
+    const hotsetTbSize = 80;
     const hotsetOpRamAddConst = 1;
     const hotsetOpRamXorConst = 2;
     const hotsetOpAluAddConst = 3;
@@ -2108,6 +2116,11 @@ static bool tcg_wasm64_run_hotset_decode_semantic(
     }
 
     words = metadata->generated_output;
+    tb->value_env_offset = TCG_WASM64_RUN_ENV_OFFSET_INVALID;
+    tb->base_env_offset = TCG_WASM64_RUN_ENV_OFFSET_INVALID;
+    tb->branch_env_offset = TCG_WASM64_RUN_ENV_OFFSET_INVALID;
+    tb->store_env_offset = TCG_WASM64_RUN_ENV_OFFSET_INVALID;
+
     for (size_t index = 0; index < count; index++) {
         if (tcg_wasm64_tci_terminal_op(tcg_wasm64_tci_op(words[index]))) {
             terminal_index = index;
