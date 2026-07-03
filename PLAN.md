@@ -456,12 +456,69 @@ run that reaches a weaker marker than normal multi-user readiness.
     This is a deterministic preflight over the local TCI-like model plus a
     compile-checked artifact, not the R4 browser speed gate and not proof that
     Linux boot is accelerated.
-  - [ ] R4b - Add a same-artifact Emscripten runtime microbench that compares
+  - [x] R4b - Add a same-artifact Emscripten runtime microbench that compares
     `wasmjit_run()` against the C/TCI-like hotset interpreter path inside the
     QEMU/WASM binary and records both ALU/branch and TLB-hit RAM ratios in the
     browser result JSON. DoD: both paths execute the same hotset semantics,
     report instruction counts and wall time, and the generated path is at
-    least 3x faster for both workloads.
+    least 3x faster for both workloads. Accepted 2026-07-03:
+    `tcg/wasm64.c` now runs the opt-in runtime smoke as two named workloads
+    from the same Emscripten QEMU binary: `alu-branch` and `tlb-hit-ram`.
+    Each generated workload is compared with the matching C/TCI-like dispatch
+    loop, checks matching generated/fallback instruction counts, exit values,
+    RAM values, zero helper/`qemu_ld`/`qemu_st` calls, and requires
+    `generated_vs_tci_speedup_ppm >= 3000000`. The browser result JSON now
+    records a top-level aggregate plus a `workloads[]` array.
+    Verification before the browser run: `git diff --check`,
+    `node --check scripts/ci/wasm-browser-smoke.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke-runner.mjs`,
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`, and
+    `node scripts/ci/wasmjit-runloop-model-test.mjs`. Artifact build command:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-runtime-ratio-r2
+    --target riscv64 --tcg-wasm64-backend --build-image`. Artifact hashes:
+    `qemu-system-riscv64.js`
+    `64f5c1aaab099fd5340971359f2d84c79d1f3933f4c7cf89d2276c56fbcc1b0a`,
+    `qemu-system-riscv64.wasm`
+    `c7395de68e9cfde1e1648dbc4656044cfc7caaeb5135ab90509af25830c9b7c2`,
+    and manifest
+    `22308952901e5978f2fa4fef282404bc7328b4a41161938352faf34e0bbf2714`.
+    Browser proof used Chrome `149.0.7827.201`, `machine=virt`,
+    `rootfsDevice=virtio-pci`, `wasm64RunloopSmoke=1`, and the pinned
+    TuxBoot RISC-V kernel/rootfs. Commands: serve with
+    `node scripts/ci/wasm-browser-smoke-server.mjs --artifact-dir
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-runtime-ratio-r2
+    --kernel
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-wasm-smoke-assets/tuxboot-riscv64-Image
+    --rootfs
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-official-guest/tuxboot-riscv64-rootfs.ext4
+    --port 8109 --program qemu-system-riscv64.js --wasm
+    qemu-system-riscv64.wasm`, launch Chrome with remote debugging on
+    port `9229`, and run
+    `node
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv-rootfs-pci-cdp-runner.mjs`.
+    Result JSON:
+    `/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-runtime-ratio-r2/cdp-rootfs-pci-runloop-result.json`
+    SHA256
+    `973d059db97d3f514ed8e761dfef8e780b7bb94c32ce59f74a82fc3f57b97fb6`.
+    Screenshot:
+    `/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-runtime-ratio-r2/cdp-rootfs-pci-runloop.png`
+    SHA256
+    `d5246dccb7b53bf8582a825d077299fc08d263e2b13af63d57d3d94600b9adee`.
+    The run reached `Welcome to TuxTest` in `41503` ms. Runtime summary
+    emitted at `4063` ms with `ok=true`, budget `1000000` per workload,
+    aggregate generated/fallback guest-instruction equivalents
+    `8000000`/`8000000`, aggregate generated body time `4740000` ns,
+    aggregate C/TCI-like dispatch time `36395000` ns, aggregate speedup
+    `7678270` ppm, and zero helper/`qemu_ld`/`qemu_st` calls. Per workload:
+    `alu-branch` generated `4000000` and fallback `4000000` guest-instruction
+    equivalents, generated body `2610000` ns, C/TCI-like dispatch
+    `15765000` ns, speedup `6040229` ppm, inline TLB loads/stores `0`/`0`,
+    and matching exit/RAM values; `tlb-hit-ram` generated `4000000` and
+    fallback `4000000`, generated body `2130000` ns, C/TCI-like dispatch
+    `20630000` ns, speedup `9685446` ppm, inline TLB loads/stores
+    `1000000`/`1000000`, and matching exit/RAM values.
   - [ ] R4c - Run the same-commit generic Chromium RISC-V speed gate only
     after R4b passes. DoD: build one default-TCI artifact and one accelerator
     artifact from the same commit, run the same generic guest/marker, record

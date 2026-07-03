@@ -738,22 +738,58 @@ for (const status of [
     ok: true,
     budget: 1000000,
     exit_reason: "budget",
-    generated_guest_instructions: 4000000,
-    generated_body_time_ns: 1000000,
-    generated_chain_length: 1000000,
+    generated_guest_instructions: 8000000,
+    fallback_guest_instructions: 8000000,
+    generated_body_time_ns: 3000000,
+    tci_dispatch_time_ns: 15000000,
+    generated_vs_tci_speedup_ppm: 5000000,
+    min_generated_vs_tci_speedup_ppm: 3000000,
+    generated_chain_length: 2000000,
     inline_tlb_hit_loads: 1000000,
     inline_tlb_hit_stores: 1000000,
     helper_calls: 0,
     qemu_ld_calls: 0,
     qemu_st_calls: 0,
-    exits_budget: 1,
+    exits_budget: 2,
+    workload_count: 2,
+    workloads: [
+      {
+        name: "alu-branch",
+        ok: true,
+        generated_guest_instructions: 4000000,
+        fallback_guest_instructions: 4000000,
+        generated_body_time_ns: 1000000,
+        tci_dispatch_time_ns: 5000000,
+        generated_vs_tci_speedup_ppm: 5000000,
+        inline_tlb_hit_loads: 0,
+        inline_tlb_hit_stores: 0,
+      },
+      {
+        name: "tlb-hit-ram",
+        ok: true,
+        generated_guest_instructions: 4000000,
+        fallback_guest_instructions: 4000000,
+        generated_body_time_ns: 2000000,
+        tci_dispatch_time_ns: 10000000,
+        generated_vs_tci_speedup_ppm: 5000000,
+        inline_tlb_hit_loads: 1000000,
+        inline_tlb_hit_stores: 1000000,
+      },
+    ],
   });
   const parsed = wasm64RunloopSummary(line);
   assert.equal(parsed.event, "runtime-smoke");
   assert.equal(parsed.ok, true);
-  assert.equal(parsed.generated_guest_instructions, 4000000);
-  assert.equal(parsed.generated_chain_length, 1000000);
+  assert.equal(parsed.generated_guest_instructions, 8000000);
+  assert.equal(parsed.fallback_guest_instructions, 8000000);
+  assert.equal(parsed.generated_vs_tci_speedup_ppm, 5000000);
+  assert.equal(parsed.generated_chain_length, 2000000);
   assert.equal(parsed.inline_tlb_hit_loads, 1000000);
+  assert.equal(parsed.workload_count, 2);
+  assert.equal(parsed.workloads[0].name, "alu-branch");
+  assert.equal(parsed.workloads[0].inline_tlb_hit_loads, 0);
+  assert.equal(parsed.workloads[1].name, "tlb-hit-ram");
+  assert.equal(parsed.workloads[1].inline_tlb_hit_loads, 1000000);
   assert.equal(parsed.qemu_ld_calls, 0);
   assert.equal(wasm64RunloopSummary("ordinary serial line"), null);
   assert.equal(wasm64RunloopSummary("qemu-wasm64-runloop: not-json"), null);
