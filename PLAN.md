@@ -605,6 +605,42 @@ run that reaches a weaker marker than normal multi-user readiness.
     load/store lowering, TB chaining/hotset dispatch, and invalidation rules.
     The output must name the first deterministic x86_64 tests to write and
     the first top hot TB/op shapes that would block real generated coverage.
+    Started 2026-07-03 from existing evidence only; no code or browser run was
+    performed. Reusable from R4b/current x86 evidence: the
+    `wasmjit_run(ctx,budget)` run/exit ABI and budget-exit loop shape; runtime
+    counters for generated/fallback instruction-equivalent counts, body time,
+    C/TCI-like dispatch time, inline TLB-hit loads/stores, helpers, `qemu_ld`,
+    `qemu_st`, chain length, compile/instantiate time, and exit reason; the
+    browser parser/result JSON paths for `wasm64Runloop` and `wasm64Tcg`
+    summaries; the Emscripten module-instantiation path used by the
+    same-artifact runtime smoke; the `alu-branch` and `tlb-hit-ram` runtime
+    ratio smoke workloads; the strict/no-silent-fallback performance contract;
+    and the same-commit default-versus-accelerator Chromium speed-gate shape.
+    X86-specific before real generated execution: map `CPUX86State` general
+    registers, `eip/rip`, segment bases/limits/selectors, control registers,
+    privilege-sensitive state, and lazy flags/condition-code state; define
+    helper exits for x86 architectural helpers and side-effectful helpers;
+    lower only the measured real x86 TCG op shapes; add real x86 SoftMMU
+    TLB-hit load/store lowering for safe RAM hits; preserve exits for misses,
+    MMIO, page faults, page-crossing and permission-sensitive cases; attach
+    internal TB chaining or hotset dispatch without returning to QEMU per TB;
+    and prove generated code cannot outlive TB or address-space invalidation.
+    First deterministic tests to write: x86 CPU-state offset/register flush
+    fixture; lazy-flags/setcond/brcond equivalence fixture; segmentation and
+    privilege-sensitive fallback fixture; x86 helper-exit classification
+    fixture; SoftMMU TLB-hit load/store equivalence with miss/MMIO/page-fault
+    exits; TB invalidation/stale-code rejection fixture; and same-input
+    live-TB differential fixture that records TB identity, `TranslationBlock`
+    `icount`, register checksum, memory writes, and dispatch target. Current
+    top blockers from R4h/R4i-a evidence are the stable unsupported-op family
+    `ld32u=43978` plus `st8=22`, with the first attachable fixture shape
+    `ld32u, tci_movi, tci_setcond32, brcond, tci_movi, st8, ld, tci_movi,
+    add, st, goto_tb, exit_tb, exit_tb`; `call`-heavy TBs remain fallback
+    until a helper-exit design exists. R4f remains open because the R4e
+    target-neutral reusable-surface proof is still unchecked, and current x86
+    evidence does not record a real hot TB PC/identity plus
+    `TranslationBlock.icount` for the `ld32u`-first family; the pre-R4i
+    fixture explicitly reports `real_live_state_capture=false`.
   - [ ] R4g - Record the current x86_64 baseline and shared accelerator
     contract evidence without accepting it as real x86 acceleration. DoD:
     build current default-TCI and backend-gated `x86_64-softmmu` Emscripten

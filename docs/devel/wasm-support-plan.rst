@@ -218,6 +218,72 @@ proof must tie the generated execution to a real translated TB instance with
 ``TranslationBlock.icount`` and enough captured CPU/TB state to report nonzero
 generated guest-instruction retirement.
 
+R4f x86_64 reuse and gap map
+----------------------------
+
+R4f was started on 2026-07-03 as a documentation and evidence slice only.  No
+code, TCG, target, accelerator, or browser harness files were changed, and no
+fresh browser run was performed.  The map below uses available R4b, R4h,
+R4i-a, and current x86 smoke evidence.  It does not use RISC-V timing to
+estimate x86 progress.
+
+Reusable from the shared R4b/current x86 evidence:
+
+* the ``wasmjit_run(ctx,budget)`` run/exit ABI and budget-exit loop shape;
+* generated/fallback instruction-equivalent counters, generated body time,
+  C/TCI-like dispatch time, inline TLB-hit load/store counters, helper,
+  ``qemu_ld`` and ``qemu_st`` counters, generated chain length, compile time,
+  instantiate time, and exit reason counters;
+* browser result parsing for ``wasm64Runloop`` and ``wasm64Tcg`` summaries,
+  including the R4h fix that made summary-only x86 runs deliver
+  ``/qemu-tci-env``;
+* the Emscripten module-instantiation path used by the same-artifact runtime
+  smoke;
+* the ``alu-branch`` and ``tlb-hit-ram`` runtime ratio smoke workloads;
+* the strict/no-silent-fallback performance contract; and
+* the same-commit default-versus-accelerator Chromium speed-gate shape.
+
+X86-specific work before real generated execution:
+
+* map ``CPUX86State`` general registers, ``eip``/``rip``, segment
+  bases/limits/selectors, control registers, privilege-sensitive state, and
+  lazy flags/condition-code state into the generated execution contract;
+* define x86 helper exits for architectural helpers and side-effectful helpers;
+* lower only measured real x86 TCG op shapes needed by the selected live TB;
+* implement real x86 SoftMMU/TLB-hit RAM load/store lowering, with precise
+  exits for misses, MMIO, page faults, page-crossing accesses, and permission
+  sensitive cases;
+* attach internal TB chaining or hotset dispatch without returning to QEMU once
+  per TB on hot paths; and
+* prove generated code cannot outlive TB flush, code invalidation, or relevant
+  address-space invalidation.
+
+The first deterministic x86 tests to write are:
+
+* an x86 CPU-state offset and register-flush fixture;
+* a lazy-flags, ``setcond`` and ``brcond`` equivalence fixture;
+* a segmentation and privilege-sensitive fallback fixture;
+* an x86 helper-exit classification fixture;
+* a SoftMMU TLB-hit load/store equivalence fixture with miss, MMIO, and
+  page-fault exits;
+* a TB invalidation and stale-code rejection fixture; and
+* a same-input live-TB differential fixture that records TB identity,
+  ``TranslationBlock.icount``, register checksum, memory writes, and dispatch
+  target.
+
+The first current blockers are the R4h unsupported-op family
+``ld32u=43978`` plus ``st8=22``.  The first attachable fixture shape already
+modeled by R4i-a is:
+
+``ld32u, tci_movi, tci_setcond32, brcond, tci_movi, st8, ld, tci_movi, add, st, goto_tb, exit_tb, exit_tb``.
+
+``call``-heavy TBs remain fallback until a helper-exit design exists.  R4f is
+left open because the R4e target-neutral reusable-surface proof is still
+unchecked, and current x86 evidence does not record a real hot TB PC/identity
+plus ``TranslationBlock.icount`` for the ``ld32u``-first family.  The pre-R4i
+fixture is useful scaffolding, but it explicitly reports
+``real_live_state_capture=false``.
+
 RISC-V 64 accelerator boundary
 ==============================
 
