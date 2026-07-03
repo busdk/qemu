@@ -7798,3 +7798,62 @@ This accepts R4b.  R4c remains open: one default-TCI artifact and one
 accelerator artifact must be built from this same commit family and compared
 in the same generic RISC-V Chromium smoke, with the accelerator marker time at
 least 25 percent faster before any final Bus Engine OS browser run is claimed.
+
+On 2026-07-03, R4c was attempted from QEMU commit ``3bb1593ad0`` and did not
+pass the speed gate.  The default-TCI artifact was built with::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-r4c-default-tci \
+    --target riscv64 --build-image
+
+It produced:
+
+* ``qemu-system-riscv64.js`` =
+  ``cbf0836c26df510e1eae6ede43b86d30195975e477e0a2b5f8ca3d65181225f6``;
+* ``qemu-system-riscv64.wasm`` =
+  ``d7919529b2f7f44e61edbaa8b6b3a70ec42e7107acea64945437dbbbd5b62149``;
+* manifest =
+  ``35f69d9924ae12a587dd65b483b41d985f0d6f422ff9cc1ec216e6ef96d641c3``;
+* ``SHA256SUMS`` =
+  ``e3195fb1df814ce8faf5f47036ee7535d3e45c76cbc6b104e111c465e3dcdb61``.
+
+The accelerator artifact was the accepted R4b artifact from the same commit:
+
+* ``qemu-system-riscv64.js`` =
+  ``64f5c1aaab099fd5340971359f2d84c79d1f3933f4c7cf89d2276c56fbcc1b0a``;
+* ``qemu-system-riscv64.wasm`` =
+  ``c7395de68e9cfde1e1648dbc4656044cfc7caaeb5135ab90509af25830c9b7c2``;
+* manifest =
+  ``22308952901e5978f2fa4fef282404bc7328b4a41161938352faf34e0bbf2714``.
+
+Both browser runs used Chrome ``149.0.7827.201``, ``machine=virt``, blank CPU,
+``rootfsDevice=virtio-pci``, kernel append ``printk.time=0 root=/dev/vda
+console=ttyS0 panic=-1``, marker ``Welcome to TuxTest``, network ``none``,
+and the pinned TuxBoot RISC-V kernel/rootfs.  The default run wrote
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-r4c-default-tci/result.json``
+with SHA256
+``b4966aa9bcf62520f257c4f6a3533a35126d9010092400e082b4968110d0afb6`` and
+screenshot
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-r4c-default-tci/screenshot.png``
+with SHA256
+``addafcc0b27012e824d035a013a13b3a2cf2e2753b7bf27188f83d90ba180642``.  It
+reached the marker in ``43329`` ms.
+
+The accelerator run wrote
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-r4c-accelerator/result.json``
+with SHA256
+``8462847618a0fa315c659fb1ee480dcb08aef3fc1d2cf437271a7c0c54266083`` and
+screenshot
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-r4c-accelerator/screenshot.png``
+with SHA256
+``d5246dccb7b53bf8582a825d077299fc08d263e2b13af63d57d3d94600b9adee``.  It
+reached the marker in ``36629`` ms.
+
+This is a ``15.46%`` marker-time improvement, below the required ``25%``.
+Against this default run, the accelerator needed to reach the marker in
+``32497`` ms or faster.  This is rejected R4c evidence.  The next accepted
+implementation slice is R4d: make generated execution cover real guest
+translation blocks before ``Welcome to TuxTest``, report nonzero generated
+coverage from actual guest TBs plus top fallback PCs/TBs or unsupported op
+shapes, and preserve strict TCI fallback as the default before another R4c
+attempt.
