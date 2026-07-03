@@ -612,7 +612,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-browser-smoke-runner-test.mjs`. No browser run, artifact
     build, or real RV64 generated-coverage proof was run in this harness slice,
     so R4d remains open.
-  - [ ] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
+  - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
     but rejected only because they did not close the whole five-minute gap;
@@ -628,7 +628,73 @@ run that reaches a weaker marker than normal multi-user readiness.
     `484370d4d2` is already on `develop`; W1 address-limited Memory64 evidence
     was a `5.8%` comparison but did not change the selected artifact family;
     `origin/qemu-r4-wasmjit-speed-gate` remains the main unpromoted branch
-    requiring review and current retest before any integration.
+    requiring review and current retest before any integration. Completed
+    2026-07-03 as a precise no-integration decision for
+    `origin/qemu-r4-wasmjit-speed-gate` at
+    `a4977b9bc72ca6581cfbcfd441090792cc36c552` against current
+    `origin/develop` / `worker/qemu-partial-win-audit-20260703a` at
+    `ea36d093165c273b4eafb3612e20d48d6f6d44e7`. The reviewed branch contains
+    commits `822d2e0064`, `ea6c39c591`, `9d3726a6ad`, `a50699595b`,
+    `101d157e7a`, `7c139871c8`, `6f30dea20f`, `77b710d544`,
+    `71052f7369`, `07796d5110`, `4c71b28d0d`, `502d3f1960`,
+    `2a4fd84791`, and `a4977b9bc7` after merge base
+    `a0ae7bd2ef74a0cb09b530dccf8e83b48673b89b`. Classification: target-neutral
+    runloop/hotset/env-offset infrastructure exists in the branch, but current
+    `develop` has already accepted the reusable R4e contract and then moved
+    the x86 lane through R4j to the R4k per-TB generated-body emitter shape;
+    the branch's descriptor/hotset approach is therefore stale for the active
+    x86 cold-boot path. RISC-V-only evidence in the branch is superseded by the
+    current R4b/R4c records above, including the same-commit `43329` ms
+    default versus `36629` ms accelerator result that remained below the
+    `25%` R4c gate. The branch has no current x86 implementation lane, and a
+    wholesale merge would regress the active x86 gate surface by deleting
+    `scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs` and
+    `scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, which were
+    added on current `develop` by `34809cded9` and `0ab671ae04`.
+    `git merge-tree --write-tree origin/develop
+    origin/qemu-r4-wasmjit-speed-gate` produced content conflicts in
+    `PLAN.md`, `docs/devel/wasm-support-plan.rst`,
+    `scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+    `scripts/ci/wasm-browser-smoke-runner.mjs`,
+    `scripts/ci/wasm-browser-smoke.mjs`,
+    `scripts/ci/wasm64-runloop-contract-test.mjs`,
+    `scripts/ci/wasmjit-runloop-model.mjs`, `tcg/wasm64.c`, and
+    `tcg/wasm64.h`.
+
+    Deterministic evidence was still gathered to avoid rejecting only by age.
+    On the candidate ref, `git diff --check origin/develop..HEAD`,
+    `git diff --check origin/develop..origin/qemu-r4-wasmjit-speed-gate`,
+    `node --check scripts/ci/wasm-browser-smoke-runner.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke.mjs`,
+    `node --check scripts/ci/wasmjit-runloop-model.mjs`,
+    `node scripts/ci/wasmjit-runloop-model-test.mjs`,
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`,
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs`, and
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs` all passed;
+    the candidate equivalence test reported `fixtures=12`,
+    `unsupportedFixtures=1`, helper loads/stores `2`/`2`, and terminals
+    `goto_tb=4`, `exit_tb=8`. On current `develop`, `git diff --check`,
+    `node --check scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs`,
+    `node scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`,
+    `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`,
+    `node scripts/ci/wasmjit-runloop-model-test.mjs`, and
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs` passed; the current
+    equivalence gate reported `fixtures=13`,
+    `r4iPerTBEmitterFixtures=1`,
+    `r4iPerTBEmitterGeneratedGuestInstructions=1`,
+    `r4iPerTBEmitterInlineTlbHitLoads=2`,
+    `r4iPerTBEmitterInlineTlbHitStores=2`, and zero helper/`qemu_ld`/`qemu_st`
+    calls for the R4i per-TB emitter fixture. No browser comparison was run
+    for `origin/qemu-r4-wasmjit-speed-gate` because no code from that branch
+    was retained after the current-plan audit. A future salvage attempt must
+    be a narrow R4k-compatible patch that preserves the x86 metrics gate and
+    per-TB emitter tests, then proves nonzero generated guest execution plus a
+    same-commit browser speed improvement on the active target before any
+    integration decision.
   - [x] R4e - Preserve the target-neutral accelerator pieces so the RISC-V
     runtime work can be reused by an x86_64 accelerator lane without copying
     or re-inventing the proof contract. DoD: document and test that the
