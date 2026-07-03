@@ -324,7 +324,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     runtime proof only; it does not complete R4 because it is not a
     same-commit speed gate and it does not yet execute real Linux TB
     semantics through generated hotsets.
-  - [ ] R3f - Replace metadata-derived placeholder hotset operations with the
+  - [x] R3f - Replace metadata-derived placeholder hotset operations with the
     first semantic generated execution path for real translated RISC-V TB
     metadata. DoD: generated-output metadata carries enough translated
     operation material to execute at least one multi-TB ALU/branch hotset and
@@ -333,7 +333,79 @@ run that reaches a weaker marker than normal multi-user readiness.
     no-silent-fallback mode with explicit reasons; the generated run loop
     still records instruction, wall-time, inline-load/store, helper, and exit
     counters; and no browser speed gate is run until this deterministic
-    semantic proof passes.
+    semantic proof passes. Accepted 2026-07-03: `tcg/wasm64.c` now decodes
+    the 32-bit TCI words stored in `TCGWasm64TBMetadata.generated_output`
+    into semantic hotset descriptors instead of deriving placeholder
+    operations from metadata position or checksum. The first accepted shapes
+    are a four-word ALU/branch pattern
+    `tci_movi`, `add|xor`, `brcond`, `goto_tb|exit_tb`, and a five-word
+    TLB-hit RAM pattern `ld`, `tci_movi`, `add|xor`, `st`,
+    `goto_tb|exit_tb`. Mismatched registers, nonzero RAM offsets,
+    non-terminal output, unsupported op shapes, missing metadata, truncated
+    output, and incomplete generated output fail closed through explicit
+    build statuses instead of falling back silently. `tcg/wasm64.h` now has
+    ALU and RAM descriptor op types, and the Emscripten runtime smoke accepts
+    both while keeping helper and `qemu_ld`/`qemu_st` counters at zero for the
+    structural proof.
+
+    Deterministic checks passed: `git diff --check`,
+    `node scripts/ci/wasmjit-runloop-model-test.mjs`,
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`,
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node --check scripts/ci/wasmjit-runloop-model.mjs`,
+    `node --check scripts/ci/wasmjit-runloop-model-test.mjs`,
+    `python3 scripts/ci/wasm-build-artifacts-local-test.py`,
+    `node scripts/ci/wasm-browser-smoke-args-test.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke-runner.mjs`, and
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs` outside the sandbox
+    because sandboxed Node child-process spawning produced an invalid empty
+    stderr fixture.
+
+    Artifact build command:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3f-riscv64-semantic-artifacts
+    --target riscv64 --tcg-wasm64-backend --jobs auto --build-image`.
+    Meson reported `TCG backend: experimental wasm64 with TCI fallback`.
+    Artifact hashes: `qemu-system-riscv64.js`
+    `6d07a659820450a23d4696750fcae327a1418f978f75ecfe3dc514a904bfce2f`,
+    `qemu-system-riscv64.wasm`
+    `eb0fc0a6a15ea6b89370b8544f066b0bff46c8ca1f3aa9f1f5d94890280164b7`,
+    manifest
+    `8773510461fad1b3d22d348eb21583cbc4c6e4110f85d0dd6823df69985a1863`.
+    The build emitted one pre-existing warning in `system/wasm-power.c` about
+    `qemu_wasm_power_request()` lacking a previous prototype; this R3f patch
+    did not touch that file.
+
+    Structural browser proof command:
+    `npm exec --yes --package=playwright -- node
+    scripts/ci/wasm-browser-smoke-runner.mjs --artifact-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3f-riscv64-semantic-artifacts
+    --guest-manifest
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-guest/tuxboot-browser-smoke-guest.json
+    --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3f-riscv64-semantic-browser-smoke/wasm-browser-smoke-result.json
+    --screenshot
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3f-riscv64-semantic-browser-smoke/wasm-browser-smoke.png
+    --timeout-ms 180000 --progress-sample-interval-ms 10000
+    --progress-sample-limit 40 --wasm64-runloop-smoke`. Chromium
+    `149.0.7827.55` reached `Welcome to TuxTest` in `137992` ms.
+    Result JSON hash:
+    `6d300df5f2d0c6cf35677486c8b1ac51845ac10128a5d46f1be4abd0193ea1b7`.
+    Screenshot hash:
+    `556393d3a4cab57904e82ff6630c26b6a4d872165fb8ee786cbf0e649e7ee770`.
+    Boot milestones were first Linux printk at `35249` ms, root block
+    discovery at `39292` ms, rootfs mounted at `49778` ms, and init started
+    at `50639` ms. The semantic metadata-hotset summary at `9755` ms
+    reported `ok=true`, `hotset_build_status=ok`, `budget=1000000`,
+    `exit_reason=budget`, `generated_guest_instructions=5000000`,
+    `fallback_guest_instructions=0`, `generated_body_time_ns=5145000`,
+    `compile_time_ns=225000`, `instantiate_time_ns=70000`,
+    `generated_chain_length=1000000`, `inline_tlb_hit_loads=1000000`,
+    `inline_tlb_hit_stores=1000000`, zero helper/`qemu_ld`/`qemu_st` calls,
+    and one budget exit with no MMIO, TLB, interrupt, helper, unsupported,
+    HLT, or invalidation exits. This is still structural runtime proof, not
+    the R4 same-commit speed gate.
 - [ ] R4 - Prove performance before Bus Engine OS long runs. DoD: a same-commit
   Chromium generic RISC-V accelerator smoke is at least 25% faster than
   default RISC-V TCI, and microbenchmarks show at least 3x over RISC-V TCI for

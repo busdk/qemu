@@ -6,11 +6,17 @@
  */
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   buildHotsetFromMetadataModel,
   buildWasmjitRunloopModule,
   encodeS64,
+  encodeTciP,
+  encodeTciRI,
+  encodeTciRL,
+  encodeTciRRR,
+  encodeTciRRS,
   encodeU32,
   expectedRunloopValue,
   runTciLikeRunloopModel,
@@ -19,6 +25,7 @@ import {
   validateWasmjitRunloopContract,
   WASMJIT_EXIT_BUDGET,
   WASMJIT_HOTSET_BUILD_STATUS,
+  WASMJIT_HOTSET_OP,
   WASMJIT_RUNLOOP_MODEL_VERSION,
   WASMJIT_TB_METADATA_FLAGS,
   WASMJIT_TB_METADATA_MAGIC,
@@ -35,6 +42,43 @@ assert.equal(expectedRunloopValue(0n, 0), 0n);
 assert.equal(expectedRunloopValue(0n, 1), 1n);
 assert.equal(expectedRunloopValue(0n, 2), 0x5a5bn);
 
+function parseOpcodes(...sources) {
+  const opcodes = {};
+  let index = 0;
+
+  for (const source of sources) {
+    for (const match of source.matchAll(/^DEF\(([^,\s]+)/gm)) {
+      opcodes[match[1]] = index;
+      index++;
+    }
+  }
+  return opcodes;
+}
+
+const opcodes = parseOpcodes(
+  readFileSync(new URL("../../include/tcg/tcg-opc.h", import.meta.url), "utf8"),
+  readFileSync(new URL("../../tcg/tci/tcg-target-opc.h.inc", import.meta.url), "utf8"),
+);
+
+function aluBranchGeneratedOutput(binaryOp, immediate) {
+  return [
+    encodeTciRI(opcodes.tci_movi, 2, immediate),
+    encodeTciRRR(opcodes[binaryOp], 0, 0, 2),
+    encodeTciRL(opcodes.brcond, 0, 0),
+    encodeTciP(opcodes.goto_tb, 0),
+  ];
+}
+
+function ramGeneratedOutput(binaryOp, immediate) {
+  return [
+    encodeTciRRS(opcodes.ld, 0, 1, 0),
+    encodeTciRI(opcodes.tci_movi, 2, immediate),
+    encodeTciRRR(opcodes[binaryOp], 0, 0, 2),
+    encodeTciRRS(opcodes.st, 0, 1, 0),
+    encodeTciP(opcodes.goto_tb, 0),
+  ];
+}
+
 function generatedMetadata({
   checksum = 1,
   flags = WASMJIT_TB_METADATA_FLAGS.valid |
@@ -44,10 +88,10 @@ function generatedMetadata({
     WASMJIT_TB_METADATA_FLAGS.terminal |
     WASMJIT_TB_METADATA_FLAGS.generatedOutput,
   generatedUnsupportedOpCount = 0,
-  generatedOutputSize = 16,
-  generatedOutputOpCount = 4,
-  opCount = 4,
-  generatedOutput = [1, 2, 3, 4],
+  generatedOutput = ramGeneratedOutput("add", checksum),
+  generatedOutputSize = generatedOutput.length * 4,
+  generatedOutputOpCount = generatedOutput.length,
+  opCount = generatedOutput.length,
 } = {}) {
   return {
     magic: WASMJIT_TB_METADATA_MAGIC,
@@ -64,10 +108,10 @@ function generatedMetadata({
 
 {
   const built = buildHotsetFromMetadataModel([
-    generatedMetadata({ checksum: 1 }),
-    generatedMetadata({ checksum: 0x5a5a }),
-    generatedMetadata({ checksum: 3 }),
-  ]);
+    generatedMetadata({ generatedOutput: aluBranchGeneratedOutput("add", 1) }),
+    generatedMetadata({ generatedOutput: ramGeneratedOutput("xor", 0x5a5a) }),
+    generatedMetadata({ generatedOutput: ramGeneratedOutput("add", 3) }),
+  ], { opcodes });
 
   assert.equal(built.ok, true);
   assert.equal(built.status, WASMJIT_HOTSET_BUILD_STATUS.ok);
@@ -75,10 +119,14 @@ function generatedMetadata({
   assert.equal(built.hotset.entryTbId, 1);
   assert.deepEqual(built.hotset.tbs.map((tb) => tb.tbId), [1, 2, 3]);
   assert.deepEqual(built.hotset.tbs.map((tb) => tb.nextTbId), [2, 3, 1]);
-  assert.deepEqual(built.hotset.tbs.map((tb) => tb.op), [1, 2, 1]);
+  assert.deepEqual(built.hotset.tbs.map((tb) => tb.op), [
+    WASMJIT_HOTSET_OP.aluAddConst,
+    WASMJIT_HOTSET_OP.ramXorConst,
+    WASMJIT_HOTSET_OP.ramAddConst,
+  ]);
   assert.deepEqual(
     built.hotset.tbs.map((tb) => tb.guestInstructions),
-    [4, 4, 4],
+    [4, 5, 5],
   );
   assert.deepEqual(
     built.hotset.tbs.map((tb) => tb.immediate.toString()),
@@ -87,12 +135,42 @@ function generatedMetadata({
 }
 
 assert.equal(
+  buildHotsetFromMetadataModel([
+    generatedMetadata({
+      generatedOutput: [
+        encodeTciRI(opcodes.tci_movi, 2, 1),
+        encodeTciRRR(opcodes.add, 0, 1, 2),
+        encodeTciRL(opcodes.brcond, 0, 0),
+        encodeTciP(opcodes.goto_tb, 0),
+      ],
+    }),
+  ], { opcodes }).status,
+  WASMJIT_HOTSET_BUILD_STATUS.unsupportedHotTb,
+);
+
+assert.equal(
+  buildHotsetFromMetadataModel([
+    generatedMetadata({
+      generatedOutput: [
+        encodeTciRRS(opcodes.ld, 0, 1, 0),
+        encodeTciRI(opcodes.tci_movi, 2, 1),
+        encodeTciRRR(opcodes.add, 0, 0, 2),
+        encodeTciRRS(opcodes.st, 0, 1, 4),
+        encodeTciP(opcodes.goto_tb, 0),
+      ],
+    }),
+  ], { opcodes }).status,
+  WASMJIT_HOTSET_BUILD_STATUS.unsupportedHotTb,
+);
+
+assert.equal(
   buildHotsetFromMetadataModel([]).status,
   WASMJIT_HOTSET_BUILD_STATUS.empty,
 );
 assert.equal(
   buildHotsetFromMetadataModel([generatedMetadata(), generatedMetadata()], {
     capacity: 1,
+    opcodes,
   }).status,
   WASMJIT_HOTSET_BUILD_STATUS.capacity,
 );
@@ -103,13 +181,13 @@ assert.equal(
         WASMJIT_TB_METADATA_FLAGS.generatedCandidate |
         WASMJIT_TB_METADATA_FLAGS.generatedOutput,
     }),
-  ]).status,
+  ], { opcodes }).status,
   WASMJIT_HOTSET_BUILD_STATUS.nonTerminal,
 );
 assert.equal(
   buildHotsetFromMetadataModel([
     generatedMetadata({ generatedUnsupportedOpCount: 1 }),
-  ]).status,
+  ], { opcodes }).status,
   WASMJIT_HOTSET_BUILD_STATUS.unsupportedHotTb,
 );
 assert.equal(
@@ -119,7 +197,7 @@ assert.equal(
         WASMJIT_TB_METADATA_FLAGS.generatedCandidate |
         WASMJIT_TB_METADATA_FLAGS.terminal,
     }),
-  ]).status,
+  ], { opcodes }).status,
   WASMJIT_HOTSET_BUILD_STATUS.noGeneratedOutput,
 );
 assert.equal(
@@ -131,7 +209,7 @@ assert.equal(
         WASMJIT_TB_METADATA_FLAGS.generatedOutput |
         WASMJIT_TB_METADATA_FLAGS.outputTruncated,
     }),
-  ]).status,
+  ], { opcodes }).status,
   WASMJIT_HOTSET_BUILD_STATUS.outputTruncated,
 );
 

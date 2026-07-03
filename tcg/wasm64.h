@@ -205,6 +205,8 @@ typedef struct TCGWasm64RunContext {
 typedef enum TCGWasm64RunHotsetOp {
     TCG_WASM64_RUN_HOTSET_OP_RAM_ADD_CONST = 1,
     TCG_WASM64_RUN_HOTSET_OP_RAM_XOR_CONST = 2,
+    TCG_WASM64_RUN_HOTSET_OP_ALU_ADD_CONST = 3,
+    TCG_WASM64_RUN_HOTSET_OP_ALU_XOR_CONST = 4,
 } TCGWasm64RunHotsetOp;
 
 typedef struct TCGWasm64RunHotsetTB {
