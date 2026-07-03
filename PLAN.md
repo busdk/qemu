@@ -84,12 +84,51 @@ run that reaches a weaker marker than normal multi-user readiness.
   `virtual-server` final proof, strict fallback/non-regression requirements,
   and R1-R5 gates for baseline, design, first accelerator slice, speed proof,
   and final Bus Engine OS proof.
-- [ ] R1 - Establish the browser and native RISC-V baselines before
+- [x] R1 - Establish the browser and native RISC-V baselines before
   acceleration. DoD: build or obtain current `qemu-system-riscv64` native and
   WASM artifacts, boot a generic RISC-V Linux smoke in Chromium with default
   TCI, record exact commands, browser version, artifact hashes, result JSON,
   and compare wall time to native RISC-V QEMU and the previous x86_64 browser
   evidence.
+  Accepted 2026-07-03: current `riscv64-softmmu` WASM artifacts were built
+  from this branch with
+  `python3 scripts/ci/wasm-build-artifacts-local.py --out
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r1-riscv64-wasm-artifacts
+  --target riscv64`. Artifact hashes: `qemu-system-riscv64.js`
+  `09661031708135586564f43d6bf879ef49442124b4811eb0c8244943af96a2bf`,
+  `qemu-system-riscv64.wasm`
+  `386adeb6157f029e6b285f8e6eb6fa2822b05a47daf640d25711ffc037f54b0d`,
+  manifest
+  `7bf44f0cd8990ff05a13825c08d876fca8504f67f6a41918eddc381ccf36d556`.
+  The pinned TuxBoot RISC-V guest used kernel hash
+  `2bd8132a3bf21570290042324fff48c987f42f2a00c08de979f43f0662ebadba`
+  and decompressed rootfs hash
+  `bdae7f7e022592800442b73eb32ec7631f43a4c13dd8621051204f7e482fbd2b`.
+  The Chromium proof used Chromium `149.0.7827.55`,
+  `npm exec --yes --package=playwright -- node
+  scripts/ci/wasm-browser-smoke-runner.mjs --artifact-dir
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r1-riscv64-wasm-artifacts
+  --guest-manifest
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r1-riscv64-guest/tuxboot-browser-smoke-guest.json
+  --out
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r1-riscv64-browser-tci-5/wasm-browser-smoke-result.json
+  --screenshot
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r1-riscv64-browser-tci-5/wasm-browser-smoke.png
+  --timeout-ms 180000 --progress-sample-interval-ms 10000
+  --progress-sample-limit 40`. It reached `Welcome to TuxTest` in
+  `140119` ms; milestones were kernel `37647` ms, root block `41170` ms,
+  rootfs mounted `52294` ms, and init started `53141` ms. The same-source
+  native `qemu-system-riscv64` was built in Docker because the host lacked
+  `ninja` and `glib-2.0` development headers; native binary hash
+  `b53afefbb6e6f6c8a0be0a537e438189ef095de791bd86d8a344e6e093c7e5ac`
+  reached the same marker in `4879` ms and wrote
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r1-riscv64-native-tci-3/wasm-native-smoke-result.json`.
+  The RISC-V browser/native ratio is `28.7x`. The RISC-V browser TCI smoke is
+  `1.39x` the previous x86_64 browser TCI evidence from W2l-c
+  (`100472` ms). The RISC-V marker was corrected from the unobserved
+  `tuxtest login:` prompt to the emitted `Welcome to TuxTest` userspace
+  banner; this remains a generic smoke marker only, not the final Bus Engine
+  OS multi-user readiness gate.
   - [x] R1a - Make the existing QEMU WASM artifact builder and browser smoke
     harness target-selectable before measuring `riscv64-softmmu`. DoD:
     `scripts/ci/wasm-build-artifacts-local.py` can request

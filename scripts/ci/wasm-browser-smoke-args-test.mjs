@@ -210,6 +210,13 @@ function serviceBridgeConfig(overrides = {}) {
 }
 
 {
+  const args = qemuArgs(baseConfig({ cpu: "", machine: "virt" }));
+
+  assert.equal(valueAfter(args, "-M"), "virt");
+  assert.equal(args.includes("-cpu"), false);
+}
+
+{
   const args = qemuArgs(baseConfig({ display: "sdl" }));
 
   assert.equal(args.includes("-nographic"), false);

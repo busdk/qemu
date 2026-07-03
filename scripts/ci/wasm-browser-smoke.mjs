@@ -24,6 +24,8 @@ const OPTIONAL_FIRMWARE_FILES = [
   "vgabios.bin",
   "vgabios-stdvga.bin",
   "efi-virtio.rom",
+  "opensbi-riscv32-generic-fw_dynamic.bin",
+  "opensbi-riscv64-generic-fw_dynamic.bin",
 ];
 const DEFAULT_ROOTFS_OPFS_NAME = "qemu-wasm-rootfs.raw";
 const OPFS_ROOTFS_DIRECTORY = "qemu-wasm-rootfs";
@@ -34,6 +36,11 @@ const OPFS_PERSISTENT_DISK_DIRECTORY = "qemu-wasm-persistent-disk";
 function option(name, fallback) {
   const value = new URLSearchParams(window.location.search).get(name);
   return value === null || value === "" ? fallback : value;
+}
+
+function blankableOption(name, fallback) {
+  const value = new URLSearchParams(window.location.search).get(name);
+  return value === null ? fallback : value;
 }
 
 function pathOption(name, fallback) {
@@ -1469,7 +1476,7 @@ function buildConfig() {
   return {
     appendExtra: option("appendExtra", ""),
     allowSerialFallback: boolOption("allowSerialFallback", true),
-    cpu: option("cpu", "Nehalem"),
+    cpu: blankableOption("cpu", "Nehalem"),
     display: option("display", "none"),
     displayDevice: option("displayDevice", "default"),
     expectText: listOption("expectText"),

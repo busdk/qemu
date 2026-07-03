@@ -17,6 +17,8 @@ const OPTIONAL_FIRMWARE_FILES = [
   "vgabios.bin",
   "vgabios-stdvga.bin",
   "efi-virtio.rom",
+  "opensbi-riscv32-generic-fw_dynamic.bin",
+  "opensbi-riscv64-generic-fw_dynamic.bin",
 ];
 
 function usage(status) {

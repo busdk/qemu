@@ -114,6 +114,77 @@ generated behavior for supported integer, branch, load/store, helper/CSR-exit,
 and invalidation cases.  Existing ``x86_64`` QEMU/WASM TCI smoke remains a
 non-regression gate.
 
+RISC-V 64 default-TCI baseline
+==============================
+
+The current ``riscv64-softmmu`` default-TCI baseline was accepted on
+2026-07-03 before accelerator implementation work.  The WebAssembly artifacts
+were built from this branch with:
+
+.. code-block:: console
+
+  $ python3 scripts/ci/wasm-build-artifacts-local.py \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r1-riscv64-wasm-artifacts \
+      --target riscv64
+
+Artifact hashes:
+
+* ``qemu-system-riscv64.js``:
+  ``09661031708135586564f43d6bf879ef49442124b4811eb0c8244943af96a2bf``
+* ``qemu-system-riscv64.wasm``:
+  ``386adeb6157f029e6b285f8e6eb6fa2822b05a47daf640d25711ffc037f54b0d``
+* manifest:
+  ``7bf44f0cd8990ff05a13825c08d876fca8504f67f6a41918eddc381ccf36d556``
+
+The pinned TuxBoot RISC-V guest used kernel SHA-256
+``2bd8132a3bf21570290042324fff48c987f42f2a00c08de979f43f0662ebadba`` and
+decompressed rootfs SHA-256
+``bdae7f7e022592800442b73eb32ec7631f43a4c13dd8621051204f7e482fbd2b``.
+The generic success marker is ``Welcome to TuxTest`` because this image emits
+that userspace banner reliably; the earlier ``tuxtest login:`` marker was not
+observed before timeout.  This marker is only a generic smoke marker.  The
+final Bus Engine OS proof still requires the documented multi-user readiness
+gate.
+
+The Chromium proof used Chromium ``149.0.7827.55``:
+
+.. code-block:: console
+
+  $ npm exec --yes --package=playwright -- node \
+      scripts/ci/wasm-browser-smoke-runner.mjs \
+      --artifact-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r1-riscv64-wasm-artifacts \
+      --guest-manifest /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r1-riscv64-guest/tuxboot-browser-smoke-guest.json \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r1-riscv64-browser-tci-5/wasm-browser-smoke-result.json \
+      --screenshot /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r1-riscv64-browser-tci-5/wasm-browser-smoke.png \
+      --timeout-ms 180000 \
+      --progress-sample-interval-ms 10000 \
+      --progress-sample-limit 40
+
+The browser run reached ``Welcome to TuxTest`` in ``140119`` ms.  Recorded
+milestones were first Linux printk at ``37647`` ms, root block discovery at
+``41170`` ms, rootfs mounted at ``52294`` ms, and init started at ``53141``
+ms.  Browser runtime evidence recorded ``crossOriginIsolated: true``,
+``SharedArrayBuffer`` support, ``hardwareConcurrency: 20``, and
+``deviceMemory: 32``.
+
+A same-source native comparator was built in Docker because the host lacked
+``ninja`` and ``glib-2.0`` development headers.  The build used a copied
+source tree inside ``qemu/emsdk-wasm64-cross:latest`` with Emscripten flags
+unset and configured native ``riscv64-softmmu``.  Native binary SHA-256:
+
+``b53afefbb6e6f6c8a0be0a537e438189ef095de791bd86d8a344e6e093c7e5ac``
+
+The native command used the same ``virt`` machine, kernel, rootfs,
+``-accel tcg,thread=single``, and ``virtio-blk-device`` shape as the browser
+manifest.  It reached ``Welcome to TuxTest`` in ``4879`` ms and wrote:
+
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r1-riscv64-native-tci-3/wasm-native-smoke-result.json``
+
+The RISC-V browser/native ratio for this generic smoke is therefore about
+``28.7x``.  The RISC-V browser TCI smoke is ``1.39x`` the previous
+``x86_64`` browser TCI W2l-c evidence of ``100472`` ms for
+``QEMU_WASM_LINUX_BOOT_OK``.
+
 Strict definition of done
 =========================
 

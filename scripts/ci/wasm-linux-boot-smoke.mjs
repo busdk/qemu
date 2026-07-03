@@ -18,6 +18,8 @@ const OPTIONAL_FIRMWARE_FILES = [
   "vgabios.bin",
   "vgabios-stdvga.bin",
   "efi-virtio.rom",
+  "opensbi-riscv32-generic-fw_dynamic.bin",
+  "opensbi-riscv64-generic-fw_dynamic.bin",
 ];
 
 function parseArgs(argv) {
@@ -288,7 +290,7 @@ function runSmoke(options) {
   }
 
   args.push("--", "-M", options.machine, "-m", options.memory);
-  if (options.cpu !== null) {
+  if (options.cpu) {
     args.push("-cpu", options.cpu);
   }
 
