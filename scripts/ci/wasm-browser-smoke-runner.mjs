@@ -173,6 +173,14 @@ Options:
                     Browser profile directory reused for OPFS restart proofs
   --visual-marker TEXT
                      Expected visual marker metadata for display proofs
+  --wasm64-tcg-summary
+                     Enable opt-in wasm64 backend translation summaries
+  --wasm64-tcg-summary-interval N
+                     TB executions between wasm64 backend summaries
+                     (default: 100000)
+  --wasm64-tcg-summary-limit N
+                     Maximum wasm64 backend summaries emitted by QEMU
+                     (default: 4)
   --wasm64-runloop-smoke
                      Enable opt-in QEMU wasm64 run/exit runtime smoke
   --help              Show this help
@@ -264,6 +272,9 @@ function parseArgs(argv) {
     timeoutMs: 180000,
     userDataDir: null,
     visualMarker: "",
+    wasm64TcgSummary: false,
+    wasm64TcgSummaryInterval: 100000,
+    wasm64TcgSummaryLimit: 4,
     wasm64RunloopSmoke: false,
   };
   const explicit = new Set();
@@ -491,6 +502,15 @@ function parseArgs(argv) {
     } else if (arg === "--visual-marker") {
       options.visualMarker = argv[++i];
       explicit.add("visualMarker");
+    } else if (arg === "--wasm64-tcg-summary") {
+      options.wasm64TcgSummary = true;
+      explicit.add("wasm64TcgSummary");
+    } else if (arg === "--wasm64-tcg-summary-interval") {
+      options.wasm64TcgSummaryInterval = Number(argv[++i]);
+      explicit.add("wasm64TcgSummaryInterval");
+    } else if (arg === "--wasm64-tcg-summary-limit") {
+      options.wasm64TcgSummaryLimit = Number(argv[++i]);
+      explicit.add("wasm64TcgSummaryLimit");
     } else if (arg === "--wasm64-runloop-smoke") {
       options.wasm64RunloopSmoke = true;
       explicit.add("wasm64RunloopSmoke");
@@ -515,6 +535,7 @@ function parseArgs(argv) {
       "tciFastGates",
       "tciProgress",
       "tciWasmGeneratedTrace",
+      "wasm64TcgSummary",
       "wasm64RunloopSmoke",
     ],
     checksumFields: ["kernel", "initrd", "rootfs"],
@@ -539,6 +560,8 @@ function parseArgs(argv) {
       "tcgHotblocksOpSample",
       "tcgHotblocksTop",
       "tciWasmGeneratedTraceLimit",
+      "wasm64TcgSummaryInterval",
+      "wasm64TcgSummaryLimit",
       "timeoutMs",
     ],
     pathFields: [
@@ -674,6 +697,17 @@ function parseArgs(argv) {
   if (!Number.isInteger(options.tciProgressInterval) ||
       options.tciProgressInterval <= 0) {
     console.error("--tci-progress-interval must be a positive integer");
+    usage(2);
+  }
+  if (!Number.isInteger(options.wasm64TcgSummaryInterval) ||
+      options.wasm64TcgSummaryInterval <= 0) {
+    console.error("--wasm64-tcg-summary-interval must be a positive integer");
+    usage(2);
+  }
+  if (!Number.isInteger(options.wasm64TcgSummaryLimit) ||
+      options.wasm64TcgSummaryLimit <= 0 ||
+      options.wasm64TcgSummaryLimit > 64) {
+    console.error("--wasm64-tcg-summary-limit must be an integer from 1 to 64");
     usage(2);
   }
   if (!Number.isInteger(options.maxOutputBytes) || options.maxOutputBytes <= 0) {
@@ -1400,6 +1434,17 @@ export function browserSmokeUrl(options) {
       String(options.tciWasmGeneratedTraceLimit),
     );
   }
+  if (options.wasm64TcgSummary) {
+    url.searchParams.set("wasm64TcgSummary", "1");
+    url.searchParams.set(
+      "wasm64TcgSummaryInterval",
+      String(options.wasm64TcgSummaryInterval),
+    );
+    url.searchParams.set(
+      "wasm64TcgSummaryLimit",
+      String(options.wasm64TcgSummaryLimit),
+    );
+  }
   if (options.wasm64RunloopSmoke) {
     url.searchParams.set("wasm64RunloopSmoke", "1");
   }
@@ -1520,6 +1565,15 @@ export function initialSmokeResult(options, browserVersion) {
       Number.isInteger(options.tciWasmGeneratedTraceLimit)
         ? options.tciWasmGeneratedTraceLimit
         : 64,
+    wasm64TcgSummary: Boolean(options.wasm64TcgSummary),
+    wasm64TcgSummaryInterval:
+      Number.isInteger(options.wasm64TcgSummaryInterval)
+        ? options.wasm64TcgSummaryInterval
+        : 100000,
+    wasm64TcgSummaryLimit:
+      Number.isInteger(options.wasm64TcgSummaryLimit)
+        ? options.wasm64TcgSummaryLimit
+        : 4,
     wasm64RunloopSmoke: Boolean(options.wasm64RunloopSmoke),
     userDataDir: options.userDataDir,
     visualMarker: options.visualMarker,

@@ -19,6 +19,8 @@
 #define TCG_WASM64_RUNLOOP_ENV_FILE "/qemu-tci-env"
 #define TCG_WASM64_RUNLOOP_SMOKE_BUDGET 1000000u
 #define TCG_WASM64_RUNLOOP_MIN_RATIO_PPM 3000000u
+#define TCG_WASM64_TCG_SUMMARY_DEFAULT_INTERVAL 100000u
+#define TCG_WASM64_TCG_SUMMARY_DEFAULT_LIMIT 4u
 
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, env) !=
                   TCG_WASM64_RUN_CTX_ENV_OFFSET);
@@ -138,6 +140,8 @@ static __thread uint64_t translated_generated_first_unsupported_ops[NB_OPS];
 static __thread TCGWasm64TranslateEntry translate_cache[
     TCG_WASM64_TRANSLATE_CACHE_SIZE];
 static __thread TCGWasm64TBMetadata *active_translate_metadata;
+static __thread uint64_t tcg_summary_tb_exec_count;
+static __thread uint64_t tcg_summary_report_count;
 
 static TCGWasm64TranslateEntry *tcg_wasm64_translate_entry(const void *tb_ptr)
 {
@@ -501,6 +505,72 @@ static bool tcg_wasm64_runloop_env_bool(const char *name)
 #else
     return false;
 #endif
+}
+
+static uint64_t tcg_wasm64_runloop_env_u64(const char *name, uint64_t fallback)
+{
+#ifdef CONFIG_EMSCRIPTEN
+    g_autofree char *owned = NULL;
+    const char *raw = g_getenv(name);
+    char *end = NULL;
+    guint64 value;
+
+    if (raw == NULL) {
+        owned = tcg_wasm64_runloop_file_getenv(name);
+        raw = owned;
+    }
+    if (raw == NULL || *raw == '\0') {
+        return fallback;
+    }
+
+    value = g_ascii_strtoull(raw, &end, 10);
+    if (end == raw || *end != '\0' || value == 0) {
+        return fallback;
+    }
+    return value;
+#else
+    return fallback;
+#endif
+}
+
+static bool tcg_wasm64_tcg_summary_enabled(void)
+{
+    static bool checked;
+    static bool enabled;
+
+    if (!checked) {
+        enabled = tcg_wasm64_runloop_env_bool("QEMU_WASM64_TCG_SUMMARY");
+        checked = true;
+    }
+    return enabled;
+}
+
+static uint64_t tcg_wasm64_tcg_summary_interval(void)
+{
+    static bool checked;
+    static uint64_t interval = TCG_WASM64_TCG_SUMMARY_DEFAULT_INTERVAL;
+
+    if (!checked) {
+        interval = tcg_wasm64_runloop_env_u64(
+            "QEMU_WASM64_TCG_SUMMARY_INTERVAL",
+            TCG_WASM64_TCG_SUMMARY_DEFAULT_INTERVAL);
+        checked = true;
+    }
+    return interval;
+}
+
+static uint64_t tcg_wasm64_tcg_summary_limit(void)
+{
+    static bool checked;
+    static uint64_t limit = TCG_WASM64_TCG_SUMMARY_DEFAULT_LIMIT;
+
+    if (!checked) {
+        limit = tcg_wasm64_runloop_env_u64(
+            "QEMU_WASM64_TCG_SUMMARY_LIMIT",
+            TCG_WASM64_TCG_SUMMARY_DEFAULT_LIMIT);
+        checked = true;
+    }
+    return limit;
 }
 
 #ifdef CONFIG_EMSCRIPTEN
@@ -2049,7 +2119,7 @@ void tcg_wasm64_report_summary(const char *reason,
 
     merged = *counters;
     tcg_wasm64_counters_add_translation(&merged, &translated_counters);
-    if (active_counters) {
+    if (active_counters && active_counters != counters) {
         tcg_wasm64_counters_add_translation(&merged, active_counters);
     }
     counters = &merged;
@@ -2254,6 +2324,15 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
     }
     active_counters = counters;
     ret = tcg_tci_qemu_tb_exec(env, tb_ptr);
+    if (tcg_wasm64_tcg_summary_enabled() &&
+        tcg_summary_report_count < tcg_wasm64_tcg_summary_limit()) {
+        tcg_summary_tb_exec_count++;
+        if (tcg_summary_tb_exec_count %
+            tcg_wasm64_tcg_summary_interval() == 0) {
+            tcg_wasm64_report_summary("interval", counters);
+            tcg_summary_report_count++;
+        }
+    }
     tcg_wasm64_counters_add_translation(&translated_counters, counters);
     active_counters = previous_counters;
     return ret;

@@ -730,6 +730,144 @@ The ``alu-branch`` runtime benchmark reported ``ok=true``,
 This accepts only the in-binary runtime microbench.  R4c still must run the
 same-commit default-TCI versus accelerator generic Chromium speed gate before
 any long Bus Engine OS proof.
+
+R4c failed same-commit generic speed gate
+-----------------------------------------
+
+The first R4c same-commit speed gate did not pass.  It is retained here as
+negative evidence and a replanning point.
+
+The default-TCI artifact from commit
+``9ebd2fcc7e7727564a3be86721ae7a0b1f9af3b3`` had these SHA-256 values:
+
+* ``qemu-system-riscv64.js``:
+  ``cbf0836c26df510e1eae6ede43b86d30195975e477e0a2b5f8ca3d65181225f6``
+* ``qemu-system-riscv64.wasm``:
+  ``984cde6dc7da361ec0032ff5ddc575e96daf7f1adfaa10abcbc8d796ae9c4fc2``
+* manifest:
+  ``510e058756deef4a482e6f59abef2770c5b5be9db6b245e87c42c391360e912c``
+
+Chromium ``149.0.7827.55`` reached ``Welcome to TuxTest`` in ``127204`` ms.
+The result JSON was
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4c-riscv64-default-tci-smoke/wasm-browser-smoke-result.json``
+with SHA-256
+``1309e75c252961237376d7830100f2cc03ec7c39219e7b6f33d4f18d0f0b4ed1``.
+
+The same-commit backend artifact reused the R4b artifact:
+
+* ``qemu-system-riscv64.js``:
+  ``7058739c8cfd1e19967218a5c8e8f2ff8972ce7c974fe25d96bfe898de34e5``
+* ``qemu-system-riscv64.wasm``:
+  ``554d989f98728b55880461e2749224be8c51f04e87a7483831f2158e329d9765``
+* manifest:
+  ``fc8e93fc981835a33ac27fe054586c03d7363242a95be0cb80c39050b1c7df55``
+
+The backend reached the same marker in ``140286`` ms.  The result JSON was
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4c-riscv64-backend-speed-smoke/wasm-browser-smoke-result.json``
+with SHA-256
+``5d064a0e51dbbc00fa89ff0ec9d80253c53552657f4321eb1fd127d203eecee7``.
+
+The required 25% gate was ``95403`` ms or faster.  The backend was
+``13082`` ms slower than default TCI, with backend/default ratio
+``1.1028426779032106``.  This rejects the current structural runtime smoke as
+a boot-speed fix.  It does not reject the accelerator architecture; it shows
+that translated Linux TBs are not yet executing through the long-running
+``wasmjit_run()`` path.
+
+R4d bounded backend translation telemetry
+-----------------------------------------
+
+R4d adds bounded, opt-in backend translation summaries for real generic
+RISC-V browser smokes.  The expected effect on the gate metric was diagnostic,
+not a speed improvement: expose whether translated TB output exists during a
+normal boot, and whether generated Linux execution remains zero.  The new
+controls are ``--wasm64-tcg-summary``,
+``--wasm64-tcg-summary-interval``, and
+``--wasm64-tcg-summary-limit``.
+
+Focused checks passed:
+
+.. code-block:: console
+
+  $ git diff --check
+  $ node --check scripts/ci/wasm-browser-smoke-runner.mjs
+  $ node --check scripts/ci/wasm-browser-smoke.mjs
+  $ python3 scripts/ci/wasm-build-artifacts-local-test.py
+  $ node scripts/ci/wasm64-runloop-contract-test.mjs
+  $ node scripts/ci/wasmjit-runloop-model-test.mjs
+  $ node scripts/ci/wasm-browser-smoke-runner-test.mjs
+
+The runner test was rerun outside the sandbox because sandboxed child-process
+spawning drops the expected stderr in its negative subprocess fixture.
+
+The backend artifact was built with:
+
+.. code-block:: console
+
+  $ python3 scripts/ci/wasm-build-artifacts-local.py \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4d-riscv64-tcg-summary-limited-artifacts \
+      --target riscv64 \
+      --tcg-wasm64-backend \
+      --jobs auto \
+      --build-image
+
+Meson reported ``TCG backend: experimental wasm64 with TCI fallback``.
+Artifact SHA-256 values were:
+
+* ``qemu-system-riscv64.js``:
+  ``f5c19c7f47306c00c51688a015b5e06cf78c52959cd4f0e56869c1aa14ae855d``
+* ``qemu-system-riscv64.wasm``:
+  ``8b51301b98233495d0fe7e1726eed4d699d8e939d4a7b87e05747c62fa7e4ab3``
+* manifest:
+  ``8aebd484fe3ae3c8ebd9f575f15347f784c7d7fcad2f619f775019bc459881f9``
+* ``SHA256SUMS``:
+  ``f9b0d7f92e35d012daa83f973e763256be3ac94a423b11939533c86a1780405a``
+
+The browser proof used Chromium ``149.0.7827.55``:
+
+.. code-block:: console
+
+  $ npm exec --yes --package=playwright -- node \
+      scripts/ci/wasm-browser-smoke-runner.mjs \
+      --artifact-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4d-riscv64-tcg-summary-limited-artifacts \
+      --guest-manifest /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-guest/tuxboot-browser-smoke-guest.json \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4d-riscv64-tcg-summary-limited-smoke/wasm-browser-smoke-result.json \
+      --screenshot /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4d-riscv64-tcg-summary-limited-smoke/wasm-browser-smoke.png \
+      --timeout-ms 180000 \
+      --progress-sample-interval-ms 10000 \
+      --progress-sample-limit 40 \
+      --wasm64-tcg-summary \
+      --wasm64-tcg-summary-interval 50000 \
+      --wasm64-tcg-summary-limit 4
+
+It reached ``Welcome to TuxTest`` in ``140671`` ms.  Result JSON SHA-256:
+``dc318917bd6469d6359cd3343d96da9d687d03243ab3badc910932ca77ec51a9``.
+Screenshot SHA-256:
+``62325f7c3d749a4efa8a683a015664c8951cf4be1ba5c194519e43ee54655343``.
+Boot milestones were first Linux printk at ``35399`` ms, root block discovery
+at ``39777`` ms, rootfs mounted at ``51142`` ms, and init started at
+``52040`` ms.
+
+The run captured exactly four ``qemu-wasm64-tcg`` summaries.  The last
+summary at elapsed ``26570`` ms reported ``generated_attempts=0``,
+``generated_compiled=0``, ``generated_executed=0``,
+``translated_tbs=42667``, ``translated_ops=1495935``,
+``translated_generated_output_tbs=22154``,
+``exec_generated_output_available_tbs=22154``, and
+``exec_generated_output_lookup_tbs=42667``.  The generated-output share was
+``51.92%``.  The generated-candidate supported-op share was ``97.37%``.
+Metadata misses still accounted for ``78.67%`` of the metadata lookup plus
+miss denominator.  The top unsupported generated-output blockers were
+``call=20350``, ``not=108``, ``sar=106``, ``divu=81``, ``br=36``,
+``remu=22``, ``divs=18``, and ``mulu2=14``.
+
+The accepted conclusion is that real translation-time output material is
+present during generic boot, but no generated Linux TBs are compiled or
+executed yet.  The next accelerator item is attaching eligible
+translated-output hotsets to the long-running ``wasmjit_run()`` executor with
+no-silent-fallback accounting.  Another direct-boundary wrapper or
+opcode-at-a-time browser loop is not justified by this evidence.
+
 Strict definition of done
 =========================
 

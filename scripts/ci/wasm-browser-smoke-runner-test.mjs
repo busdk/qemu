@@ -1093,6 +1093,9 @@ for (const status of [
     rootfsDevice: "virtio-mmio",
     tciProgress: true,
     tciProgressInterval: 2000000,
+    wasm64TcgSummary: true,
+    wasm64TcgSummaryInterval: 50000,
+    wasm64TcgSummaryLimit: 3,
     timeoutMs: 30000,
     visualMarker: "",
     wasm64RunloopSmoke: true,
@@ -1100,6 +1103,9 @@ for (const status of [
 
   assert.equal(url.searchParams.get("tciProgress"), "1");
   assert.equal(url.searchParams.get("tciProgressInterval"), "2000000");
+  assert.equal(url.searchParams.get("wasm64TcgSummary"), "1");
+  assert.equal(url.searchParams.get("wasm64TcgSummaryInterval"), "50000");
+  assert.equal(url.searchParams.get("wasm64TcgSummaryLimit"), "3");
   assert.equal(url.searchParams.get("wasm64RunloopSmoke"), "1");
 }
 
@@ -1375,6 +1381,9 @@ for (const status of [
     tciWasmGeneratedTraceLimit: 7,
     userDataDir: "/tmp/qemu-wasm-profile",
     visualMarker: "login",
+    wasm64TcgSummary: true,
+    wasm64TcgSummaryInterval: 50000,
+    wasm64TcgSummaryLimit: 3,
     wasm64RunloopSmoke: true,
   }, "HeadlessChrome/141.0.7390.37");
 
@@ -1415,6 +1424,9 @@ for (const status of [
   assert.equal(result.tciProgressInterval, 2000000);
   assert.equal(result.tciWasmGeneratedTrace, true);
   assert.equal(result.tciWasmGeneratedTraceLimit, 7);
+  assert.equal(result.wasm64TcgSummary, true);
+  assert.equal(result.wasm64TcgSummaryInterval, 50000);
+  assert.equal(result.wasm64TcgSummaryLimit, 3);
   assert.equal(result.wasm64RunloopSmoke, true);
   assert.equal(Object.hasOwn(result, "tciWasmSubset"), false);
   assert.equal(Object.hasOwn(result, "tciWasmGeneratedOnly"), false);

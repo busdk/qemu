@@ -1525,6 +1525,9 @@ function buildConfig() {
       nonNegativeNumberOption("tciWasmGeneratedTraceLimit", 64),
     timeoutMs: numberOption("timeoutMs", 180000),
     visualMarker: option("visualMarker", ""),
+    wasm64TcgSummary: boolOption("wasm64TcgSummary", false),
+    wasm64TcgSummaryInterval: numberOption("wasm64TcgSummaryInterval", 100000),
+    wasm64TcgSummaryLimit: numberOption("wasm64TcgSummaryLimit", 4),
     wasm64RunloopSmoke: boolOption("wasm64RunloopSmoke", false),
     wasm: option("wasm", "/artifacts/qemu-system-x86_64.wasm"),
   };
@@ -1707,7 +1710,17 @@ async function run() {
       last: null,
     },
     wasm64Tcg: {
-      maxSummaries: 16,
+      enabled: Boolean(config.wasm64TcgSummary),
+      interval: config.wasm64TcgSummaryInterval,
+      limit: config.wasm64TcgSummaryLimit,
+      env: config.wasm64TcgSummary ? {
+        QEMU_WASM64_TCG_SUMMARY: "1",
+        QEMU_WASM64_TCG_SUMMARY_INTERVAL:
+          String(config.wasm64TcgSummaryInterval),
+        QEMU_WASM64_TCG_SUMMARY_LIMIT:
+          String(config.wasm64TcgSummaryLimit),
+      } : null,
+      maxSummaries: config.wasm64TcgSummaryLimit,
       summaryCount: 0,
       summaries: [],
       lastSummary: null,
@@ -2110,6 +2123,13 @@ async function run() {
       QEMU_TCI_WASM_GENERATED_TRACE_LIMIT:
         String(config.tciWasmGeneratedTraceLimit),
     } : {}),
+    ...(config.wasm64TcgSummary ? {
+      QEMU_WASM64_TCG_SUMMARY: "1",
+      QEMU_WASM64_TCG_SUMMARY_INTERVAL:
+        String(config.wasm64TcgSummaryInterval),
+      QEMU_WASM64_TCG_SUMMARY_LIMIT:
+        String(config.wasm64TcgSummaryLimit),
+    } : {}),
     ...(config.wasm64RunloopSmoke ? {
       QEMU_WASM64_RUNLOOP_SMOKE: "1",
     } : {}),
@@ -2174,6 +2194,7 @@ async function run() {
         if (
           config.tciProgress ||
           config.tciWasmGeneratedTrace ||
+          config.wasm64TcgSummary ||
           config.wasm64RunloopSmoke
         ) {
           const lines = Object.entries(tciEnv)
