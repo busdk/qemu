@@ -147,8 +147,11 @@ assert.match(runtime, /QEMU_WASM64_TCG_SUMMARY/);
 assert.match(runtime, /QEMU_WASM64_TCG_SUMMARY_INTERVAL/);
 assert.match(runtime, /QEMU_WASM64_ONE_TB_DIFFERENTIAL/);
 assert.match(runtime, /QEMU_WASM64_LIVE_ONE_TB_DIFFERENTIAL/);
+assert.match(runtime, /QEMU_WASM64_LIVE_TB_COVERAGE/);
+assert.match(runtime, /QEMU_WASM64_LIVE_TB_COVERAGE_SCAN_LIMIT/);
 assert.match(runtime, /TCG_WASM64_ONE_TB_NAME "live-x86-pre-r4i-ld32u-goto-tb-13"/);
 assert.match(runtime, /TCG_WASM64_LIVE_ONE_TB_NAME "live-x86-r4i-ld32u-goto-tb-11"/);
+assert.match(runtime, /TCG_WASM64_LIVE_TB_COVERAGE_NAME "live-rv64-generated-coverage"/);
 assert.doesNotMatch(runtime, /tcg_wasm64_live_one_tb_words\[\]/);
 assert.match(runtime, /tcg_wasm64_live_one_tb_ops\[\]/);
 assert.match(runtime, /INDEX_op_brcond/);
@@ -203,6 +206,52 @@ assert.match(runtime, /tcg_wasm64_live_one_tb_differential_maybe\(env, tb_ptr, m
 assert.match(runtime, /\[\[0, 4\], \[4, 1\], \[0x110, 8\]\]/);
 assert.match(runtime, /tcg_wasm64_summary_maybe_report/);
 assert.match(runtime, /tcg_wasm64_report_summary\("interval",\s*&zero\)/);
+assert.match(runtime, /tcg_wasm64_live_tb_coverage_js/);
+assert.match(runtime, /tcg_wasm64_live_tb_coverage_shape_supported/);
+assert.match(runtime, /tcg_wasm64_live_tb_coverage_op_supported/);
+assert.match(runtime, /tcg_wasm64_count_live_tb_coverage_denominator/);
+assert.match(runtime, /tcg_wasm64_live_tb_coverage_maybe\(env, tb_ptr, metadata\)/);
+assert.match(runtime, /\\"event\\":\\"live-tb-coverage\\"/);
+assert.match(runtime, /\\"guest_state_commit\\":false/);
+assert.match(runtime, /TCG_WASM64_LIVE_TB_COVERAGE_ENV/);
+assert.match(runtime, /INDEX_op_add, INDEX_op_and, INDEX_op_exit_tb, INDEX_op_goto_tb/);
+const liveTbCoverageSupportedBody = runtime.match(
+  /static bool tcg_wasm64_live_tb_coverage_op_supported\(uint32_t op\)\s*\{[\s\S]*?switch \(\(TCGOpcode\)op\) \{([\s\S]*?)default:/,
+)?.[1] || "";
+for (const unsafeLiveCoverageOp of [
+  "INDEX_op_call",
+  "INDEX_op_ld",
+  "INDEX_op_ld32u",
+  "INDEX_op_st",
+  "INDEX_op_st8",
+  "INDEX_op_qemu_ld",
+  "INDEX_op_qemu_st",
+  "INDEX_op_tci_qemu_ld_rrr",
+  "INDEX_op_tci_qemu_st_rrr",
+]) {
+  assert.doesNotMatch(
+    liveTbCoverageSupportedBody,
+    new RegExp(`case\\s+${unsafeLiveCoverageOp}:`),
+  );
+}
+assert.match(liveTbCoverageSupportedBody, /case INDEX_op_tci_movi:/);
+assert.match(liveTbCoverageSupportedBody, /case INDEX_op_tci_movl:/);
+assert.match(liveTbCoverageSupportedBody, /case INDEX_op_goto_tb:/);
+const liveOneTbMetricsBody = runtime.match(
+  /static void tcg_wasm64_record_live_one_tb_generated_metrics\([\s\S]*?\n\}/,
+)?.[0] || "";
+assert.doesNotMatch(
+  liveOneTbMetricsBody,
+  /generated_coverage_denominator \+= guest_insns/,
+);
+const liveTbMetricsBody = runtime.match(
+  /static void tcg_wasm64_record_live_tb_generated_metrics\([\s\S]*?\n\}/,
+)?.[0] || "";
+assert.match(liveTbMetricsBody, /generated_coverage_numerator \+= guest_insns/);
+assert.doesNotMatch(
+  liveTbMetricsBody,
+  /generated_coverage_denominator \+= guest_insns/,
+);
 const liveMetadataCounterBody = runtime.match(
   /static void tcg_wasm64_count_live_translation_metadata\([\s\S]*?\n\}\n\nuintptr_t/,
 )?.[0] || "";

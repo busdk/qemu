@@ -30,8 +30,13 @@
     "QEMU_WASM64_ONE_TB_DIFFERENTIAL"
 #define TCG_WASM64_LIVE_ONE_TB_DIFFERENTIAL_ENV \
     "QEMU_WASM64_LIVE_ONE_TB_DIFFERENTIAL"
+#define TCG_WASM64_LIVE_TB_COVERAGE_ENV \
+    "QEMU_WASM64_LIVE_TB_COVERAGE"
+#define TCG_WASM64_LIVE_TB_COVERAGE_SCAN_LIMIT_ENV \
+    "QEMU_WASM64_LIVE_TB_COVERAGE_SCAN_LIMIT"
 #define TCG_WASM64_ONE_TB_NAME "live-x86-pre-r4i-ld32u-goto-tb-13"
 #define TCG_WASM64_LIVE_ONE_TB_NAME "live-x86-r4i-ld32u-goto-tb-11"
+#define TCG_WASM64_LIVE_TB_COVERAGE_NAME "live-rv64-generated-coverage"
 #define TCG_WASM64_ONE_TB_SCRATCH_SIZE 0x4000u
 #define TCG_WASM64_ONE_TB_GENERATED_REGS_OFFSET 0x100u
 #define TCG_WASM64_ONE_TB_DATA_OFFSET 0x1000u
@@ -39,9 +44,12 @@
 #define TCG_WASM64_ONE_TB_GOTO_SLOT_DELTA (-0x60)
 #define TCG_WASM64_ONE_TB_DISPATCH_TARGET 0x5048u
 #define TCG_WASM64_ONE_TB_STATUS_DISPATCH 2u
+#define TCG_WASM64_LIVE_TB_STATUS_EXIT 1u
+#define TCG_WASM64_LIVE_TB_STATUS_UNSUPPORTED 6u
 #define TCG_WASM64_ONE_TB_EXECUTED_TCI_OP_EQUIVALENTS 11u
 #define TCG_WASM64_ONE_TB_MEMORY_LOADS 2u
 #define TCG_WASM64_ONE_TB_MEMORY_WRITES 2u
+#define TCG_WASM64_LIVE_TB_COVERAGE_DEFAULT_SCAN_LIMIT 50000u
 
 static const uint32_t tcg_wasm64_one_tb_words[] = {
     0xfff0e41c, 0x0000057d, 0x00254d88, 0x00000d04,
@@ -281,12 +289,18 @@ static __thread bool live_one_tb_metadata_missing_reported;
 static __thread bool live_one_tb_output_unavailable_reported;
 static __thread bool live_one_tb_unsupported_shape_reported;
 static __thread uint64_t live_one_tb_differential_scanned;
+static __thread bool live_tb_coverage_checked;
+static __thread bool live_tb_coverage_no_shape_reported;
+static __thread uint64_t live_tb_coverage_scanned;
 static volatile uint64_t tcg_wasm64_runloop_smoke_sink;
 static gsize summary_env_initialized;
 static gsize live_one_tb_env_initialized;
+static gsize live_tb_coverage_env_initialized;
 static bool summary_enabled;
 static bool live_one_tb_enabled;
+static bool live_tb_coverage_enabled;
 static uint64_t summary_interval;
+static uint64_t live_tb_coverage_scan_limit;
 
 static const char *tcg_wasm64_op_name(uint32_t op);
 
@@ -711,6 +725,20 @@ static bool tcg_wasm64_live_one_tb_enabled(void)
         g_once_init_leave(&live_one_tb_env_initialized, 1);
     }
     return live_one_tb_enabled;
+}
+
+static bool tcg_wasm64_live_tb_coverage_enabled(void)
+{
+    if (unlikely(g_once_init_enter(&live_tb_coverage_env_initialized))) {
+        live_tb_coverage_enabled = tcg_wasm64_runloop_env_bool(
+            TCG_WASM64_LIVE_TB_COVERAGE_ENV);
+        live_tb_coverage_scan_limit = tcg_wasm64_env_u64(
+            TCG_WASM64_LIVE_TB_COVERAGE_SCAN_LIMIT_ENV,
+            TCG_WASM64_LIVE_TB_COVERAGE_DEFAULT_SCAN_LIMIT);
+        live_tb_coverage_scan_limit = MAX(live_tb_coverage_scan_limit, 1);
+        g_once_init_leave(&live_tb_coverage_env_initialized, 1);
+    }
+    return live_tb_coverage_enabled;
 }
 
 static void tcg_wasm64_summary_maybe_report(void)
@@ -2230,6 +2258,463 @@ EM_JS(int, tcg_wasm64_live_one_tb_differential_js,
         return 6;
     }
 });
+
+EM_JS(int, tcg_wasm64_live_tb_coverage_js,
+      (uintptr_t context_arg, uintptr_t counters_arg, uintptr_t exit_arg,
+       uintptr_t result_arg, uintptr_t tb_arg, uint64_t guest_insns_arg,
+       uintptr_t generated_output_arg, uint32_t generated_output_size_arg,
+       int op_add_arg, int op_and_arg, int op_exit_tb_arg,
+       int op_goto_tb_arg, int op_mb_arg, int op_mov_arg, int op_or_arg,
+       int op_shl_arg, int op_shr_arg, int op_sub_arg, int op_tci_movi_arg,
+       int op_tci_movl_arg, int op_xor_arg), {
+    if (typeof wasmMemory === "undefined" || !wasmMemory) {
+        return 1;
+    }
+
+    const context = Number(context_arg);
+    const counters = Number(counters_arg);
+    const exit = Number(exit_arg);
+    const result = Number(result_arg);
+    const tbPtr = Number(tb_arg);
+    const guestInsns = BigInt(guest_insns_arg);
+    const generatedOutputPtr = Number(generated_output_arg);
+    const generatedOutputSize = Number(generated_output_size_arg);
+    const statusExit = 1n;
+    const statusDispatch = 2n;
+    const statusUnsupported = 6n;
+    const valueI64 = 0x7e;
+    const ops = {
+        add: Number(op_add_arg),
+        and: Number(op_and_arg),
+        exit_tb: Number(op_exit_tb_arg),
+        goto_tb: Number(op_goto_tb_arg),
+        mb: Number(op_mb_arg),
+        mov: Number(op_mov_arg),
+        or: Number(op_or_arg),
+        shl: Number(op_shl_arg),
+        shr: Number(op_shr_arg),
+        sub: Number(op_sub_arg),
+        tci_movi: Number(op_tci_movi_arg),
+        tci_movl: Number(op_tci_movl_arg),
+        xor: Number(op_xor_arg),
+    };
+
+    function encodeU32(value) {
+        const bytes = [];
+        let current = Number(value) >>> 0;
+        do {
+            let byte = current & 0x7f;
+            current >>>= 7;
+            if (current !== 0) {
+                byte |= 0x80;
+            }
+            bytes.push(byte);
+        } while (current !== 0);
+        return bytes;
+    }
+
+    function encodeS64(value) {
+        let current = BigInt.asIntN(64, BigInt(value));
+        const bytes = [];
+        for (;;) {
+            let byte = Number(current & 0x7fn);
+            const sign = (byte & 0x40) !== 0;
+            current >>= 7n;
+            const done = (current === 0n && !sign) ||
+                         (current === -1n && sign);
+            if (!done) {
+                byte |= 0x80;
+            }
+            bytes.push(byte);
+            if (done) {
+                return bytes;
+            }
+        }
+    }
+
+    function utf8Bytes(text) {
+        return Array.from(new TextEncoder().encode(text));
+    }
+
+    function name(text) {
+        const bytes = utf8Bytes(text);
+        return [...encodeU32(bytes.length), ...bytes];
+    }
+
+    function vector(items) {
+        return [...encodeU32(items.length), ...items.flat()];
+    }
+
+    function section(id, payload) {
+        return [id, ...encodeU32(payload.length), ...payload];
+    }
+
+    function functionType(params, results) {
+        return [
+            0x60,
+            ...vector(params.map((param) => [param])),
+            ...vector(results.map((result) => [result])),
+        ];
+    }
+
+    function functionBody(instructions, locals = []) {
+        const body = [
+            ...vector(locals.map(({ count, type }) =>
+                [...encodeU32(count), type])),
+            ...instructions,
+            0x0b,
+        ];
+        return [...encodeU32(body.length), ...body];
+    }
+
+    function memArg(align, offset) {
+        return [...encodeU32(align), ...encodeU32(offset)];
+    }
+
+    function localGet(index) {
+        return [0x20, ...encodeU32(index)];
+    }
+
+    function localSet(index, expr) {
+        return [...expr, 0x21, ...encodeU32(index)];
+    }
+
+    function i32Const(value) {
+        return [0x41, ...encodeU32(value >>> 0)];
+    }
+
+    function i64Const(value) {
+        return [0x42, ...encodeS64(value)];
+    }
+
+    function i64LoadAtPtr(ptrLocal, offset) {
+        return [...localGet(ptrLocal), 0x29, ...memArg(3, offset)];
+    }
+
+    function i32StoreAtPtr(ptrLocal, offset, value) {
+        return [...localGet(ptrLocal), ...value, 0x36, ...memArg(2, offset)];
+    }
+
+    function i64StoreAtPtr(ptrLocal, offset, value) {
+        return [...localGet(ptrLocal), ...value, 0x37, ...memArg(3, offset)];
+    }
+
+    function bits(value, start, length) {
+        return (value >>> start) & ((1 << length) - 1);
+    }
+
+    function sextract(value, start, length) {
+        const mask = (1 << length) - 1;
+        let extracted = (value >>> start) & mask;
+        const sign = 1 << (length - 1);
+        if ((extracted & sign) !== 0) {
+            extracted |= ~mask;
+        }
+        return extracted;
+    }
+
+    function toU64(value) {
+        return BigInt.asUintN(64, BigInt(value));
+    }
+
+    function checksum(values) {
+        let hash = 1469598103934665603n;
+        for (const item of values) {
+            hash ^= toU64(item);
+            hash = BigInt.asUintN(64, hash * 1099511628211n);
+        }
+        return hash;
+    }
+
+    function setResult(index, value) {
+        HEAPU64[result / 8 + index] = toU64(value);
+    }
+
+    function readGeneratedOutputWords() {
+        if (generatedOutputPtr === 0 || generatedOutputSize === 0 ||
+            generatedOutputSize % 4 !== 0) {
+            return null;
+        }
+        const wordCount = generatedOutputSize / 4;
+        const output = [];
+
+        for (let i = 0; i < wordCount; i++) {
+            output.push(HEAPU32[generatedOutputPtr / 4 + i] >>> 0);
+        }
+        return output;
+    }
+
+    function supportedOp(opc) {
+        return opc === ops.add || opc === ops.and ||
+               opc === ops.exit_tb || opc === ops.goto_tb ||
+               opc === ops.mb || opc === ops.mov || opc === ops.or ||
+               opc === ops.shl || opc === ops.shr || opc === ops.sub ||
+               opc === ops.tci_movi || opc === ops.tci_movl ||
+               opc === ops.xor;
+    }
+
+    function terminalStatus(opc) {
+        if (opc === ops.goto_tb) {
+            return statusDispatch;
+        }
+        if (opc === ops.exit_tb) {
+            return statusExit;
+        }
+        return statusUnsupported;
+    }
+
+    function readTerminalValue(opc, ptrOffset) {
+        if (opc === ops.goto_tb) {
+            const address = tbPtr + ptrOffset;
+            if (address < 0 || address % 8 !== 0) {
+                return 0n;
+            }
+            return HEAPU64[address / 8];
+        }
+        return BigInt(tbPtr + ptrOffset);
+    }
+
+    function applyOp(regs, insn, index) {
+        const opc = bits(insn, 0, 8);
+        const r0 = bits(insn, 8, 4);
+        const r1 = bits(insn, 12, 4);
+        const r2 = bits(insn, 16, 4);
+        const currentTbPtr = (index + 1) * 4;
+
+        if (opc === ops.tci_movi || opc === ops.tci_movl) {
+            regs[r0] = BigInt(sextract(insn, 12, 20));
+        } else if (opc === ops.mov) {
+            regs[r0] = regs[r1];
+        } else if (opc === ops.add) {
+            regs[r0] = toU64(regs[r1] + regs[r2]);
+        } else if (opc === ops.sub) {
+            regs[r0] = toU64(regs[r1] - regs[r2]);
+        } else if (opc === ops.and) {
+            regs[r0] = toU64(regs[r1] & regs[r2]);
+        } else if (opc === ops.or) {
+            regs[r0] = toU64(regs[r1] | regs[r2]);
+        } else if (opc === ops.xor) {
+            regs[r0] = toU64(regs[r1] ^ regs[r2]);
+        } else if (opc === ops.shl) {
+            regs[r0] = toU64(regs[r1] << (regs[r2] & 63n));
+        } else if (opc === ops.shr) {
+            regs[r0] = toU64(regs[r1] >> (regs[r2] & 63n));
+        } else if (opc === ops.mb) {
+            return null;
+        } else if (opc === ops.goto_tb || opc === ops.exit_tb) {
+            const ptrOffset = currentTbPtr + sextract(insn, 12, 20);
+            return {
+                status: terminalStatus(opc),
+                value: readTerminalValue(opc, ptrOffset),
+            };
+        } else {
+            throw new Error(`unsupported live coverage opcode ${opc}`);
+        }
+        return null;
+    }
+
+    function referenceRun(words) {
+        const regs = [];
+        for (let reg = 0; reg < 16; reg++) {
+            regs.push(BigInt(0x1000 + reg));
+        }
+        for (let index = 0; index < words.length; index++) {
+            const terminal = applyOp(regs, words[index] >>> 0, index);
+            if (terminal) {
+                return {
+                    ...terminal,
+                    checksum: checksum(regs),
+                    executed: BigInt(index + 1),
+                };
+            }
+        }
+        throw new Error("live coverage generated output has no terminal");
+    }
+
+    function buildGeneratedInstructions(words) {
+        const emitted = [
+            ...localSet(1, i64LoadAtPtr(0, 24)),
+            ...localSet(2, i64LoadAtPtr(0, 32)),
+        ];
+        let terminal = null;
+
+        for (let reg = 0; reg < 16; reg++) {
+            emitted.push(...localSet(3 + reg, i64Const(BigInt(0x1000 + reg))));
+        }
+
+        for (let index = 0; index < words.length; index++) {
+            const insn = words[index] >>> 0;
+            const opc = bits(insn, 0, 8);
+            const r0 = bits(insn, 8, 4);
+            const r1 = bits(insn, 12, 4);
+            const r2 = bits(insn, 16, 4);
+            const currentTbPtr = (index + 1) * 4;
+            const dst = 3 + r0;
+            const src1 = 3 + r1;
+            const src2 = 3 + r2;
+
+            if (!supportedOp(opc)) {
+                throw new Error(`unsupported live coverage opcode ${opc}`);
+            }
+            if (opc === ops.tci_movi || opc === ops.tci_movl) {
+                emitted.push(...localSet(dst,
+                                         i64Const(sextract(insn, 12, 20))));
+            } else if (opc === ops.mov) {
+                emitted.push(...localSet(dst, localGet(src1)));
+            } else if (opc === ops.add || opc === ops.sub ||
+                       opc === ops.and || opc === ops.or ||
+                       opc === ops.xor || opc === ops.shl ||
+                       opc === ops.shr) {
+                const opByte = opc === ops.add ? 0x7c :
+                               opc === ops.sub ? 0x7d :
+                               opc === ops.and ? 0x83 :
+                               opc === ops.or ? 0x84 :
+                               opc === ops.xor ? 0x85 :
+                               opc === ops.shl ? 0x86 : 0x88;
+                emitted.push(
+                    ...localGet(src1),
+                    ...localGet(src2),
+                    opByte,
+                    ...localSet(dst));
+            } else if (opc === ops.mb) {
+                continue;
+            } else if (opc === ops.goto_tb || opc === ops.exit_tb) {
+                const ptrOffset = currentTbPtr + sextract(insn, 12, 20);
+                terminal = {
+                    opc,
+                    ptrOffset,
+                    executed: index + 1,
+                };
+                break;
+            }
+        }
+
+        if (!terminal) {
+            throw new Error("live coverage generated output has no terminal");
+        }
+
+        let checksumExpr = i64Const(1469598103934665603n);
+        for (let reg = 0; reg < 16; reg++) {
+            checksumExpr = [
+                ...checksumExpr,
+                ...localGet(3 + reg),
+                0x85,
+                ...i64Const(1099511628211n),
+                0x7e,
+            ];
+        }
+
+        emitted.push(...localSet(19, checksumExpr));
+        emitted.push(...i64StoreAtPtr(1, 0, guestInsns === 0n
+            ? i64Const(0n) : i64Const(guestInsns)));
+        emitted.push(...i64StoreAtPtr(1, 80, i64Const(1n)));
+        emitted.push(...i32StoreAtPtr(
+            2, 0, i32Const(Number(terminalStatus(terminal.opc)))));
+        emitted.push(...i64StoreAtPtr(
+            2, 32,
+            terminal.opc === ops.goto_tb
+                ? [
+                    ...i64Const(BigInt(tbPtr + terminal.ptrOffset)),
+                    0x29, ...memArg(3, 0),
+                ]
+                : i64Const(BigInt(tbPtr + terminal.ptrOffset))));
+        emitted.push(...i64StoreAtPtr(2, 40, i64Const(BigInt(terminal.executed))));
+        emitted.push(...localGet(19));
+        return emitted;
+    }
+
+    try {
+        const words = readGeneratedOutputWords();
+        if (!words || words.length === 0) {
+            setResult(0, 4n);
+            return 4;
+        }
+        for (const word of words) {
+            if (!supportedOp(bits(word >>> 0, 0, 8))) {
+                setResult(0, statusUnsupported);
+                return Number(statusUnsupported);
+            }
+        }
+
+        const bytes = Uint8Array.from([
+            0x00, 0x61, 0x73, 0x6d,
+            0x01, 0x00, 0x00, 0x00,
+            ...section(1, vector([
+                functionType([valueI64], [valueI64]),
+            ])),
+            ...section(2, vector([
+                [
+                    ...name("env"), ...name("memory"),
+                    0x02, 0x07, 0x00, 0x80, 0x80, 0x10,
+                ],
+            ])),
+            ...section(3, vector([[0x00]])),
+            ...section(7, vector([
+                [...name("wasmjit_run"), 0x00, ...encodeU32(0)],
+            ])),
+            ...section(10, vector([
+                functionBody(buildGeneratedInstructions(words), [
+                    { count: 19, type: valueI64 },
+                ]),
+            ])),
+        ]);
+        if (!WebAssembly.validate(bytes)) {
+            setResult(0, 7n);
+            return 7;
+        }
+
+        for (let i = 0; i < 192 / 8; i++) {
+            HEAPU64[counters / 8 + i] = 0n;
+        }
+        for (let i = 0; i < 48 / 8; i++) {
+            HEAPU64[exit / 8 + i] = 0n;
+        }
+        HEAPU64[context / 8 + 2] = guestInsns;
+        HEAPU64[context / 8 + 3] = BigInt(counters);
+        HEAPU64[context / 8 + 4] = BigInt(exit);
+
+        const compileStart = performance.now();
+        const module = new WebAssembly.Module(bytes);
+        const compileNs = BigInt(Math.round(
+            (performance.now() - compileStart) * 1000000));
+        const instantiateStart = performance.now();
+        const instance = new WebAssembly.Instance(module, {
+            env: { memory: wasmMemory },
+        });
+        const instantiateNs = BigInt(Math.round(
+            (performance.now() - instantiateStart) * 1000000));
+        const generatedStart = performance.now();
+        const generatedChecksum = BigInt(instance.exports.wasmjit_run(
+            BigInt(context)));
+        const generatedNs = BigInt(Math.round(
+            (performance.now() - generatedStart) * 1000000));
+        const reference = referenceRun(words);
+
+        HEAPU64[counters / 8 + 2] = generatedNs;
+        HEAPU64[counters / 8 + 8] = compileNs;
+        HEAPU64[counters / 8 + 9] = instantiateNs;
+        setResult(0, 0n);
+        setResult(1, HEAPU32[exit / 4]);
+        setResult(2, reference.status);
+        setResult(3, HEAPU64[exit / 8 + 4]);
+        setResult(4, reference.value);
+        setResult(5, generatedChecksum);
+        setResult(6, reference.checksum);
+        setResult(7, HEAPU64[exit / 8 + 5]);
+        setResult(8, reference.executed);
+        setResult(9, guestInsns);
+        setResult(10, words.length);
+
+        return HEAPU32[exit / 4] === Number(reference.status) &&
+               HEAPU64[exit / 8 + 4] === reference.value &&
+               generatedChecksum === reference.checksum &&
+               HEAPU64[exit / 8 + 5] === reference.executed &&
+               guestInsns > 0n ? 0 : 2;
+    } catch (error) {
+        setResult(0, 6n);
+        return 6;
+    }
+});
 #endif
 
 static const char *tcg_wasm64_runloop_smoke_workload_name(
@@ -2926,7 +3411,6 @@ static void tcg_wasm64_record_live_one_tb_generated_metrics(
     translated_counters.generated_compiled++;
     translated_counters.generated_executed++;
     translated_counters.generated_coverage_numerator += guest_insns;
-    translated_counters.generated_coverage_denominator += guest_insns;
 }
 
 static void tcg_wasm64_live_one_tb_differential_maybe(
@@ -3062,6 +3546,280 @@ static void tcg_wasm64_live_one_tb_differential_maybe(
         tcg_wasm64_record_live_one_tb_generated_metrics(guest_insns);
     }
     tcg_wasm64_report_live_one_tb_differential(
+        tb, metadata, &run_counters, &exit, result, ok);
+}
+
+static bool tcg_wasm64_live_tb_coverage_op_supported(uint32_t op)
+{
+    switch ((TCGOpcode)op) {
+    case INDEX_op_add:
+    case INDEX_op_and:
+    case INDEX_op_exit_tb:
+    case INDEX_op_goto_tb:
+    case INDEX_op_mb:
+    case INDEX_op_mov:
+    case INDEX_op_or:
+    case INDEX_op_shl:
+    case INDEX_op_shr:
+    case INDEX_op_sub:
+    case INDEX_op_tci_movi:
+    case INDEX_op_tci_movl:
+    case INDEX_op_xor:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool tcg_wasm64_live_tb_coverage_shape_supported(
+    const TCGWasm64TBMetadata *metadata)
+{
+    const uint32_t *words;
+
+    if (!tcg_wasm64_translate_generated_output_available(metadata)) {
+        return false;
+    }
+    words = metadata->generated_output;
+    for (uint32_t i = 0; i < metadata->generated_output_op_count; i++) {
+        if (!tcg_wasm64_live_tb_coverage_op_supported(
+                tcg_wasm64_tci_word_op(words[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void tcg_wasm64_report_live_tb_coverage(
+    const TranslationBlock *tb, const TCGWasm64TBMetadata *metadata,
+    const TCGWasm64RunCounters *run_counters,
+    const TCGWasm64RunExit *exit, const uint64_t *result, bool ok)
+{
+    fprintf(stderr,
+            "qemu-wasm64-runloop: {\"format\":1,"
+            "\"event\":\"live-tb-coverage\","
+            "\"name\":\"%s\","
+            "\"ok\":%s,"
+            "\"real_live_tb\":true,"
+            "\"guest_state_commit\":false,"
+            "\"tb_ptr\":\"0x%" PRIxPTR "\","
+            "\"tb_pc\":\"0x%" PRIx64 "\","
+            "\"tb_cs_base\":\"0x%" PRIx64 "\","
+            "\"tb_flags\":%" PRIu32 ","
+            "\"tb_cflags\":%" PRIu32 ","
+            "\"tb_size\":%" PRIu16 ","
+            "\"tb_icount\":%" PRIu16 ","
+            "\"metadata_op_count\":%" PRIu32 ","
+            "\"metadata_generated_output_size\":%" PRIu32 ","
+            "\"metadata_generated_output_op_count\":%" PRIu32 ","
+            "\"metadata_generated_output_checksum\":%" PRIu32 ","
+            "\"generated_guest_instructions\":%" PRIu64 ","
+            "\"generated_body_time_ns\":%" PRIu64 ","
+            "\"compile_time_ns\":%" PRIu64 ","
+            "\"instantiate_time_ns\":%" PRIu64 ","
+            "\"generated_chain_length\":%" PRIu64 ","
+            "\"generated_status\":%" PRIu64 ","
+            "\"reference_status\":%" PRIu64 ","
+            "\"generated_exit_value\":%" PRIu64 ","
+            "\"reference_exit_value\":%" PRIu64 ","
+            "\"generated_regs_checksum\":%" PRIu64 ","
+            "\"reference_regs_checksum\":%" PRIu64 ","
+            "\"generated_tci_op_equivalents\":%" PRIu64 ","
+            "\"reference_tci_op_equivalents\":%" PRIu64 ","
+            "\"generated_output_words\":%" PRIu64 ","
+            "\"exit_reason_code\":%u,"
+            "\"exit_value\":%" PRIu64 ","
+            "\"scanned_live_tbs_before_match\":%" PRIu64 ","
+            "\"js_status\":%" PRIu64 "}\n",
+            TCG_WASM64_LIVE_TB_COVERAGE_NAME,
+            ok ? "true" : "false",
+            (uintptr_t)tb->tc.ptr,
+            (uint64_t)tb->pc,
+            tb->cs_base,
+            tb->flags,
+            tb_cflags(tb),
+            tb->size,
+            tb->icount,
+            metadata->op_count,
+            metadata->generated_output_size,
+            metadata->generated_output_op_count,
+            metadata->generated_output_checksum,
+            run_counters->generated_guest_instructions,
+            run_counters->generated_body_time_ns,
+            run_counters->compile_time_ns,
+            run_counters->instantiate_time_ns,
+            run_counters->generated_chain_length,
+            result[1],
+            result[2],
+            result[3],
+            result[4],
+            result[5],
+            result[6],
+            result[7],
+            result[8],
+            result[10],
+            exit->reason,
+            exit->value,
+            live_tb_coverage_scanned,
+            result[0]);
+}
+
+static void tcg_wasm64_report_live_tb_coverage_skip(
+    const char *blocker, const void *tb_ptr,
+    const TCGWasm64TBMetadata *metadata)
+{
+    fprintf(stderr,
+            "qemu-wasm64-runloop: {\"format\":1,"
+            "\"event\":\"live-tb-coverage\","
+            "\"name\":\"%s\","
+            "\"ok\":false,"
+            "\"blocker\":\"%s\","
+            "\"tb_ptr\":\"0x%" PRIxPTR "\","
+            "\"has_metadata\":%s,"
+            "\"metadata_op_count\":%" PRIu32 ","
+            "\"metadata_first_op\":%" PRIu32 ","
+            "\"metadata_first_op_name\":\"%s\","
+            "\"metadata_generated_output_available\":%s,"
+            "\"metadata_generated_output_size\":%" PRIu32 ","
+            "\"metadata_generated_output_op_count\":%" PRIu32 ","
+            "\"metadata_first_generated_unsupported_op\":%" PRIu32 ","
+            "\"metadata_first_generated_unsupported_op_name\":\"%s\","
+            "\"scanned_live_tbs\":%" PRIu64 ","
+            "\"scan_limit\":%" PRIu64 "}\n",
+            TCG_WASM64_LIVE_TB_COVERAGE_NAME,
+            blocker,
+            (uintptr_t)tb_ptr,
+            metadata ? "true" : "false",
+            metadata ? metadata->op_count : 0,
+            metadata ? metadata->first_op : UINT32_MAX,
+            metadata ? tcg_wasm64_op_name(metadata->first_op) : "none",
+            tcg_wasm64_translate_generated_output_available(metadata) ?
+                "true" : "false",
+            metadata ? metadata->generated_output_size : 0,
+            metadata ? metadata->generated_output_op_count : 0,
+            metadata ? metadata->first_generated_unsupported_op : UINT32_MAX,
+            metadata ? tcg_wasm64_op_name(
+                metadata->first_generated_unsupported_op) : "none",
+            live_tb_coverage_scanned,
+            live_tb_coverage_scan_limit);
+}
+
+static void tcg_wasm64_record_live_tb_generated_metrics(
+    uint64_t guest_insns)
+{
+    translated_counters.generated_attempts++;
+    translated_counters.generated_compiled++;
+    translated_counters.generated_executed++;
+    translated_counters.generated_coverage_numerator += guest_insns;
+}
+
+static void tcg_wasm64_count_live_tb_coverage_denominator(const void *tb_ptr)
+{
+    TranslationBlock *tb;
+
+    if (!tb_ptr ||
+        (!tcg_wasm64_summary_enabled() &&
+         !tcg_wasm64_live_one_tb_enabled() &&
+         !tcg_wasm64_live_tb_coverage_enabled())) {
+        return;
+    }
+
+    tb = tcg_tb_lookup((uintptr_t)tb_ptr);
+    if (tb && tb->icount != 0) {
+        translated_counters.generated_coverage_denominator += tb->icount;
+    }
+}
+
+static void tcg_wasm64_live_tb_coverage_maybe(
+    CPUArchState *env, const void *tb_ptr,
+    const TCGWasm64TBMetadata *metadata)
+{
+    TranslationBlock *tb;
+    TCGWasm64RunCounters run_counters;
+    TCGWasm64RunExit exit;
+    TCGWasm64RunContext context = { 0 };
+    uint64_t result[11] = { 0 };
+    uint64_t guest_insns;
+    bool ok = false;
+
+    if (live_tb_coverage_checked ||
+        !tcg_wasm64_live_tb_coverage_enabled()) {
+        return;
+    }
+    if (live_tb_coverage_scanned >= live_tb_coverage_scan_limit) {
+        if (!live_tb_coverage_no_shape_reported) {
+            live_tb_coverage_no_shape_reported = true;
+            tcg_wasm64_report_live_tb_coverage_skip(
+                "scan limit reached before a generated live TB shape ran",
+                tb_ptr, metadata);
+        }
+        return;
+    }
+
+    live_tb_coverage_scanned++;
+    if (!metadata ||
+        !tcg_wasm64_live_tb_coverage_shape_supported(metadata)) {
+        if (metadata) {
+            translated_counters.fallback_runtime++;
+            tcg_wasm64_count_exit(&translated_counters,
+                                  TCG_WASM64_EXIT_UNSUPPORTED);
+        }
+        return;
+    }
+
+    tb = tcg_tb_lookup((uintptr_t)tb_ptr);
+    if (!tb || tb->icount == 0) {
+        if (!live_tb_coverage_no_shape_reported) {
+            live_tb_coverage_no_shape_reported = true;
+            tcg_wasm64_report_live_tb_coverage_skip(
+                "generated output matched but TranslationBlock identity "
+                "or icount was missing",
+                tb_ptr, metadata);
+        }
+        return;
+    }
+    guest_insns = tb->icount;
+
+    tcg_wasm64_run_counters_reset(&run_counters);
+    memset(&exit, 0, sizeof(exit));
+    context.env = env;
+    context.budget = guest_insns;
+    context.counters = &run_counters;
+    context.exit = &exit;
+    context.mode = TCG_WASM64_RUN_MODE_PERF_PROOF;
+
+#ifdef CONFIG_EMSCRIPTEN
+    result[0] = tcg_wasm64_live_tb_coverage_js(
+        (uintptr_t)&context, (uintptr_t)&run_counters, (uintptr_t)&exit,
+        (uintptr_t)result, (uintptr_t)tb_ptr, guest_insns,
+        (uintptr_t)metadata->generated_output, metadata->generated_output_size,
+        INDEX_op_add, INDEX_op_and, INDEX_op_exit_tb, INDEX_op_goto_tb,
+        INDEX_op_mb, INDEX_op_mov, INDEX_op_or, INDEX_op_shl, INDEX_op_shr,
+        INDEX_op_sub, INDEX_op_tci_movi, INDEX_op_tci_movl, INDEX_op_xor);
+#else
+    result[0] = 1;
+#endif
+
+    ok = result[0] == 0 &&
+         result[1] == result[2] &&
+         result[3] == result[4] &&
+         result[5] == result[6] &&
+         result[7] == result[8] &&
+         result[9] == guest_insns &&
+         run_counters.generated_guest_instructions == guest_insns &&
+         run_counters.generated_chain_length == 1 &&
+         exit.reason == result[1] &&
+         exit.value == result[3];
+
+    if (ok) {
+        tcg_wasm64_record_live_tb_generated_metrics(guest_insns);
+        live_tb_coverage_checked = true;
+    } else {
+        translated_counters.generated_attempts++;
+        translated_counters.fallback_runtime++;
+        tcg_wasm64_count_exit(&translated_counters,
+                              TCG_WASM64_EXIT_UNSUPPORTED);
+    }
+    tcg_wasm64_report_live_tb_coverage(
         tb, metadata, &run_counters, &exit, result, ok);
 }
 
@@ -3632,11 +4390,15 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
     metadata = tcg_wasm64_translate_lookup_mutable(tb_ptr);
     if (metadata) {
         tcg_wasm64_count_live_translation_metadata(metadata);
+        tcg_wasm64_count_live_tb_coverage_denominator(tb_ptr);
         tcg_wasm64_live_one_tb_differential_maybe(env, tb_ptr, metadata);
+        tcg_wasm64_live_tb_coverage_maybe(env, tb_ptr, metadata);
         tcg_wasm64_summary_maybe_report();
     } else {
         translated_counters.translated_metadata_misses++;
+        tcg_wasm64_count_live_tb_coverage_denominator(tb_ptr);
         tcg_wasm64_live_one_tb_differential_maybe(env, tb_ptr, NULL);
+        tcg_wasm64_live_tb_coverage_maybe(env, tb_ptr, NULL);
     }
     active_counters = counters;
     ret = tcg_tci_qemu_tb_exec(env, tb_ptr);

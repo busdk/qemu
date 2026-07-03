@@ -186,6 +186,9 @@ Options:
   --wasm64-live-one-tb-differential
                      Enable opt-in generated-vs-reference proof for one real
                      translated x86 TB shape
+  --wasm64-live-tb-coverage
+                     Enable opt-in generated execution proof for one real
+                     live generated-output TB before falling back to TCI
   --wasm64-runloop-smoke
                      Enable opt-in QEMU wasm64 run/exit runtime smoke
   --wasm64-tcg-summary
@@ -293,6 +296,7 @@ export function parseArgs(argv) {
     visualMarker: "",
     wasm64OneTbDifferential: false,
     wasm64LiveOneTbDifferential: false,
+    wasm64LiveTbCoverage: false,
     wasm64RunloopSmoke: false,
     wasm64TcgSummary: false,
     wasm64TcgSummaryInterval: 10000,
@@ -531,6 +535,9 @@ export function parseArgs(argv) {
     } else if (arg === "--wasm64-live-one-tb-differential") {
       options.wasm64LiveOneTbDifferential = true;
       explicit.add("wasm64LiveOneTbDifferential");
+    } else if (arg === "--wasm64-live-tb-coverage") {
+      options.wasm64LiveTbCoverage = true;
+      explicit.add("wasm64LiveTbCoverage");
     } else if (arg === "--wasm64-runloop-smoke") {
       options.wasm64RunloopSmoke = true;
       explicit.add("wasm64RunloopSmoke");
@@ -572,6 +579,7 @@ export function parseArgs(argv) {
       "tciWasmGeneratedTrace",
       "wasm64OneTbDifferential",
       "wasm64LiveOneTbDifferential",
+      "wasm64LiveTbCoverage",
       "wasm64RunloopSmoke",
       "wasm64TcgSummary",
       "requireWasm64TcgCoverage",
@@ -893,6 +901,9 @@ export function parseArgs(argv) {
     options.requireWasm64TcgFallbackAttribution
   ) {
     options.wasm64TcgSummary = true;
+    if (options.requireWasm64TcgCoverage) {
+      options.wasm64LiveTbCoverage = true;
+    }
   }
 
   return options;
@@ -1590,6 +1601,9 @@ export function browserSmokeUrl(options) {
   if (options.wasm64LiveOneTbDifferential) {
     url.searchParams.set("wasm64LiveOneTbDifferential", "1");
   }
+  if (options.wasm64LiveTbCoverage) {
+    url.searchParams.set("wasm64LiveTbCoverage", "1");
+  }
   if (options.wasm64TcgSummary) {
     url.searchParams.set("wasm64TcgSummary", "1");
     url.searchParams.set(
@@ -1718,6 +1732,7 @@ export function initialSmokeResult(options, browserVersion) {
     wasm64OneTbDifferential: Boolean(options.wasm64OneTbDifferential),
     wasm64LiveOneTbDifferential:
       Boolean(options.wasm64LiveOneTbDifferential),
+    wasm64LiveTbCoverage: Boolean(options.wasm64LiveTbCoverage),
     wasm64TcgSummary: Boolean(options.wasm64TcgSummary),
     wasm64TcgSummaryInterval: Number.isInteger(options.wasm64TcgSummaryInterval)
       ? options.wasm64TcgSummaryInterval

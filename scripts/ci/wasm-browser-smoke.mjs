@@ -1528,6 +1528,7 @@ function buildConfig() {
     wasm64OneTbDifferential: boolOption("wasm64OneTbDifferential", false),
     wasm64LiveOneTbDifferential:
       boolOption("wasm64LiveOneTbDifferential", false),
+    wasm64LiveTbCoverage: boolOption("wasm64LiveTbCoverage", false),
     wasm64RunloopSmoke: boolOption("wasm64RunloopSmoke", false),
     wasm64TcgSummary: boolOption("wasm64TcgSummary", false),
     wasm64TcgSummaryInterval: numberOption("wasm64TcgSummaryInterval", 10000),
@@ -1722,7 +1723,8 @@ async function run() {
     wasm64Runloop: {
       enabled: Boolean(config.wasm64RunloopSmoke ||
                        config.wasm64OneTbDifferential ||
-                       config.wasm64LiveOneTbDifferential),
+                       config.wasm64LiveOneTbDifferential ||
+                       config.wasm64LiveTbCoverage),
       maxSummaries: 16,
       summaryCount: 0,
       summaries: [],
@@ -2128,6 +2130,9 @@ async function run() {
     ...(config.wasm64LiveOneTbDifferential ? {
       QEMU_WASM64_LIVE_ONE_TB_DIFFERENTIAL: "1",
     } : {}),
+    ...(config.wasm64LiveTbCoverage ? {
+      QEMU_WASM64_LIVE_TB_COVERAGE: "1",
+    } : {}),
     ...(config.wasm64TcgSummary ? {
       QEMU_WASM64_TCG_SUMMARY: "1",
       QEMU_WASM64_TCG_SUMMARY_INTERVAL: String(config.wasm64TcgSummaryInterval),
@@ -2196,6 +2201,7 @@ async function run() {
           config.wasm64RunloopSmoke ||
           config.wasm64OneTbDifferential ||
           config.wasm64LiveOneTbDifferential ||
+          config.wasm64LiveTbCoverage ||
           config.wasm64TcgSummary
         ) {
           const lines = Object.entries(tciEnv)

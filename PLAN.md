@@ -612,6 +612,38 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-browser-smoke-runner-test.mjs`. No browser run, artifact
     build, or real RV64 generated-coverage proof was run in this harness slice,
     so R4d remains open.
+  - [x] R4d-b - Add the opt-in live RV64 generated-coverage probe before the
+    next browser proof. DoD: a deterministic implementation slice exposes a
+    browser-runner flag for live generated TB coverage, automatically enables
+    it when the R4d coverage gate is required, keeps strict TCI as the
+    guest-state commit path, accounts live TB instruction coverage with a real
+    numerator and denominator, and preserves fallback attribution for
+    unsupported generated-output shapes. Accepted 2026-07-03:
+    `tcg/wasm64.c` now supports `QEMU_WASM64_LIVE_TB_COVERAGE=1` with a
+    bounded scan over live TB metadata. For a conservative side-effect-free
+    generated-output shape, it builds and executes a generated WebAssembly
+    body from the live TCI words, compares status, terminal value, executed op
+    count, and register checksum against a JavaScript reference over those
+    same words, emits `qemu-wasm64-runloop` event `live-tb-coverage`, records
+    generated numerator only on success, and counts the live TB execution
+    stream as the denominator. The proof records `guest_state_commit:false`;
+    after the diagnostic generated execution, normal `tcg_tci_qemu_tb_exec`
+    still owns guest-visible execution. `scripts/ci/wasm-browser-smoke-runner.mjs`
+    exposes `--wasm64-live-tb-coverage`, the browser page forwards
+    `QEMU_WASM64_LIVE_TB_COVERAGE=1`, and
+    `--require-wasm64-tcg-coverage` now enables both wasm64 TCG summaries and
+    this live probe. Checks: `node --check
+    scripts/ci/wasm-browser-smoke.mjs`; `node --check
+    scripts/ci/wasm-browser-smoke-runner.mjs`; `node --check
+    scripts/ci/wasm-browser-smoke-runner-test.mjs`; `node --check
+    scripts/ci/wasm64-translate-metadata-test.mjs`; `node
+    scripts/ci/wasm-browser-smoke-args-test.mjs`; `node
+    scripts/ci/wasm-browser-smoke-runner-test.mjs`; `node
+    scripts/ci/wasm64-translate-metadata-test.mjs`; and `git diff --check`
+    passed. No browser run or artifact build was run in this worker slice, so
+    R4d remains open until the supervisor-run Chrome proof reports nonzero
+    real RV64 generated coverage and the top remaining fallback PCs/TBs or op
+    shapes before `Welcome to TuxTest`.
   - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
