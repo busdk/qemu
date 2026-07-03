@@ -24,7 +24,7 @@ assert.match(target, /#define\s+tcg_out_tb_start\s+tcg_wasm64_tci_out_tb_start/)
 assert.match(target, /tcg_wasm64_translate_begin\(tcg_splitwx_to_rx\(s->code_buf\)\)/);
 assert.match(target, /tcg_wasm64_has_pending_tci_op\s*=\s*true/);
 assert.match(target, /tcg_wasm64_translate_note_tci_op\(op\)/);
-assert.match(target, /tcg_wasm64_translate_note_tci_insn\(tcg_wasm64_pending_tci_op,\s*insn\)/);
+assert.match(target, /tcg_wasm64_translate_note_tci_insn\(s,\s*tcg_wasm64_pending_tci_op,\s*insn\)/);
 assert.match(target, /#undef\s+tcg_out32/);
 assert.match(target, /#undef\s+tcg_out_tci_note_op/);
 
@@ -67,9 +67,11 @@ assert.match(header, /runloop_attach_probe_semantic_first_ops\[\s*\n\s*TCG_WASM6
 assert.match(header, /generated_output_size/);
 assert.match(header, /generated_output_op_count/);
 assert.match(header, /generated_output_checksum/);
+assert.match(header, /TCG_WASM64_TCI_REG_COUNT 16u/);
+assert.match(header, /tci_reg_env_offsets\[TCG_WASM64_TCI_REG_COUNT\]/);
 assert.match(header, /first_generated_unsupported_op/);
 assert.match(header, /tcg_wasm64_translate_note_tci_op\(uint32_t op\)/);
-assert.match(header, /tcg_wasm64_translate_note_tci_insn\(uint32_t op,\s*uint32_t insn\)/);
+assert.match(header, /tcg_wasm64_translate_note_tci_insn\(TCGContext \*s,\s*uint32_t op,\s*\n\s*uint32_t insn\)/);
 assert.match(header, /tcg_wasm64_translate_lookup\(const void \*tb_ptr\)/);
 assert.match(header, /tcg_wasm64_translate_generated_candidate/);
 assert.match(header, /tcg_wasm64_translate_generated_output_available/);
@@ -105,7 +107,11 @@ assert.match(runtime, /case INDEX_op_tci_setcond32:/);
 assert.match(runtime, /case INDEX_op_tci_qemu_ld_rrr:/);
 assert.match(runtime, /void tcg_wasm64_translate_begin\(const void \*tb_ptr\)/);
 assert.match(runtime, /void tcg_wasm64_translate_note_tci_op\(uint32_t op\)/);
-assert.match(runtime, /void tcg_wasm64_translate_note_tci_insn\(uint32_t op,\s*uint32_t insn\)/);
+assert.match(runtime, /void tcg_wasm64_translate_note_tci_insn\(TCGContext \*s,\s*uint32_t op,\s*\n\s*uint32_t insn\)/);
+assert.match(runtime, /tcg_wasm64_tci_reg_env_offset\(TCGContext \*s,\s*uint32_t reg\)/);
+assert.match(runtime, /temp->kind != TEMP_GLOBAL/);
+assert.match(runtime, /temp->mem_base->reg != TCG_AREG0/);
+assert.match(runtime, /metadata->tci_reg_env_offsets\[reg\] = env_offset/);
 assert.match(runtime, /tcg_wasm64_translate_generated_output_available/);
 assert.match(runtime, /const TCGWasm64TBMetadata \*tcg_wasm64_translate_lookup/);
 assert.match(runtime, /translated_fallback_markers/);

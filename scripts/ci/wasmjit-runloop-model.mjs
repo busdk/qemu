@@ -198,6 +198,17 @@ function terminalOp(opcodes, op) {
   return op === opcodes.goto_tb || op === opcodes.exit_tb;
 }
 
+function metadataEnvOffset(metadata, reg) {
+  const offsets = metadata.tciRegEnvOffsets;
+  if (!Array.isArray(offsets) || reg < 0 || reg >= offsets.length) {
+    return WASMJIT_ENV_OFFSET_INVALID;
+  }
+  const offset = offsets[reg];
+  return Number.isInteger(offset) && offset >= 0 && offset <= 0xffffffff
+    ? offset >>> 0
+    : WASMJIT_ENV_OFFSET_INVALID;
+}
+
 function decodeSemanticHotsetTB(metadata, opcodes) {
   const words = metadata.generatedOutput;
   if (!opcodes || !words || words.length < 3) {
@@ -230,6 +241,8 @@ function decodeSemanticHotsetTB(metadata, opcodes) {
       immediate: BigInt.asUintN(64, BigInt(tciImm20(words[0]))),
       valueReg: dstReg,
       branchReg: tciR0(words[2]),
+      valueEnvOffset: metadataEnvOffset(metadata, dstReg),
+      branchEnvOffset: metadataEnvOffset(metadata, tciR0(words[2])),
       terminalOp: terminal,
       terminalDiff,
     };
@@ -264,6 +277,10 @@ function decodeSemanticHotsetTB(metadata, opcodes) {
           branchReg,
           storeReg: tciR0(words[index]),
           branchCond: tciCond4(words[2]),
+          valueEnvOffset: metadataEnvOffset(metadata, loadReg),
+          baseEnvOffset: metadataEnvOffset(metadata, baseReg),
+          branchEnvOffset: metadataEnvOffset(metadata, branchReg),
+          storeEnvOffset: metadataEnvOffset(metadata, tciR0(words[index])),
           terminalOp: terminal,
           terminalDiff,
         };
@@ -300,6 +317,9 @@ function decodeSemanticHotsetTB(metadata, opcodes) {
       loadOffset: tciOffset16(words[0]),
       storeOffset: tciOffset16(words[3]),
       storeReg: tciR0(words[3]),
+      valueEnvOffset: metadataEnvOffset(metadata, valueReg),
+      baseEnvOffset: metadataEnvOffset(metadata, baseReg),
+      storeEnvOffset: metadataEnvOffset(metadata, tciR0(words[3])),
       terminalOp: terminal,
       terminalDiff,
     };

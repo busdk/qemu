@@ -1006,6 +1006,52 @@ run that reaches a weaker marker than normal multi-user readiness.
     `1ffe059a4267cdd7d1246584a4b446cc41e6993253bae74aa36f0d8acd5d72ff`.
     This slice does not execute live Linux TBs, does not improve the browser
     marker time by itself, and does not complete R4.
+  - [x] R4i - Fill run-loop descriptor env-offset slots from target-owned
+    TCG global-memory metadata. Prediction: this should not improve marker
+    time by itself and should not trigger a browser speed gate; it should make
+    R4g/R4h descriptors execution-addressable by recording concrete
+    `CPUArchState` offsets for TCI registers whose allocator source is an
+    `ENV`-based global-memory temp. Common `tcg/wasm64.*` code may inspect
+    target-neutral TCG temp metadata such as `mem_base` and `mem_offset`, but
+    must not inspect RISC-V target structs or macros. DoD: translation-time
+    metadata records env offsets for TCI registers backed by `TCG_AREG0`
+    globals, descriptor building copies those offsets into
+    `value_env_offset`, `base_env_offset`, `branch_env_offset`, and
+    `store_env_offset`, deterministic tests prove real generated-output
+    fixtures no longer leave those slots invalid when the source temp is
+    env-backed, and no browser speed-gate claim is made from this slice.
+    Accepted 2026-07-03: `TCGWasm64TBMetadata` now carries a 16-entry
+    `tci_reg_env_offsets` table. The wasm64 TCI emission hook passes
+    `TCGContext *` into `tcg_wasm64_translate_note_tci_insn()`, which records
+    an env offset only when a physical TCI register maps to a target-neutral
+    TCG `TEMP_GLOBAL` backed by `TCG_AREG0`. Descriptor building copies those
+    offsets into `value_env_offset`, `base_env_offset`, `branch_env_offset`,
+    and `store_env_offset`; unmapped registers keep
+    `TCG_WASM64_RUN_ENV_OFFSET_INVALID`. The implementation stays free of
+    RISC-V target structs/macros in common `tcg/wasm64.*` code.
+
+    Checks: `git diff --check`,
+    `node --check scripts/ci/wasmjit-runloop-model.mjs`,
+    `node --check scripts/ci/wasmjit-runloop-model-test.mjs`,
+    `node scripts/ci/wasmjit-runloop-model-test.mjs`,
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`, and
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`.
+
+    Artifact build command:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4i-riscv64-env-offset-metadata-artifacts
+    --target riscv64 --tcg-wasm64-backend --jobs auto --build-image`.
+    Meson reported `TCG backend: experimental wasm64 with TCI fallback`.
+    Artifact hashes: `qemu-system-riscv64.js`
+    `2f8d15b101be397d21778aaef6679433947a218a9d30d95a8a1e0736f0ef2422`,
+    `qemu-system-riscv64.wasm`
+    `3306407560a6a40d5c1015803f2875ff07b8d4551a82d6dace57ce377d57d44d`,
+    manifest
+    `102f2c1829f8c3981f2b437f5a35d8fd6c48965b7cc9e35cc507cb1bf1c88ef3`,
+    SHA256SUMS
+    `a8838587723d4918bba939f268ca4d5a4cc2bd2c328d923bbbfe31b69f8b042a`.
+    This slice does not execute live Linux TBs through generated Wasm, does
+    not improve the browser marker time by itself, and does not complete R4.
 - [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
   accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
   cold in browser-hosted QEMU/WASM with the accelerator and reaches

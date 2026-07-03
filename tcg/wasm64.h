@@ -320,6 +320,7 @@ typedef enum TCGWasm64TranslateFallbackReason {
 #define TCG_WASM64_TRANSLATE_OUTPUT_MAX 4096u
 #define TCG_WASM64_TRANSLATE_OUTPUT_WORDS \
     (TCG_WASM64_TRANSLATE_OUTPUT_MAX / sizeof(uint32_t))
+#define TCG_WASM64_TCI_REG_COUNT 16u
 
 /*
  * Side-band metadata recorded while the wasm64 target emits the fallback TCI
@@ -346,6 +347,7 @@ typedef struct TCGWasm64TBMetadata {
     uint32_t generated_output_size;
     uint32_t generated_output_op_count;
     uint32_t generated_output_checksum;
+    uint32_t tci_reg_env_offsets[TCG_WASM64_TCI_REG_COUNT];
     const uint32_t *generated_output;
 } TCGWasm64TBMetadata;
 
@@ -364,7 +366,8 @@ void tcg_wasm64_run_count_exit(TCGWasm64RunCounters *counters,
 const char *tcg_wasm64_run_exit_reason_name(TCGWasm64RunExitReason reason);
 void tcg_wasm64_translate_begin(const void *tb_ptr);
 void tcg_wasm64_translate_note_tci_op(uint32_t op);
-void tcg_wasm64_translate_note_tci_insn(uint32_t op, uint32_t insn);
+void tcg_wasm64_translate_note_tci_insn(TCGContext *s, uint32_t op,
+                                        uint32_t insn);
 const TCGWasm64TBMetadata *tcg_wasm64_translate_lookup(const void *tb_ptr);
 bool tcg_wasm64_translate_generated_candidate(
     const TCGWasm64TBMetadata *metadata);

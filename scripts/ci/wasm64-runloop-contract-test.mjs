@@ -214,6 +214,9 @@ assert.equal(macroValue("TCG_WASM64_RUN_COUNTERS_SIZE"), WASMJIT_COUNTERS.size);
 assert.doesNotMatch(header, /TARGET_RISCV64/);
 assert.doesNotMatch(runtime, /TARGET_RISCV64/);
 assert.doesNotMatch(runtime, /offsetof\(CPUArchState, gpr/);
+assert.match(runtime, /tcg_wasm64_metadata_env_offset/);
+assert.match(runtime, /tb->value_env_offset =\s*\n\s*tcg_wasm64_metadata_env_offset\(metadata, tb->value_reg\)/);
+assert.match(runtime, /tb->store_env_offset =\s*\n\s*tcg_wasm64_metadata_env_offset\(metadata, tb->store_reg\)/);
 assert.equal(
   macroValue("TCG_WASM64_RUN_ENV_OFFSET_INVALID"),
   WASMJIT_ENV_OFFSET_INVALID,

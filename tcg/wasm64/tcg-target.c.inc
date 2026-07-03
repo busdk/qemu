@@ -23,7 +23,7 @@ static void tcg_wasm64_note_tci_op(TCGContext *s, TCGOpcode op)
 static void tcg_wasm64_tci_out32(TCGContext *s, uint32_t insn)
 {
     if (tcg_wasm64_has_pending_tci_op) {
-        tcg_wasm64_translate_note_tci_insn(tcg_wasm64_pending_tci_op, insn);
+        tcg_wasm64_translate_note_tci_insn(s, tcg_wasm64_pending_tci_op, insn);
         tcg_wasm64_has_pending_tci_op = false;
     }
     tcg_out32(s, insn);

@@ -1775,6 +1775,11 @@ void tcg_wasm64_translate_begin(const void *tb_ptr)
     entry->tb_ptr = tb_ptr;
     memset(&entry->metadata, 0, sizeof(entry->metadata));
     memset(entry->generated_output, 0, sizeof(entry->generated_output));
+    for (size_t i = 0; i < ARRAY_SIZE(entry->metadata.tci_reg_env_offsets);
+         i++) {
+        entry->metadata.tci_reg_env_offsets[i] =
+            TCG_WASM64_RUN_ENV_OFFSET_INVALID;
+    }
     entry->metadata.tb_ptr = tb_ptr;
     entry->metadata.magic = TCG_WASM64_TB_METADATA_MAGIC;
     entry->metadata.version = TCG_WASM64_TB_METADATA_VERSION;
@@ -1851,14 +1856,112 @@ static uint32_t tcg_wasm64_checksum32(uint32_t checksum, uint8_t value)
     return checksum;
 }
 
-void tcg_wasm64_translate_note_tci_insn(uint32_t op, uint32_t insn)
+static uint32_t tcg_wasm64_tci_reg_env_offset(TCGContext *s, uint32_t reg)
+{
+    TCGTemp *temp;
+
+    if (!s || reg >= TCG_WASM64_TCI_REG_COUNT || reg >= TCG_TARGET_NB_REGS) {
+        return TCG_WASM64_RUN_ENV_OFFSET_INVALID;
+    }
+
+    temp = s->reg_to_temp[reg];
+    if (!temp || temp->kind != TEMP_GLOBAL || !temp->mem_base ||
+        temp->mem_base->reg != TCG_AREG0 ||
+        temp->mem_offset < 0 || temp->mem_offset > UINT32_MAX) {
+        return TCG_WASM64_RUN_ENV_OFFSET_INVALID;
+    }
+
+    return (uint32_t)temp->mem_offset;
+}
+
+static void tcg_wasm64_translate_note_tci_reg(
+    TCGWasm64TBMetadata *metadata,
+    TCGContext *s,
+    uint32_t reg)
+{
+    uint32_t env_offset;
+
+    if (!metadata || reg >= TCG_WASM64_TCI_REG_COUNT) {
+        return;
+    }
+
+    env_offset = tcg_wasm64_tci_reg_env_offset(s, reg);
+    if (env_offset != TCG_WASM64_RUN_ENV_OFFSET_INVALID) {
+        metadata->tci_reg_env_offsets[reg] = env_offset;
+    }
+}
+
+static void tcg_wasm64_translate_note_tci_insn_regs(
+    TCGWasm64TBMetadata *metadata,
+    TCGContext *s,
+    uint32_t op,
+    uint32_t insn)
+{
+    switch ((TCGOpcode)op) {
+    case INDEX_op_tci_movi:
+    case INDEX_op_tci_movl:
+    case INDEX_op_brcond:
+    case INDEX_op_goto_ptr:
+        tcg_wasm64_translate_note_tci_reg(
+            metadata, s, tcg_wasm64_tci_r0(insn));
+        break;
+    case INDEX_op_mov:
+    case INDEX_op_neg:
+    case INDEX_op_not:
+    case INDEX_op_ld:
+    case INDEX_op_ld8s:
+    case INDEX_op_ld8u:
+    case INDEX_op_ld16s:
+    case INDEX_op_ld16u:
+    case INDEX_op_ld32s:
+    case INDEX_op_ld32u:
+    case INDEX_op_st:
+    case INDEX_op_st8:
+    case INDEX_op_st16:
+    case INDEX_op_st32:
+        tcg_wasm64_translate_note_tci_reg(
+            metadata, s, tcg_wasm64_tci_r0(insn));
+        tcg_wasm64_translate_note_tci_reg(
+            metadata, s, tcg_wasm64_tci_r1(insn));
+        break;
+    case INDEX_op_add:
+    case INDEX_op_and:
+    case INDEX_op_mul:
+    case INDEX_op_or:
+    case INDEX_op_setcond:
+    case INDEX_op_shl:
+    case INDEX_op_shr:
+    case INDEX_op_sub:
+    case INDEX_op_tci_qemu_ld_rrr:
+    case INDEX_op_tci_qemu_st_rrr:
+    case INDEX_op_tci_setcond32:
+    case INDEX_op_xor:
+        tcg_wasm64_translate_note_tci_reg(
+            metadata, s, tcg_wasm64_tci_r0(insn));
+        tcg_wasm64_translate_note_tci_reg(
+            metadata, s, tcg_wasm64_tci_r1(insn));
+        tcg_wasm64_translate_note_tci_reg(
+            metadata, s, tcg_wasm64_tci_r2(insn));
+        break;
+    default:
+        break;
+    }
+}
+
+void tcg_wasm64_translate_note_tci_insn(TCGContext *s, uint32_t op,
+                                        uint32_t insn)
 {
     TCGWasm64TBMetadata *metadata = active_translate_metadata;
     uint32_t *output;
     uint32_t size;
     uint32_t output_index;
 
-    if (!metadata || !tcg_wasm64_translate_op_generated_supported(op)) {
+    if (!metadata) {
+        return;
+    }
+
+    tcg_wasm64_translate_note_tci_insn_regs(metadata, s, op, insn);
+    if (!tcg_wasm64_translate_op_generated_supported(op)) {
         return;
     }
 
@@ -2032,6 +2135,16 @@ static uint32_t tcg_wasm64_tci_cond4(uint32_t insn)
     return extract32(insn, 20, 4);
 }
 
+static uint32_t tcg_wasm64_metadata_env_offset(
+    const TCGWasm64TBMetadata *metadata,
+    uint32_t reg)
+{
+    if (!metadata || reg >= TCG_WASM64_TCI_REG_COUNT) {
+        return TCG_WASM64_RUN_ENV_OFFSET_INVALID;
+    }
+    return metadata->tci_reg_env_offsets[reg];
+}
+
 static uint32_t tcg_wasm64_tci_encode_ri(TCGOpcode op, uint32_t r0,
                                          int32_t imm)
 {
@@ -2153,6 +2266,10 @@ static bool tcg_wasm64_run_hotset_decode_semantic(
         tb->immediate = (uint64_t)(int64_t)tcg_wasm64_tci_imm20(words[0]);
         tb->value_reg = dst_reg;
         tb->branch_reg = tcg_wasm64_tci_r0(words[2]);
+        tb->value_env_offset =
+            tcg_wasm64_metadata_env_offset(metadata, tb->value_reg);
+        tb->branch_env_offset =
+            tcg_wasm64_metadata_env_offset(metadata, tb->branch_reg);
         tb->terminal_op = terminal_op;
         tb->terminal_diff = terminal_diff;
         return true;
@@ -2187,6 +2304,14 @@ static bool tcg_wasm64_run_hotset_decode_semantic(
                 tb->branch_reg = branch_reg;
                 tb->store_reg = tcg_wasm64_tci_r0(words[index]);
                 tb->branch_cond = tcg_wasm64_tci_cond4(words[2]);
+                tb->value_env_offset =
+                    tcg_wasm64_metadata_env_offset(metadata, tb->value_reg);
+                tb->base_env_offset =
+                    tcg_wasm64_metadata_env_offset(metadata, tb->base_reg);
+                tb->branch_env_offset =
+                    tcg_wasm64_metadata_env_offset(metadata, tb->branch_reg);
+                tb->store_env_offset =
+                    tcg_wasm64_metadata_env_offset(metadata, tb->store_reg);
                 tb->terminal_op = terminal_op;
                 tb->terminal_diff = terminal_diff;
                 return true;
@@ -2224,6 +2349,12 @@ static bool tcg_wasm64_run_hotset_decode_semantic(
         tb->load_offset = tcg_wasm64_tci_offset16(words[0]);
         tb->store_offset = tcg_wasm64_tci_offset16(words[3]);
         tb->store_reg = tcg_wasm64_tci_r0(words[3]);
+        tb->value_env_offset =
+            tcg_wasm64_metadata_env_offset(metadata, tb->value_reg);
+        tb->base_env_offset =
+            tcg_wasm64_metadata_env_offset(metadata, tb->base_reg);
+        tb->store_env_offset =
+            tcg_wasm64_metadata_env_offset(metadata, tb->store_reg);
         tb->terminal_op = terminal_op;
         tb->terminal_diff = terminal_diff;
         return true;

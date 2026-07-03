@@ -103,6 +103,7 @@ function generatedMetadata({
   generatedOutputSize = generatedOutput.length * 4,
   generatedOutputOpCount = generatedOutput.length,
   opCount = generatedOutput.length,
+  tciRegEnvOffsets,
 } = {}) {
   return {
     magic: WASMJIT_TB_METADATA_MAGIC,
@@ -114,6 +115,7 @@ function generatedMetadata({
     generatedOutputOpCount,
     generatedOutputChecksum: checksum,
     generatedOutput,
+    tciRegEnvOffsets,
   };
 }
 
@@ -151,6 +153,24 @@ function generatedMetadata({
       WASMJIT_ENV_OFFSET_INVALID,
     ],
   );
+}
+
+{
+  const offsets = Array(16).fill(WASMJIT_ENV_OFFSET_INVALID);
+  offsets[0] = 0x120;
+  offsets[1] = 0x200;
+  const built = buildHotsetFromMetadataModel([
+    generatedMetadata({
+      generatedOutput: ramGeneratedOutput("add", 7),
+      tciRegEnvOffsets: offsets,
+    }),
+  ], { opcodes });
+
+  assert.equal(built.ok, true);
+  assert.equal(built.hotset.tbs[0].valueEnvOffset, 0x120);
+  assert.equal(built.hotset.tbs[0].baseEnvOffset, 0x200);
+  assert.equal(built.hotset.tbs[0].storeEnvOffset, 0x120);
+  assert.equal(built.hotset.tbs[0].branchEnvOffset, WASMJIT_ENV_OFFSET_INVALID);
 }
 
 {

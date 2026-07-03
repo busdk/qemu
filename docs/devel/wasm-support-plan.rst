@@ -1091,13 +1091,11 @@ contains additional TCI words after the first ``goto_tb``.  Unsupported
 variants, including the same prefix without an ``st8`` before the first
 terminal, still fail closed with ``unsupported_hot_tb``.
 
-The next descriptor ABI step adds explicit env-offset slots
-(``value_env_offset``, ``base_env_offset``, ``branch_env_offset``, and
-``store_env_offset``) plus an invalid sentinel.  Current trace descriptors set
-those offsets to the sentinel because the existing generated-output stream only
-contains TCI register IDs.  A later translation-owned step must fill these
-offsets from QEMU global-memory metadata before the trace descriptor can
-execute real RISC-V guest register state inside ``wasmjit_run()``.
+R4h added explicit env-offset slots (``value_env_offset``,
+``base_env_offset``, ``branch_env_offset``, and ``store_env_offset``) plus an
+invalid sentinel.  That slice deliberately kept common ``tcg/wasm64.*``
+target-neutral: the runtime may consume explicit ``CPUArchState`` offsets, but
+it must not inspect RISC-V target structs or macros directly.
 
 Focused checks passed:
 
@@ -1149,6 +1147,68 @@ accelerator step must either wire this descriptor into ``wasmjit_run()``
 execution with measured instruction and wall-time metrics, or rerun the attach
 probe to prove the descriptor gap actually narrowed before any browser speed
 gate.
+
+R4i target-neutral env-offset metadata
+--------------------------------------
+
+R4i is the translation metadata bridge needed before generated descriptors can
+read or write real guest CPU state.  It is not a browser speed result.  The
+expected marker-time effect is none by itself: live Linux TBs still execute
+through TCI until a later slice connects these descriptors to the
+``wasmjit_run()`` executor.
+
+``TCGWasm64TBMetadata`` now carries a 16-entry ``tci_reg_env_offsets`` table.
+When the wasm64 target emits the fallback TCI stream, it passes the active
+``TCGContext`` to the metadata hook.  The hook records an env offset only when
+the physical TCI register maps to a target-neutral TCG ``TEMP_GLOBAL`` whose
+memory base is ``TCG_AREG0``.  Descriptor building then copies those offsets
+into the ``value_env_offset``, ``base_env_offset``, ``branch_env_offset``, and
+``store_env_offset`` fields.  Registers without such a mapping keep the
+invalid sentinel.
+
+This keeps target-specific layout knowledge in QEMU's normal translation
+metadata path.  Common wasm64 runtime code uses TCG temp metadata
+(``mem_base``/``mem_offset``) and does not inspect ``TARGET_RISCV64``,
+``CPURISCVState``, or direct RISC-V GPR offsets.
+
+Focused checks passed:
+
+.. code-block:: console
+
+  $ git diff --check
+  $ node --check scripts/ci/wasmjit-runloop-model.mjs
+  $ node --check scripts/ci/wasmjit-runloop-model-test.mjs
+  $ node scripts/ci/wasmjit-runloop-model-test.mjs
+  $ node scripts/ci/wasm64-runloop-contract-test.mjs
+  $ node scripts/ci/wasm64-translate-metadata-test.mjs
+
+The backend artifact was built with:
+
+.. code-block:: console
+
+  $ python3 scripts/ci/wasm-build-artifacts-local.py \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4i-riscv64-env-offset-metadata-artifacts \
+      --target riscv64 \
+      --tcg-wasm64-backend \
+      --jobs auto \
+      --build-image
+
+Meson reported ``TCG backend: experimental wasm64 with TCI fallback``.
+Artifact SHA-256 values were:
+
+* ``qemu-system-riscv64.js``:
+  ``2f8d15b101be397d21778aaef6679433947a218a9d30d95a8a1e0736f0ef2422``
+* ``qemu-system-riscv64.wasm``:
+  ``3306407560a6a40d5c1015803f2875ff07b8d4551a82d6dace57ce377d57d44d``
+* manifest:
+  ``102f2c1829f8c3981f2b437f5a35d8fd6c48965b7cc9e35cc507cb1bf1c88ef3``
+* ``SHA256SUMS``:
+  ``a8838587723d4918bba939f268ca4d5a4cc2bd2c328d923bbbfe31b69f8b042a``
+
+This slice does not execute live Linux TBs through generated Wasm and does
+not complete R4.  The next accelerator step should use these env offsets to
+build a real generated execution path or run a bounded attach diagnostic that
+proves the descriptor gap has narrowed before any browser speed gate.
 
 Strict definition of done
 =========================
