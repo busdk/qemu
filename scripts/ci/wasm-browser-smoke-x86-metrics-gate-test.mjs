@@ -1,0 +1,520 @@
+#!/usr/bin/env node
+/*
+ * Test the browser smoke x86 metrics gate helpers.
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ */
+
+import assert from "node:assert/strict";
+
+import {
+  X86_BROWSER_SMOKE_METRICS_GATE_VERSION,
+  x86BrowserSmokeMetricsGate,
+} from "./wasm-browser-smoke-x86-metrics-gate.mjs";
+
+const runtimeSmokeResult = {
+  wasm64Runloop: {
+    summaryCount: 1,
+    summaries: [
+      {
+        event: "runtime-smoke",
+        ok: true,
+        budget: 1000000,
+        exit_reason: "budget",
+        exit_reason_code: 1,
+        generated_guest_instructions: 8000000,
+        fallback_guest_instructions: 8000000,
+        generated_body_time_ns: 3000000,
+        tci_dispatch_time_ns: 15000000,
+        tb_lookup_time_ns: 250000,
+        helper_call_time_ns: 0,
+        qemu_ld_time_ns: 0,
+        qemu_st_time_ns: 0,
+        generated_vs_tci_speedup_ppm: 5000000,
+        min_generated_vs_tci_speedup_ppm: 3000000,
+        compile_time_ns: 100,
+        instantiate_time_ns: 200,
+        generated_chain_length: 2000000,
+        inline_tlb_hit_loads: 1000000,
+        inline_tlb_hit_stores: 1000000,
+        helper_calls: 0,
+        qemu_ld_calls: 0,
+        qemu_st_calls: 0,
+        exits_budget: 2,
+        exits_mmio: 0,
+        exits_tlb_miss_or_fault: 0,
+        exits_interrupt: 0,
+        exits_helper: 0,
+        exits_unsupported: 0,
+        exits_hlt: 0,
+        exits_invalidated: 0,
+        workload_count: 2,
+        workloads: [
+          {
+            name: "alu-branch",
+            ok: true,
+            generated_guest_instructions: 4000000,
+            fallback_guest_instructions: 4000000,
+            generated_body_time_ns: 1000000,
+            tci_dispatch_time_ns: 5000000,
+            generated_vs_tci_speedup_ppm: 5000000,
+            generated_exit_value: 1,
+            fallback_exit_value: 1,
+            generated_ram_value: 0,
+            fallback_ram_value: 0,
+            inline_tlb_hit_loads: 0,
+            inline_tlb_hit_stores: 0,
+            helper_calls: 0,
+            qemu_ld_calls: 0,
+            qemu_st_calls: 0,
+            exits_budget: 1,
+            exits_mmio: 0,
+            exits_tlb_miss_or_fault: 0,
+            exits_interrupt: 0,
+            exits_helper: 0,
+            exits_unsupported: 0,
+            exits_hlt: 0,
+            exits_invalidated: 0,
+          },
+          {
+            name: "tlb-hit-ram",
+            ok: true,
+            generated_guest_instructions: 4000000,
+            fallback_guest_instructions: 4000000,
+            generated_body_time_ns: 2000000,
+            tci_dispatch_time_ns: 10000000,
+            generated_vs_tci_speedup_ppm: 5000000,
+            generated_exit_value: 3,
+            fallback_exit_value: 3,
+            generated_ram_value: 3,
+            fallback_ram_value: 3,
+            inline_tlb_hit_loads: 1000000,
+            inline_tlb_hit_stores: 1000000,
+            helper_calls: 0,
+            qemu_ld_calls: 0,
+            qemu_st_calls: 0,
+            exits_budget: 1,
+            exits_mmio: 0,
+            exits_tlb_miss_or_fault: 0,
+            exits_interrupt: 0,
+            exits_helper: 0,
+            exits_unsupported: 0,
+            exits_hlt: 0,
+            exits_invalidated: 0,
+          },
+        ],
+      },
+    ],
+    lastSummary: {
+      event: "runtime-smoke",
+      ok: true,
+      budget: 1000000,
+      exit_reason: "budget",
+      exit_reason_code: 1,
+      generated_guest_instructions: 8000000,
+      fallback_guest_instructions: 8000000,
+      generated_body_time_ns: 3000000,
+      tci_dispatch_time_ns: 15000000,
+      tb_lookup_time_ns: 250000,
+      helper_call_time_ns: 0,
+      qemu_ld_time_ns: 0,
+      qemu_st_time_ns: 0,
+      generated_vs_tci_speedup_ppm: 5000000,
+      min_generated_vs_tci_speedup_ppm: 3000000,
+      compile_time_ns: 100,
+      instantiate_time_ns: 200,
+      generated_chain_length: 2000000,
+      inline_tlb_hit_loads: 1000000,
+      inline_tlb_hit_stores: 1000000,
+      helper_calls: 0,
+      qemu_ld_calls: 0,
+      qemu_st_calls: 0,
+      exits_budget: 2,
+      exits_mmio: 0,
+      exits_tlb_miss_or_fault: 0,
+      exits_interrupt: 0,
+      exits_helper: 0,
+      exits_unsupported: 0,
+      exits_hlt: 0,
+      exits_invalidated: 0,
+      workload_count: 2,
+      workloads: [
+        {
+          name: "alu-branch",
+          ok: true,
+          generated_guest_instructions: 4000000,
+          fallback_guest_instructions: 4000000,
+          generated_body_time_ns: 1000000,
+          tci_dispatch_time_ns: 5000000,
+          generated_vs_tci_speedup_ppm: 5000000,
+          generated_exit_value: 1,
+          fallback_exit_value: 1,
+          generated_ram_value: 0,
+          fallback_ram_value: 0,
+          inline_tlb_hit_loads: 0,
+          inline_tlb_hit_stores: 0,
+          helper_calls: 0,
+          qemu_ld_calls: 0,
+          qemu_st_calls: 0,
+          exits_budget: 1,
+          exits_mmio: 0,
+          exits_tlb_miss_or_fault: 0,
+          exits_interrupt: 0,
+          exits_helper: 0,
+          exits_unsupported: 0,
+          exits_hlt: 0,
+          exits_invalidated: 0,
+        },
+        {
+          name: "tlb-hit-ram",
+          ok: true,
+          generated_guest_instructions: 4000000,
+          fallback_guest_instructions: 4000000,
+          generated_body_time_ns: 2000000,
+          tci_dispatch_time_ns: 10000000,
+          generated_vs_tci_speedup_ppm: 5000000,
+          generated_exit_value: 3,
+          fallback_exit_value: 3,
+          generated_ram_value: 3,
+          fallback_ram_value: 3,
+          inline_tlb_hit_loads: 1000000,
+          inline_tlb_hit_stores: 1000000,
+          helper_calls: 0,
+          qemu_ld_calls: 0,
+          qemu_st_calls: 0,
+          exits_budget: 1,
+          exits_mmio: 0,
+          exits_tlb_miss_or_fault: 0,
+          exits_interrupt: 0,
+          exits_helper: 0,
+          exits_unsupported: 0,
+          exits_hlt: 0,
+          exits_invalidated: 0,
+        },
+      ],
+    },
+  },
+  wasm64Tcg: {
+    summaryCount: 1,
+    summaries: [
+      {
+        event: "summary",
+        reason: "interval",
+        generated_attempts: 100,
+        generated_compiled: 3,
+        generated_executed: 12,
+        generated_cache_hits: 9,
+        generated_coverage_numerator: 21,
+        generated_coverage_denominator: 1000,
+        generated_coverage_ppm: 21000,
+        generated_exits: {
+          budget: 5,
+          mmio: 1,
+          tlb_miss: 2,
+          interrupt: 3,
+          csr: 4,
+          invalid: 0,
+          invalidation: 0,
+          unsupported: 6,
+          fatal: 0,
+        },
+        translated_tbs: 8,
+        translated_ops: 144,
+        translated_fallback_markers: 8,
+        translated_metadata_misses: 1,
+        translated_profiled_tbs: 7,
+        translated_lowerable_tbs: 6,
+        translated_profile_supported_ops: 5,
+        translated_profile_unsupported_ops: 2,
+        translated_generated_candidate_tbs: 4,
+        translated_generated_supported_ops: 3,
+        translated_generated_unsupported_ops: 1,
+        translated_generated_output_tbs: 2,
+        translated_generated_output_unavailable_tbs: 1,
+        exec_generated_output_lookup_tbs: 2,
+        exec_generated_output_available_tbs: 1,
+        fallback_unsupported: 88,
+        fallback_helper: 1,
+        fallback_qemu_load: 2,
+        fallback_qemu_store: 3,
+        fallback_runtime: 1,
+        translated_generated_first_unsupported_ops: [
+          { op: 1, name: "ld32u", count: 5 },
+        ],
+      },
+    ],
+    lastSummary: {
+      event: "summary",
+      reason: "interval",
+      generated_attempts: 100,
+      generated_compiled: 3,
+      generated_executed: 12,
+      generated_cache_hits: 9,
+      generated_coverage_numerator: 21,
+      generated_coverage_denominator: 1000,
+      generated_coverage_ppm: 21000,
+      generated_exits: {
+        budget: 5,
+        mmio: 1,
+        tlb_miss: 2,
+        interrupt: 3,
+        csr: 4,
+        invalid: 0,
+        invalidation: 0,
+        unsupported: 6,
+        fatal: 0,
+      },
+      translated_tbs: 8,
+      translated_ops: 144,
+      translated_fallback_markers: 8,
+      translated_metadata_misses: 1,
+      translated_profiled_tbs: 7,
+      translated_lowerable_tbs: 6,
+      translated_profile_supported_ops: 5,
+      translated_profile_unsupported_ops: 2,
+      translated_generated_candidate_tbs: 4,
+      translated_generated_supported_ops: 3,
+      translated_generated_unsupported_ops: 1,
+      translated_generated_output_tbs: 2,
+      translated_generated_output_unavailable_tbs: 1,
+      exec_generated_output_lookup_tbs: 2,
+      exec_generated_output_available_tbs: 1,
+      fallback_unsupported: 88,
+      fallback_helper: 1,
+      fallback_qemu_load: 2,
+      fallback_qemu_store: 3,
+      fallback_runtime: 1,
+      translated_generated_first_unsupported_ops: [
+        { op: 1, name: "ld32u", count: 5 },
+      ],
+    },
+  },
+};
+
+const scaffoldOneTbDifferentialResult = {
+  wasm64Runloop: {
+    summaryCount: 1,
+    summaries: [
+      {
+        event: "one-tb-differential",
+        name: "live-x86-pre-r4i-ld32u-goto-tb-13",
+        ok: true,
+        live_shape_fixture: true,
+        real_live_state_capture: false,
+        shape: [
+          "ld32u",
+          "tci_movi",
+          "tci_setcond32",
+          "brcond",
+          "tci_movi",
+          "st8",
+          "ld",
+          "tci_movi",
+          "add",
+          "st",
+          "goto_tb",
+          "exit_tb",
+          "exit_tb",
+        ],
+        generated_tci_op_equivalents: 11,
+        reference_tci_op_equivalents: 11,
+        generated_body_time_ns: 1000,
+        tci_dispatch_time_ns: 4000,
+        compile_time_ns: 100,
+        instantiate_time_ns: 200,
+        generated_chain_length: 1,
+        inline_tlb_hit_loads: 0,
+        inline_tlb_hit_stores: 0,
+        helper_calls: 0,
+        qemu_ld_calls: 0,
+        qemu_st_calls: 0,
+        generated_status: 0,
+        reference_status: 0,
+        dispatch_status: 1,
+        generated_dispatch_target: 20552,
+        reference_dispatch_target: 20552,
+        exit_reason_code: 1,
+        exit_value: 0,
+        generated_regs_checksum: 4806450183793710000,
+        reference_regs_checksum: 4806450183793710000,
+        generated_memory_checksum: 16094818889002498000,
+        reference_memory_checksum: 16094818889002498000,
+        generated_memory_writes: 2,
+        reference_memory_writes: 2,
+        expected_memory_writes: 2,
+        js_status: 0,
+      },
+    ],
+    lastSummary: {
+      event: "one-tb-differential",
+      name: "live-x86-pre-r4i-ld32u-goto-tb-13",
+      ok: true,
+      live_shape_fixture: true,
+      real_live_state_capture: false,
+      shape: [
+        "ld32u",
+        "tci_movi",
+        "tci_setcond32",
+        "brcond",
+        "tci_movi",
+        "st8",
+        "ld",
+        "tci_movi",
+        "add",
+        "st",
+        "goto_tb",
+        "exit_tb",
+        "exit_tb",
+      ],
+      generated_tci_op_equivalents: 11,
+      reference_tci_op_equivalents: 11,
+      generated_body_time_ns: 1000,
+      tci_dispatch_time_ns: 4000,
+      compile_time_ns: 100,
+      instantiate_time_ns: 200,
+      generated_chain_length: 1,
+      inline_tlb_hit_loads: 0,
+      inline_tlb_hit_stores: 0,
+      helper_calls: 0,
+      qemu_ld_calls: 0,
+      qemu_st_calls: 0,
+      generated_status: 0,
+      reference_status: 0,
+      dispatch_status: 1,
+      generated_dispatch_target: 20552,
+      reference_dispatch_target: 20552,
+      exit_reason_code: 1,
+      exit_value: 0,
+      generated_regs_checksum: 4806450183793710000,
+      reference_regs_checksum: 4806450183793710000,
+      generated_memory_checksum: 16094818889002498000,
+      reference_memory_checksum: 16094818889002498000,
+      generated_memory_writes: 2,
+      reference_memory_writes: 2,
+      expected_memory_writes: 2,
+      js_status: 0,
+    },
+  },
+};
+
+const liveOneTbDifferentialResult = JSON.parse(
+  JSON.stringify(scaffoldOneTbDifferentialResult),
+);
+{
+  const liveSummary = {
+    ...liveOneTbDifferentialResult.wasm64Runloop.summaries[0],
+    event: "live-one-tb-differential",
+    name: "live-x86-r4i-ld32u-goto-tb-13",
+    live_shape_fixture: false,
+    real_live_state_capture: true,
+    tb_id: 13,
+    pc: 20552,
+    generated_guest_instructions: 4000000,
+    reference_guest_instructions: 4000000,
+    inline_tlb_hit_loads: 2,
+    inline_tlb_hit_stores: 2,
+  };
+  liveOneTbDifferentialResult.wasm64Runloop.summaries[0] = liveSummary;
+  liveOneTbDifferentialResult.wasm64Runloop.lastSummary = {
+    ...liveSummary,
+  };
+}
+
+assert.equal(X86_BROWSER_SMOKE_METRICS_GATE_VERSION, 2);
+
+{
+  const gate = x86BrowserSmokeMetricsGate(runtimeSmokeResult);
+  assert.equal(gate.ok, true);
+  assert.equal(gate.runloop.ok, true);
+  assert.equal(gate.runloop.summaryCount, 1);
+  assert.equal(gate.runloop.summariesLength, 1);
+  assert.equal(gate.runloop.lastSummary.event, "runtime-smoke");
+  assert.equal(gate.runloop.acceptanceAllowed, true);
+  assert.equal(gate.runloop.lastSummary.workload_count_matches, true);
+  assert.equal(gate.runloop.lastSummary.generated_vs_tci_speedup_ppm_matches, true);
+  assert.equal(gate.runloop.lastSummary.generated_vs_tci_speedup_ppm_computed, 5000000);
+  assert.equal(gate.runloop.lastSummary.workloads.length, 2);
+  assert.equal(gate.runloop.lastSummary.workloads[0].generated_vs_tci_speedup_ppm_matches, true);
+  assert.equal(gate.runloop.lastSummary.workloads[1].generated_vs_tci_speedup_ppm_matches, true);
+  assert.equal(gate.tcg.ok, true);
+  assert.equal(gate.tcg.summaryCount, 1);
+  assert.equal(gate.tcg.summariesLength, 1);
+  assert.equal(gate.tcg.lastSummary.generated_coverage_share, 0.021);
+  assert.equal(gate.tcg.lastSummary.generated_coverage_ppm_computed, 21000);
+  assert.equal(gate.tcg.lastSummary.generated_coverage_ppm_matches, true);
+  assert.deepEqual(gate.tcg.lastSummary.generated_exits.missingFields, []);
+}
+
+{
+  const gate = x86BrowserSmokeMetricsGate(scaffoldOneTbDifferentialResult);
+  assert.equal(gate.ok, false);
+  assert.equal(gate.runloop.ok, true);
+  assert.equal(gate.runloop.acceptanceAllowed, false);
+  assert.equal(gate.runloop.lastSummary.event, "one-tb-differential");
+  assert.equal(gate.runloop.lastSummary.real_live_state_capture, false);
+  assert.equal(gate.runloop.lastSummary.generated_body_time_positive, true);
+  assert.equal(gate.runloop.lastSummary.tci_dispatch_time_positive, true);
+  assert.equal(gate.runloop.lastSummary.generated_chain_length_positive, true);
+  assert.equal(gate.runloop.lastSummary.inline_tlb_hit_loads_valid, true);
+  assert.equal(gate.runloop.lastSummary.inline_tlb_hit_stores_valid, true);
+  assert.equal(gate.runloop.lastSummary.generated_tci_op_equivalents_matches, true);
+  assert.equal(gate.runloop.lastSummary.generated_dispatch_target_matches, true);
+  assert.equal(gate.runloop.lastSummary.generated_regs_checksum_matches, true);
+  assert.equal(gate.runloop.lastSummary.generated_memory_checksum_matches, true);
+  assert.equal(gate.runloop.lastSummary.generated_memory_writes_matches, true);
+  assert.equal(gate.runloop.lastSummary.helper_calls_zero, true);
+  assert.equal(gate.runloop.lastSummary.qemu_ld_calls_zero, true);
+  assert.equal(gate.runloop.lastSummary.qemu_st_calls_zero, true);
+  assert.equal(gate.tcg, null);
+}
+
+{
+  const gate = x86BrowserSmokeMetricsGate(liveOneTbDifferentialResult);
+  assert.equal(gate.ok, true);
+  assert.equal(gate.runloop.ok, true);
+  assert.equal(gate.runloop.acceptanceAllowed, true);
+  assert.equal(gate.runloop.lastSummary.event, "live-one-tb-differential");
+  assert.equal(gate.runloop.lastSummary.real_live_state_capture, true);
+  assert.equal(gate.runloop.lastSummary.tb_id, 13);
+  assert.equal(gate.runloop.lastSummary.pc, 20552);
+  assert.equal(gate.runloop.lastSummary.generated_guest_instructions, 4000000);
+  assert.equal(gate.runloop.lastSummary.reference_guest_instructions, 4000000);
+  assert.equal(gate.runloop.lastSummary.generated_guest_instructions_valid, true);
+  assert.equal(gate.runloop.lastSummary.reference_guest_instructions_valid, true);
+  assert.equal(gate.runloop.lastSummary.tb_identity_valid, true);
+  assert.equal(gate.runloop.lastSummary.generated_body_time_positive, true);
+  assert.equal(gate.runloop.lastSummary.tci_dispatch_time_positive, true);
+  assert.equal(gate.runloop.lastSummary.generated_chain_length_positive, true);
+  assert.equal(gate.runloop.lastSummary.inline_tlb_hit_loads_valid, true);
+  assert.equal(gate.runloop.lastSummary.inline_tlb_hit_stores_valid, true);
+  assert.equal(gate.runloop.lastSummary.generated_tci_op_equivalents_matches, true);
+  assert.equal(gate.runloop.lastSummary.generated_dispatch_target_matches, true);
+  assert.equal(gate.runloop.lastSummary.generated_regs_checksum_matches, true);
+  assert.equal(gate.runloop.lastSummary.generated_memory_checksum_matches, true);
+  assert.equal(gate.runloop.lastSummary.generated_memory_writes_matches, true);
+  assert.equal(gate.runloop.lastSummary.helper_calls_zero, true);
+  assert.equal(gate.runloop.lastSummary.qemu_ld_calls_zero, true);
+  assert.equal(gate.runloop.lastSummary.qemu_st_calls_zero, true);
+  assert.equal(gate.tcg, null);
+}
+
+{
+  const broken = JSON.parse(JSON.stringify(runtimeSmokeResult));
+  delete broken.wasm64Runloop.lastSummary.generated_body_time_ns;
+  const gate = x86BrowserSmokeMetricsGate(broken);
+  assert.equal(gate.ok, false);
+  assert.ok(gate.runloop.lastSummary.missingFields.includes("generated_body_time_ns"));
+}
+
+{
+  const gate = x86BrowserSmokeMetricsGate(
+    {
+      wasm64Runloop: runtimeSmokeResult.wasm64Runloop,
+    },
+    { requireTcg: true },
+  );
+  assert.equal(gate.ok, false);
+  assert.equal(gate.tcg, null);
+}
+
+console.log("wasm-browser-smoke-x86-metrics-gate-test: ok");
