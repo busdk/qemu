@@ -1639,16 +1639,18 @@ run that reaches a weaker marker than normal multi-user readiness.
     must beat same-commit default TCI by at least `25%`; otherwise record the
     failed gate and re-plan before another x86 browser run.
 
-    Attempt 2026-07-03 after R4m: `origin/develop` was fetched and
-    `projects/qemu` was current at
-    `d447dd51d9b831824af9da1de7d1e18c1f066d65` (`wasm64: route
-    live x86 generated execution opt-in`). A clean Docker build helper was
-    used for both artifacts:
+    Attempt 2026-07-03 after latest QEMU fetch: `origin/develop` was fetched
+    and `projects/qemu` was current at
+    `bc620279c05a7bbec2851f278d7a3cba524d73c5` (`Record latest x86 WASM
+    speed gate rejection`). This supersedes the earlier same-day
+    `d447dd51d9b831824af9da1de7d1e18c1f066d65` measurement because QEMU
+    `origin/develop` moved while the first evidence was being recorded. A
+    clean Docker build helper was used for both current-tip artifacts:
     `python3 scripts/ci/wasm-build-artifacts-local.py --out
-    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-d447dd5-default-artifacts
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-bc62027-default-artifacts
     --target x86_64 --jobs 10`, and the same command with
     `--tcg-wasm64-backend` writing
-    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-d447dd5-accelerator-artifacts`.
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-bc62027-accelerator-artifacts`.
     Default artifact hashes: JS
     `105d0404f8f105be8604cff8f4f094c665a663c9696bd5dab3f7ab7e20e69870`,
     WASM `6fe1613185bcbdb0fdfd7fddfac6c1ea384a0ebb92893887c1081c5d6af7c50e`,
@@ -1656,9 +1658,9 @@ run that reaches a weaker marker than normal multi-user readiness.
     `d9c96709f2984502d92097397efcbf7c05dc695de05be9e9dd5e86e35190cad0`.
     Accelerator artifact hashes: JS
     `3c49db2604c6f8ce79b60a21f7e2c930fc699e4b68ab1bf1fad83e980f48e8bd`,
-    WASM `a755bf94202338c01337895d0b75f1ac1d3014202bb471b0715067efd5914da1`,
+    WASM `c9666b47f7a32f65379a4948a221ae17fe01775192191ca9ee956c18a9683e9a`,
     manifest
-    `e858329e298d68f271a82c5d3a17e61be6f935940458d79a65164078a41bbd45`.
+    `dfb2c5f6a75fe3b90d7902f461071319b7b122a65f27cdff8c6ee881dc2bdc32`.
     Both ran in Chrome for Testing `149.0.7827.55` using the same fresh
     `microvm,acpi=off` generic x86_64 TuxBoot smoke guest manifest
     `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-d447dd5-guest-current/tuxboot-browser-smoke-guest.json`.
@@ -1667,28 +1669,31 @@ run that reaches a weaker marker than normal multi-user readiness.
     and initramfs SHA-256
     `632b8d6b856ca868bdf66b42c97ee64623b1897c144ebf9cf26608d4f9f06e02`.
 
-    Default TCI reached `QEMU_WASM_LINUX_BOOT_OK` in `86206` ms with result
+    Default TCI reached `QEMU_WASM_LINUX_BOOT_OK` in `86701` ms with result
     JSON
-    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-d447dd5-default-smoke/wasm-browser-smoke-result.json`.
-    Kernel version printed at `35496` ms and init started at `83534` ms.
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-bc62027-default-smoke/wasm-browser-smoke-result.json`.
+    Kernel version printed at `35229` ms and init started at `85042` ms.
     The accelerator run used the same runner shape plus
     `--wasm64-live-generated-exec --wasm64-tcg-summary`, wrote result JSON
-    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-d447dd5-accelerator-smoke/wasm-browser-smoke-result.json`,
-    and timed out at `180236` ms without `QEMU_WASM_LINUX_BOOT_OK`. Kernel
-    version printed at `41032` ms, but init did not start before timeout.
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-bc62027-accelerator-smoke/wasm-browser-smoke-result.json`,
+    and timed out at `180227` ms without `QEMU_WASM_LINUX_BOOT_OK`. Kernel
+    version printed at `39941` ms, but init did not start before timeout.
     The final `wasm64Tcg.lastSummary` had `generated_attempts=0`,
     `generated_compiled=0`, `generated_executed=0`,
     `generated_cache_hits=0`, and generated coverage `0` over denominator
     `0`. It did report translated/generated-output shape data at the first
-    interval: `translated_tbs=10000`, `translated_generated_output_tbs=5558`,
-    `translated_generated_output_unavailable_tbs=4442`, and first unsupported
-    ops led by `call=4136`, `sar=99`, and `tci_movcond32=56`. The final
+    interval: `translated_tbs=10000`, `translated_generated_output_tbs=9691`,
+    `translated_generated_output_unavailable_tbs=309`,
+    `translated_generated_output_missing_candidate_tbs=309`, and first
+    unsupported ops led by `sar=99`, `tci_movcond32=56`, `not=52`,
+    `ctz=39`, `muls2=18`, `clz=17`, `tci_rotr32=13`, and `tci_rotl32=5`.
+    The final
     `wasm64Runloop.lastSummary` rejected live generated execution with
     `reason=selected-body-shape-unsupported`, `compat_fallback=true`,
     `generated_guest_instructions=0`, `generated_chain_length=0`,
     `inline_tlb_hit_loads=0`, `inline_tlb_hit_stores=0`, `helper_calls=0`,
     `qemu_ld_calls=0`, `qemu_st_calls=0`, `exits_unsupported=1`, and
-    `attempt_index=156388`.
+    `attempt_index=161551`.
 
     This rejects the current latest-QEMU accelerator artifact for R4l. It is
     not just below the required `25%` improvement; it is slower than default
