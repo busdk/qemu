@@ -739,21 +739,25 @@ static void tci_wasm_generated_trace_call_event(const char *reason,
                                                 void *const *call_slots)
 {
     TCGOpcode opc = extract32(insn, 0, 8);
-#ifdef CONFIG_TCG_WASM64_BACKEND
-    const TCGHelperInfo *helper_info = tcg_lookup_helper_trace_info(func);
-#else
-    const TCGHelperInfo *helper_info = NULL;
-#endif
-    const char *helper_name = helper_info != NULL ? helper_info->name : "";
-    unsigned helper_flags = helper_info != NULL ? helper_info->flags : 0;
     uint64_t args[4] = { 0, 0, 0, 0 };
     unsigned nargs = cif != NULL ? cif->nargs : 0;
     unsigned ntrace = MIN(nargs, (unsigned)ARRAY_SIZE(args));
     int64_t op_index = -1;
+    const TCGHelperInfo *helper_info = NULL;
+    const char *helper_name = "";
+    unsigned helper_flags = 0;
 
     if (!tci_wasm_generated_trace_enabled() ||
         tci_wasm_generated_trace_events >= tci_wasm_generated_trace_limit) {
         return;
+    }
+
+#ifdef CONFIG_TCG_WASM64_BACKEND
+    helper_info = tcg_lookup_helper_trace_info(func);
+#endif
+    if (helper_info != NULL) {
+        helper_name = helper_info->name;
+        helper_flags = helper_info->flags;
     }
 
     for (unsigned i = 0; i < ntrace; i++) {

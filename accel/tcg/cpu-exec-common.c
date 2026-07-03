@@ -22,6 +22,9 @@
 #include "system/tcg.h"
 #include "qemu/plugin.h"
 #include "accel/tcg/cpu-loop.h"
+#ifdef CONFIG_TCG_WASM64_BACKEND
+#include "tcg/wasm64.h"
+#endif
 #include "internal-common.h"
 
 bool tcg_allowed;
@@ -71,6 +74,9 @@ void cpu_loop_exit(CPUState *cpu)
     cpu->neg.can_do_io = true;
     /* Undo any setting in generated code.  */
     qemu_plugin_disable_mem_helpers(cpu);
+#ifdef CONFIG_TCG_WASM64_BACKEND
+    tcg_wasm64_clear_active_counters();
+#endif
     siglongjmp(cpu->jmp_env, 1);
 }
 

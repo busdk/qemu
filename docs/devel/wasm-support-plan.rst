@@ -7640,3 +7640,72 @@ does, however, satisfy the deterministic W2 microbench gate for the run/exit
 shape.  The next step is to execute this ABI from the actual Emscripten/QEMU
 runtime path and export the same metrics in result JSON before attempting the
 W3 generic speed gate again.
+
+W2p QEMU runtime run/exit smoke
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The runtime probe is now accepted as a QEMU-owned Emscripten runtime smoke for
+the current ``riscv64-softmmu`` accelerator lane.  It is opt-in through
+``QEMU_WASM64_RUNLOOP_SMOKE=1`` or the browser query option
+``wasm64RunloopSmoke=1``.  The probe instantiates a generated
+``wasmjit_run(ctx, budget)`` module against the live Emscripten
+``WebAssembly.Memory`` and copies the accelerator-shape counters into browser
+result JSON through QEMU-owned C structs.
+
+The current local artifact was built with:
+
+.. code-block:: text
+
+  python3 scripts/ci/wasm-build-artifacts-local.py --out /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-runtime-smoke-r3 --target riscv64 --tcg-wasm64-backend --build-image
+
+Artifact hashes:
+
+* ``qemu-system-riscv64.js`` =
+  ``fe0090ac02ab2cb335543f96830d235572c0da46fb6222bb36343c1cf64a4a0c``
+* ``qemu-system-riscv64.wasm`` =
+  ``d28d2b6ab3cee9cbd12af522b3f180568dc5ab5efa3f709624523a097f15ef7d``
+* ``qemu-system-wasm-artifacts.json`` =
+  ``009ee5e354ff5c38fb86a0d3903346cd5f5514457331aaafb3ddcad3bf3b3a9d``
+
+Chrome ``149.0.7827.201`` ran the artifact with ``machine=virt``,
+``rootfsDevice=virtio-pci``, and ``wasm64RunloopSmoke=1``.  The result JSON is
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-runtime-smoke-r3/cdp-rootfs-pci-runloop-result.json``
+with SHA256
+``ebbc14705ba04622c5be6bb5840025834b4da53fdd16023da216211dc6c83637``.  The
+screenshot is
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-runtime-smoke-r3/cdp-rootfs-pci-runloop.png``
+with SHA256
+``20f5cb1b7c0e8e713d398fff403bea6f8391896f49c207127ab80ada5a0efab5``.
+
+The run reached ``Welcome to TuxTest`` in ``40194`` ms.  The runtime-smoke
+summary was recorded at ``2397`` ms with ``ok=true``, budget ``1000000``,
+generated guest-instruction equivalents ``4000000``, generated-body time
+``2470000`` ns, compile time ``140000`` ns, instantiate time ``20000`` ns,
+generated chain length ``1000000``, inline TLB-hit loads and stores
+``1000000`` each, zero helper calls, zero ``qemu_ld`` calls, zero
+``qemu_st`` calls, and one budget exit.
+
+Two isolation runs sharpened the remaining blocker.  A no-smoke
+``rootfsDevice=virtio-pci`` control reached ``Welcome to TuxTest`` in
+``44606`` ms with result
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-runtime-smoke-r3/cdp-rootfs-pci-result.json``
+SHA256
+``32985a3a993dbefea33d7557d7ff5837a26f67e2534b7f7ecfae67f4a376e4a4``.  An
+empty-initramfs run with no root block device reached the expected VFS kernel
+panic in ``13134`` ms; the empty initramfs SHA256 was
+``f06e8dc9202babc3500d801b84c655787ce44245b618131707c070cd1ced5bcf`` and the
+result JSON was
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-runtime-smoke-r3/cdp-initrd-isolation-result.json``
+SHA256
+``89a285bb33a0abe2244bd16c78b1665cdcdddb04d9dc3d79ec962529cdfcfe33``.
+
+The negative storage proof is specific to the ``virtio-mmio`` rootfs shape for
+this backend artifact: result
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-runtime-smoke-r3/cdp-backend-control-result.json``
+SHA256
+``c2ba6f0966c71cb1681665ed41c15026dc8bdb586d522d7eca6c81e71ee05b50`` timed
+out after ``90634`` ms and aborted after ``virtio_blk virtio0`` with
+``Assertion failed: p_rcu_reader->depth != 0``.  Until that QEMU blocker is
+fixed, backend generic RISC-V browser smokes should use ``virtio-pci`` rootfs
+on the ``virt`` machine.  R4b remains open because it must add the same-artifact
+C/TCI-like comparison and ratios before the generic speed gate.

@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  WASMJIT_COUNTERS,
   WASMJIT_RUN_CTX,
   WASMJIT_RUN_EXIT,
 } from "./wasmjit-runloop-model.mjs";
@@ -108,6 +109,103 @@ assert.equal(macroValue("TCG_WASM64_RUN_EXIT_VALUE_OFFSET"), WASMJIT_RUN_EXIT.va
 assert.equal(macroValue("TCG_WASM64_RUN_EXIT_SIZE_OFFSET"), WASMJIT_RUN_EXIT.sizeField);
 assert.equal(macroValue("TCG_WASM64_RUN_EXIT_FLAGS_OFFSET"), WASMJIT_RUN_EXIT.flags);
 assert.equal(macroValue("TCG_WASM64_RUN_EXIT_SIZE"), WASMJIT_RUN_EXIT.size);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_GENERATED_GUEST_INSTRUCTIONS_OFFSET"),
+  WASMJIT_COUNTERS.generatedGuestInstructions,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_FALLBACK_GUEST_INSTRUCTIONS_OFFSET"),
+  WASMJIT_COUNTERS.fallbackGuestInstructions,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_GENERATED_BODY_TIME_NS_OFFSET"),
+  WASMJIT_COUNTERS.generatedBodyTimeNs,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_TCI_DISPATCH_TIME_NS_OFFSET"),
+  WASMJIT_COUNTERS.tciDispatchTimeNs,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_TB_LOOKUP_TIME_NS_OFFSET"),
+  WASMJIT_COUNTERS.tbLookupTimeNs,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_HELPER_CALL_TIME_NS_OFFSET"),
+  WASMJIT_COUNTERS.helperCallTimeNs,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_QEMU_LD_TIME_NS_OFFSET"),
+  WASMJIT_COUNTERS.qemuLdTimeNs,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_QEMU_ST_TIME_NS_OFFSET"),
+  WASMJIT_COUNTERS.qemuStTimeNs,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_COMPILE_TIME_NS_OFFSET"),
+  WASMJIT_COUNTERS.compileTimeNs,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_INSTANTIATE_TIME_NS_OFFSET"),
+  WASMJIT_COUNTERS.instantiateTimeNs,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_GENERATED_CHAIN_LENGTH_OFFSET"),
+  WASMJIT_COUNTERS.generatedChainLength,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_INLINE_TLB_HIT_LOADS_OFFSET"),
+  WASMJIT_COUNTERS.inlineTlbHitLoads,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_INLINE_TLB_HIT_STORES_OFFSET"),
+  WASMJIT_COUNTERS.inlineTlbHitStores,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_HELPER_CALLS_OFFSET"),
+  WASMJIT_COUNTERS.helperCalls,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_QEMU_LD_CALLS_OFFSET"),
+  WASMJIT_COUNTERS.qemuLoadCalls,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_QEMU_ST_CALLS_OFFSET"),
+  WASMJIT_COUNTERS.qemuStoreCalls,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_EXITS_BUDGET_OFFSET"),
+  WASMJIT_COUNTERS.exitsBudget,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_EXITS_MMIO_OFFSET"),
+  WASMJIT_COUNTERS.exitsMmio,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_EXITS_TLB_MISS_OR_FAULT_OFFSET"),
+  WASMJIT_COUNTERS.exitsTlbMissOrFault,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_EXITS_INTERRUPT_OFFSET"),
+  WASMJIT_COUNTERS.exitsInterrupt,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_EXITS_HELPER_OFFSET"),
+  WASMJIT_COUNTERS.exitsHelper,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_EXITS_UNSUPPORTED_OFFSET"),
+  WASMJIT_COUNTERS.exitsUnsupported,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_EXITS_HLT_OFFSET"),
+  WASMJIT_COUNTERS.exitsHlt,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_COUNTERS_EXITS_INVALIDATED_OFFSET"),
+  WASMJIT_COUNTERS.exitsInvalidated,
+);
+assert.equal(macroValue("TCG_WASM64_RUN_COUNTERS_SIZE"), WASMJIT_COUNTERS.size);
 
 assert.match(runtime, /void tcg_wasm64_run_counters_reset/);
 assert.match(runtime, /void tcg_wasm64_run_counters_add/);
@@ -119,5 +217,12 @@ assert.match(runtime, /return "invalidated"/);
 assert.match(runtime, /QEMU_BUILD_BUG_ON\(offsetof\(TCGWasm64RunContext, env\) !=/);
 assert.match(runtime, /QEMU_BUILD_BUG_ON\(sizeof\(TCGWasm64RunContext\) != TCG_WASM64_RUN_CTX_SIZE\)/);
 assert.match(runtime, /QEMU_BUILD_BUG_ON\(sizeof\(TCGWasm64RunExit\) != TCG_WASM64_RUN_EXIT_SIZE\)/);
+assert.match(runtime, /QEMU_BUILD_BUG_ON\(sizeof\(TCGWasm64RunCounters\) !=/);
+assert.match(runtime, /QEMU_WASM64_RUNLOOP_SMOKE/);
+assert.match(runtime, /qemu-wasm64-runloop: /);
+assert.match(runtime, /tcg_wasm64_runloop_smoke_js/);
+assert.match(runtime, /0x02,\s*0x07,\s*0x00,\s*0x80,\s*0x80,\s*0x10/);
+assert.match(runtime, /generated_guest_instructions == budget \* 4/);
+assert.match(runtime, /inline_tlb_hit_loads == budget/);
 
 console.log("wasm64 runloop contract: ok");
