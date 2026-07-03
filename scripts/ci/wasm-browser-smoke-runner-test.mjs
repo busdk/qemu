@@ -1039,13 +1039,11 @@ for (const status of [
     rootfs: null,
     rootfsDevice: "virtio-mmio",
     tciFastGates: true,
-    wasm64TcgGenerated: true,
     timeoutMs: 30000,
     visualMarker: "",
   });
 
   assert.equal(url.searchParams.get("tciFastGates"), "1");
-  assert.equal(url.searchParams.get("wasm64TcgGenerated"), "1");
 }
 
 {
@@ -1352,7 +1350,6 @@ for (const status of [
     },
     timeoutMs: 180000,
     tciFastGates: true,
-    wasm64TcgGenerated: true,
     tciProgress: true,
     tciProgressInterval: 2000000,
     tciWasmGeneratedTrace: true,
@@ -1395,7 +1392,6 @@ for (const status of [
   assert.equal(result.displayMinNonblackPixels, 4);
   assert.equal(result.rootfsDevice, "virtio-pci");
   assert.equal(result.tciFastGates, true);
-  assert.equal(result.wasm64TcgGenerated, true);
   assert.equal(result.tciProgress, true);
   assert.equal(result.tciProgressInterval, 2000000);
   assert.equal(result.tciWasmGeneratedTrace, true);
