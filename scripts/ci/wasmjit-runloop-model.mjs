@@ -22,7 +22,8 @@ export const WASMJIT_RUN_CTX = {
   exit: 32,
   mode: 40,
   flags: 44,
-  size: 48,
+  tlb: 48,
+  size: 56,
 };
 
 export const WASMJIT_RUN_EXIT = {
@@ -35,6 +36,54 @@ export const WASMJIT_RUN_EXIT = {
   sizeField: 40,
   flags: 44,
   size: 48,
+};
+
+export const WASMJIT_TLB_MIRROR = {
+  mask: 0,
+  table: 8,
+  fulltlb: 16,
+  mmuIdx: 24,
+  targetPageBits: 28,
+  cpuTlbEntryBits: 32,
+  tlbEntrySize: 36,
+  tlbFlagsMask: 40,
+  tlbSlowFlagsMask: 44,
+  flags: 48,
+  size: 56,
+};
+
+export const WASMJIT_TLB_MIRROR_VALID = 1;
+
+export const WASMJIT_TLB_ENTRY = {
+  addrRead: 0,
+  addrWrite: 8,
+  addrCode: 16,
+  addend: 24,
+  size: 32,
+  bits: 5,
+};
+
+export const WASMJIT_TLB_ENTRY_FULL = {
+  slowFlags: 35,
+  size: 48,
+};
+
+export const WASMJIT_TLB_CONSTANTS = {
+  targetPageBits: 12,
+  targetPageMask: -4096n,
+  invalidMask: 64n,
+  notDirty: 128n,
+  forceSlow: 256n,
+  flagsMask: 448n,
+  bswap: 1,
+  watchpoint: 2,
+  checkAligned: 4,
+  discardWrite: 8,
+  mmio: 16,
+  slowFlagsMask: 31,
+  mmuDataLoad: 0,
+  mmuDataStore: 1,
+  runExitFlagPageCrossing: 1,
 };
 
 export const WASMJIT_COUNTERS = {

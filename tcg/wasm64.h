@@ -144,6 +144,19 @@ typedef struct TCGWasm64RunCounters {
     uint64_t exits_invalidated;
 } TCGWasm64RunCounters;
 
+typedef struct TCGWasm64TLBMirror {
+    uintptr_t mask;
+    uintptr_t table;
+    uintptr_t fulltlb;
+    uint32_t mmu_idx;
+    uint32_t target_page_bits;
+    uint32_t cpu_tlb_entry_bits;
+    uint32_t tlb_entry_size;
+    uint32_t tlb_flags_mask;
+    uint32_t tlb_slow_flags_mask;
+    uint32_t flags;
+} TCGWasm64TLBMirror;
+
 typedef struct TCGWasm64RunContext {
     CPUArchState *env;
     void *guest_ram;
@@ -152,6 +165,7 @@ typedef struct TCGWasm64RunContext {
     TCGWasm64RunExit *exit;
     uint32_t mode;
     uint32_t flags;
+    TCGWasm64TLBMirror *tlb;
 } TCGWasm64RunContext;
 
 #define TCG_WASM64_RUN_CTX_ENV_OFFSET 0u
@@ -161,7 +175,46 @@ typedef struct TCGWasm64RunContext {
 #define TCG_WASM64_RUN_CTX_EXIT_OFFSET 32u
 #define TCG_WASM64_RUN_CTX_MODE_OFFSET 40u
 #define TCG_WASM64_RUN_CTX_FLAGS_OFFSET 44u
-#define TCG_WASM64_RUN_CTX_SIZE 48u
+#define TCG_WASM64_RUN_CTX_TLB_OFFSET 48u
+#define TCG_WASM64_RUN_CTX_SIZE 56u
+
+#define TCG_WASM64_TLB_MIRROR_MASK_OFFSET 0u
+#define TCG_WASM64_TLB_MIRROR_TABLE_OFFSET 8u
+#define TCG_WASM64_TLB_MIRROR_FULLTLB_OFFSET 16u
+#define TCG_WASM64_TLB_MIRROR_MMU_IDX_OFFSET 24u
+#define TCG_WASM64_TLB_MIRROR_TARGET_PAGE_BITS_OFFSET 28u
+#define TCG_WASM64_TLB_MIRROR_CPU_TLB_ENTRY_BITS_OFFSET 32u
+#define TCG_WASM64_TLB_MIRROR_TLB_ENTRY_SIZE_OFFSET 36u
+#define TCG_WASM64_TLB_MIRROR_TLB_FLAGS_MASK_OFFSET 40u
+#define TCG_WASM64_TLB_MIRROR_TLB_SLOW_FLAGS_MASK_OFFSET 44u
+#define TCG_WASM64_TLB_MIRROR_FLAGS_OFFSET 48u
+#define TCG_WASM64_TLB_MIRROR_SIZE 56u
+#define TCG_WASM64_TLB_MIRROR_VALID 1u
+
+#define TCG_WASM64_CPUTLB_ENTRY_ADDR_READ_OFFSET 0u
+#define TCG_WASM64_CPUTLB_ENTRY_ADDR_WRITE_OFFSET 8u
+#define TCG_WASM64_CPUTLB_ENTRY_ADDR_CODE_OFFSET 16u
+#define TCG_WASM64_CPUTLB_ENTRY_ADDEND_OFFSET 24u
+#define TCG_WASM64_CPUTLB_ENTRY_SIZE 32u
+#define TCG_WASM64_CPUTLB_ENTRY_BITS 5u
+
+#define TCG_WASM64_CPUTLB_ENTRY_FULL_SLOW_FLAGS_OFFSET 35u
+#define TCG_WASM64_CPUTLB_ENTRY_FULL_SIZE 48u
+
+#define TCG_WASM64_MMU_DATA_LOAD 0u
+#define TCG_WASM64_MMU_DATA_STORE 1u
+#define TCG_WASM64_TLB_BSWAP 1u
+#define TCG_WASM64_TLB_WATCHPOINT 2u
+#define TCG_WASM64_TLB_CHECK_ALIGNED 4u
+#define TCG_WASM64_TLB_DISCARD_WRITE 8u
+#define TCG_WASM64_TLB_MMIO 16u
+#define TCG_WASM64_TLB_INVALID_MASK 64u
+#define TCG_WASM64_TLB_NOTDIRTY 128u
+#define TCG_WASM64_TLB_FORCE_SLOW 256u
+#define TCG_WASM64_TLB_FLAGS_MASK 448u
+#define TCG_WASM64_TLB_SLOW_FLAGS_MASK 31u
+
+#define TCG_WASM64_RUN_EXIT_FLAG_PAGE_CROSSING 1u
 
 #define TCG_WASM64_RUN_EXIT_REASON_OFFSET 0u
 #define TCG_WASM64_RUN_EXIT_TB_ID_OFFSET 4u
@@ -266,6 +319,9 @@ void tcg_wasm64_run_counters_add(TCGWasm64RunCounters *dst,
 void tcg_wasm64_run_count_exit(TCGWasm64RunCounters *counters,
                                TCGWasm64RunExitReason reason);
 const char *tcg_wasm64_run_exit_reason_name(TCGWasm64RunExitReason reason);
+void tcg_wasm64_tlb_mirror_reset(TCGWasm64TLBMirror *mirror);
+void tcg_wasm64_tlb_mirror_refresh(TCGWasm64TLBMirror *mirror,
+                                   CPUArchState *env, uint32_t mmu_idx);
 void tcg_wasm64_translate_begin(const void *tb_ptr);
 void tcg_wasm64_translate_note_tci_op(uint32_t op);
 void tcg_wasm64_translate_note_tci_insn(uint32_t op, uint32_t insn);

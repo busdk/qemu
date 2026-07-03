@@ -8,6 +8,11 @@
  */
 
 #include "qemu/osdep.h"
+#include "exec/cpu-common.h"
+#include "exec/mmu-access-type.h"
+#include "exec/target_page.h"
+#include "exec/tlb-common.h"
+#include "exec/tlb-flags.h"
 #include "exec/translation-block.h"
 #include "tcg/tcg.h"
 #include "tcg/wasm64.h"
@@ -134,7 +139,59 @@ QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, mode) !=
                   TCG_WASM64_RUN_CTX_MODE_OFFSET);
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, flags) !=
                   TCG_WASM64_RUN_CTX_FLAGS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, tlb) !=
+                  TCG_WASM64_RUN_CTX_TLB_OFFSET);
 QEMU_BUILD_BUG_ON(sizeof(TCGWasm64RunContext) != TCG_WASM64_RUN_CTX_SIZE);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64TLBMirror, mask) !=
+                  TCG_WASM64_TLB_MIRROR_MASK_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64TLBMirror, table) !=
+                  TCG_WASM64_TLB_MIRROR_TABLE_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64TLBMirror, fulltlb) !=
+                  TCG_WASM64_TLB_MIRROR_FULLTLB_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64TLBMirror, mmu_idx) !=
+                  TCG_WASM64_TLB_MIRROR_MMU_IDX_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64TLBMirror, target_page_bits) !=
+                  TCG_WASM64_TLB_MIRROR_TARGET_PAGE_BITS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64TLBMirror, cpu_tlb_entry_bits) !=
+                  TCG_WASM64_TLB_MIRROR_CPU_TLB_ENTRY_BITS_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64TLBMirror, tlb_entry_size) !=
+                  TCG_WASM64_TLB_MIRROR_TLB_ENTRY_SIZE_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64TLBMirror, tlb_flags_mask) !=
+                  TCG_WASM64_TLB_MIRROR_TLB_FLAGS_MASK_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64TLBMirror, tlb_slow_flags_mask) !=
+                  TCG_WASM64_TLB_MIRROR_TLB_SLOW_FLAGS_MASK_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64TLBMirror, flags) !=
+                  TCG_WASM64_TLB_MIRROR_FLAGS_OFFSET);
+QEMU_BUILD_BUG_ON(sizeof(TCGWasm64TLBMirror) !=
+                  TCG_WASM64_TLB_MIRROR_SIZE);
+QEMU_BUILD_BUG_ON(CPU_TLB_ENTRY_BITS != TCG_WASM64_CPUTLB_ENTRY_BITS);
+QEMU_BUILD_BUG_ON(offsetof(CPUTLBEntry, addr_read) !=
+                  TCG_WASM64_CPUTLB_ENTRY_ADDR_READ_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(CPUTLBEntry, addr_write) !=
+                  TCG_WASM64_CPUTLB_ENTRY_ADDR_WRITE_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(CPUTLBEntry, addr_code) !=
+                  TCG_WASM64_CPUTLB_ENTRY_ADDR_CODE_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(CPUTLBEntry, addend) !=
+                  TCG_WASM64_CPUTLB_ENTRY_ADDEND_OFFSET);
+QEMU_BUILD_BUG_ON(sizeof(CPUTLBEntry) != TCG_WASM64_CPUTLB_ENTRY_SIZE);
+QEMU_BUILD_BUG_ON(offsetof(CPUTLBEntryFull, slow_flags) !=
+                  TCG_WASM64_CPUTLB_ENTRY_FULL_SLOW_FLAGS_OFFSET);
+QEMU_BUILD_BUG_ON(sizeof(CPUTLBEntryFull) !=
+                  TCG_WASM64_CPUTLB_ENTRY_FULL_SIZE);
+QEMU_BUILD_BUG_ON(MMU_DATA_LOAD != TCG_WASM64_MMU_DATA_LOAD);
+QEMU_BUILD_BUG_ON(MMU_DATA_STORE != TCG_WASM64_MMU_DATA_STORE);
+#ifndef CONFIG_USER_ONLY
+QEMU_BUILD_BUG_ON(TLB_BSWAP != TCG_WASM64_TLB_BSWAP);
+QEMU_BUILD_BUG_ON(TLB_WATCHPOINT != TCG_WASM64_TLB_WATCHPOINT);
+QEMU_BUILD_BUG_ON(TLB_CHECK_ALIGNED != TCG_WASM64_TLB_CHECK_ALIGNED);
+QEMU_BUILD_BUG_ON(TLB_DISCARD_WRITE != TCG_WASM64_TLB_DISCARD_WRITE);
+QEMU_BUILD_BUG_ON(TLB_MMIO != TCG_WASM64_TLB_MMIO);
+QEMU_BUILD_BUG_ON(TLB_INVALID_MASK != TCG_WASM64_TLB_INVALID_MASK);
+QEMU_BUILD_BUG_ON(TLB_NOTDIRTY != TCG_WASM64_TLB_NOTDIRTY);
+QEMU_BUILD_BUG_ON(TLB_FORCE_SLOW != TCG_WASM64_TLB_FORCE_SLOW);
+QEMU_BUILD_BUG_ON(TLB_FLAGS_MASK != TCG_WASM64_TLB_FLAGS_MASK);
+QEMU_BUILD_BUG_ON(TLB_SLOW_FLAGS_MASK != TCG_WASM64_TLB_SLOW_FLAGS_MASK);
+#endif
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, reason) !=
                   TCG_WASM64_RUN_EXIT_REASON_OFFSET);
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, tb_id) !=
@@ -516,6 +573,43 @@ const char *tcg_wasm64_run_exit_reason_name(TCGWasm64RunExitReason reason)
     default:
         return "unknown";
     }
+}
+
+void tcg_wasm64_tlb_mirror_reset(TCGWasm64TLBMirror *mirror)
+{
+    if (mirror) {
+        memset(mirror, 0, sizeof(*mirror));
+    }
+}
+
+void tcg_wasm64_tlb_mirror_refresh(TCGWasm64TLBMirror *mirror,
+                                   CPUArchState *env, uint32_t mmu_idx)
+{
+    if (!mirror) {
+        return;
+    }
+    tcg_wasm64_tlb_mirror_reset(mirror);
+
+#if defined(CONFIG_TCG) && !defined(CONFIG_USER_ONLY)
+    if (!env || mmu_idx >= NB_MMU_MODES) {
+        return;
+    }
+
+    CPUState *cpu = env_cpu(env);
+    CPUTLBDescFast *fast = cpu_tlb_fast(cpu, mmu_idx);
+    CPUTLBDesc *desc = &cpu->neg.tlb.d[mmu_idx];
+
+    mirror->mask = fast->mask;
+    mirror->table = (uintptr_t)fast->table;
+    mirror->fulltlb = (uintptr_t)desc->fulltlb;
+    mirror->mmu_idx = mmu_idx;
+    mirror->target_page_bits = TARGET_PAGE_BITS;
+    mirror->cpu_tlb_entry_bits = CPU_TLB_ENTRY_BITS;
+    mirror->tlb_entry_size = sizeof(CPUTLBEntry);
+    mirror->tlb_flags_mask = TLB_FLAGS_MASK;
+    mirror->tlb_slow_flags_mask = TLB_SLOW_FLAGS_MASK;
+    mirror->flags = TCG_WASM64_TLB_MIRROR_VALID;
+#endif
 }
 
 #ifdef CONFIG_EMSCRIPTEN

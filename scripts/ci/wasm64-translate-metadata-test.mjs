@@ -66,11 +66,29 @@ assert.match(header, /tcg_wasm64_translate_lookup\(const void \*tb_ptr\)/);
 assert.match(header, /tcg_wasm64_translate_generated_candidate/);
 assert.match(header, /tcg_wasm64_translate_generated_output_available/);
 assert.match(header, /uintptr_t tcg_tci_qemu_tb_exec\(CPUArchState \*env,\s*const void \*tb_ptr\)/);
+assert.match(header, /typedef struct TCGWasm64TLBMirror/);
+assert.match(header, /TCG_WASM64_RUN_CTX_TLB_OFFSET/);
+assert.match(header, /TCG_WASM64_TLB_MIRROR_FULLTLB_OFFSET/);
+assert.match(header, /TCG_WASM64_CPUTLB_ENTRY_ADDR_READ_OFFSET/);
+assert.match(header, /TCG_WASM64_CPUTLB_ENTRY_FULL_SLOW_FLAGS_OFFSET/);
+assert.match(header, /TCG_WASM64_TLB_FLAGS_MASK/);
+assert.match(header, /tcg_wasm64_tlb_mirror_reset\(TCGWasm64TLBMirror \*mirror\)/);
+assert.match(header, /tcg_wasm64_tlb_mirror_refresh\(TCGWasm64TLBMirror \*mirror,\s*\n\s*CPUArchState \*env,\s*uint32_t mmu_idx\)/);
 
 assert.match(runtime, /TCG_WASM64_TRANSLATE_CACHE_SIZE/);
 assert.match(runtime, /static __thread TCGWasm64TranslateEntry translate_cache/);
 assert.match(runtime, /tcg_wasm64_translate_op_supported/);
 assert.match(runtime, /tcg_wasm64_translate_op_generated_supported/);
+assert.match(runtime, /QEMU_BUILD_BUG_ON\(offsetof\(TCGWasm64RunContext, tlb\) !=/);
+assert.match(runtime, /QEMU_BUILD_BUG_ON\(offsetof\(TCGWasm64TLBMirror, fulltlb\) !=/);
+assert.match(runtime, /QEMU_BUILD_BUG_ON\(offsetof\(CPUTLBEntry, addr_read\) !=/);
+assert.match(runtime, /QEMU_BUILD_BUG_ON\(offsetof\(CPUTLBEntryFull, slow_flags\) !=/);
+assert.match(runtime, /QEMU_BUILD_BUG_ON\(TLB_FLAGS_MASK != TCG_WASM64_TLB_FLAGS_MASK\)/);
+assert.match(runtime, /void tcg_wasm64_tlb_mirror_reset\(TCGWasm64TLBMirror \*mirror\)/);
+assert.match(runtime, /void tcg_wasm64_tlb_mirror_refresh\(TCGWasm64TLBMirror \*mirror,/);
+assert.match(runtime, /CPUState \*cpu = env_cpu\(env\)/);
+assert.match(runtime, /CPUTLBDescFast \*fast = cpu_tlb_fast\(cpu, mmu_idx\)/);
+assert.match(runtime, /CPUTLBDesc \*desc = &cpu->neg\.tlb\.d\[mmu_idx\]/);
 const generatedSupportedBody = runtime.match(
   /static bool tcg_wasm64_translate_op_generated_supported\(uint32_t op\)\s*\{[\s\S]*?switch \(\(TCGOpcode\)op\) \{([\s\S]*?)default:/,
 )?.[1] || "";
@@ -248,5 +266,24 @@ assert.match(generatedEquivalence, /unmodeled-segment-state/);
 assert.match(generatedEquivalence, /unmodeled-helper-sensitive-state/);
 assert.match(generatedEquivalence, /runtime unsupported return/);
 assert.match(generatedEquivalence, /r4iX86CpuStateContract/);
+for (const fixtureName of [
+  "r4k-softmmu-ld32u-tlb-hit-ram",
+  "r4k-softmmu-ld-tlb-hit-ram",
+  "r4k-softmmu-st8-tlb-hit-ram",
+  "r4k-softmmu-st-tlb-hit-ram",
+  "r4k-softmmu-tlb-miss",
+  "r4k-softmmu-mmio",
+  "r4k-softmmu-permission-fault",
+  "r4k-softmmu-page-crossing",
+  "r4k-softmmu-stale-output-mismatch",
+]) {
+  assert.match(generatedEquivalence, new RegExp(fixtureName));
+}
+assert.match(generatedEquivalence, /r4kSoftmmuFastPath/);
+assert.match(generatedEquivalence, /R4K_SOFTMMU_EMITTER_NAME/);
+assert.match(generatedEquivalence, /WASMJIT_TLB_MIRROR/);
+assert.match(generatedEquivalence, /inlineTlbHitLoads/);
+assert.match(generatedEquivalence, /qemuLdCalls/);
+assert.match(generatedEquivalence, /metadata-output-tb-code-mismatch/);
 
 console.log("wasm64 translate metadata contract: ok");

@@ -14,6 +14,10 @@ import {
   WASMJIT_COUNTERS,
   WASMJIT_RUN_CTX,
   WASMJIT_RUN_EXIT,
+  WASMJIT_TLB_CONSTANTS,
+  WASMJIT_TLB_ENTRY,
+  WASMJIT_TLB_ENTRY_FULL,
+  WASMJIT_TLB_MIRROR,
 } from "./wasmjit-runloop-model.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -89,7 +93,7 @@ for (const field of [
 }
 
 assert.match(header, /typedef struct TCGWasm64RunContext/);
-for (const field of ["env", "guest_ram", "budget", "counters", "exit", "mode", "flags"]) {
+for (const field of ["env", "guest_ram", "budget", "counters", "exit", "mode", "flags", "tlb"]) {
   assert.match(header, new RegExp(field));
 }
 assert.equal(macroValue("TCG_WASM64_RUN_CTX_ENV_OFFSET"), WASMJIT_RUN_CTX.env);
@@ -99,7 +103,29 @@ assert.equal(macroValue("TCG_WASM64_RUN_CTX_COUNTERS_OFFSET"), WASMJIT_RUN_CTX.c
 assert.equal(macroValue("TCG_WASM64_RUN_CTX_EXIT_OFFSET"), WASMJIT_RUN_CTX.exit);
 assert.equal(macroValue("TCG_WASM64_RUN_CTX_MODE_OFFSET"), WASMJIT_RUN_CTX.mode);
 assert.equal(macroValue("TCG_WASM64_RUN_CTX_FLAGS_OFFSET"), WASMJIT_RUN_CTX.flags);
+assert.equal(macroValue("TCG_WASM64_RUN_CTX_TLB_OFFSET"), WASMJIT_RUN_CTX.tlb);
 assert.equal(macroValue("TCG_WASM64_RUN_CTX_SIZE"), WASMJIT_RUN_CTX.size);
+assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_MASK_OFFSET"), WASMJIT_TLB_MIRROR.mask);
+assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_TABLE_OFFSET"), WASMJIT_TLB_MIRROR.table);
+assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_FULLTLB_OFFSET"), WASMJIT_TLB_MIRROR.fulltlb);
+assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_MMU_IDX_OFFSET"), WASMJIT_TLB_MIRROR.mmuIdx);
+assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_TARGET_PAGE_BITS_OFFSET"), WASMJIT_TLB_MIRROR.targetPageBits);
+assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_CPU_TLB_ENTRY_BITS_OFFSET"), WASMJIT_TLB_MIRROR.cpuTlbEntryBits);
+assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_TLB_ENTRY_SIZE_OFFSET"), WASMJIT_TLB_MIRROR.tlbEntrySize);
+assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_TLB_FLAGS_MASK_OFFSET"), WASMJIT_TLB_MIRROR.tlbFlagsMask);
+assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_TLB_SLOW_FLAGS_MASK_OFFSET"), WASMJIT_TLB_MIRROR.tlbSlowFlagsMask);
+assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_FLAGS_OFFSET"), WASMJIT_TLB_MIRROR.flags);
+assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_SIZE"), WASMJIT_TLB_MIRROR.size);
+assert.equal(macroValue("TCG_WASM64_CPUTLB_ENTRY_ADDR_READ_OFFSET"), WASMJIT_TLB_ENTRY.addrRead);
+assert.equal(macroValue("TCG_WASM64_CPUTLB_ENTRY_ADDR_WRITE_OFFSET"), WASMJIT_TLB_ENTRY.addrWrite);
+assert.equal(macroValue("TCG_WASM64_CPUTLB_ENTRY_ADDR_CODE_OFFSET"), WASMJIT_TLB_ENTRY.addrCode);
+assert.equal(macroValue("TCG_WASM64_CPUTLB_ENTRY_ADDEND_OFFSET"), WASMJIT_TLB_ENTRY.addend);
+assert.equal(macroValue("TCG_WASM64_CPUTLB_ENTRY_SIZE"), WASMJIT_TLB_ENTRY.size);
+assert.equal(macroValue("TCG_WASM64_CPUTLB_ENTRY_BITS"), WASMJIT_TLB_ENTRY.bits);
+assert.equal(macroValue("TCG_WASM64_CPUTLB_ENTRY_FULL_SLOW_FLAGS_OFFSET"), WASMJIT_TLB_ENTRY_FULL.slowFlags);
+assert.equal(macroValue("TCG_WASM64_CPUTLB_ENTRY_FULL_SIZE"), WASMJIT_TLB_ENTRY_FULL.size);
+assert.equal(macroValue("TCG_WASM64_TLB_FLAGS_MASK"), Number(WASMJIT_TLB_CONSTANTS.flagsMask));
+assert.equal(macroValue("TCG_WASM64_TLB_SLOW_FLAGS_MASK"), WASMJIT_TLB_CONSTANTS.slowFlagsMask);
 assert.equal(macroValue("TCG_WASM64_RUN_EXIT_REASON_OFFSET"), WASMJIT_RUN_EXIT.reason);
 assert.equal(macroValue("TCG_WASM64_RUN_EXIT_TB_ID_OFFSET"), WASMJIT_RUN_EXIT.tbId);
 assert.equal(macroValue("TCG_WASM64_RUN_EXIT_PC_OFFSET"), WASMJIT_RUN_EXIT.pc);
@@ -216,6 +242,8 @@ assert.match(runtime, /return "tlb-miss-or-fault"/);
 assert.match(runtime, /return "invalidated"/);
 assert.match(runtime, /QEMU_BUILD_BUG_ON\(offsetof\(TCGWasm64RunContext, env\) !=/);
 assert.match(runtime, /QEMU_BUILD_BUG_ON\(sizeof\(TCGWasm64RunContext\) != TCG_WASM64_RUN_CTX_SIZE\)/);
+assert.match(runtime, /QEMU_BUILD_BUG_ON\(offsetof\(TCGWasm64TLBMirror, mask\) !=/);
+assert.match(runtime, /tcg_wasm64_tlb_mirror_refresh/);
 assert.match(runtime, /QEMU_BUILD_BUG_ON\(sizeof\(TCGWasm64RunExit\) != TCG_WASM64_RUN_EXIT_SIZE\)/);
 assert.match(runtime, /QEMU_BUILD_BUG_ON\(sizeof\(TCGWasm64RunCounters\) !=/);
 assert.match(runtime, /QEMU_WASM64_RUNLOOP_SMOKE/);

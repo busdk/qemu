@@ -16,6 +16,11 @@ import {
   WASMJIT_COUNTERS,
   WASMJIT_RUN_CTX,
   WASMJIT_RUN_EXIT,
+  WASMJIT_TLB_CONSTANTS,
+  WASMJIT_TLB_ENTRY,
+  WASMJIT_TLB_ENTRY_FULL,
+  WASMJIT_TLB_MIRROR,
+  WASMJIT_TLB_MIRROR_VALID,
 } from "./wasmjit-runloop-model.mjs";
 
 const VALUE_I32 = 0x7f;
@@ -82,12 +87,25 @@ const STATUS_DISPATCH = 2n;
 const STATUS_UNSUPPORTED = 6n;
 const RUN_EXIT_REASON_NONE = 0;
 const RUN_EXIT_REASON_BUDGET = 1;
+const RUN_EXIT_REASON_MMIO = 2;
+const RUN_EXIT_REASON_TLB_MISS_OR_FAULT = 3;
 const RUN_EXIT_REASON_UNSUPPORTED = 6;
 const RUN_EXIT_REASON_INVALIDATED = 8;
+const RUN_EXIT_FLAG_PAGE_CROSSING =
+  WASMJIT_TLB_CONSTANTS.runExitFlagPageCrossing;
 const PER_TB_EMITTER_NAME = "r4k-per-tb-function-body-emitter";
 const TWO_TB_HOTSET_EMITTER_NAME = "r4k-two-tb-hotset-dispatch-fixture";
 const TWO_TB_HOTSET_BODY_TIME_NS_PER_TB = 1000n;
 const X86_CPU_STATE_CONTRACT_VERSION = 1;
+const R4K_SOFTMMU_EMITTER_NAME = "r4k-softmmu-tlb-fastpath-fixture";
+const R4K_SOFTMMU_MMU_IDX = 2;
+const R4K_SOFTMMU_PAGE_BITS = WASMJIT_TLB_CONSTANTS.targetPageBits;
+const R4K_SOFTMMU_PAGE_MASK = WASMJIT_TLB_CONSTANTS.targetPageMask;
+const R4K_SOFTMMU_TLB_ENTRY_BITS = WASMJIT_TLB_ENTRY.bits;
+const MO_8 = 0;
+const MO_16 = 1;
+const MO_32 = 2;
+const MO_64 = 3;
 const X86_REG_ENUMS = [
   "R_EAX", "R_ECX", "R_EDX", "R_EBX", "R_ESP", "R_EBP", "R_ESI", "R_EDI",
   "R_R8", "R_R9", "R_R10", "R_R11", "R_R12", "R_R13", "R_R14", "R_R15",
@@ -157,6 +175,10 @@ function i32Load(address, offset = 0) {
   return [...address, 0x28, ...encodeU32(2), ...encodeU32(offset)];
 }
 
+function i32Load8U(address, offset = 0) {
+  return [...address, 0x2d, ...encodeU32(0), ...encodeU32(offset)];
+}
+
 function i64Store(address, value, offset = 0) {
   return [...address, ...value, 0x37, ...encodeU32(3), ...encodeU32(offset)];
 }
@@ -191,6 +213,54 @@ function ifBlock(condition, body) {
 
 function i64Truthy(expr) {
   return [...expr, 0x50, 0x45];
+}
+
+function i32Eqz(expr) {
+  return [...expr, 0x45];
+}
+
+function i32Eq(lhs, rhs) {
+  return [...lhs, ...rhs, 0x46];
+}
+
+function i32Ne(lhs, rhs) {
+  return [...lhs, ...rhs, 0x47];
+}
+
+function i32And(lhs, rhs) {
+  return [...lhs, ...rhs, 0x71];
+}
+
+function i64AddExpr(lhs, rhs) {
+  return [...lhs, ...rhs, 0x7c];
+}
+
+function i64MulExpr(lhs, rhs) {
+  return [...lhs, ...rhs, 0x7e];
+}
+
+function i64AndExpr(lhs, rhs) {
+  return [...lhs, ...rhs, 0x83];
+}
+
+function i64XorExpr(lhs, rhs) {
+  return [...lhs, ...rhs, 0x85];
+}
+
+function i64ShlExpr(lhs, rhs) {
+  return [...lhs, ...rhs, 0x86];
+}
+
+function i64ShrUExpr(lhs, rhs) {
+  return [...lhs, ...rhs, 0x88];
+}
+
+function i64EqExpr(lhs, rhs) {
+  return [...lhs, ...rhs, 0x51];
+}
+
+function i64NeExpr(lhs, rhs) {
+  return [...lhs, ...rhs, 0x52];
 }
 
 function bits(value, start, length) {
@@ -942,6 +1012,18 @@ function routeLiveGeneratedOutput(metadata) {
       shape,
     };
   }
+  if (metadata.tbWords &&
+      (metadata.tbWords.length !== metadata.words.length ||
+       metadata.tbWords.some((word, index) =>
+         (word >>> 0) !== (metadata.words[index] >>> 0)))) {
+    return {
+      ok: false,
+      reason: "metadata-output-tb-code-mismatch",
+      jsStatusName: "metadata-output-tb-code-mismatch",
+      generatedGuestInstructions: 0,
+      shape,
+    };
+  }
 
   const emission = emitPerTBFunctionBody(metadata.words, metadata.relativeBase);
 
@@ -1307,6 +1389,12 @@ function runExitReasonName(reason) {
   if (reason === RUN_EXIT_REASON_BUDGET) {
     return "budget";
   }
+  if (reason === RUN_EXIT_REASON_MMIO) {
+    return "mmio";
+  }
+  if (reason === RUN_EXIT_REASON_TLB_MISS_OR_FAULT) {
+    return "tlb-miss-or-fault";
+  }
   if (reason === RUN_EXIT_REASON_UNSUPPORTED) {
     return "unsupported";
   }
@@ -1583,6 +1671,549 @@ function readHotsetCounters(view, countersPtr) {
     exitsBudget: counter(WASMJIT_COUNTERS.exitsBudget),
     exitsUnsupported: counter(WASMJIT_COUNTERS.exitsUnsupported),
     exitsInvalidated: counter(WASMJIT_COUNTERS.exitsInvalidated),
+  };
+}
+
+const SOFTMMU_LOCAL_ENV_PTR = 1;
+const SOFTMMU_LOCAL_EXIT_PTR = 2;
+const SOFTMMU_LOCAL_COUNTERS_PTR = 3;
+const SOFTMMU_LOCAL_TLB_PTR = 4;
+const SOFTMMU_LOCAL_SLOW_FLAGS = 5;
+const SOFTMMU_LOCAL_TADDR = 6;
+const SOFTMMU_LOCAL_OI = 7;
+const SOFTMMU_LOCAL_MEMOP = 8;
+const SOFTMMU_LOCAL_VALUE = 9;
+const SOFTMMU_LOCAL_MASK = 10;
+const SOFTMMU_LOCAL_TABLE_PTR = 11;
+const SOFTMMU_LOCAL_FULLTLB_PTR = 12;
+const SOFTMMU_LOCAL_INDEX = 13;
+const SOFTMMU_LOCAL_ENTRY_PTR = 14;
+const SOFTMMU_LOCAL_FULL_PTR = 15;
+const SOFTMMU_LOCAL_COMPARATOR = 16;
+const SOFTMMU_LOCAL_ADDEND = 17;
+const SOFTMMU_LOCAL_HOST_ADDR = 18;
+
+function softmmuMemOpIdx(memop, mmuIdx = R4K_SOFTMMU_MMU_IDX) {
+  return BigInt((memop << 5) | mmuIdx);
+}
+
+function softmmuAccessSize(memop) {
+  if (memop === MO_8) {
+    return 1;
+  }
+  if (memop === MO_32) {
+    return 4;
+  }
+  if (memop === MO_64) {
+    return 8;
+  }
+  throw new Error(`unsupported fixture memop ${memop}`);
+}
+
+function softmmuAccessType(access) {
+  return access === "store"
+    ? WASMJIT_TLB_CONSTANTS.mmuDataStore
+    : WASMJIT_TLB_CONSTANTS.mmuDataLoad;
+}
+
+function softmmuComparatorOffset(access) {
+  return access === "store"
+    ? WASMJIT_TLB_ENTRY.addrWrite
+    : WASMJIT_TLB_ENTRY.addrRead;
+}
+
+function softmmuCounterSnapshot(view, countersPtr) {
+  function counter(offset) {
+    return view.getBigUint64(countersPtr + offset, true);
+  }
+
+  return {
+    generatedGuestInstructions:
+      counter(WASMJIT_COUNTERS.generatedGuestInstructions),
+    inlineTlbHitLoads: counter(WASMJIT_COUNTERS.inlineTlbHitLoads),
+    inlineTlbHitStores: counter(WASMJIT_COUNTERS.inlineTlbHitStores),
+    helperCalls: counter(WASMJIT_COUNTERS.helperCalls),
+    qemuLdCalls: counter(WASMJIT_COUNTERS.qemuLoadCalls),
+    qemuStCalls: counter(WASMJIT_COUNTERS.qemuStoreCalls),
+    exitsMmio: counter(WASMJIT_COUNTERS.exitsMmio),
+    exitsTlbMissOrFault: counter(WASMJIT_COUNTERS.exitsTlbMissOrFault),
+    exitsUnsupported: counter(WASMJIT_COUNTERS.exitsUnsupported),
+  };
+}
+
+function softmmuIncrementCounter(offset) {
+  return i64Store(localGet(SOFTMMU_LOCAL_COUNTERS_PTR), [
+    ...i64Load(localGet(SOFTMMU_LOCAL_COUNTERS_PTR), offset),
+    ...i64Const(1n),
+    0x7c,
+  ], offset);
+}
+
+function softmmuStoreExit(reason, size, flags) {
+  return [
+    ...i32Store(localGet(SOFTMMU_LOCAL_EXIT_PTR), i32Const(reason),
+                WASMJIT_RUN_EXIT.reason),
+    ...i64Store(localGet(SOFTMMU_LOCAL_EXIT_PTR),
+                localGet(SOFTMMU_LOCAL_TADDR), WASMJIT_RUN_EXIT.vaddr),
+    ...i64Store(localGet(SOFTMMU_LOCAL_EXIT_PTR), i64Const(0n),
+                WASMJIT_RUN_EXIT.paddr),
+    ...i32Store(localGet(SOFTMMU_LOCAL_EXIT_PTR), i32Const(size),
+                WASMJIT_RUN_EXIT.sizeField),
+    ...i32Store(localGet(SOFTMMU_LOCAL_EXIT_PTR), i32Const(flags),
+                WASMJIT_RUN_EXIT.flags),
+  ];
+}
+
+function softmmuFailureReturn({ reason, counterOffset, size, flags = 0 }) {
+  return [
+    ...softmmuStoreExit(reason, size, flags),
+    ...softmmuIncrementCounter(counterOffset),
+    ...returnExpr(i64Const(BigInt(reason))),
+  ];
+}
+
+function emitSoftmmuFastPathModule(fixture) {
+  const insn = fixture.words[0] >>> 0;
+  const opc = bits(insn, 0, 8);
+  const r0 = bits(insn, 8, 4);
+  const r1 = bits(insn, 12, 4);
+  const r2 = bits(insn, 16, 4);
+  const access = fixture.access;
+  const generatedMemop = fixture.generatedMemop;
+  const size = softmmuAccessSize(generatedMemop);
+  const accessType = softmmuAccessType(access);
+  const unsupportedReturn = softmmuFailureReturn({
+    reason: RUN_EXIT_REASON_UNSUPPORTED,
+    counterOffset: WASMJIT_COUNTERS.exitsUnsupported,
+    size,
+  });
+  const tlbMissReturn = softmmuFailureReturn({
+    reason: RUN_EXIT_REASON_TLB_MISS_OR_FAULT,
+    counterOffset: WASMJIT_COUNTERS.exitsTlbMissOrFault,
+    size,
+  });
+  const pageCrossingReturn = softmmuFailureReturn({
+    reason: RUN_EXIT_REASON_TLB_MISS_OR_FAULT,
+    counterOffset: WASMJIT_COUNTERS.exitsTlbMissOrFault,
+    size,
+    flags: RUN_EXIT_FLAG_PAGE_CROSSING,
+  });
+  const mmioReturn = softmmuFailureReturn({
+    reason: RUN_EXIT_REASON_MMIO,
+    counterOffset: WASMJIT_COUNTERS.exitsMmio,
+    size,
+  });
+  const instructions = [];
+
+  if (access === "load" && opc !== OPS.tci_qemu_ld_rrr) {
+    throw new Error(`${fixture.name} must start with tci_qemu_ld_rrr`);
+  }
+  if (access === "store" && opc !== OPS.tci_qemu_st_rrr) {
+    throw new Error(`${fixture.name} must start with tci_qemu_st_rrr`);
+  }
+
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_ENV_PTR,
+    i32WrapI64(i64Load(localGet(0), WASMJIT_RUN_CTX.env))));
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_EXIT_PTR,
+    i32WrapI64(i64Load(localGet(0), WASMJIT_RUN_CTX.exit))));
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_COUNTERS_PTR,
+    i32WrapI64(i64Load(localGet(0), WASMJIT_RUN_CTX.counters))));
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_TLB_PTR,
+    i32WrapI64(i64Load(localGet(0), WASMJIT_RUN_CTX.tlb))));
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_TADDR,
+    i64Load(localGet(SOFTMMU_LOCAL_ENV_PTR), r1 * 8)));
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_OI,
+    i64Load(localGet(SOFTMMU_LOCAL_ENV_PTR), r2 * 8)));
+  if (access === "store") {
+    instructions.push(...localSet(
+      SOFTMMU_LOCAL_VALUE,
+      i64Load(localGet(SOFTMMU_LOCAL_ENV_PTR), r0 * 8)));
+  }
+  instructions.push(...ifBlock(
+    i32Eqz(localGet(SOFTMMU_LOCAL_TLB_PTR)),
+    unsupportedReturn,
+  ));
+  instructions.push(...ifBlock(
+    i32Eqz(i32And(
+      i32Load(localGet(SOFTMMU_LOCAL_TLB_PTR),
+              WASMJIT_TLB_MIRROR.flags),
+      i32Const(WASMJIT_TLB_MIRROR_VALID))),
+    unsupportedReturn,
+  ));
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_MASK,
+    i64Load(localGet(SOFTMMU_LOCAL_TLB_PTR), WASMJIT_TLB_MIRROR.mask)));
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_TABLE_PTR,
+    i64Load(localGet(SOFTMMU_LOCAL_TLB_PTR), WASMJIT_TLB_MIRROR.table)));
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_FULLTLB_PTR,
+    i64Load(localGet(SOFTMMU_LOCAL_TLB_PTR), WASMJIT_TLB_MIRROR.fulltlb)));
+  instructions.push(...ifBlock(
+    i64EqExpr(localGet(SOFTMMU_LOCAL_TABLE_PTR), i64Const(0n)),
+    unsupportedReturn,
+  ));
+  instructions.push(...ifBlock(
+    i64EqExpr(localGet(SOFTMMU_LOCAL_FULLTLB_PTR), i64Const(0n)),
+    unsupportedReturn,
+  ));
+  instructions.push(...ifBlock(
+    i32Ne(
+      i32WrapI64(i64AndExpr(localGet(SOFTMMU_LOCAL_OI), i64Const(31n))),
+      i32Load(localGet(SOFTMMU_LOCAL_TLB_PTR),
+              WASMJIT_TLB_MIRROR.mmuIdx)),
+    unsupportedReturn,
+  ));
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_MEMOP,
+    i64ShrUExpr(localGet(SOFTMMU_LOCAL_OI), i64Const(5n))));
+  instructions.push(...ifBlock(
+    i64NeExpr(localGet(SOFTMMU_LOCAL_MEMOP), i64Const(BigInt(generatedMemop))),
+    unsupportedReturn,
+  ));
+  instructions.push(...ifBlock(
+    i64NeExpr(
+      i64AndExpr(
+        i64XorExpr(
+          localGet(SOFTMMU_LOCAL_TADDR),
+          i64AddExpr(localGet(SOFTMMU_LOCAL_TADDR),
+                     i64Const(BigInt(size - 1)))),
+        i64Const(R4K_SOFTMMU_PAGE_MASK)),
+      i64Const(0n)),
+    pageCrossingReturn,
+  ));
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_INDEX,
+    i64AndExpr(
+      i64ShrUExpr(localGet(SOFTMMU_LOCAL_TADDR),
+                  i64Const(BigInt(R4K_SOFTMMU_PAGE_BITS))),
+      i64ShrUExpr(localGet(SOFTMMU_LOCAL_MASK),
+                  i64Const(BigInt(R4K_SOFTMMU_TLB_ENTRY_BITS))))));
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_ENTRY_PTR,
+    i64AddExpr(
+      localGet(SOFTMMU_LOCAL_TABLE_PTR),
+      i64ShlExpr(localGet(SOFTMMU_LOCAL_INDEX),
+                 i64Const(BigInt(R4K_SOFTMMU_TLB_ENTRY_BITS))))));
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_FULL_PTR,
+    i64AddExpr(
+      localGet(SOFTMMU_LOCAL_FULLTLB_PTR),
+      i64MulExpr(localGet(SOFTMMU_LOCAL_INDEX),
+                 i64Const(BigInt(WASMJIT_TLB_ENTRY_FULL.size))))));
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_COMPARATOR,
+    i64Load(i32WrapI64(localGet(SOFTMMU_LOCAL_ENTRY_PTR)),
+            softmmuComparatorOffset(access))));
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_ADDEND,
+    i64Load(i32WrapI64(localGet(SOFTMMU_LOCAL_ENTRY_PTR)),
+            WASMJIT_TLB_ENTRY.addend)));
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_SLOW_FLAGS,
+    i32Load8U(
+      i32WrapI64(localGet(SOFTMMU_LOCAL_FULL_PTR)),
+      WASMJIT_TLB_ENTRY_FULL.slowFlags + accessType)));
+  instructions.push(...ifBlock(
+    i64NeExpr(
+      i64AndExpr(localGet(SOFTMMU_LOCAL_COMPARATOR),
+                 i64Const(R4K_SOFTMMU_PAGE_MASK)),
+      i64AndExpr(localGet(SOFTMMU_LOCAL_TADDR),
+                 i64Const(R4K_SOFTMMU_PAGE_MASK))),
+    tlbMissReturn,
+  ));
+  instructions.push(...ifBlock(
+    i64NeExpr(
+      i64AndExpr(localGet(SOFTMMU_LOCAL_COMPARATOR),
+                 i64Const(WASMJIT_TLB_CONSTANTS.invalidMask)),
+      i64Const(0n)),
+    tlbMissReturn,
+  ));
+  instructions.push(...ifBlock(
+    i32Ne(
+      i32And(localGet(SOFTMMU_LOCAL_SLOW_FLAGS),
+             i32Const(WASMJIT_TLB_CONSTANTS.mmio)),
+      i32Const(0)),
+    mmioReturn,
+  ));
+  instructions.push(...ifBlock(
+    i64NeExpr(
+      i64AndExpr(localGet(SOFTMMU_LOCAL_COMPARATOR),
+                 i64Const(WASMJIT_TLB_CONSTANTS.flagsMask)),
+      i64Const(0n)),
+    unsupportedReturn,
+  ));
+  instructions.push(...ifBlock(
+    i32Ne(
+      i32And(localGet(SOFTMMU_LOCAL_SLOW_FLAGS),
+             i32Const(WASMJIT_TLB_CONSTANTS.slowFlagsMask)),
+      i32Const(0)),
+    unsupportedReturn,
+  ));
+  instructions.push(...localSet(
+    SOFTMMU_LOCAL_HOST_ADDR,
+    i64AddExpr(localGet(SOFTMMU_LOCAL_TADDR),
+               localGet(SOFTMMU_LOCAL_ADDEND))));
+
+  if (access === "load") {
+    const loaded = generatedMemop === MO_32
+      ? i64ExtendI32U(i32Load(i32WrapI64(localGet(SOFTMMU_LOCAL_HOST_ADDR))))
+      : i64Load(i32WrapI64(localGet(SOFTMMU_LOCAL_HOST_ADDR)));
+
+    instructions.push(...i64Store(
+      localGet(SOFTMMU_LOCAL_ENV_PTR), loaded, r0 * 8));
+    instructions.push(...softmmuIncrementCounter(
+      WASMJIT_COUNTERS.inlineTlbHitLoads));
+  } else if (generatedMemop === MO_8) {
+    instructions.push(...i32Store8(
+      i32WrapI64(localGet(SOFTMMU_LOCAL_HOST_ADDR)),
+      i32WrapI64(localGet(SOFTMMU_LOCAL_VALUE))));
+    instructions.push(...softmmuIncrementCounter(
+      WASMJIT_COUNTERS.inlineTlbHitStores));
+  } else {
+    instructions.push(...i64Store(
+      i32WrapI64(localGet(SOFTMMU_LOCAL_HOST_ADDR)),
+      localGet(SOFTMMU_LOCAL_VALUE)));
+    instructions.push(...softmmuIncrementCounter(
+      WASMJIT_COUNTERS.inlineTlbHitStores));
+  }
+
+  instructions.push(...softmmuIncrementCounter(
+    WASMJIT_COUNTERS.generatedGuestInstructions));
+  instructions.push(...i32Store(localGet(SOFTMMU_LOCAL_EXIT_PTR),
+                                i32Const(RUN_EXIT_REASON_NONE),
+                                WASMJIT_RUN_EXIT.reason));
+  instructions.push(...i64Const(STATUS_EXIT));
+
+  const moduleBytes = Uint8Array.from([
+    0x00, 0x61, 0x73, 0x6d,
+    0x01, 0x00, 0x00, 0x00,
+    ...section(1, vector([
+      functionType([VALUE_I32], [VALUE_I64]),
+    ])),
+    ...section(2, vector([
+      [...name("env"), ...name("memory"), 0x02, 0x00, 0x01],
+    ])),
+    ...section(3, vector([[0x00]])),
+    ...section(7, vector([[...name("wasmjit_run"), 0x00, ...encodeU32(0)]])),
+    ...section(10, vector([functionBody(
+      instructions,
+      [
+        { count: 5, type: VALUE_I32 },
+        { count: 13, type: VALUE_I64 },
+      ],
+    )])),
+  ]);
+
+  return {
+    ok: WebAssembly.validate(moduleBytes),
+    emitter: R4K_SOFTMMU_EMITTER_NAME,
+    moduleBytes,
+    moduleByteLength: moduleBytes.length,
+    moduleValid: WebAssembly.validate(moduleBytes),
+    access,
+    generatedMemop,
+  };
+}
+
+function createSoftmmuState(fixture) {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const view = new DataView(memory.buffer);
+  const ctxPtr = 64;
+  const regsPtr = 0x400;
+  const countersPtr = 0x800;
+  const exitPtr = 0xa00;
+  const mirrorPtr = 0x1800;
+  const tablePtr = 0x2000;
+  const fulltlbPtr = 0x2800;
+  const hostPage = 0x5000n;
+  const taddr = fixture.taddr || 0x1238n;
+  const page = taddr & R4K_SOFTMMU_PAGE_MASK;
+  const addend = hostPage - page;
+  const hostAddr = Number(taddr + addend);
+  const mask = fixture.mask ?? ((4 - 1) << R4K_SOFTMMU_TLB_ENTRY_BITS);
+  const index = Number(
+    (taddr >> BigInt(R4K_SOFTMMU_PAGE_BITS)) &
+    (BigInt(mask) >> BigInt(R4K_SOFTMMU_TLB_ENTRY_BITS)));
+  const entryPtr = tablePtr + index * WASMJIT_TLB_ENTRY.size;
+  const fullPtr = fulltlbPtr + index * WASMJIT_TLB_ENTRY_FULL.size;
+  const access = fixture.access;
+  const comparatorOffset = softmmuComparatorOffset(access);
+  const comparator = fixture.comparator ??
+    (page | BigInt(fixture.comparatorFlags || 0));
+  const slowFlags = fixture.slowFlags || 0;
+  const oiMemop = fixture.oiMemop ?? fixture.generatedMemop;
+  const oiMmuIdx = fixture.oiMmuIdx ?? R4K_SOFTMMU_MMU_IDX;
+  const oi = softmmuMemOpIdx(oiMemop, oiMmuIdx);
+  const regs = Array.from({ length: 16 }, (_, reg) =>
+    BigInt(0x100 + reg));
+
+  regs[0] = fixture.storeValue ?? 0x1122334455667788n;
+  regs[1] = taddr;
+  regs[2] = oi;
+  view.setBigUint64(ctxPtr + WASMJIT_RUN_CTX.env, BigInt(regsPtr), true);
+  view.setBigUint64(ctxPtr + WASMJIT_RUN_CTX.guestRam, 0n, true);
+  view.setBigUint64(ctxPtr + WASMJIT_RUN_CTX.budget, 1n, true);
+  view.setBigUint64(ctxPtr + WASMJIT_RUN_CTX.counters,
+                    BigInt(countersPtr), true);
+  view.setBigUint64(ctxPtr + WASMJIT_RUN_CTX.exit, BigInt(exitPtr), true);
+  view.setUint32(ctxPtr + WASMJIT_RUN_CTX.mode, 1, true);
+  view.setUint32(ctxPtr + WASMJIT_RUN_CTX.flags, 0, true);
+  view.setBigUint64(ctxPtr + WASMJIT_RUN_CTX.tlb,
+                    fixture.tlbPointer === 0 ? 0n : BigInt(mirrorPtr), true);
+
+  if (fixture.tlbPointer !== 0) {
+    view.setBigUint64(mirrorPtr + WASMJIT_TLB_MIRROR.mask,
+                      BigInt(mask), true);
+    view.setBigUint64(mirrorPtr + WASMJIT_TLB_MIRROR.table,
+                      BigInt(fixture.tablePointer === 0 ? 0 : tablePtr), true);
+    view.setBigUint64(mirrorPtr + WASMJIT_TLB_MIRROR.fulltlb,
+                      BigInt(fixture.fulltlbPointer === 0 ? 0 : fulltlbPtr),
+                      true);
+    view.setUint32(mirrorPtr + WASMJIT_TLB_MIRROR.mmuIdx,
+                   fixture.mirrorMmuIdx ?? R4K_SOFTMMU_MMU_IDX, true);
+    view.setUint32(mirrorPtr + WASMJIT_TLB_MIRROR.targetPageBits,
+                   R4K_SOFTMMU_PAGE_BITS, true);
+    view.setUint32(mirrorPtr + WASMJIT_TLB_MIRROR.cpuTlbEntryBits,
+                   R4K_SOFTMMU_TLB_ENTRY_BITS, true);
+    view.setUint32(mirrorPtr + WASMJIT_TLB_MIRROR.tlbEntrySize,
+                   WASMJIT_TLB_ENTRY.size, true);
+    view.setUint32(mirrorPtr + WASMJIT_TLB_MIRROR.tlbFlagsMask,
+                   Number(WASMJIT_TLB_CONSTANTS.flagsMask), true);
+    view.setUint32(mirrorPtr + WASMJIT_TLB_MIRROR.tlbSlowFlagsMask,
+                   WASMJIT_TLB_CONSTANTS.slowFlagsMask, true);
+    view.setUint32(mirrorPtr + WASMJIT_TLB_MIRROR.flags,
+                   fixture.mirrorFlags ?? WASMJIT_TLB_MIRROR_VALID, true);
+  }
+  view.setBigUint64(entryPtr + WASMJIT_TLB_ENTRY.addrRead, page, true);
+  view.setBigUint64(entryPtr + WASMJIT_TLB_ENTRY.addrWrite, page, true);
+  view.setBigUint64(entryPtr + comparatorOffset, comparator, true);
+  view.setBigUint64(entryPtr + WASMJIT_TLB_ENTRY.addend, addend, true);
+  view.setUint8(fullPtr + WASMJIT_TLB_ENTRY_FULL.slowFlags +
+                softmmuAccessType(access), slowFlags);
+  if (fixture.initialRam64 !== undefined) {
+    view.setBigUint64(hostAddr, fixture.initialRam64, true);
+  } else {
+    view.setBigUint64(hostAddr, 0x8877665544332211n, true);
+  }
+  if (fixture.initialRam32 !== undefined) {
+    view.setUint32(hostAddr, fixture.initialRam32, true);
+  }
+  for (let reg = 0; reg < regs.length; reg++) {
+    view.setBigUint64(regsPtr + reg * 8, regs[reg], true);
+  }
+
+  return {
+    memory,
+    view,
+    ctxPtr,
+    regsPtr,
+    countersPtr,
+    exitPtr,
+    hostAddr,
+    taddr,
+    size: softmmuAccessSize(fixture.generatedMemop),
+  };
+}
+
+function readSoftmmuExit(view, exitPtr) {
+  const reason = view.getUint32(exitPtr + WASMJIT_RUN_EXIT.reason, true);
+
+  return {
+    reason,
+    reasonName: runExitReasonName(reason),
+    vaddr: view.getBigUint64(exitPtr + WASMJIT_RUN_EXIT.vaddr, true),
+    size: view.getUint32(exitPtr + WASMJIT_RUN_EXIT.sizeField, true),
+    flags: view.getUint32(exitPtr + WASMJIT_RUN_EXIT.flags, true),
+  };
+}
+
+async function runSoftmmuFixture(fixture) {
+  const emission = emitSoftmmuFastPathModule(fixture);
+
+  assert.equal(emission.ok, true, `${fixture.name} softmmu emitter failed`);
+  assert.equal(emission.moduleValid, true,
+               `${fixture.name} emitted invalid softmmu module`);
+  const state = createSoftmmuState(fixture);
+  const beforeRam64 = state.view.getBigUint64(state.hostAddr, true);
+  const beforeReg0 = state.view.getBigUint64(state.regsPtr, true);
+  const compiled = await WebAssembly.compile(emission.moduleBytes);
+  const instance = await WebAssembly.instantiate(compiled, {
+    env: {
+      memory: state.memory,
+    },
+  });
+  const status = instance.exports.wasmjit_run(state.ctxPtr);
+  const counters = softmmuCounterSnapshot(state.view, state.countersPtr);
+  const exit = readSoftmmuExit(state.view, state.exitPtr);
+  const afterRam64 = state.view.getBigUint64(state.hostAddr, true);
+  const afterReg0 = state.view.getBigUint64(state.regsPtr, true);
+
+  assert.equal(status, fixture.expectedStatus,
+               `${fixture.name} status mismatch`);
+  assert.equal(exit.reasonName, fixture.expectedRunExitReason,
+               `${fixture.name} run exit reason mismatch`);
+  assert.equal(counters.inlineTlbHitLoads,
+               BigInt(fixture.expectedInlineLoads || 0),
+               `${fixture.name} inline load count mismatch`);
+  assert.equal(counters.inlineTlbHitStores,
+               BigInt(fixture.expectedInlineStores || 0),
+               `${fixture.name} inline store count mismatch`);
+  assert.equal(counters.helperCalls, 0n);
+  assert.equal(counters.qemuLdCalls, 0n);
+  assert.equal(counters.qemuStCalls, 0n);
+  assert.equal(counters.exitsMmio, BigInt(fixture.expectedExitsMmio || 0));
+  assert.equal(counters.exitsTlbMissOrFault,
+               BigInt(fixture.expectedExitsTlbMissOrFault || 0));
+  assert.equal(counters.exitsUnsupported,
+               BigInt(fixture.expectedExitsUnsupported || 0));
+  assert.equal(exit.flags, fixture.expectedExitFlags || 0);
+  if (fixture.expectedReg0 !== undefined) {
+    assert.equal(afterReg0, fixture.expectedReg0,
+                 `${fixture.name} loaded register mismatch`);
+  } else if (!fixture.expectedSuccess) {
+    assert.equal(afterReg0, beforeReg0,
+                 `${fixture.name} failed path must not modify reg0`);
+  }
+  if (fixture.expectedRam64 !== undefined) {
+    assert.equal(afterRam64, fixture.expectedRam64,
+                 `${fixture.name} RAM value mismatch`);
+  } else if (!fixture.expectedSuccess) {
+    assert.equal(afterRam64, beforeRam64,
+                 `${fixture.name} failed path must not touch RAM`);
+  }
+
+  return {
+    name: fixture.name,
+    emitter: emission.emitter,
+    moduleValid: emission.moduleValid,
+    moduleByteLength: emission.moduleByteLength,
+    access: fixture.access,
+    generatedMemop: fixture.generatedMemop,
+    status: status.toString(),
+    runExitReason: exit.reasonName,
+    fallbackReason: fixture.fallbackReason,
+    exitFlags: exit.flags,
+    expectedSuccess: fixture.expectedSuccess,
+    inlineTlbHitLoads: counters.inlineTlbHitLoads.toString(),
+    inlineTlbHitStores: counters.inlineTlbHitStores.toString(),
+    helperCalls: counters.helperCalls.toString(),
+    qemuLdCalls: counters.qemuLdCalls.toString(),
+    qemuStCalls: counters.qemuStCalls.toString(),
+    exits: {
+      mmio: counters.exitsMmio.toString(),
+      tlbMissOrFault: counters.exitsTlbMissOrFault.toString(),
+      unsupported: counters.exitsUnsupported.toString(),
+    },
+    failClosedBeforeRamAccess: !fixture.expectedSuccess
+      ? afterRam64 === beforeRam64
+      : null,
   };
 }
 
@@ -1945,6 +2576,185 @@ const r4kTwoTBHotsetFixtures = [
   },
 ];
 
+const r4kSoftmmuFixtures = [
+  {
+    name: "r4k-softmmu-ld32u-tlb-hit-ram",
+    access: "load",
+    fallbackReason: null,
+    generatedMemop: MO_32,
+    initialRam32: 0x89abcdef,
+    expectedSuccess: true,
+    expectedStatus: STATUS_EXIT,
+    expectedRunExitReason: "none",
+    expectedInlineLoads: 1,
+    expectedInlineStores: 0,
+    expectedReg0: 0x89abcdefn,
+    words: [
+      OPS.tci_qemu_ld_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4k-softmmu-ld-tlb-hit-ram",
+    access: "load",
+    fallbackReason: null,
+    generatedMemop: MO_64,
+    initialRam64: 0x0123456789abcdefn,
+    expectedSuccess: true,
+    expectedStatus: STATUS_EXIT,
+    expectedRunExitReason: "none",
+    expectedInlineLoads: 1,
+    expectedInlineStores: 0,
+    expectedReg0: 0x0123456789abcdefn,
+    words: [
+      OPS.tci_qemu_ld_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4k-softmmu-st8-tlb-hit-ram",
+    access: "store",
+    fallbackReason: null,
+    generatedMemop: MO_8,
+    storeValue: 0xaan,
+    expectedSuccess: true,
+    expectedStatus: STATUS_EXIT,
+    expectedRunExitReason: "none",
+    expectedInlineLoads: 0,
+    expectedInlineStores: 1,
+    expectedRam64: 0x88776655443322aan,
+    words: [
+      OPS.tci_qemu_st_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4k-softmmu-st-tlb-hit-ram",
+    access: "store",
+    fallbackReason: null,
+    generatedMemop: MO_64,
+    storeValue: 0x0102030405060708n,
+    expectedSuccess: true,
+    expectedStatus: STATUS_EXIT,
+    expectedRunExitReason: "none",
+    expectedInlineLoads: 0,
+    expectedInlineStores: 1,
+    expectedRam64: 0x0102030405060708n,
+    words: [
+      OPS.tci_qemu_st_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4k-softmmu-tlb-miss",
+    access: "load",
+    fallbackReason: "tlb-miss",
+    generatedMemop: MO_32,
+    comparator: 0x3000n,
+    expectedSuccess: false,
+    expectedStatus: BigInt(RUN_EXIT_REASON_TLB_MISS_OR_FAULT),
+    expectedRunExitReason: "tlb-miss-or-fault",
+    expectedExitsTlbMissOrFault: 1,
+    words: [
+      OPS.tci_qemu_ld_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4k-softmmu-mmio",
+    access: "load",
+    fallbackReason: "mmio",
+    generatedMemop: MO_32,
+    comparatorFlags: Number(WASMJIT_TLB_CONSTANTS.forceSlow),
+    slowFlags: WASMJIT_TLB_CONSTANTS.mmio,
+    expectedSuccess: false,
+    expectedStatus: BigInt(RUN_EXIT_REASON_MMIO),
+    expectedRunExitReason: "mmio",
+    expectedExitsMmio: 1,
+    words: [
+      OPS.tci_qemu_ld_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4k-softmmu-permission-fault",
+    access: "load",
+    fallbackReason: "permission-fault",
+    generatedMemop: MO_32,
+    comparatorFlags: Number(WASMJIT_TLB_CONSTANTS.invalidMask),
+    expectedSuccess: false,
+    expectedStatus: BigInt(RUN_EXIT_REASON_TLB_MISS_OR_FAULT),
+    expectedRunExitReason: "tlb-miss-or-fault",
+    expectedExitsTlbMissOrFault: 1,
+    words: [
+      OPS.tci_qemu_ld_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4k-softmmu-page-crossing",
+    access: "load",
+    fallbackReason: "page-crossing",
+    generatedMemop: MO_64,
+    taddr: 0xffcn,
+    expectedSuccess: false,
+    expectedStatus: BigInt(RUN_EXIT_REASON_TLB_MISS_OR_FAULT),
+    expectedRunExitReason: "tlb-miss-or-fault",
+    expectedExitFlags: RUN_EXIT_FLAG_PAGE_CROSSING,
+    expectedExitsTlbMissOrFault: 1,
+    words: [
+      OPS.tci_qemu_ld_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4k-softmmu-unsupported-memop",
+    access: "load",
+    fallbackReason: "unsupported-memop",
+    generatedMemop: MO_32,
+    oiMemop: MO_16,
+    expectedSuccess: false,
+    expectedStatus: STATUS_UNSUPPORTED,
+    expectedRunExitReason: "unsupported",
+    expectedExitsUnsupported: 1,
+    words: [
+      OPS.tci_qemu_ld_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4k-softmmu-slow-flags",
+    access: "store",
+    fallbackReason: "slow-flags",
+    generatedMemop: MO_64,
+    comparatorFlags: Number(WASMJIT_TLB_CONSTANTS.forceSlow),
+    slowFlags: WASMJIT_TLB_CONSTANTS.watchpoint,
+    expectedSuccess: false,
+    expectedStatus: STATUS_UNSUPPORTED,
+    expectedRunExitReason: "unsupported",
+    expectedExitsUnsupported: 1,
+    words: [
+      OPS.tci_qemu_st_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4k-softmmu-unmirrored-state",
+    access: "load",
+    fallbackReason: "unmirrored-state",
+    generatedMemop: MO_32,
+    mirrorFlags: 0,
+    expectedSuccess: false,
+    expectedStatus: STATUS_UNSUPPORTED,
+    expectedRunExitReason: "unsupported",
+    expectedExitsUnsupported: 1,
+    words: [
+      OPS.tci_qemu_ld_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  },
+];
+
 const unsupportedFixtures = [
   {
     name: "qemu-helper-mixed-unsupported-fallback",
@@ -1984,6 +2794,7 @@ const results = [];
 const unsupportedResults = [];
 const unsupportedX86StateResults = [];
 const r4kTwoTBHotsetResults = [];
+const r4kSoftmmuResults = [];
 
 for (const fixture of fixtures) {
   for (const seed of fixture.seeds || [1, 2]) {
@@ -2014,6 +2825,10 @@ for (const fixture of unsupportedX86StateFixtures) {
 
 for (const fixture of r4kTwoTBHotsetFixtures) {
   r4kTwoTBHotsetResults.push(await runTwoTBHotsetFixture(fixture, 1));
+}
+
+for (const fixture of r4kSoftmmuFixtures) {
+  r4kSoftmmuResults.push(await runSoftmmuFixture(fixture));
 }
 
 assert.equal(results.length, 13);
@@ -2208,6 +3023,16 @@ const r4kLiveRoutingCases = [
     generatedOutputAvailable: true,
     generatedOutputSize: r4iLiveX86Fixture.words.length * 4,
     words: r4iLiveX86Fixture.words,
+    tbWords: r4iLiveX86Fixture.words.map((word, index) =>
+      index === 1 ? (word ^ 0x10) >>> 0 : word),
+    relativeBase: r4iLiveX86Fixture.relativeBase,
+    guestInstructions: 1,
+  }),
+  routeLiveGeneratedOutput({
+    opCount: R4I_LIVE_X86_SHAPE.length,
+    generatedOutputAvailable: true,
+    generatedOutputSize: r4iLiveX86Fixture.words.length * 4,
+    words: r4iLiveX86Fixture.words,
     relativeBase: r4iLiveX86Fixture.relativeBase,
     guestInstructions: 1,
   }),
@@ -2219,14 +3044,142 @@ assert.deepEqual(
     "generated-output-unavailable",
     "selected-hot-shape-unsupported",
     "unsupported-shape",
+    "metadata-output-tb-code-mismatch",
     null,
   ],
 );
 assert.deepEqual(
   r4kLiveRoutingCases.map((entry) => entry.generatedGuestInstructions),
-  [0, 0, 0, 0, 1],
+  [0, 0, 0, 0, 0, 1],
 );
 assert.equal(r4kLiveRoutingCases.at(-1).moduleValid, true);
+const r4kSoftmmuStaleOutputMismatch = r4kLiveRoutingCases.find((entry) =>
+  entry.reason === "metadata-output-tb-code-mismatch");
+assert.equal(r4kSoftmmuStaleOutputMismatch.generatedGuestInstructions, 0);
+r4kSoftmmuResults.push({
+  name: "r4k-softmmu-stale-output-mismatch",
+  emitter: PER_TB_EMITTER_NAME,
+  moduleValid: false,
+  status: "metadata-output-tb-code-mismatch",
+  runExitReason: "metadata-output-tb-code-mismatch",
+  fallbackReason: "metadata-output-tb-code-mismatch",
+  expectedSuccess: false,
+  inlineTlbHitLoads: "0",
+  inlineTlbHitStores: "0",
+  helperCalls: "0",
+  qemuLdCalls: "0",
+  qemuStCalls: "0",
+  exits: {
+    mmio: "0",
+    tlbMissOrFault: "0",
+    unsupported: "0",
+  },
+});
+const r4kSoftmmuNames = r4kSoftmmuResults.map((entry) => entry.name);
+assert.deepEqual(
+  r4kSoftmmuNames,
+  [
+    "r4k-softmmu-ld32u-tlb-hit-ram",
+    "r4k-softmmu-ld-tlb-hit-ram",
+    "r4k-softmmu-st8-tlb-hit-ram",
+    "r4k-softmmu-st-tlb-hit-ram",
+    "r4k-softmmu-tlb-miss",
+    "r4k-softmmu-mmio",
+    "r4k-softmmu-permission-fault",
+    "r4k-softmmu-page-crossing",
+    "r4k-softmmu-unsupported-memop",
+    "r4k-softmmu-slow-flags",
+    "r4k-softmmu-unmirrored-state",
+    "r4k-softmmu-stale-output-mismatch",
+  ],
+);
+const r4kSoftmmuRamHits = r4kSoftmmuResults.filter((entry) =>
+  entry.name.endsWith("tlb-hit-ram"));
+assert.equal(r4kSoftmmuRamHits.length, 4);
+assert.deepEqual(
+  r4kSoftmmuRamHits.map((entry) => entry.runExitReason),
+  ["none", "none", "none", "none"],
+);
+assert.deepEqual(
+  r4kSoftmmuRamHits.map((entry) => [
+    entry.inlineTlbHitLoads,
+    entry.inlineTlbHitStores,
+    entry.helperCalls,
+    entry.qemuLdCalls,
+    entry.qemuStCalls,
+  ]),
+  [
+    ["1", "0", "0", "0", "0"],
+    ["1", "0", "0", "0", "0"],
+    ["0", "1", "0", "0", "0"],
+    ["0", "1", "0", "0", "0"],
+  ],
+);
+const r4kSoftmmuFailClosed = r4kSoftmmuResults.filter((entry) =>
+  !entry.expectedSuccess);
+assert.deepEqual(
+  r4kSoftmmuFailClosed.map((entry) => entry.fallbackReason),
+  [
+    "tlb-miss",
+    "mmio",
+    "permission-fault",
+    "page-crossing",
+    "unsupported-memop",
+    "slow-flags",
+    "unmirrored-state",
+    "metadata-output-tb-code-mismatch",
+  ],
+);
+assert.deepEqual(
+  r4kSoftmmuFailClosed.map((entry) => [
+    entry.inlineTlbHitLoads,
+    entry.inlineTlbHitStores,
+    entry.helperCalls,
+    entry.qemuLdCalls,
+    entry.qemuStCalls,
+  ]),
+  r4kSoftmmuFailClosed.map(() => ["0", "0", "0", "0", "0"]),
+);
+assert.equal(
+  r4kSoftmmuResults.find((entry) =>
+    entry.name === "r4k-softmmu-mmio").exits.mmio,
+  "1",
+);
+assert.equal(
+  r4kSoftmmuResults.find((entry) =>
+    entry.name === "r4k-softmmu-tlb-miss").exits.tlbMissOrFault,
+  "1",
+);
+assert.equal(
+  r4kSoftmmuResults.find((entry) =>
+    entry.name === "r4k-softmmu-permission-fault").exits.tlbMissOrFault,
+  "1",
+);
+assert.equal(
+  r4kSoftmmuResults.find((entry) =>
+    entry.name === "r4k-softmmu-page-crossing").exits.tlbMissOrFault,
+  "1",
+);
+assert.equal(
+  r4kSoftmmuResults.find((entry) =>
+    entry.name === "r4k-softmmu-page-crossing").exitFlags,
+  RUN_EXIT_FLAG_PAGE_CROSSING,
+);
+assert.equal(
+  r4kSoftmmuResults.find((entry) =>
+    entry.name === "r4k-softmmu-unsupported-memop").exits.unsupported,
+  "1",
+);
+assert.equal(
+  r4kSoftmmuResults.find((entry) =>
+    entry.name === "r4k-softmmu-slow-flags").exits.unsupported,
+  "1",
+);
+assert.equal(
+  r4kSoftmmuResults.find((entry) =>
+    entry.name === "r4k-softmmu-unmirrored-state").exits.unsupported,
+  "1",
+);
 console.log(JSON.stringify({
   format: 1,
   event: "generated-output-equivalence",
@@ -2291,6 +3244,13 @@ console.log(JSON.stringify({
       generatedChainLength: entry.generatedChainLength,
       generatedBodyTimeNs: entry.generatedBodyTimeNs,
     })),
+  },
+  r4kSoftmmuFastPath: {
+    emitter: R4K_SOFTMMU_EMITTER_NAME,
+    fixtureCount: r4kSoftmmuResults.length,
+    fixtures: r4kSoftmmuResults,
+    ramHits: r4kSoftmmuRamHits,
+    failClosedCases: r4kSoftmmuFailClosed,
   },
   r4kLiveMetadataRouting: r4kLiveRoutingCases,
   unsupportedX86StateFixtures: unsupportedX86StateResults,

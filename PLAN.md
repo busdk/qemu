@@ -1329,6 +1329,52 @@ run that reaches a weaker marker than normal multi-user readiness.
     model, and C-side bump/read helpers with `QEMU_BUILD_BUG_ON()` offset
     checks; generated code must fail closed on any token mismatch before
     executing guest-visible work.
+    Slice 5 accepted 2026-07-03 on branch
+    `qemu/r4k-softmmu-fastpath-impl-20260703-12`: the deterministic
+    generated-output equivalence gate now includes observable
+    `r4kSoftmmuFastPath` JSON with `12` fixtures. RAM-hit fixtures
+    `r4k-softmmu-ld32u-tlb-hit-ram`, `r4k-softmmu-ld-tlb-hit-ram`,
+    `r4k-softmmu-st8-tlb-hit-ram`, and
+    `r4k-softmmu-st-tlb-hit-ram` validate generated modules, return normal
+    terminal status, report `runExitReason="none"`, record inline TLB-hit
+    load/store counts `1/0`, `1/0`, `0/1`, and `0/1`, and keep
+    `helperCalls=0`, `qemuLdCalls=0`, and `qemuStCalls=0`. Fail-closed
+    fixtures cover `r4k-softmmu-tlb-miss`,
+    `r4k-softmmu-mmio`, `r4k-softmmu-permission-fault`,
+    `r4k-softmmu-page-crossing`, unsupported `MemOp`, slow flags, and
+    unmirrored state; all report zero inline/helper/`qemu_*` counts before
+    RAM access, with precise exit reasons/counters (`MMIO`,
+    `TLB_MISS_OR_FAULT`, `UNSUPPORTED`) and the page-crossing exit flag.
+    The expressible stale-output case
+    `r4k-softmmu-stale-output-mismatch` uses the current
+    `metadata-output-tb-code-mismatch` status and zero generated counters;
+    true stale-TB/address-space invalidation remains slice 6 because it needs
+    generation tracking. `TCGWasm64RunContext` now carries a C-owned
+    `TCGWasm64TLBMirror *tlb`; `tcg_wasm64_tlb_mirror_reset()` and
+    `tcg_wasm64_tlb_mirror_refresh()` snapshot only
+    `CPUTLBDescFast.mask`, `CPUTLBDescFast.table`, and
+    `CPUTLBDesc.fulltlb` plus exported TLB constants for a selected
+    `mmu_idx`, with `QEMU_BUILD_BUG_ON()` checks for the run context, mirror,
+    `CPUTLBEntry`, `CPUTLBEntryFull.slow_flags`, and TLB flag layouts. The
+    generated fixture reads only the mirror and does not hard-code
+    `CPUState`/`CPUArchState` negative displacement. Checks passed:
+    `git diff --check`,
+    `node --check scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`, and
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`; extra
+    sanity check `node scripts/ci/wasm64-runloop-contract-test.mjs` also
+    passed. No browser smoke, speed claim, broad generic x86 lowering,
+    RISC-V work, BusDK work, or Bus Engine OS proof was run or enabled; R4k
+    remains open for slice 6 stale-TB/address-space invalidation rejection
+    and metrics tests. Rebase validation on 2026-07-03 kept this as one
+    reviewable commit on top of `origin/develop` `99247562af` and repeated
+    the required deterministic checks plus
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`. No scoped C compile
+    check was run because this worker tree has no configured Meson/Ninja
+    build directory or `compile_commands.json`, and standalone
+    `tcg/wasm64.c` compilation depends on generated QEMU config/target
+    headers; configuring a full x86_64-softmmu build was outside this slice.
   - [ ] R4l - Run the x86_64 same-commit generic Chromium speed gate only
     after R4h-R4k have deterministic evidence. DoD: build one default-TCI
     `x86_64-softmmu` artifact and one accelerator artifact from the same
