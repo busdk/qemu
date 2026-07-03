@@ -195,6 +195,13 @@ Options:
   --wasm64-live-generated-exec-no-fallback
                      Fail loudly instead of silently using TCI when live
                      generated execution rejects an enabled TB
+  --wasm64-live-generated-exec-preflight
+                     Fail before a long browser run when live generated
+                     execution reaches the preflight limit without retiring
+                     generated guest instructions
+  --wasm64-live-generated-exec-preflight-limit N
+                     Live generated execution preflight attempts before
+                     failing when no generated body executes (default: 10000)
   --wasm64-runloop-smoke
                      Enable opt-in QEMU wasm64 run/exit runtime smoke
   --wasm64-tcg-summary
@@ -305,6 +312,8 @@ export function parseArgs(argv) {
     wasm64LiveTbCoverage: false,
     wasm64LiveGeneratedExec: false,
     wasm64LiveGeneratedExecNoFallback: false,
+    wasm64LiveGeneratedExecPreflight: false,
+    wasm64LiveGeneratedExecPreflightLimit: 10000,
     wasm64RunloopSmoke: false,
     wasm64TcgSummary: false,
     wasm64TcgSummaryInterval: 10000,
@@ -554,6 +563,14 @@ export function parseArgs(argv) {
       options.wasm64LiveGeneratedExecNoFallback = true;
       explicit.add("wasm64LiveGeneratedExec");
       explicit.add("wasm64LiveGeneratedExecNoFallback");
+    } else if (arg === "--wasm64-live-generated-exec-preflight") {
+      options.wasm64LiveGeneratedExec = true;
+      options.wasm64LiveGeneratedExecPreflight = true;
+      explicit.add("wasm64LiveGeneratedExec");
+      explicit.add("wasm64LiveGeneratedExecPreflight");
+    } else if (arg === "--wasm64-live-generated-exec-preflight-limit") {
+      options.wasm64LiveGeneratedExecPreflightLimit = Number(argv[++i]);
+      explicit.add("wasm64LiveGeneratedExecPreflightLimit");
     } else if (arg === "--wasm64-runloop-smoke") {
       options.wasm64RunloopSmoke = true;
       explicit.add("wasm64RunloopSmoke");
@@ -598,6 +615,7 @@ export function parseArgs(argv) {
       "wasm64LiveTbCoverage",
       "wasm64LiveGeneratedExec",
       "wasm64LiveGeneratedExecNoFallback",
+      "wasm64LiveGeneratedExecPreflight",
       "wasm64RunloopSmoke",
       "wasm64TcgSummary",
       "requireWasm64TcgCoverage",
@@ -615,6 +633,7 @@ export function parseArgs(argv) {
       "performanceAttributionInterval",
       "performanceAttributionTciInterval",
       "minWasm64TcgCoveragePpm",
+      "wasm64LiveGeneratedExecPreflightLimit",
       "wasm64TcgSummaryInterval",
       "port",
       "preKeyboardWaitMs",
@@ -1628,6 +1647,13 @@ export function browserSmokeUrl(options) {
   if (options.wasm64LiveGeneratedExecNoFallback) {
     url.searchParams.set("wasm64LiveGeneratedExecNoFallback", "1");
   }
+  if (options.wasm64LiveGeneratedExecPreflight) {
+    url.searchParams.set("wasm64LiveGeneratedExecPreflight", "1");
+    url.searchParams.set(
+      "wasm64LiveGeneratedExecPreflightLimit",
+      String(options.wasm64LiveGeneratedExecPreflightLimit),
+    );
+  }
   if (options.wasm64TcgSummary) {
     url.searchParams.set("wasm64TcgSummary", "1");
     url.searchParams.set(
@@ -1760,6 +1786,12 @@ export function initialSmokeResult(options, browserVersion) {
     wasm64LiveGeneratedExec: Boolean(options.wasm64LiveGeneratedExec),
     wasm64LiveGeneratedExecNoFallback:
       Boolean(options.wasm64LiveGeneratedExecNoFallback),
+    wasm64LiveGeneratedExecPreflight:
+      Boolean(options.wasm64LiveGeneratedExecPreflight),
+    wasm64LiveGeneratedExecPreflightLimit:
+      Number.isInteger(options.wasm64LiveGeneratedExecPreflightLimit)
+        ? options.wasm64LiveGeneratedExecPreflightLimit
+        : 10000,
     wasm64TcgSummary: Boolean(options.wasm64TcgSummary),
     wasm64TcgSummaryInterval: Number.isInteger(options.wasm64TcgSummaryInterval)
       ? options.wasm64TcgSummaryInterval

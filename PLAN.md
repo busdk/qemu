@@ -1743,7 +1743,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. Compile/browser
     proof was not run on this supervisor host because `ninja`, `meson`, and
     `emcc` were not available on `PATH`; this slice makes no R4l speed claim.
-- [ ] R4n - Replace the R4m per-attempt live-generated-exec diagnostic path
+- [x] R4n - Replace the R4m per-attempt live-generated-exec diagnostic path
   with an accelerator preflight and aggregate-metrics path before another x86
   browser speed run. DoD: normal generic smoke output no longer emits one
   `qemu-wasm64-runloop:` line per attempted TB; unsupported or missing
@@ -1753,6 +1753,44 @@ run that reaches a weaker marker than normal multi-user readiness.
   live generated body with nonzero generated guest-instruction retirement; and
   the next R4l attempt is only allowed when the preflight predicts nonzero
   useful generated execution.
+  Accepted slice evidence: based on current QEMU `origin/develop`
+  `69d30a6de28b8349c7e49e712b21d2de68297e5c`, the opt-in
+  `QEMU_WASM64_LIVE_GENERATED_EXEC_PREFLIGHT` path now emits one aggregate
+  `live-generated-exec-summary` event instead of one runtime line per
+  attempted TB. The summary records preflight state, no-silent-fallback state,
+  attempts, successes, rejects, generated guest-instruction counts, generated
+  coverage numerator/denominator, and per-reason reject totals for
+  `metadata-missing`, `generated-output-unavailable`,
+  `selected-body-shape-unsupported`, `tb-identity-missing-or-stale`, and
+  `generated-exec-rejected`. Preflight can fail closed with
+  `preflight-zero-generated-exec` after the configured attempt limit, so a
+  long x86 browser speed gate is not run when the enabled accelerator retires
+  zero generated guest instructions. The browser runner/page expose
+  `--wasm64-live-generated-exec-preflight` and
+  `--wasm64-live-generated-exec-preflight-limit`; the x86 metrics gate treats
+  aggregate summaries as valid diagnostic evidence but does not allow
+  acceptance unless `preflight_ready=true` and generated guest instructions
+  are nonzero. Checks: `git diff --check`, `node --check
+  scripts/ci/wasm-browser-smoke-runner.mjs`, `node --check
+  scripts/ci/wasm-browser-smoke.mjs`, `node --check
+  scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs`, `node
+  scripts/ci/wasm64-translate-metadata-test.mjs`, `node
+  scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+  scripts/ci/wasm-browser-smoke-runner-test.mjs`, `node
+  scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, and `node
+  scripts/ci/wasm64-runloop-contract-test.mjs` passed after rebasing over the
+  latest QEMU commit. Current-base artifact build command:
+  `python3 scripts/ci/wasm-build-artifacts-local.py --out
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4n-preflight-aggregate-69d30a-artifacts
+  --target x86_64 --tcg-wasm64-backend --jobs 20`; hashes:
+  `qemu-system-x86_64.js`
+  `8dbd4cc933de6d189d66a431bfd2422e0d85149cd546118f629efcb2259a9492`,
+  `qemu-system-x86_64.wasm`
+  `08eda635cd20bef2a847976129204840281afedafbdb5e49e9f1baf83192ea87`,
+  manifest
+  `ecd236eda4eb80dee24b1d65a9dbbeb9b07777f889bc4baee235db7a78f75dc4`.
+  This item makes no R4l speed claim, does not use RISC-V timing as x86
+  evidence, and does not permit an x86 Bus Engine OS browser proof yet.
 - [x] R7 - Dispatch available RISC-V generated output from the live wasm64
   run loop before TCI fallback. DoD: when live TB metadata reports
   `tcg_wasm64_translate_generated_output_available()` and the RV64

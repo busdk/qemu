@@ -291,6 +291,62 @@ const runtimeSmokeResult = {
   },
 };
 
+const liveGeneratedExecSummaryZeroResult = {
+  wasm64Runloop: {
+    summaryCount: 1,
+    summaries: [
+      {
+        event: "live-generated-exec-summary",
+        reason: "preflight-zero-generated-exec",
+        compat_fallback: true,
+        preflight: true,
+        preflight_limit: 10000,
+        preflight_ready: false,
+        no_silent_fallback: false,
+        attempts: 10000,
+        successes: 0,
+        rejects: 10000,
+        generated_guest_instructions: 0,
+        generated_coverage_numerator: 0,
+        generated_coverage_denominator: 10000,
+        reject_reasons: [
+          { reason: "metadata-missing", count: 2 },
+          { reason: "generated-output-unavailable", count: 3 },
+          { reason: "selected-body-shape-unsupported", count: 9995 },
+          { reason: "tb-identity-missing-or-stale", count: 0 },
+          { reason: "generated-exec-rejected", count: 0 },
+        ],
+      },
+    ],
+    lastSummary: null,
+  },
+};
+liveGeneratedExecSummaryZeroResult.wasm64Runloop.lastSummary =
+  liveGeneratedExecSummaryZeroResult.wasm64Runloop.summaries[0];
+
+const liveGeneratedExecSummaryReadyResult = JSON.parse(
+  JSON.stringify(liveGeneratedExecSummaryZeroResult),
+);
+{
+  const summary = liveGeneratedExecSummaryReadyResult.wasm64Runloop.summaries[0];
+
+  summary.reason = "generated-exec-dispatch";
+  summary.compat_fallback = false;
+  summary.preflight_ready = true;
+  summary.attempts = 1;
+  summary.successes = 1;
+  summary.rejects = 0;
+  summary.generated_guest_instructions = 1;
+  summary.generated_coverage_numerator = 1;
+  summary.generated_coverage_denominator = 1;
+  for (const reason of summary.reject_reasons) {
+    reason.count = 0;
+  }
+  liveGeneratedExecSummaryReadyResult.wasm64Runloop.lastSummary = {
+    ...summary,
+  };
+}
+
 const scaffoldOneTbDifferentialResult = {
   wasm64Runloop: {
     summaryCount: 1,
@@ -565,6 +621,33 @@ assert.equal(X86_BROWSER_SMOKE_METRICS_GATE_VERSION, 3);
   assert.equal(gate.tcg.lastSummary.generated_coverage_ppm_computed, 21000);
   assert.equal(gate.tcg.lastSummary.generated_coverage_ppm_matches, true);
   assert.deepEqual(gate.tcg.lastSummary.generated_exits.missingFields, []);
+}
+
+{
+  const gate = x86BrowserSmokeMetricsGate(liveGeneratedExecSummaryZeroResult);
+  assert.equal(gate.ok, false);
+  assert.equal(gate.runloop.ok, true);
+  assert.equal(gate.runloop.acceptanceAllowed, false);
+  assert.equal(gate.runloop.lastSummary.event, "live-generated-exec-summary");
+  assert.equal(gate.runloop.lastSummary.reason, "preflight-zero-generated-exec");
+  assert.equal(gate.runloop.lastSummary.preflight, true);
+  assert.equal(gate.runloop.lastSummary.preflight_ready, false);
+  assert.equal(gate.runloop.lastSummary.generated_guest_instructions, 0);
+  assert.equal(gate.runloop.lastSummary.reject_reason_total, 10000);
+  assert.equal(gate.runloop.lastSummary.reject_reason_total_matches, true);
+}
+
+{
+  const gate = x86BrowserSmokeMetricsGate(liveGeneratedExecSummaryReadyResult);
+  assert.equal(gate.ok, true);
+  assert.equal(gate.runloop.ok, true);
+  assert.equal(gate.runloop.acceptanceAllowed, true);
+  assert.equal(gate.runloop.lastSummary.event, "live-generated-exec-summary");
+  assert.equal(gate.runloop.lastSummary.reason, "generated-exec-dispatch");
+  assert.equal(gate.runloop.lastSummary.preflight_ready, true);
+  assert.equal(gate.runloop.lastSummary.generated_guest_instructions, 1);
+  assert.equal(gate.runloop.lastSummary.reject_reason_total, 0);
+  assert.equal(gate.runloop.lastSummary.reject_reason_total_matches, true);
 }
 
 {

@@ -1532,6 +1532,10 @@ function buildConfig() {
     wasm64LiveGeneratedExec: boolOption("wasm64LiveGeneratedExec", false),
     wasm64LiveGeneratedExecNoFallback:
       boolOption("wasm64LiveGeneratedExecNoFallback", false),
+    wasm64LiveGeneratedExecPreflight:
+      boolOption("wasm64LiveGeneratedExecPreflight", false),
+    wasm64LiveGeneratedExecPreflightLimit:
+      numberOption("wasm64LiveGeneratedExecPreflightLimit", 10000),
     wasm64RunloopSmoke: boolOption("wasm64RunloopSmoke", false),
     wasm64TcgSummary: boolOption("wasm64TcgSummary", false),
     wasm64TcgSummaryInterval: numberOption("wasm64TcgSummaryInterval", 10000),
@@ -1728,7 +1732,8 @@ async function run() {
                        config.wasm64OneTbDifferential ||
                        config.wasm64LiveOneTbDifferential ||
                        config.wasm64LiveTbCoverage ||
-                       config.wasm64LiveGeneratedExec),
+                       config.wasm64LiveGeneratedExec ||
+                       config.wasm64LiveGeneratedExecPreflight),
       maxSummaries: 16,
       summaryCount: 0,
       summaries: [],
@@ -2137,11 +2142,17 @@ async function run() {
     ...(config.wasm64LiveTbCoverage ? {
       QEMU_WASM64_LIVE_TB_COVERAGE: "1",
     } : {}),
-    ...(config.wasm64LiveGeneratedExec ? {
+    ...((config.wasm64LiveGeneratedExec ||
+         config.wasm64LiveGeneratedExecPreflight) ? {
       QEMU_WASM64_LIVE_GENERATED_EXEC: "1",
     } : {}),
     ...(config.wasm64LiveGeneratedExecNoFallback ? {
       QEMU_WASM64_LIVE_GENERATED_EXEC_NO_FALLBACK: "1",
+    } : {}),
+    ...(config.wasm64LiveGeneratedExecPreflight ? {
+      QEMU_WASM64_LIVE_GENERATED_EXEC_PREFLIGHT: "1",
+      QEMU_WASM64_LIVE_GENERATED_EXEC_PREFLIGHT_LIMIT:
+        String(config.wasm64LiveGeneratedExecPreflightLimit),
     } : {}),
     ...(config.wasm64TcgSummary ? {
       QEMU_WASM64_TCG_SUMMARY: "1",
@@ -2213,6 +2224,7 @@ async function run() {
           config.wasm64LiveOneTbDifferential ||
           config.wasm64LiveTbCoverage ||
           config.wasm64LiveGeneratedExec ||
+          config.wasm64LiveGeneratedExecPreflight ||
           config.wasm64TcgSummary
         ) {
           const lines = Object.entries(tciEnv)

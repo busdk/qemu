@@ -1145,8 +1145,8 @@ function routeLiveGeneratedOutput(metadata) {
       !shape.every((name, index) => name === R4I_LIVE_X86_SHAPE[index])) {
     return {
       ok: false,
-      reason: "selected-hot-shape-unsupported",
-      jsStatusName: "selected-hot-shape-unsupported",
+      reason: "selected-body-shape-unsupported",
+      jsStatusName: "selected-body-shape-unsupported",
       generatedGuestInstructions: 0,
       shape,
     };
@@ -3649,7 +3649,7 @@ assert.deepEqual(
   [
     "metadata-missing",
     "generated-output-unavailable",
-    "selected-hot-shape-unsupported",
+    "selected-body-shape-unsupported",
     "unsupported-shape",
     "metadata-output-tb-code-mismatch",
     null,
@@ -3783,6 +3783,12 @@ const r4mLiveGeneratedExecCases = [
     },
   }),
   simulateR4mLiveGeneratedExec({
+    name: "r4m-metadata-missing-no-silent-fallback-fails-closed",
+    enabled: true,
+    noFallback: true,
+    metadata: null,
+  }),
+  simulateR4mLiveGeneratedExec({
     name: "r4m-stale-output-invalidates-zero-generated-work",
     enabled: true,
     metadata: {
@@ -3811,7 +3817,14 @@ const r4mLiveGeneratedExecCases = [
 ];
 assert.deepEqual(
   r4mLiveGeneratedExecCases.map((entry) => entry.path),
-  ["tci", "generated", "fail-closed", "tci-fallback", "tci-fallback"],
+  [
+    "tci",
+    "generated",
+    "fail-closed",
+    "fail-closed",
+    "tci-fallback",
+    "tci-fallback",
+  ],
 );
 assert.equal(
   r4mLiveGeneratedExecCases.find((entry) =>
@@ -3828,6 +3841,18 @@ assert.equal(
 assert.equal(
   r4mLiveGeneratedExecCases.find((entry) =>
     entry.name === "r4m-unsupported-no-silent-fallback-fails-closed")
+    .failedClosed,
+  true,
+);
+assert.equal(
+  r4mLiveGeneratedExecCases.find((entry) =>
+    entry.name === "r4m-metadata-missing-no-silent-fallback-fails-closed")
+    .reason,
+  "metadata-missing",
+);
+assert.equal(
+  r4mLiveGeneratedExecCases.find((entry) =>
+    entry.name === "r4m-metadata-missing-no-silent-fallback-fails-closed")
     .failedClosed,
   true,
 );

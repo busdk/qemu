@@ -72,6 +72,28 @@ const RUNLOOP_WORKLOAD_FIELDS = [
   ["exits_invalidated", isInteger],
 ];
 
+const RUNLOOP_LIVE_GENERATED_EXEC_SUMMARY_FIELDS = [
+  ["event", (value) => value === "live-generated-exec-summary"],
+  ["reason", isString],
+  ["compat_fallback", isBoolean],
+  ["preflight", isBoolean],
+  ["preflight_limit", isPositiveInteger],
+  ["preflight_ready", isBoolean],
+  ["no_silent_fallback", isBoolean],
+  ["attempts", isPositiveInteger],
+  ["successes", isInteger],
+  ["rejects", isInteger],
+  ["generated_guest_instructions", isInteger],
+  ["generated_coverage_numerator", isInteger],
+  ["generated_coverage_denominator", isInteger],
+  ["reject_reasons", isArray],
+];
+
+const RUNLOOP_LIVE_GENERATED_EXEC_REJECT_REASON_FIELDS = [
+  ["reason", isString],
+  ["count", isInteger],
+];
+
 const ONE_TB_DIFFERENTIAL_RESULT_FIELDS = [
   ["name", isString],
   ["ok", isBoolean],
@@ -642,9 +664,66 @@ function validateLiveOneTbDifferentialSummary(summary) {
   };
 }
 
+function validateLiveGeneratedExecRejectReason(reason, index) {
+  return {
+    ...reason,
+    missingFields: collectMissingFields(
+      reason,
+      RUNLOOP_LIVE_GENERATED_EXEC_REJECT_REASON_FIELDS,
+      `reject_reasons[${index}].`,
+    ),
+  };
+}
+
+function validateLiveGeneratedExecSummary(summary) {
+  const missingFields = collectMissingFields(
+    summary,
+    RUNLOOP_LIVE_GENERATED_EXEC_SUMMARY_FIELDS,
+  );
+  const rejectReasons = [];
+  let rejectReasonTotal = 0;
+
+  if (Array.isArray(summary?.reject_reasons)) {
+    for (let index = 0; index < summary.reject_reasons.length; index++) {
+      const validated = validateLiveGeneratedExecRejectReason(
+        summary.reject_reasons[index],
+        index,
+      );
+
+      rejectReasons.push(validated);
+      if (isInteger(validated.count)) {
+        rejectReasonTotal += validated.count;
+      }
+    }
+  }
+
+  return {
+    ...summary,
+    missingFields,
+    reject_reasons: rejectReasons,
+    reject_reason_total: rejectReasonTotal,
+    reject_reason_total_matches:
+      isInteger(summary?.rejects) && rejectReasonTotal === summary.rejects,
+    acceptanceAllowed:
+      summary?.preflight_ready === true &&
+      summary?.generated_guest_instructions > 0,
+    ok:
+      missingFields.length === 0 &&
+      rejectReasons.every((entry) => entry.missingFields.length === 0) &&
+      isInteger(summary?.attempts) &&
+      isInteger(summary?.successes) &&
+      isInteger(summary?.rejects) &&
+      summary.attempts === summary.successes + summary.rejects &&
+      rejectReasonTotal === summary.rejects,
+  };
+}
+
 function validateRunloopSummaryByEvent(summary) {
   if (summary?.event === "runtime-smoke") {
     return validateRunloopSummary(summary);
+  }
+  if (summary?.event === "live-generated-exec-summary") {
+    return validateLiveGeneratedExecSummary(summary);
   }
   if (summary?.event === "one-tb-differential") {
     return validateScaffoldOneTbDifferentialSummary(summary);
