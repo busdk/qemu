@@ -602,7 +602,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-browser-smoke-runner-test.mjs`. No browser run, artifact
     build, or real RV64 generated-coverage proof was run in this harness slice,
     so R4d remains open.
-  - [ ] R4e - Preserve the target-neutral accelerator pieces so the RISC-V
+  - [x] R4e - Preserve the target-neutral accelerator pieces so the RISC-V
     runtime work can be reused by an x86_64 accelerator lane without copying
     or re-inventing the proof contract. DoD: document and test that the
     reusable surface is target-neutral: `TCGWasm64RunContext`, synthetic exit
@@ -611,7 +611,20 @@ run that reaches a weaker marker than normal multi-user readiness.
     parsing, and the `alu-branch`/`tlb-hit-ram` runtime smoke workloads. The
     item is not accepted if it introduces x86_64 lowering or claims any x86_64
     Linux speedup; it is only the shared contract that both `riscv64-softmmu`
-    and future `x86_64-softmmu` accelerator work must use.
+    and future `x86_64-softmmu` accelerator work must use. Accepted
+    2026-07-03: the shared contract is now covered by deterministic tests
+    rather than by any x86 lowering or live R4i work. Checks:
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`,
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+    `node scripts/ci/wasmjit-runloop-model-test.mjs`, and
+    `git diff --check` passed. The contract test covers
+    `TCGWasm64RunContext`, `TCGWasm64RunCounters`, synthetic exit reasons,
+    `wasmjit_run(ctx,budget)` ABI strings, and the `alu-branch` /
+    `tlb-hit-ram` workload names. The model test covers the shared module
+    import/export path and workload semantics. The browser smoke runner test
+    covers browser result JSON parsing for the shared runloop summary shape
+    and keeps the runner validation diagnostics testable in-process under
+    piped Node execution.
   - [ ] R4f - Add an x86_64 reuse and gap map before implementing x86_64
     generated execution. DoD: using current `x86_64-softmmu` browser smoke
     evidence or a fresh bounded smoke, record which parts are reusable from
@@ -655,8 +668,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `ld32u=43978` plus `st8=22`, with the first attachable fixture shape
     `ld32u, tci_movi, tci_setcond32, brcond, tci_movi, st8, ld, tci_movi,
     add, st, goto_tb, exit_tb, exit_tb`; `call`-heavy TBs remain fallback
-    until a helper-exit design exists. R4f remains open because the R4e
-    target-neutral reusable-surface proof is still unchecked, and current x86
+    until a helper-exit design exists. R4f remains open because current x86
     evidence does not record a real hot TB PC/identity plus
     `TranslationBlock.icount` for the `ld32u`-first family; the pre-R4i
     fixture explicitly reports `real_live_state_capture=false`.

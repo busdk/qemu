@@ -20,6 +20,7 @@ import {
   isTerminalPageStatus,
   guestSerialIdleDiagnostic,
   pageErrorDiagnostic,
+  parseArgs,
   progressSampleDiagnostic,
   promoteSmokeState,
   requestFailureDiagnostic,
@@ -51,6 +52,26 @@ const marker = "QEMU_WASM_LINUX_BOOT_OK";
 const runnerPath = fileURLToPath(new URL("./wasm-browser-smoke-runner.mjs", import.meta.url));
 const browserSmokePath = fileURLToPath(new URL("./wasm-browser-smoke.mjs", import.meta.url));
 const browserSmokeSource = readFileSync(browserSmokePath, "utf8");
+
+function captureStderr(fn) {
+  const writes = [];
+  const originalWrite = process.stderr.write;
+  process.stderr.write = function(chunk, encoding, callback) {
+    writes.push(typeof chunk === "string" ? chunk : chunk.toString());
+    if (typeof encoding === "function") {
+      encoding();
+    } else if (typeof callback === "function") {
+      callback();
+    }
+    return true;
+  };
+  try {
+    fn();
+    return writes.join("");
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+}
 
 assert.match(browserSmokeSource, /QEMU_WASM64_TCG_SUMMARY/);
 assert.match(browserSmokeSource, /QEMU_WASM64_ONE_TB_DIFFERENTIAL/);
@@ -1613,42 +1634,34 @@ for (const status of [
 }
 
 {
-  const child = spawnSync(process.execPath, [
-    runnerPath,
-    "--artifact-dir", "/tmp/artifacts",
-    "--kernel", "/tmp/kernel",
-    "--initrd", "/tmp/initrd",
-    "--rootfs-storage", "opfs-snapshot",
-  ], {
-    cwd: process.cwd(),
-    encoding: "utf8",
+  const output = captureStderr(() => {
+    assert.throws(
+      () => parseArgs([
+        "--artifact-dir", "/tmp/artifacts",
+        "--kernel", "/tmp/kernel",
+        "--initrd", "/tmp/initrd",
+        "--rootfs-storage", "opfs-snapshot",
+      ]),
+      (error) => error && error.status === 2,
+    );
   });
-
-  assert.equal(child.status, 2);
-  assert.match(
-    `${child.stdout}${child.stderr}`,
-    /--rootfs-storage opfs-snapshot requires --rootfs/,
-  );
+  assert.match(output, /--rootfs-storage opfs-snapshot requires --rootfs/);
 }
 
 {
-  const child = spawnSync(process.execPath, [
-    runnerPath,
-    "--artifact-dir", "/tmp/artifacts",
-    "--kernel", "/tmp/kernel",
-    "--rootfs", "/tmp/rootfs.raw",
-    "--rootfs-storage", "opfs-snapshot",
-    "--rootfs-opfs-name", "bad/name.raw",
-  ], {
-    cwd: process.cwd(),
-    encoding: "utf8",
+  const output = captureStderr(() => {
+    assert.throws(
+      () => parseArgs([
+        "--artifact-dir", "/tmp/artifacts",
+        "--kernel", "/tmp/kernel",
+        "--rootfs", "/tmp/rootfs.raw",
+        "--rootfs-storage", "opfs-snapshot",
+        "--rootfs-opfs-name", "bad/name.raw",
+      ]),
+      (error) => error && error.status === 2,
+    );
   });
-
-  assert.equal(child.status, 2);
-  assert.match(
-    `${child.stdout}${child.stderr}`,
-    /--rootfs-opfs-name must be a non-empty file name/,
-  );
+  assert.match(output, /--rootfs-opfs-name must be a non-empty file name/);
 }
 
 {

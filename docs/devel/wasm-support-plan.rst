@@ -278,10 +278,9 @@ modeled by R4i-a is:
 ``ld32u, tci_movi, tci_setcond32, brcond, tci_movi, st8, ld, tci_movi, add, st, goto_tb, exit_tb, exit_tb``.
 
 ``call``-heavy TBs remain fallback until a helper-exit design exists.  R4f is
-left open because the R4e target-neutral reusable-surface proof is still
-unchecked, and current x86 evidence does not record a real hot TB PC/identity
-plus ``TranslationBlock.icount`` for the ``ld32u``-first family.  The pre-R4i
-fixture is useful scaffolding, but it explicitly reports
+left open because current x86 evidence does not record a real hot TB
+PC/identity plus ``TranslationBlock.icount`` for the ``ld32u``-first family.
+The pre-R4i fixture is useful scaffolding, but it explicitly reports
 ``real_live_state_capture=false``.
 
 RISC-V 64 accelerator boundary
@@ -8102,3 +8101,29 @@ translation blocks before ``Welcome to TuxTest``, report nonzero generated
 coverage from actual guest TBs plus top fallback PCs/TBs or unsupported op
 shapes, and preserve strict TCI fallback as the default before another R4c
 attempt.
+
+R4e target-neutral contract proof
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The reusable accelerator contract is now proven in deterministic tests that
+stay target-neutral and do not touch x86 lowering or live R4i implementation
+files.
+
+Checks:
+
+* ``node scripts/ci/wasm64-runloop-contract-test.mjs``
+* ``node scripts/ci/wasm-browser-smoke-runner-test.mjs``
+* ``node scripts/ci/wasmjit-runloop-model-test.mjs``
+* ``git diff --check``
+
+The contract test verifies ``TCGWasm64RunContext``,
+``TCGWasm64RunCounters``, synthetic exit reasons, the
+``wasmjit_run(ctx, budget)`` ABI strings, and the shared ``alu-branch`` and
+``tlb-hit-ram`` workload names.  The runloop model test verifies the same
+module import/export path, generated-vs-TCI-like workload semantics, and the
+shared run/exit counters.  The browser smoke runner test verifies browser
+result JSON parsing for the shared runloop summary shape and keeps the runner
+validation diagnostics testable in-process under piped Node execution.
+
+This is target-neutral contract evidence only.  It does not claim x86_64
+lowering, x86_64 Linux speedup, or any live R4i generated-TB result.

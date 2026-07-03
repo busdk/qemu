@@ -23,6 +23,14 @@ const DEFAULT_PROGRESS_SAMPLE_INTERVAL_MS = 10000;
 const DEFAULT_PROGRESS_SAMPLE_LIMIT = 120;
 const DEFAULT_IDLE_TIMEOUT_MS = 0;
 
+class UsageError extends Error {
+  constructor(status) {
+    super("usage");
+    this.name = "UsageError";
+    this.status = status;
+  }
+}
+
 function usage(status) {
   const stream = status === 0 ? process.stdout : process.stderr;
   stream.write(`usage: wasm-browser-smoke-runner.mjs --artifact-dir DIR --kernel FILE --initrd FILE [OPTIONS]
@@ -200,10 +208,10 @@ Environment:
                      Chromium-specific executable path; overrides the generic
                      executable when --browser chromium
 `);
-  process.exit(status);
+  throw new UsageError(status);
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const options = {
     appendExtra: "",
     artifactDir: null,
@@ -1965,7 +1973,16 @@ export async function requestPowerOperation(page, options, result) {
 }
 
 async function run() {
-  const options = parseArgs(process.argv.slice(2));
+  let options;
+  try {
+    options = parseArgs(process.argv.slice(2));
+  } catch (error) {
+    if (error instanceof UsageError) {
+      process.exitCode = error.status;
+      return;
+    }
+    throw error;
+  }
   const browserType = await loadPlaywright(options.browser);
   const server = await startServer(options);
   const launchOptions = playwrightLaunchOptions(options.browser);
