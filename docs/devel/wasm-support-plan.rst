@@ -868,6 +868,104 @@ translated-output hotsets to the long-running ``wasmjit_run()`` executor with
 no-silent-fallback accounting.  Another direct-boundary wrapper or
 opcode-at-a-time browser loop is not justified by this evidence.
 
+R4e live run-loop attach preflight
+----------------------------------
+
+R4e adds bounded, opt-in attach-readiness telemetry for real translated-output
+TBs.  The expected effect on the gate metric was still diagnostic, not a speed
+improvement: the probe must not execute guest-visible Linux TBs yet.  It
+exists to answer how many live translated-output TBs can already be described
+by the current ``wasmjit_run()`` hotset descriptor ABI and how many fail with
+no-silent-fallback status reasons.
+
+The new control is ``--wasm64-runloop-attach-probe``.  It sets
+``QEMU_WASM64_RUNLOOP_ATTACH_PROBE=1`` for QEMU, records the boolean in the
+browser result JSON, and adds this summary object:
+``runloop_attach_probe``.  The probe builds a one-TB
+``TCGWasm64RunHotset`` descriptor from live metadata, records the
+descriptor-build status, and still falls through to ``tcg_tci_qemu_tb_exec()``
+for guest-visible execution.  It is attach-readiness telemetry only.
+
+Focused checks passed:
+
+.. code-block:: console
+
+  $ git diff --check
+  $ node --check scripts/ci/wasm-browser-smoke-runner.mjs
+  $ node --check scripts/ci/wasm-browser-smoke.mjs
+  $ python3 scripts/ci/wasm-build-artifacts-local-test.py
+  $ node scripts/ci/wasm64-runloop-contract-test.mjs
+  $ node scripts/ci/wasm64-translate-metadata-test.mjs
+  $ node scripts/ci/wasmjit-runloop-model-test.mjs
+  $ node scripts/ci/wasm-browser-smoke-runner-test.mjs
+
+The runner test was rerun outside the sandbox because sandboxed child-process
+spawning drops the expected stderr in its negative subprocess fixture.
+
+The backend artifact was built with:
+
+.. code-block:: console
+
+  $ python3 scripts/ci/wasm-build-artifacts-local.py \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4e-riscv64-attach-probe-artifacts \
+      --target riscv64 \
+      --tcg-wasm64-backend \
+      --jobs auto \
+      --build-image
+
+Meson reported ``TCG backend: experimental wasm64 with TCI fallback``.
+Artifact SHA-256 values were:
+
+* ``qemu-system-riscv64.js``:
+  ``4de17efbdaa5ae31f00f08d58907850bee5b5c8b22220d63b87af75265835094``
+* ``qemu-system-riscv64.wasm``:
+  ``906041d46590c72d480ed6ddfd7af7d3f0a1ea56aabd9c106f2c3edd66dc8448``
+* manifest:
+  ``3838287a51a343457ead9b4b017217abb8ed197080a5fcbe8b71a52831217f08``
+* ``SHA256SUMS``:
+  ``eefcf48e74b3e81eea28d3419d2110825578c0eea36c80ae98bebec8c8b029c4``
+
+The browser proof used Chromium ``149.0.7827.55``:
+
+.. code-block:: console
+
+  $ npm exec --yes --package=playwright -- node \
+      scripts/ci/wasm-browser-smoke-runner.mjs \
+      --artifact-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4e-riscv64-attach-probe-artifacts \
+      --guest-manifest /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-guest/tuxboot-browser-smoke-guest.json \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4e-riscv64-attach-probe-smoke/wasm-browser-smoke-result.json \
+      --screenshot /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4e-riscv64-attach-probe-smoke/wasm-browser-smoke.png \
+      --timeout-ms 180000 \
+      --progress-sample-interval-ms 10000 \
+      --progress-sample-limit 40 \
+      --wasm64-tcg-summary \
+      --wasm64-tcg-summary-interval 50000 \
+      --wasm64-tcg-summary-limit 4 \
+      --wasm64-runloop-attach-probe
+
+It reached ``Welcome to TuxTest`` in ``139954`` ms.  Result JSON SHA-256:
+``b9b83e3b7a76f6ae835f18666a2142180a15e0448171134e672db34fb28d9c8e``.
+Screenshot SHA-256:
+``62325f7c3d749a4efa8a683a015664c8951cf4be1ba5c194519e43ee54655343``.
+
+The run captured exactly four ``qemu-wasm64-tcg`` summaries.  The final
+summary reported ``generated_attempts=0``, ``generated_compiled=0``,
+``generated_executed=0``, ``translated_tbs=42688``,
+``translated_ops=1490739``, ``translated_metadata_misses=157312``,
+``translated_generated_output_tbs=22319``,
+``translated_generated_output_ops=735183``,
+``exec_generated_output_lookup_tbs=42688``, and
+``exec_generated_output_available_tbs=22319``.
+
+The attach preflight sampled ``200000`` TB entries and found
+``ready_tbs=0``, ``ready_ops=0``, ``missing_metadata=157312``,
+``unsupported_hot_tb=42688``, and zero ``non_terminal``,
+``no_generated_output``, or ``output_truncated`` rejects.  The accepted
+conclusion is that the current descriptor ABI cannot yet attach any real
+translated-output Linux TBs to ``wasmjit_run()``.  The next accelerator item
+must close that semantic descriptor gap with deterministic tests and then
+rerun this probe before another speed gate.
+
 Strict definition of done
 =========================
 

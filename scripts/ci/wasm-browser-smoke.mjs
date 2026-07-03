@@ -1528,6 +1528,7 @@ function buildConfig() {
     wasm64TcgSummary: boolOption("wasm64TcgSummary", false),
     wasm64TcgSummaryInterval: numberOption("wasm64TcgSummaryInterval", 100000),
     wasm64TcgSummaryLimit: numberOption("wasm64TcgSummaryLimit", 4),
+    wasm64RunloopAttachProbe: boolOption("wasm64RunloopAttachProbe", false),
     wasm64RunloopSmoke: boolOption("wasm64RunloopSmoke", false),
     wasm: option("wasm", "/artifacts/qemu-system-x86_64.wasm"),
   };
@@ -1713,6 +1714,7 @@ async function run() {
       enabled: Boolean(config.wasm64TcgSummary),
       interval: config.wasm64TcgSummaryInterval,
       limit: config.wasm64TcgSummaryLimit,
+      runloopAttachProbe: Boolean(config.wasm64RunloopAttachProbe),
       env: config.wasm64TcgSummary ? {
         QEMU_WASM64_TCG_SUMMARY: "1",
         QEMU_WASM64_TCG_SUMMARY_INTERVAL:
@@ -2130,6 +2132,9 @@ async function run() {
       QEMU_WASM64_TCG_SUMMARY_LIMIT:
         String(config.wasm64TcgSummaryLimit),
     } : {}),
+    ...(config.wasm64RunloopAttachProbe ? {
+      QEMU_WASM64_RUNLOOP_ATTACH_PROBE: "1",
+    } : {}),
     ...(config.wasm64RunloopSmoke ? {
       QEMU_WASM64_RUNLOOP_SMOKE: "1",
     } : {}),
@@ -2195,6 +2200,7 @@ async function run() {
           config.tciProgress ||
           config.tciWasmGeneratedTrace ||
           config.wasm64TcgSummary ||
+          config.wasm64RunloopAttachProbe ||
           config.wasm64RunloopSmoke
         ) {
           const lines = Object.entries(tciEnv)

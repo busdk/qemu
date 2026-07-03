@@ -676,6 +676,14 @@ for (const status of [
       unsupported: 6,
       fatal: 0,
     },
+    runloop_attach_probe: {
+      tbs: 100,
+      ready_tbs: 7,
+      ready_ops: 35,
+      missing_metadata: 10,
+      unsupported_hot_tb: 70,
+      no_generated_output: 13,
+    },
     translated_tbs: 8,
     translated_ops: 144,
     translated_fallback_markers: 8,
@@ -700,6 +708,9 @@ for (const status of [
     unsupported: 6,
     fatal: 0,
   });
+  assert.equal(parsed.runloop_attach_probe.ready_tbs, 7);
+  assert.equal(parsed.runloop_attach_probe.ready_ops, 35);
+  assert.equal(parsed.runloop_attach_probe.unsupported_hot_tb, 70);
   assert.equal(parsed.translated_tbs, 8);
   assert.equal(parsed.translated_ops, 144);
   assert.equal(parsed.translated_fallback_markers, 8);
@@ -1096,6 +1107,7 @@ for (const status of [
     wasm64TcgSummary: true,
     wasm64TcgSummaryInterval: 50000,
     wasm64TcgSummaryLimit: 3,
+    wasm64RunloopAttachProbe: true,
     timeoutMs: 30000,
     visualMarker: "",
     wasm64RunloopSmoke: true,
@@ -1106,6 +1118,7 @@ for (const status of [
   assert.equal(url.searchParams.get("wasm64TcgSummary"), "1");
   assert.equal(url.searchParams.get("wasm64TcgSummaryInterval"), "50000");
   assert.equal(url.searchParams.get("wasm64TcgSummaryLimit"), "3");
+  assert.equal(url.searchParams.get("wasm64RunloopAttachProbe"), "1");
   assert.equal(url.searchParams.get("wasm64RunloopSmoke"), "1");
 }
 
@@ -1384,6 +1397,7 @@ for (const status of [
     wasm64TcgSummary: true,
     wasm64TcgSummaryInterval: 50000,
     wasm64TcgSummaryLimit: 3,
+    wasm64RunloopAttachProbe: true,
     wasm64RunloopSmoke: true,
   }, "HeadlessChrome/141.0.7390.37");
 
@@ -1427,6 +1441,7 @@ for (const status of [
   assert.equal(result.wasm64TcgSummary, true);
   assert.equal(result.wasm64TcgSummaryInterval, 50000);
   assert.equal(result.wasm64TcgSummaryLimit, 3);
+  assert.equal(result.wasm64RunloopAttachProbe, true);
   assert.equal(result.wasm64RunloopSmoke, true);
   assert.equal(Object.hasOwn(result, "tciWasmSubset"), false);
   assert.equal(Object.hasOwn(result, "tciWasmGeneratedOnly"), false);

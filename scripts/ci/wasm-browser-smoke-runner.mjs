@@ -181,6 +181,9 @@ Options:
   --wasm64-tcg-summary-limit N
                      Maximum wasm64 backend summaries emitted by QEMU
                      (default: 4)
+  --wasm64-runloop-attach-probe
+                     Probe live translated-output TBs against the wasmjit
+                     run-loop descriptor ABI without executing them
   --wasm64-runloop-smoke
                      Enable opt-in QEMU wasm64 run/exit runtime smoke
   --help              Show this help
@@ -275,6 +278,7 @@ function parseArgs(argv) {
     wasm64TcgSummary: false,
     wasm64TcgSummaryInterval: 100000,
     wasm64TcgSummaryLimit: 4,
+    wasm64RunloopAttachProbe: false,
     wasm64RunloopSmoke: false,
   };
   const explicit = new Set();
@@ -511,6 +515,9 @@ function parseArgs(argv) {
     } else if (arg === "--wasm64-tcg-summary-limit") {
       options.wasm64TcgSummaryLimit = Number(argv[++i]);
       explicit.add("wasm64TcgSummaryLimit");
+    } else if (arg === "--wasm64-runloop-attach-probe") {
+      options.wasm64RunloopAttachProbe = true;
+      explicit.add("wasm64RunloopAttachProbe");
     } else if (arg === "--wasm64-runloop-smoke") {
       options.wasm64RunloopSmoke = true;
       explicit.add("wasm64RunloopSmoke");
@@ -536,6 +543,7 @@ function parseArgs(argv) {
       "tciProgress",
       "tciWasmGeneratedTrace",
       "wasm64TcgSummary",
+      "wasm64RunloopAttachProbe",
       "wasm64RunloopSmoke",
     ],
     checksumFields: ["kernel", "initrd", "rootfs"],
@@ -1445,6 +1453,9 @@ export function browserSmokeUrl(options) {
       String(options.wasm64TcgSummaryLimit),
     );
   }
+  if (options.wasm64RunloopAttachProbe) {
+    url.searchParams.set("wasm64RunloopAttachProbe", "1");
+  }
   if (options.wasm64RunloopSmoke) {
     url.searchParams.set("wasm64RunloopSmoke", "1");
   }
@@ -1574,6 +1585,7 @@ export function initialSmokeResult(options, browserVersion) {
       Number.isInteger(options.wasm64TcgSummaryLimit)
         ? options.wasm64TcgSummaryLimit
         : 4,
+    wasm64RunloopAttachProbe: Boolean(options.wasm64RunloopAttachProbe),
     wasm64RunloopSmoke: Boolean(options.wasm64RunloopSmoke),
     userDataDir: options.userDataDir,
     visualMarker: options.visualMarker,

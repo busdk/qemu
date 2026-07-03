@@ -731,6 +731,85 @@ run that reaches a weaker marker than normal multi-user readiness.
     the long-running `wasmjit_run()` executor with no-silent-fallback
     accounting, not another direct-boundary wrapper or opcode-at-a-time
     browser loop.
+  - [x] R4e - Add a live run-loop attach preflight for real translated-output
+    TBs. Prediction: this should not improve marker time, because it must not
+    execute guest-visible Linux TBs yet. It should expose the next useful
+    accelerator denominator: how many live translated-output TBs are already
+    attachable to the current `wasmjit_run()` descriptor ABI, and how many
+    fail with no-silent-fallback statuses such as missing metadata,
+    non-terminal output, unsupported semantic shape, missing generated output,
+    or truncation. DoD: the probe is opt-in, default execution still falls
+    through TCI, `qemu-wasm64-tcg` summaries report attach-ready and rejected
+    counts, deterministic tests cover the JSON/flag/contract shape, and a
+    bounded generic RISC-V Chromium diagnostic records the attach-preflight
+    counts from a current backend artifact. Accepted 2026-07-03:
+    `QEMU_WASM64_RUNLOOP_ATTACH_PROBE=1` is now plumbed through
+    `--wasm64-runloop-attach-probe` and the browser result JSON. The probe
+    builds a one-TB `TCGWasm64RunHotset` descriptor from live translated
+    metadata, records the descriptor-build status in `qemu-wasm64-tcg`
+    summaries, and still falls through to `tcg_tci_qemu_tb_exec()` for
+    guest-visible execution. This is attach-readiness telemetry only; it does
+    not execute generated Linux TBs and does not claim a speed improvement.
+
+    Checks: `git diff --check`,
+    `node --check scripts/ci/wasm-browser-smoke-runner.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke.mjs`,
+    `python3 scripts/ci/wasm-build-artifacts-local-test.py`,
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`,
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node scripts/ci/wasmjit-runloop-model-test.mjs`, and
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs` outside the sandbox
+    because sandboxed child-process spawning drops the expected stderr.
+
+    Artifact build command:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4e-riscv64-attach-probe-artifacts
+    --target riscv64 --tcg-wasm64-backend --jobs auto --build-image`.
+    Meson reported `TCG backend: experimental wasm64 with TCI fallback`.
+    Artifact hashes: `qemu-system-riscv64.js`
+    `4de17efbdaa5ae31f00f08d58907850bee5b5c8b22220d63b87af75265835094`,
+    `qemu-system-riscv64.wasm`
+    `906041d46590c72d480ed6ddfd7af7d3f0a1ea56aabd9c106f2c3edd66dc8448`,
+    manifest
+    `3838287a51a343457ead9b4b017217abb8ed197080a5fcbe8b71a52831217f08`,
+    SHA256SUMS
+    `eefcf48e74b3e81eea28d3419d2110825578c0eea36c80ae98bebec8c8b029c4`.
+
+    Browser proof command:
+    `npm exec --yes --package=playwright -- node
+    scripts/ci/wasm-browser-smoke-runner.mjs --artifact-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4e-riscv64-attach-probe-artifacts
+    --guest-manifest
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-guest/tuxboot-browser-smoke-guest.json
+    --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4e-riscv64-attach-probe-smoke/wasm-browser-smoke-result.json
+    --screenshot
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4e-riscv64-attach-probe-smoke/wasm-browser-smoke.png
+    --timeout-ms 180000 --progress-sample-interval-ms 10000
+    --progress-sample-limit 40 --wasm64-tcg-summary
+    --wasm64-tcg-summary-interval 50000 --wasm64-tcg-summary-limit 4
+    --wasm64-runloop-attach-probe`. Chromium `149.0.7827.55` reached
+    `Welcome to TuxTest` in `139954` ms. Result JSON hash:
+    `b9b83e3b7a76f6ae835f18666a2142180a15e0448171134e672db34fb28d9c8e`;
+    screenshot hash:
+    `62325f7c3d749a4efa8a683a015664c8951cf4be1ba5c194519e43ee54655343`.
+
+    The run captured four summaries. The final summary reported
+    `generated_attempts=0`, `generated_compiled=0`, `generated_executed=0`,
+    `translated_tbs=42688`, `translated_ops=1490739`,
+    `translated_metadata_misses=157312`,
+    `translated_generated_output_tbs=22319`,
+    `translated_generated_output_ops=735183`,
+    `exec_generated_output_lookup_tbs=42688`, and
+    `exec_generated_output_available_tbs=22319`. The attach preflight
+    sampled `200000` TB entries and found `ready_tbs=0`,
+    `ready_ops=0`, `missing_metadata=157312`,
+    `unsupported_hot_tb=42688`, and zero `non_terminal`,
+    `no_generated_output`, or `output_truncated` rejects. The accepted
+    conclusion is that the current descriptor ABI cannot yet attach any real
+    translated-output Linux TBs to `wasmjit_run()`. The next accelerator
+    item must close that semantic descriptor gap with deterministic tests and
+    then rerun this probe before another speed gate.
 - [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
   accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
   cold in browser-hosted QEMU/WASM with the accelerator and reaches

@@ -213,6 +213,25 @@ void tcg_wasm64_counters_add(TCGWasm64Counters *dst,
         src->exec_generated_output_missing_candidate_tbs;
     dst->exec_generated_output_incomplete_tbs +=
         src->exec_generated_output_incomplete_tbs;
+    dst->runloop_attach_probe_tbs += src->runloop_attach_probe_tbs;
+    dst->runloop_attach_probe_ready_tbs +=
+        src->runloop_attach_probe_ready_tbs;
+    dst->runloop_attach_probe_ready_ops +=
+        src->runloop_attach_probe_ready_ops;
+    dst->runloop_attach_probe_empty += src->runloop_attach_probe_empty;
+    dst->runloop_attach_probe_capacity += src->runloop_attach_probe_capacity;
+    dst->runloop_attach_probe_missing_metadata +=
+        src->runloop_attach_probe_missing_metadata;
+    dst->runloop_attach_probe_invalid_metadata +=
+        src->runloop_attach_probe_invalid_metadata;
+    dst->runloop_attach_probe_non_terminal +=
+        src->runloop_attach_probe_non_terminal;
+    dst->runloop_attach_probe_unsupported_hot_tb +=
+        src->runloop_attach_probe_unsupported_hot_tb;
+    dst->runloop_attach_probe_no_generated_output +=
+        src->runloop_attach_probe_no_generated_output;
+    dst->runloop_attach_probe_output_truncated +=
+        src->runloop_attach_probe_output_truncated;
     dst->fallback_unsupported += src->fallback_unsupported;
     dst->fallback_helper += src->fallback_helper;
     dst->fallback_qemu_load += src->fallback_qemu_load;
@@ -284,6 +303,25 @@ static void tcg_wasm64_counters_add_translation(TCGWasm64Counters *dst,
         src->exec_generated_output_missing_candidate_tbs;
     dst->exec_generated_output_incomplete_tbs +=
         src->exec_generated_output_incomplete_tbs;
+    dst->runloop_attach_probe_tbs += src->runloop_attach_probe_tbs;
+    dst->runloop_attach_probe_ready_tbs +=
+        src->runloop_attach_probe_ready_tbs;
+    dst->runloop_attach_probe_ready_ops +=
+        src->runloop_attach_probe_ready_ops;
+    dst->runloop_attach_probe_empty += src->runloop_attach_probe_empty;
+    dst->runloop_attach_probe_capacity += src->runloop_attach_probe_capacity;
+    dst->runloop_attach_probe_missing_metadata +=
+        src->runloop_attach_probe_missing_metadata;
+    dst->runloop_attach_probe_invalid_metadata +=
+        src->runloop_attach_probe_invalid_metadata;
+    dst->runloop_attach_probe_non_terminal +=
+        src->runloop_attach_probe_non_terminal;
+    dst->runloop_attach_probe_unsupported_hot_tb +=
+        src->runloop_attach_probe_unsupported_hot_tb;
+    dst->runloop_attach_probe_no_generated_output +=
+        src->runloop_attach_probe_no_generated_output;
+    dst->runloop_attach_probe_output_truncated +=
+        src->runloop_attach_probe_output_truncated;
 }
 
 void tcg_wasm64_count_fallback(TCGWasm64Counters *counters,
@@ -455,6 +493,54 @@ const char *tcg_wasm64_run_hotset_build_status_name(
     }
 }
 
+static void tcg_wasm64_count_runloop_attach_probe(
+    TCGWasm64Counters *counters,
+    TCGWasm64RunHotsetBuildStatus status,
+    const TCGWasm64TBMetadata *metadata)
+{
+    if (!counters) {
+        return;
+    }
+
+    counters->runloop_attach_probe_tbs++;
+    switch (status) {
+    case TCG_WASM64_RUN_HOTSET_BUILD_OK:
+        counters->runloop_attach_probe_ready_tbs++;
+        if (metadata) {
+            counters->runloop_attach_probe_ready_ops +=
+                metadata->generated_output_op_count;
+        }
+        break;
+    case TCG_WASM64_RUN_HOTSET_BUILD_EMPTY:
+        counters->runloop_attach_probe_empty++;
+        break;
+    case TCG_WASM64_RUN_HOTSET_BUILD_CAPACITY:
+        counters->runloop_attach_probe_capacity++;
+        break;
+    case TCG_WASM64_RUN_HOTSET_BUILD_MISSING_METADATA:
+        counters->runloop_attach_probe_missing_metadata++;
+        break;
+    case TCG_WASM64_RUN_HOTSET_BUILD_INVALID_METADATA:
+        counters->runloop_attach_probe_invalid_metadata++;
+        break;
+    case TCG_WASM64_RUN_HOTSET_BUILD_NON_TERMINAL:
+        counters->runloop_attach_probe_non_terminal++;
+        break;
+    case TCG_WASM64_RUN_HOTSET_BUILD_UNSUPPORTED_HOT_TB:
+        counters->runloop_attach_probe_unsupported_hot_tb++;
+        break;
+    case TCG_WASM64_RUN_HOTSET_BUILD_NO_GENERATED_OUTPUT:
+        counters->runloop_attach_probe_no_generated_output++;
+        break;
+    case TCG_WASM64_RUN_HOTSET_BUILD_OUTPUT_TRUNCATED:
+        counters->runloop_attach_probe_output_truncated++;
+        break;
+    default:
+        counters->runloop_attach_probe_unsupported_hot_tb++;
+        break;
+    }
+}
+
 #ifdef CONFIG_EMSCRIPTEN
 static char *tcg_wasm64_runloop_file_getenv(const char *name)
 {
@@ -571,6 +657,19 @@ static uint64_t tcg_wasm64_tcg_summary_limit(void)
         checked = true;
     }
     return limit;
+}
+
+static bool tcg_wasm64_runloop_attach_probe_enabled(void)
+{
+    static bool checked;
+    static bool enabled;
+
+    if (!checked) {
+        enabled = tcg_wasm64_runloop_env_bool(
+            "QEMU_WASM64_RUNLOOP_ATTACH_PROBE");
+        checked = true;
+    }
+    return enabled;
 }
 
 #ifdef CONFIG_EMSCRIPTEN
@@ -2048,6 +2147,22 @@ bool tcg_wasm64_run_hotset_build_from_metadata(
     return true;
 }
 
+static void tcg_wasm64_runloop_attach_probe(
+    TCGWasm64Counters *counters,
+    const TCGWasm64TBMetadata *metadata)
+{
+    const TCGWasm64TBMetadata *single_metadata[] = { metadata };
+    TCGWasm64RunHotsetTB tb;
+    TCGWasm64RunHotset hotset;
+    TCGWasm64RunHotsetBuildStatus status =
+        TCG_WASM64_RUN_HOTSET_BUILD_OK;
+
+    (void)tcg_wasm64_run_hotset_build_from_metadata(
+        &hotset, &tb, 1, single_metadata, ARRAY_SIZE(single_metadata),
+        &status);
+    tcg_wasm64_count_runloop_attach_probe(counters, status, metadata);
+}
+
 bool tcg_wasm64_backend_available(void)
 {
     return true;
@@ -2169,6 +2284,15 @@ void tcg_wasm64_report_summary(const char *reason,
             "\"exec_generated_output_unavailable_tbs\":%" PRIu64 ","
             "\"exec_generated_output_missing_candidate_tbs\":%" PRIu64 ","
             "\"exec_generated_output_incomplete_tbs\":%" PRIu64 ","
+            "\"runloop_attach_probe\":{\"tbs\":%" PRIu64 ","
+            "\"ready_tbs\":%" PRIu64 ",\"ready_ops\":%" PRIu64 ","
+            "\"empty\":%" PRIu64 ",\"capacity\":%" PRIu64 ","
+            "\"missing_metadata\":%" PRIu64 ","
+            "\"invalid_metadata\":%" PRIu64 ","
+            "\"non_terminal\":%" PRIu64 ","
+            "\"unsupported_hot_tb\":%" PRIu64 ","
+            "\"no_generated_output\":%" PRIu64 ","
+            "\"output_truncated\":%" PRIu64 "},"
             "\"fallback_unsupported\":%" PRIu64 ","
             "\"fallback_helper\":%" PRIu64 ","
             "\"fallback_qemu_load\":%" PRIu64 ","
@@ -2224,6 +2348,17 @@ void tcg_wasm64_report_summary(const char *reason,
             counters->exec_generated_output_unavailable_tbs,
             counters->exec_generated_output_missing_candidate_tbs,
             counters->exec_generated_output_incomplete_tbs,
+            counters->runloop_attach_probe_tbs,
+            counters->runloop_attach_probe_ready_tbs,
+            counters->runloop_attach_probe_ready_ops,
+            counters->runloop_attach_probe_empty,
+            counters->runloop_attach_probe_capacity,
+            counters->runloop_attach_probe_missing_metadata,
+            counters->runloop_attach_probe_invalid_metadata,
+            counters->runloop_attach_probe_non_terminal,
+            counters->runloop_attach_probe_unsupported_hot_tb,
+            counters->runloop_attach_probe_no_generated_output,
+            counters->runloop_attach_probe_output_truncated,
             counters->fallback_unsupported,
             counters->fallback_helper,
             counters->fallback_qemu_load,
@@ -2318,8 +2453,14 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
                     counters->translated_generated_output_truncated++;
                 }
             }
+            if (tcg_wasm64_runloop_attach_probe_enabled()) {
+                tcg_wasm64_runloop_attach_probe(counters, metadata);
+            }
         } else {
             counters->translated_metadata_misses++;
+            if (tcg_wasm64_runloop_attach_probe_enabled()) {
+                tcg_wasm64_runloop_attach_probe(counters, NULL);
+            }
         }
     }
     active_counters = counters;
