@@ -82,6 +82,13 @@ export const WASMJIT_HOTSET = {
   size: 16,
 };
 
+export const WASMJIT_HOTSET_OP = {
+  ramAddConst: 1,
+  ramXorConst: 2,
+  aluAddConst: 3,
+  aluXorConst: 4,
+};
+
 export const WASMJIT_TB_METADATA_FLAGS = {
   valid: 1 << 0,
   fallback: 1 << 1,
@@ -107,6 +114,125 @@ export const WASMJIT_HOTSET_BUILD_STATUS = {
   noGeneratedOutput: "no-generated-output",
   outputTruncated: "output-truncated",
 };
+
+export function encodeTciRI(op, r0, imm) {
+  return ((op & 0xff) |
+    ((r0 & 0xf) << 8) |
+    (((imm << 12) >> 12) << 12)) >>> 0;
+}
+
+export function encodeTciRRR(op, r0, r1, r2) {
+  return ((op & 0xff) |
+    ((r0 & 0xf) << 8) |
+    ((r1 & 0xf) << 12) |
+    ((r2 & 0xf) << 16)) >>> 0;
+}
+
+export function encodeTciRRS(op, r0, r1, offset) {
+  return ((op & 0xff) |
+    ((r0 & 0xf) << 8) |
+    ((r1 & 0xf) << 12) |
+    (((offset << 16) >> 16) << 16)) >>> 0;
+}
+
+export function encodeTciP(op, diff = 0) {
+  return ((op & 0xff) | (((diff << 12) >> 12) << 12)) >>> 0;
+}
+
+export function encodeTciRL(op, r0, diff = 0) {
+  return ((op & 0xff) | ((r0 & 0xf) << 8) |
+    (((diff << 12) >> 12) << 12)) >>> 0;
+}
+
+function signExtend(value, bits) {
+  const shift = 32 - bits;
+  return (value << shift) >> shift;
+}
+
+function tciOp(insn) {
+  return insn & 0xff;
+}
+
+function tciR0(insn) {
+  return (insn >>> 8) & 0xf;
+}
+
+function tciR1(insn) {
+  return (insn >>> 12) & 0xf;
+}
+
+function tciR2(insn) {
+  return (insn >>> 16) & 0xf;
+}
+
+function tciImm20(insn) {
+  return signExtend(insn >>> 12, 20);
+}
+
+function tciOffset16(insn) {
+  return signExtend(insn >>> 16, 16);
+}
+
+function terminalOp(opcodes, op) {
+  return op === opcodes.goto_tb || op === opcodes.exit_tb;
+}
+
+function decodeSemanticHotsetTB(metadata, opcodes) {
+  const words = metadata.generatedOutput;
+  if (!opcodes || !words || words.length < 3) {
+    return null;
+  }
+
+  const terminal = tciOp(words[words.length - 1]);
+  if (!terminalOp(opcodes, terminal)) {
+    return null;
+  }
+
+  if (words.length === 4 &&
+      tciOp(words[0]) === opcodes.tci_movi &&
+      (tciOp(words[1]) === opcodes.add || tciOp(words[1]) === opcodes.xor) &&
+      tciOp(words[2]) === opcodes.brcond) {
+    const constReg = tciR0(words[0]);
+    const dstReg = tciR0(words[1]);
+    if (tciR1(words[1]) !== dstReg || tciR2(words[1]) !== constReg ||
+        tciR0(words[2]) !== dstReg) {
+      return null;
+    }
+    return {
+      op: tciOp(words[1]) === opcodes.add
+        ? WASMJIT_HOTSET_OP.aluAddConst
+        : WASMJIT_HOTSET_OP.aluXorConst,
+      immediate: BigInt.asUintN(64, BigInt(tciImm20(words[0]))),
+    };
+  }
+
+  if (words.length === 5 &&
+      tciOp(words[0]) === opcodes.ld &&
+      tciOp(words[1]) === opcodes.tci_movi &&
+      (tciOp(words[2]) === opcodes.add || tciOp(words[2]) === opcodes.xor) &&
+      tciOp(words[3]) === opcodes.st) {
+    const valueReg = tciR0(words[0]);
+    const baseReg = tciR1(words[0]);
+    const constReg = tciR0(words[1]);
+    if (tciOffset16(words[0]) !== 0 ||
+        tciR0(words[2]) !== valueReg ||
+        tciR1(words[2]) !== valueReg ||
+        tciR2(words[2]) !== constReg ||
+        tciR0(words[3]) !== valueReg ||
+        tciR1(words[3]) !== baseReg ||
+        tciOffset16(words[3]) !== 0) {
+      return null;
+    }
+    return {
+      op: tciOp(words[2]) === opcodes.add
+        ? WASMJIT_HOTSET_OP.ramAddConst
+        : WASMJIT_HOTSET_OP.ramXorConst,
+      immediate: BigInt.asUintN(64, BigInt(tciImm20(words[1]))),
+    };
+  }
+
+  return null;
+}
 
 export function encodeU32(value) {
   if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
@@ -178,7 +304,10 @@ function generatedOutputAvailable(metadata) {
     Array.isArray(metadata.generatedOutput);
 }
 
-export function buildHotsetFromMetadataModel(metadata, { capacity = metadata.length } = {}) {
+export function buildHotsetFromMetadataModel(metadata, {
+  capacity = metadata.length,
+  opcodes,
+} = {}) {
   if (metadata.length === 0) {
     return { ok: false, status: WASMJIT_HOTSET_BUILD_STATUS.empty };
   }
@@ -223,15 +352,21 @@ export function buildHotsetFromMetadataModel(metadata, { capacity = metadata.len
       };
     }
 
+    const semantic = decodeSemanticHotsetTB(current, opcodes);
+    if (!semantic) {
+      return {
+        ok: false,
+        status: WASMJIT_HOTSET_BUILD_STATUS.unsupportedHotTb,
+      };
+    }
+
     const tbId = index + 1;
-    const immediate = BigInt(current.generatedOutputChecksum ||
-      current.generatedOutputOpCount || 1);
     tbs.push({
       tbId,
       nextTbId: index + 1 === metadata.length ? 1 : tbId + 1,
-      op: (index & 1) ? 2 : 1,
+      op: semantic.op,
       guestInstructions: current.generatedOutputOpCount,
-      immediate,
+      immediate: semantic.immediate,
     });
   }
 
