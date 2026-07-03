@@ -265,11 +265,11 @@ at ``13958`` ms, reached ``virtio_blk virtio0``, and timed out at ``180321``
 ms without ``Welcome to TuxTest``.  The final line was
 ``Pthread ... Uncaught Infinity``.  In the generated Emscripten JavaScript,
 ``Infinity`` is thrown by ``__emscripten_throw_longjmp`` for JS SJLJ longjmp
-support, so the current corrected generic RISC-V browser blocker is an
+support, so that artifact's corrected generic RISC-V browser blocker was an
 escaped Emscripten longjmp in the raw block I/O path.  The earlier RCU
 assertion remains historical evidence from an ad hoc browser shape and should
-not be treated as the current RISC-V baseline blocker without reproducing it
-with the official blank-CPU manifest.
+not be treated as the RISC-V baseline blocker without reproducing it with the
+official blank-CPU manifest.
 
 An attempted experiment to pass ``-sSUPPORT_LONGJMP=wasm`` through
 ``--configure-arg=--extra-cflags=...`` and ``--configure-arg=--extra-ldflags=...``
@@ -278,6 +278,56 @@ was stopped as unaccepted: Meson still reported the normal Emscripten
 used ``-enable-emscripten-sjlj``.  If Wasm SJLJ is tested next, it needs a
 real cross-file or build-helper option that changes the Emscripten compile and
 link mode before spending time on browser proof.
+
+The accepted RISC-V baseline came from removing stale opt-in TCI
+subset/direct-boundary experiments from the live TCI and browser-smoke paths,
+then rebuilding the same official blank-CPU TuxBoot guest shape.  The cleanup
+does not identify a precise Emscripten longjmp root cause; it is accepted
+because the before/after artifact evidence is reproducible and the new default
+path reaches the marker.
+
+The cleanup artifact was built with::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-cleanup-r1 \
+    --target riscv64 --build-image
+
+It produced:
+
+* ``qemu-system-riscv64.js`` =
+  ``cbf0836c26df510e1eae6ede43b86d30195975e477e0a2b5f8ca3d65181225f6``;
+* ``qemu-system-riscv64.wasm`` =
+  ``e8f8a97d5ee1c463ed7f3c39e31f29870ebb470becb1518d8e8602ee0fae8fd8``;
+* manifest =
+  ``111c7fe0d1666bdd6793061340c875f6625b9754ba6bd4fa9d032aed5ab7fb97``.
+
+The local Chrome/CDP proof used Chrome ``149.0.7827.201`` and wrote
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-cleanup-r1/wasm-browser-smoke-result.json``
+with SHA-256
+``ac0e0af85018108651df3783c9830810bbd1161bac941a9f981c907e890a1450``,
+plus screenshot
+``/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-cleanup-r1/wasm-browser-smoke.png``
+with SHA-256
+``e2ee07da8b466fc2ac318f98bd5384c59539e23f34a2adc9f9ba554f2a464d38``.
+The browser run imported QEMU at ``2055`` ms, started QEMU at ``2074`` ms,
+printed the Linux version at ``11895`` ms, discovered ``/dev/vda`` at
+``12832`` ms, mounted the root filesystem at ``16272`` ms, started init at
+``16457`` ms, and reached ``Welcome to TuxTest`` at ``40041`` ms.  The final
+sampled elapsed time was ``50242`` ms.
+
+A same-host native control with ``/opt/homebrew/bin/qemu-system-riscv64``
+used::
+
+  qemu-system-riscv64 -M virt -m 512M -nographic -serial mon:stdio \
+    -monitor none -kernel <Image> \
+    -append 'printk.time=0 root=/dev/vda console=ttyS0 panic=-1' \
+    -drive file=<rootfs.ext4>,format=raw,if=none,id=hd0 \
+    -device virtio-blk-device,drive=hd0 -nic none
+
+It reached ``Welcome to TuxTest`` in ``1609`` ms, making the browser/native
+ratio about ``24.9x`` for this generic TuxBoot marker.  This completes the
+generic RISC-V default-TCI baseline for accelerator development.  It is not
+the final Bus Engine OS ``riscv64`` ``virtual-server`` multi-user proof.
 
 Strict definition of done
 =========================
@@ -7336,8 +7386,60 @@ CPU/device state semantics.  A generic libffi trampoline would also still
 cross into C for arbitrary helper signatures, so it would not make generated
 block execution the default.
 
-The measured next structural target is a generated-block dispatch boundary
-around the ``lookup_tb_ptr`` helper shape.  That path accounts for ``95 / 154``
-helper calls in the trace and is the only helper-call category that plausibly
-removes a dominant candidate-loss mechanism without flattening arbitrary
-helpers.
+The measured next structural target was a generated-block dispatch boundary
+around the ``lookup_tb_ptr`` helper shape.  Follow-up W2m-j evidence rejected
+that family as the performance solution: it can produce high boundary-entry
+coverage while still returning to QEMU too often and running slower than
+default TCI.
+
+Rejected TCI subset and direct-boundary paths
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The opt-in TCI wasm subset, generated-only subset, relaxed TCI memory-barrier,
+and direct generated-boundary experiments are retained in this document as
+negative evidence only.  They are not active performance options in the live
+runner or TCI interpreter.
+
+The strongest rejection evidence is the W2m-j direct-boundary diagnostic.  It
+reported near-total boundary coverage:
+
+.. code-block:: text
+
+  direct_tb_entries=44,000,001
+  direct_generated_executed=43,960,181
+  direct_generated_dispatches=1,664
+  direct_tci_fallbacks=39,820
+
+The same run failed to reach ``QEMU_WASM_LINUX_BOOT_OK`` within ``180252`` ms,
+while default TCI generic smokes in the same family reached the marker around
+``100`` seconds.  The true compiled generated-block counters remained zero:
+``generated_compiled=0``, ``generated_executed=0``, and
+``generated_cache_hits=0``.
+
+Conclusion: boundary-entry coverage is not a performance success metric.  It
+only proves that QEMU entered a generated wrapper frequently.  It does not
+prove optimized guest instruction retirement, internal TB chaining, inline
+RAM/SoftMMU TLB hits, or rare synthetic exits.
+
+The live tree therefore removes:
+
+* ``QEMU_TCI_RELAXED_MB`` and the browser runner's ``--tci-relaxed-mb`` flag.
+* ``QEMU_TCI_WASM_SUBSET`` and the browser runner's ``--tci-wasm-subset``
+  flag.
+* ``QEMU_TCI_WASM_GENERATED_ONLY`` and the browser runner's
+  ``--tci-wasm-generated-only`` flag.
+* the TCI generated-subset compiler/executor and the direct-boundary dispatch
+  branch in ``tcg/tci.c``.
+
+The remaining generated trace support is diagnostic only.  It records TCI
+block/helper shapes for future accelerator design and does not change guest
+execution.
+
+The next W2 implementation shape is a browser-Wasm accelerator run/exit model:
+a long-running ``wasmjit_run()``-style entrypoint, internal TB chaining or
+hotset dispatch, inline common RAM/TLB-hit load/store paths, and synthetic
+exits for MMIO, TLB miss/page fault, interrupt, halt, invalidation,
+unsupported helper, or budget expiry.  The first acceptance gate is not Linux
+boot; it is a deterministic micro-hotset where one entry into generated Wasm
+executes a large counted guest-instruction budget before returning, with
+multiple-times speedup over TCI on ALU/branch and TLB-hit RAM microbenches.

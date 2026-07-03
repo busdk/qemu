@@ -154,33 +154,13 @@ Options:
   --tcg-hotblocks-top N
                      Maximum hotspot entries per summary (default: 12)
   --tci-fast-gates  Enable opt-in TCI translated-block feature-gate caching
-  --wasm64-tcg-generated
-                    Enable experimental wasm64 TCG backend generated execution
-                    attempts in backend-built artifacts
-  --tci-relaxed-mb  Enable the Emscripten/TCI-only relaxed memory-barrier
-                    experiment; default QEMU execution remains strict
   --tci-progress    Enable opt-in TCI translation-block progress summaries
                     for default-path browser diagnostics
   --tci-progress-interval N
                     TB entries between TCI progress summaries
                     (default: 100000)
-  --tci-wasm-subset
-                    Enable the opt-in wasm64 TCI subset execution proof
-  --tci-wasm-generated-only
-                    With --tci-wasm-subset, run generated Wasm blocks when
-                    accepted and fall back directly to normal TCI for
-                    generated-unsupported blocks instead of the C subset
-  --tci-wasm-subset-threshold N
-                    TB executions before the subset path is attempted
-                    (default: 1024)
-  --tci-wasm-subset-max-ops N
-                    Maximum TCI ops accepted by the subset path
-                    (1..512, default: 512)
-  --tci-wasm-subset-interval N
-                    Attempt interval between subset summaries
-                    (default: 100000)
   --tci-wasm-generated-trace
-                    Emit bounded generated WebAssembly block trace diagnostics
+                    Emit bounded TCI block and helper trace diagnostics
                     into the smoke result JSON
   --tci-wasm-generated-trace-limit N
                     Maximum generated trace events to keep (default: 64)
@@ -275,17 +255,10 @@ function parseArgs(argv) {
     tcgHotblocksOpSample: 1,
     tcgHotblocksTop: 12,
     tciFastGates: false,
-    wasm64TcgGenerated: false,
-    tciRelaxedMb: false,
     tciProgress: false,
     tciProgressInterval: 100000,
-    tciWasmSubset: false,
-    tciWasmGeneratedOnly: false,
     tciWasmGeneratedTrace: false,
     tciWasmGeneratedTraceLimit: 64,
-    tciWasmSubsetInterval: 100000,
-    tciWasmSubsetMaxOps: 512,
-    tciWasmSubsetThreshold: 1024,
     timeoutMs: 180000,
     userDataDir: null,
     visualMarker: "",
@@ -491,31 +464,15 @@ function parseArgs(argv) {
     } else if (arg === "--tci-fast-gates") {
       options.tciFastGates = true;
       explicit.add("tciFastGates");
-    } else if (arg === "--wasm64-tcg-generated") {
-      options.wasm64TcgGenerated = true;
-      explicit.add("wasm64TcgGenerated");
-    } else if (arg === "--tci-relaxed-mb") {
-      options.tciRelaxedMb = true;
-      explicit.add("tciRelaxedMb");
     } else if (arg === "--tci-progress") {
       options.tciProgress = true;
       explicit.add("tciProgress");
     } else if (arg === "--tci-progress-interval") {
       options.tciProgressInterval = Number(argv[++i]);
       explicit.add("tciProgressInterval");
-    } else if (arg === "--tci-wasm-subset") {
-      options.tciWasmSubset = true;
-      explicit.add("tciWasmSubset");
-    } else if (arg === "--tci-wasm-generated-only") {
-      options.tciWasmGeneratedOnly = true;
-      options.tciWasmSubset = true;
-      explicit.add("tciWasmGeneratedOnly");
-      explicit.add("tciWasmSubset");
     } else if (arg === "--tci-wasm-generated-trace") {
       options.tciWasmGeneratedTrace = true;
-      options.tciWasmSubset = true;
       explicit.add("tciWasmGeneratedTrace");
-      explicit.add("tciWasmSubset");
     } else if (arg === "--tci-wasm-generated-trace-limit") {
       options.tciWasmGeneratedTraceLimit = Number(argv[++i]);
       explicit.add("tciWasmGeneratedTraceLimit");
@@ -525,15 +482,6 @@ function parseArgs(argv) {
     } else if (arg === "--fw-cfg-trace-limit") {
       options.fwCfgTraceLimit = Number(argv[++i]);
       explicit.add("fwCfgTraceLimit");
-    } else if (arg === "--tci-wasm-subset-interval") {
-      options.tciWasmSubsetInterval = Number(argv[++i]);
-      explicit.add("tciWasmSubsetInterval");
-    } else if (arg === "--tci-wasm-subset-max-ops") {
-      options.tciWasmSubsetMaxOps = Number(argv[++i]);
-      explicit.add("tciWasmSubsetMaxOps");
-    } else if (arg === "--tci-wasm-subset-threshold") {
-      options.tciWasmSubsetThreshold = Number(argv[++i]);
-      explicit.add("tciWasmSubsetThreshold");
     } else if (arg === "--user-data-dir") {
       options.userDataDir = argv[++i];
       explicit.add("userDataDir");
@@ -559,11 +507,7 @@ function parseArgs(argv) {
       "screenshotFullPage",
       "tcgHotblocks",
       "tciFastGates",
-      "wasm64TcgGenerated",
-      "tciRelaxedMb",
       "tciProgress",
-      "tciWasmSubset",
-      "tciWasmGeneratedOnly",
       "tciWasmGeneratedTrace",
     ],
     checksumFields: ["kernel", "initrd", "rootfs"],
@@ -587,10 +531,7 @@ function parseArgs(argv) {
       "tcgHotblocksOpLimit",
       "tcgHotblocksOpSample",
       "tcgHotblocksTop",
-      "tciWasmSubsetInterval",
       "tciWasmGeneratedTraceLimit",
-      "tciWasmSubsetMaxOps",
-      "tciWasmSubsetThreshold",
       "timeoutMs",
     ],
     pathFields: [
@@ -711,11 +652,6 @@ function parseArgs(argv) {
     console.error("--tcg-hotblocks-top must be an integer from 1 to 64");
     usage(2);
   }
-  if (!Number.isInteger(options.tciWasmSubsetInterval) ||
-      options.tciWasmSubsetInterval <= 0) {
-    console.error("--tci-wasm-subset-interval must be a positive integer");
-    usage(2);
-  }
   if (!Number.isInteger(options.tciWasmGeneratedTraceLimit) ||
       options.tciWasmGeneratedTraceLimit < 0 ||
       options.tciWasmGeneratedTraceLimit > 1024) {
@@ -726,17 +662,6 @@ function parseArgs(argv) {
       options.fwCfgTraceLimit < 0 ||
       options.fwCfgTraceLimit > 8192) {
     console.error("--fw-cfg-trace-limit must be an integer from 0 to 8192");
-    usage(2);
-  }
-  if (!Number.isInteger(options.tciWasmSubsetMaxOps) ||
-      options.tciWasmSubsetMaxOps <= 0 ||
-      options.tciWasmSubsetMaxOps > 512) {
-    console.error("--tci-wasm-subset-max-ops must be an integer from 1 to 512");
-    usage(2);
-  }
-  if (!Number.isInteger(options.tciWasmSubsetThreshold) ||
-      options.tciWasmSubsetThreshold <= 0) {
-    console.error("--tci-wasm-subset-threshold must be a positive integer");
     usage(2);
   }
   if (!Number.isInteger(options.tciProgressInterval) ||
@@ -1450,14 +1375,8 @@ export function browserSmokeUrl(options) {
     url.searchParams.set("tcgHotblocksOpSample", String(tcgHotblocksOpSample));
     url.searchParams.set("tcgHotblocksTop", String(tcgHotblocksTop));
   }
-  if (options.tciRelaxedMb) {
-    url.searchParams.set("tciRelaxedMb", "1");
-  }
   if (options.tciFastGates) {
     url.searchParams.set("tciFastGates", "1");
-  }
-  if (options.wasm64TcgGenerated) {
-    url.searchParams.set("wasm64TcgGenerated", "1");
   }
   if (options.tciProgress) {
     url.searchParams.set("tciProgress", "1");
@@ -1466,29 +1385,11 @@ export function browserSmokeUrl(options) {
       String(options.tciProgressInterval),
     );
   }
-  if (options.tciWasmSubset) {
-    url.searchParams.set("tciWasmSubset", "1");
-    if (options.tciWasmGeneratedOnly) {
-      url.searchParams.set("tciWasmGeneratedOnly", "1");
-    }
-    if (options.tciWasmGeneratedTrace) {
-      url.searchParams.set("tciWasmGeneratedTrace", "1");
-      url.searchParams.set(
-        "tciWasmGeneratedTraceLimit",
-        String(options.tciWasmGeneratedTraceLimit),
-      );
-    }
+  if (options.tciWasmGeneratedTrace) {
+    url.searchParams.set("tciWasmGeneratedTrace", "1");
     url.searchParams.set(
-      "tciWasmSubsetInterval",
-      String(options.tciWasmSubsetInterval),
-    );
-    url.searchParams.set(
-      "tciWasmSubsetMaxOps",
-      String(options.tciWasmSubsetMaxOps),
-    );
-    url.searchParams.set(
-      "tciWasmSubsetThreshold",
-      String(options.tciWasmSubsetThreshold),
+      "tciWasmGeneratedTraceLimit",
+      String(options.tciWasmGeneratedTraceLimit),
     );
   }
   url.searchParams.set("rootfsDevice", options.rootfsDevice);
@@ -1599,28 +1500,15 @@ export function initialSmokeResult(options, browserVersion) {
       ? options.tcgHotblocksTop
       : 12,
     tciFastGates: Boolean(options.tciFastGates),
-    wasm64TcgGenerated: Boolean(options.wasm64TcgGenerated),
-    tciRelaxedMb: Boolean(options.tciRelaxedMb),
     tciProgress: Boolean(options.tciProgress),
     tciProgressInterval: Number.isInteger(options.tciProgressInterval)
       ? options.tciProgressInterval
       : 100000,
-    tciWasmSubset: Boolean(options.tciWasmSubset),
-    tciWasmGeneratedOnly: Boolean(options.tciWasmGeneratedOnly),
     tciWasmGeneratedTrace: Boolean(options.tciWasmGeneratedTrace),
     tciWasmGeneratedTraceLimit:
       Number.isInteger(options.tciWasmGeneratedTraceLimit)
         ? options.tciWasmGeneratedTraceLimit
         : 64,
-    tciWasmSubsetInterval: Number.isInteger(options.tciWasmSubsetInterval)
-      ? options.tciWasmSubsetInterval
-      : 100000,
-    tciWasmSubsetMaxOps: Number.isInteger(options.tciWasmSubsetMaxOps)
-      ? options.tciWasmSubsetMaxOps
-      : 64,
-    tciWasmSubsetThreshold: Number.isInteger(options.tciWasmSubsetThreshold)
-      ? options.tciWasmSubsetThreshold
-      : 1024,
     userDataDir: options.userDataDir,
     visualMarker: options.visualMarker,
     success: false,

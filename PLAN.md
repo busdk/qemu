@@ -84,7 +84,7 @@ run that reaches a weaker marker than normal multi-user readiness.
   `virtual-server` final proof, strict fallback/non-regression requirements,
   and R1-R5 gates for baseline, design, first accelerator slice, speed proof,
   and final Bus Engine OS proof.
-- [ ] R1 - Establish the browser and native RISC-V baselines before
+- [x] R1 - Establish the browser and native RISC-V baselines before
   acceleration. DoD: build or obtain current `qemu-system-riscv64` native and
   WASM artifacts, boot a generic RISC-V Linux smoke in Chromium with default
   TCI, record exact commands, browser version, artifact hashes, result JSON,
@@ -185,10 +185,55 @@ run that reaches a weaker marker than normal multi-user readiness.
     `virtio_blk virtio0`, and timed out at `180321` ms without
     `Welcome to TuxTest`. The final line was `Pthread ... Uncaught Infinity`.
     Generated JS maps that value to Emscripten's
-    `__emscripten_throw_longjmp`, so the current corrected generic RISC-V
-    browser blocker is an escaped Emscripten JS SJLJ longjmp in the block I/O
-    path, not the earlier ad hoc-shape RCU assertion. R1 remains open until
-    this guest reaches `Welcome to TuxTest` in browser default TCI.
+    `__emscripten_throw_longjmp`, so that artifact's corrected generic RISC-V
+    browser blocker was an escaped Emscripten JS SJLJ longjmp in the block I/O
+    path, not the earlier ad hoc-shape RCU assertion. R1 remained open from
+    this slice until the R1d cleanup artifact reached `Welcome to TuxTest` in
+    browser default TCI.
+  - [x] R1d - Accept the generic RISC-V default-TCI browser baseline after
+    removing stale TCI subset/direct-boundary experiments from the live tree.
+    DoD: rebuild a current `riscv64-softmmu` default-TCI artifact from this
+    branch, rerun the official blank-CPU TuxBoot browser manifest in Chrome,
+    record native and browser marker timings, and make clear that this is a
+    generic baseline, not the final Bus Engine OS proof. Accepted 2026-07-03:
+    `node --check scripts/ci/wasm-browser-smoke.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke-runner.mjs`,
+    `node --check scripts/ci/wasm-helper-call-classify.mjs`,
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+    `node scripts/ci/wasm-helper-call-classify-test.mjs`,
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`, and
+    `git diff --cached --check` passed. The artifact build command
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-wasm-cleanup-r1
+    --target riscv64 --build-image` passed. Artifact hashes:
+    `qemu-system-riscv64.js`
+    `cbf0836c26df510e1eae6ede43b86d30195975e477e0a2b5f8ca3d65181225f6`,
+    `qemu-system-riscv64.wasm`
+    `e8f8a97d5ee1c463ed7f3c39e31f29870ebb470becb1518d8e8602ee0fae8fd8`,
+    manifest
+    `111c7fe0d1666bdd6793061340c875f6625b9754ba6bd4fa9d032aed5ab7fb97`.
+    Local Chrome/CDP proof using Chrome `149.0.7827.201` wrote
+    `/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-cleanup-r1/wasm-browser-smoke-result.json`
+    (SHA256
+    `ac0e0af85018108651df3783c9830810bbd1161bac941a9f981c907e890a1450`)
+    and screenshot
+    `/Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-browser-cleanup-r1/wasm-browser-smoke.png`
+    (SHA256
+    `e2ee07da8b466fc2ac318f98bd5384c59539e23f34a2adc9f9ba554f2a464d38`).
+    The browser run imported QEMU at `2055` ms, started QEMU at `2074` ms,
+    printed Linux at `11895` ms, discovered `/dev/vda` at `12832` ms, mounted
+    rootfs at `16272` ms, started init at `16457` ms, and reached
+    `Welcome to TuxTest` at `40041` ms; the final sampled elapsed time was
+    `50242` ms. A same-host native command
+    `qemu-system-riscv64 -M virt -m 512M -nographic -serial mon:stdio
+    -monitor none -kernel <Image> -append 'printk.time=0 root=/dev/vda
+    console=ttyS0 panic=-1' -drive file=<rootfs.ext4>,format=raw,if=none,id=hd0
+    -device virtio-blk-device,drive=hd0 -nic none` reached the same marker in
+    `1609` ms. The browser/native ratio for this generic TuxBoot marker is
+    therefore about `24.9x`. This accepts the RISC-V generic baseline and
+    disproves the earlier `Uncaught Infinity` result as the current default
+    path blocker after cleanup; it does not satisfy the final Bus Engine OS
+    multi-user proof or identify a precise Emscripten longjmp root cause.
 - [x] R2 - Add the RV64-to-WASM accelerator design and fail-closed boundary.
   DoD: document CPU state layout, register residency, synthetic exits
   (`BUDGET`, `MMIO`, `TLB_MISS`, `INTERRUPT`, `CSR`, `INVALID`, `FATAL`),
@@ -409,6 +454,16 @@ Engineering rules for this goal:
     most `414` ppm generated coverage when coverage accounting existed, and
     every generated-only browser smoke was slower than the same-commit W3
     default TCI baseline.
+  - The direct generated-boundary path is also rejected as a performance
+    candidate. The W2m-j diagnostic reached near-total boundary coverage
+    (`direct_tb_entries=44,000,001`,
+    `direct_generated_executed=43,960,181`), but failed the generic marker
+    after `180252` ms while the same family of default TCI smokes reached the
+    marker around `100` s. Boundary-entry coverage only proves that QEMU
+    crossed a generated wrapper frequently; it does not prove generated
+    instruction retirement, internal TB chaining, inline SoftMMU/TLB hits, or
+    rare synthetic exits. Treat millions of generated-boundary entries as a
+    warning sign, not a success metric.
   - Guest-side Bus Engine OS trimming is useful but secondary. Even an
     aggressive native boot reduction from `44` seconds to `20` seconds would
     still project to about `17` minutes at the current browser/native ratio.
@@ -979,11 +1034,11 @@ Engineering rules for this goal:
   before `QEMU_WASM_LINUX_BOOT_OK`. The generated path compiled only `12`
   blocks and had `fallback_runtime=1`; that is useful failure evidence, not
   meaningful generated coverage. The pointer-width ABI correction from
-  `addFunction(..., "ii")` to `addFunction(..., "jj")` is retained, and
-  deterministic tests now guard it. Because generated execution is still too
-  narrow and unsafe for the gate, backend builds now keep
-  `QEMU_TCI_WASM_SUBSET` opt-in instead of enabling generated/subset
-  execution by default. The final opt-in-guarded artifact hashes are JS
+  `addFunction(..., "ii")` to `addFunction(..., "jj")` was useful evidence
+  at the time, but the generated-subset runtime path is not retained because
+  later W2m-j evidence disproved the direct-boundary shape as a performance
+  fix. The final opt-in-guarded artifact hashes for the historical attempt
+  were JS
   `d02596846580898d9a062dd1bf3a0ee04b727447e669733e3662283fb458846`,
   WASM `b70c7ec5bda838094487700cd766197283cb796af723d9e1675ce68dcd541342`,
   manifest `b1d667d55fff5be892a609f833bb9a5b2a1bfad52705ee0785d5e863b20a1c49`.
@@ -1198,15 +1253,50 @@ Engineering rules for this goal:
   CPU/device side effects, and `tci_tb_ptr` return-address state. The
   measured gate-moving target is not broad helper flattening; it is the
   generated-block dispatch boundary around `lookup_tb_ptr`.
-- [ ] W2m-i - Implement or reject a generated-block dispatch boundary around
-  the measured `lookup_tb_ptr` helper shape. DoD: use the W2m-h classifier
-  output and QEMU TCI dispatch semantics to design the narrow boundary before
-  code. Either implement deterministic tests showing generated blocks can
-  return the same next-TB decision as the TCI `lookup_tb_ptr` path without
-  re-entering the generic libffi helper on the hot path, or record why the
-  dispatch helper must remain fallback. A browser run is allowed only if the
-  local evidence predicts at least an order-of-magnitude generated coverage
-  share increase or removes the dominant `lookup_tb_ptr` candidate loss.
+- [x] W2m-i - Reject the per-TB generated-block dispatch boundary as the W2
+  performance candidate. Accepted evidence: W2m-j proved the narrower
+  `lookup_tb_ptr`/direct-boundary family can report near-total boundary
+  coverage and still be slower than default TCI. The long diagnostic reported
+  `direct_tb_entries=44,000,001`,
+  `direct_generated_executed=43,960,181`,
+  `direct_generated_dispatches=1664`, and
+  `direct_tci_fallbacks=39820`, then failed the generic marker after
+  `180252` ms. True compiled generated-block counters remained
+  `generated_compiled=0`, `generated_executed=0`, and
+  `generated_cache_hits=0`. Conclusion: a generated wrapper that returns to
+  QEMU after each TB, flushes CPU state through memory, calls helpers for
+  common memory operations, and relies on QEMU main-loop lookup is the wrong
+  abstraction. The implementation code for the direct-boundary experiment is
+  removed from the live tree; the evidence remains here so the path is not
+  reopened under a new name.
+- [ ] W2n - Design the real browser-Wasm accelerator run/exit path before
+  writing another execution optimization. DoD: add a short design note and
+  deterministic prototype plan for a long-running `wasmjit_run()`-style
+  entrypoint that stays inside generated Wasm until a synthetic VM exit
+  occurs. Required gates:
+  - Metrics replace boundary-entry coverage with guest instructions retired
+    through generated Wasm bodies, guest instructions retired through
+    TCI/fallback, wall time in generated bodies, wall time in TCI dispatch,
+    wall time in TB lookup/main loop, wall time in helper calls, wall time in
+    `qemu_ld`/`qemu_st`, compile/instantiate time, generated-body chain
+    length, and synthetic exit reasons.
+  - A performance-proof mode exists in the design: unsupported hot TBs fail
+    loudly with reason, while compatibility mode may still fall back to TCI.
+  - The first prototype target is not Linux boot. It is a deterministic
+    micro-hotset where one call into the generated run loop executes at least
+    `1,000,000` guest instructions or an equivalent counted instruction
+    budget before returning for budget expiry, with no per-TB QEMU main-loop
+    return.
+  - Common RAM load/store TLB-hit paths are planned as inline generated Wasm
+    operations. Calling `qemu_ld`/`qemu_st` for every generated load/store is
+    explicitly a failed-performance shape unless measurement later proves
+    otherwise.
+  - Direct hot branches are planned as intra-module control transfer or
+    dispatch-table flow inside the generated run loop. Per-TB function calls
+    back through QEMU do not satisfy W2n.
+  - No W3 browser speed gate may run from W2n until the deterministic
+    micro-hotset gate proves the new shape is multiple-times faster than TCI
+    on ALU/branch and TLB-hit RAM microbenches.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and
