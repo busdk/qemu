@@ -4758,6 +4758,7 @@ static bool tcg_wasm64_translate_op_supported(uint32_t op)
     case INDEX_op_add:
     case INDEX_op_and:
     case INDEX_op_brcond:
+    case INDEX_op_call:
     case INDEX_op_exit_tb:
     case INDEX_op_goto_tb:
     case INDEX_op_ld:
@@ -4796,6 +4797,12 @@ static bool tcg_wasm64_translate_op_generated_supported(uint32_t op)
     case INDEX_op_add:
     case INDEX_op_and:
     case INDEX_op_brcond:
+    /*
+     * Helper calls are represented as a generated prefix terminal: generated
+     * code commits state and returns TCG_WASM64_RUN_EXIT_HELPER, leaving the
+     * actual helper invocation and continuation to the host/TCI boundary.
+     */
+    case INDEX_op_call:
     case INDEX_op_deposit:
     case INDEX_op_exit_tb:
     case INDEX_op_goto_tb:
@@ -4834,6 +4841,28 @@ static bool tcg_wasm64_translate_op_generated_supported(uint32_t op)
     }
 }
 
+static bool tcg_wasm64_translate_call_exit_supported(uint32_t insn)
+{
+    uint32_t ret_len = (insn >> 8) & 0xfu;
+
+    /*
+     * The TCI word exposes return arity but not helper flags such as
+     * TCG_CALL_NO_RETURN.  Support the common void/u32/u64 helper returns and
+     * fail closed for wider return state until the boundary models it.
+     */
+    return ret_len <= 2;
+}
+
+static void tcg_wasm64_translate_mark_generated_unsupported(
+    TCGWasm64TBMetadata *metadata, uint32_t op)
+{
+    metadata->generated_unsupported_op_count++;
+    metadata->flags &= ~TCG_WASM64_TB_METADATA_GENERATED_CANDIDATE;
+    if (metadata->first_generated_unsupported_op == UINT32_MAX) {
+        metadata->first_generated_unsupported_op = op;
+    }
+}
+
 void tcg_wasm64_translate_begin(const void *tb_ptr)
 {
     TCGWasm64TranslateEntry *entry;
@@ -4869,6 +4898,7 @@ void tcg_wasm64_translate_begin(const void *tb_ptr)
 void tcg_wasm64_translate_note_tci_op(uint32_t op)
 {
     TCGWasm64TBMetadata *metadata = active_translate_metadata;
+    bool after_helper_exit;
     bool supported;
     bool generated_supported;
 
@@ -4876,6 +4906,7 @@ void tcg_wasm64_translate_note_tci_op(uint32_t op)
         return;
     }
 
+    after_helper_exit = metadata->generated_helper_exit_op_count != 0;
     supported = tcg_wasm64_translate_op_supported(op);
     generated_supported = tcg_wasm64_translate_op_generated_supported(op);
     if (metadata->op_count == 0) {
@@ -4894,13 +4925,16 @@ void tcg_wasm64_translate_note_tci_op(uint32_t op)
                 TCG_WASM64_TRANSLATE_FALLBACK_UNSUPPORTED_OPCODE;
         }
     }
-    if (generated_supported) {
-        metadata->generated_supported_op_count++;
-    } else {
-        metadata->generated_unsupported_op_count++;
-        metadata->flags &= ~TCG_WASM64_TB_METADATA_GENERATED_CANDIDATE;
-        if (metadata->first_generated_unsupported_op == UINT32_MAX) {
-            metadata->first_generated_unsupported_op = op;
+    if (!after_helper_exit) {
+        if (generated_supported) {
+            metadata->generated_supported_op_count++;
+        } else {
+            tcg_wasm64_translate_mark_generated_unsupported(metadata, op);
+        }
+        if (op == INDEX_op_call) {
+            metadata->flags |= TCG_WASM64_TB_METADATA_HELPER_EXIT |
+                               TCG_WASM64_TB_METADATA_TERMINAL;
+            metadata->generated_helper_exit_op_count = metadata->op_count;
         }
     }
     if (op == INDEX_op_exit_tb || op == INDEX_op_goto_tb) {
@@ -4931,6 +4965,21 @@ void tcg_wasm64_translate_note_tci_insn(uint32_t op, uint32_t insn)
     uint32_t output_index;
 
     if (!metadata || !tcg_wasm64_translate_op_generated_supported(op)) {
+        return;
+    }
+    if (metadata->generated_helper_exit_op_count != 0 &&
+        metadata->op_count > metadata->generated_helper_exit_op_count) {
+        return;
+    }
+    if (op == INDEX_op_call &&
+        !tcg_wasm64_translate_call_exit_supported(insn)) {
+        if (metadata->generated_supported_op_count > 0) {
+            metadata->generated_supported_op_count--;
+        }
+        metadata->generated_helper_exit_op_count = 0;
+        metadata->flags &= ~(TCG_WASM64_TB_METADATA_HELPER_EXIT |
+                             TCG_WASM64_TB_METADATA_TERMINAL);
+        tcg_wasm64_translate_mark_generated_unsupported(metadata, op);
         return;
     }
 
@@ -5006,9 +5055,20 @@ bool tcg_wasm64_translate_generated_candidate(
            metadata->generated_unsupported_op_count == 0;
 }
 
+static uint32_t tcg_wasm64_translate_generated_output_expected_ops(
+    const TCGWasm64TBMetadata *metadata)
+{
+    if (metadata->generated_helper_exit_op_count != 0) {
+        return metadata->generated_helper_exit_op_count;
+    }
+    return metadata->op_count;
+}
+
 bool tcg_wasm64_translate_generated_output_available(
     const TCGWasm64TBMetadata *metadata)
 {
+    uint32_t expected_ops;
+
     if (!tcg_wasm64_translate_generated_candidate(metadata)) {
         return false;
     }
@@ -5016,9 +5076,10 @@ bool tcg_wasm64_translate_generated_output_available(
         (metadata->flags & TCG_WASM64_TB_METADATA_OUTPUT_TRUNCATED)) {
         return false;
     }
+    expected_ops = tcg_wasm64_translate_generated_output_expected_ops(metadata);
     return metadata->generated_output_size != 0 &&
            metadata->generated_output_size % sizeof(uint32_t) == 0 &&
-           metadata->generated_output_op_count == metadata->op_count &&
+           metadata->generated_output_op_count == expected_ops &&
            metadata->generated_output_op_count ==
                metadata->generated_output_size / sizeof(uint32_t) &&
            metadata->generated_output != NULL;

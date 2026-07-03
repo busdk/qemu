@@ -90,11 +90,13 @@ const R4I_LIVE_X86_SHAPE = [
 
 const STATUS_EXIT = 1n;
 const STATUS_DISPATCH = 2n;
+const STATUS_HELPER = 5n;
 const STATUS_UNSUPPORTED = 6n;
 const RUN_EXIT_REASON_NONE = 0;
 const RUN_EXIT_REASON_BUDGET = 1;
 const RUN_EXIT_REASON_MMIO = 2;
 const RUN_EXIT_REASON_TLB_MISS_OR_FAULT = 3;
+const RUN_EXIT_REASON_HELPER = 5;
 const RUN_EXIT_REASON_UNSUPPORTED = 6;
 const RUN_EXIT_REASON_INVALIDATED = 8;
 const RUN_EXIT_FLAG_PAGE_CROSSING =
@@ -133,6 +135,10 @@ function opImm20(op, r0, imm) {
 
 function opBranch(reg, imm) {
   return (OPS.brcond | (reg << 8) | (((imm & 0xfffff) << 12) >>> 0)) >>> 0;
+}
+
+function opCall(retLen, imm = 0) {
+  return (OPS.call | (retLen << 8) | (((imm & 0xfffff) << 12) >>> 0)) >>> 0;
 }
 
 function opSetcond(op, r0, r1, r2, condition) {
@@ -525,6 +531,20 @@ function splitGeneratedOutput(words, relativeBase) {
     const r2 = bits(insn, 16, 4);
     const tbPtr = relativeBase + (index + 1) * 4;
 
+    if (opc === OPS.call) {
+      const retLen = bits(insn, 8, 4);
+
+      if (index === 0 || retLen > 2) {
+        throw new Error("fixture contains unsupported generated-output shape");
+      }
+      terminal = {
+        kind: "helper",
+        ret: relativeBase + index * 4,
+        status: STATUS_HELPER,
+        callReturnLength: retLen,
+      };
+      break;
+    }
     if (opc === OPS.exit_tb || opc === OPS.goto_tb) {
       const ptr = tbPtr + sextract(insn, 12, 20);
 
@@ -1295,6 +1315,21 @@ function interpretGeneratedOutput(words, state, relativeBase) {
       regs[r0] = toU64((regs[r1] & clearMask) |
                        ((regs[r2] & mask) << BigInt(pos)));
       index++;
+    } else if (opc === OPS.call) {
+      const retLen = bits(insn, 8, 4);
+
+      if (index === 0 || retLen > 2) {
+        throw new Error(`unsupported fixture opcode ${opc} at index ${index}`);
+      }
+      return {
+        status: STATUS_HELPER,
+        ret: BigInt(relativeBase + index * 4),
+        regs,
+        executed,
+        memoryLoads,
+        memoryWrites,
+        callReturnLength: retLen,
+      };
     } else if (opc === OPS.exit_tb) {
       const ptr = BigInt(tbPtr + sextract(insn, 12, 20));
       return {
@@ -1525,6 +1560,9 @@ function runExitReasonName(reason) {
   }
   if (reason === RUN_EXIT_REASON_TLB_MISS_OR_FAULT) {
     return "tlb-miss-or-fault";
+  }
+  if (reason === RUN_EXIT_REASON_HELPER) {
+    return "helper";
   }
   if (reason === RUN_EXIT_REASON_UNSUPPORTED) {
     return "unsupported";
@@ -2678,6 +2716,19 @@ const fixtures = [
       OPS.exit_tb,
     ],
   },
+  {
+    name: "rv64-call-exit-prefix-family",
+    terminal: "helper",
+    relativeBase: 0x5e00,
+    words: [
+      opImm20(OPS.tci_movi, 1, 0x21),
+      opImm20(OPS.tci_movi, 2, 0x22),
+      opReg(OPS.add, 3, 1, 2),
+      opCall(0),
+      OPS.deposit,
+      OPS.exit_tb,
+    ],
+  },
 ];
 
 const liveX86Fixture = fixtures.find((fixture) =>
@@ -3079,11 +3130,19 @@ const r4kSoftmmuFixtures = [
 
 const unsupportedFixtures = [
   {
-    name: "qemu-helper-mixed-unsupported-fallback",
+    name: "rv64-call-exit-at-entry-fails-closed",
     relativeBase: 0x5800,
     words: [
-      OPS.tci_qemu_ld_rrr | (3 << 8) | (14 << 12) | (13 << 16),
-      OPS.call,
+      opCall(0),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "rv64-call-exit-int128-return-fails-closed",
+    relativeBase: 0x5f00,
+    words: [
+      opImm20(OPS.tci_movi, 1, 0x21),
+      opCall(3),
       OPS.exit_tb,
     ],
   },
@@ -3175,9 +3234,10 @@ for (const fixture of r4kSoftmmuFixtures) {
   r4kSoftmmuResults.push(await runSoftmmuFixture(fixture));
 }
 
-assert.equal(results.length, 19);
+assert.equal(results.length, 21);
 assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 7);
 assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 12);
+assert.equal(results.filter((entry) => entry.terminal === "helper").length, 2);
 const helperBoundaryResults = results.filter((entry) =>
   entry.helpers.loads > 0 || entry.helpers.stores > 0);
 const simpleGapResults = results.filter((entry) =>
@@ -3186,6 +3246,8 @@ const rv64BootPathResults = results.filter((entry) =>
   entry.name.startsWith("rv64-boot-"));
 const rv64EnvRelativeResults = results.filter((entry) =>
   entry.name.startsWith("rv64-env-relative-"));
+const rv64HelperExitResults = results.filter((entry) =>
+  entry.name.startsWith("rv64-call-exit-"));
 const liveX86Results = results.filter((entry) =>
   entry.name === "live-x86-pre-r4i-ld32u-goto-tb-13");
 const r4iEmitterResults = results.filter((entry) =>
@@ -3251,6 +3313,26 @@ assert.deepEqual(
     [8, 3, 3, 0, 0],
     [8, 3, 3, 0, 0],
   ],
+);
+assert.equal(rv64HelperExitResults.length, 2);
+assert.deepEqual(
+  [...new Set(rv64HelperExitResults.map((entry) => entry.name))],
+  ["rv64-call-exit-prefix-family"],
+);
+assert.equal(
+  rv64HelperExitResults.every((entry) =>
+    entry.status === STATUS_HELPER.toString() &&
+    entry.terminal === "helper" &&
+    entry.ret === BigInt(0x5e00 + 3 * 4).toString() &&
+    entry.registerStateMatched &&
+    entry.memoryStateMatched &&
+    entry.helpers.loads === 0 &&
+    entry.helpers.stores === 0),
+  true,
+);
+assert.deepEqual(
+  rv64HelperExitResults.map((entry) => entry.generatedTciOpEquivalents),
+  [4, 4],
 );
 assert.deepEqual(
   r4iEmitterResults[0].x86CpuStateContract.generalRegisters.loadedInputRegisters,
@@ -3983,6 +4065,22 @@ console.log(JSON.stringify({
       "out-of-range-fail-closed",
     ],
   },
+  rv64HelperExitFixtures: {
+    fixtureExecutions: rv64HelperExitResults.length,
+    fixtureNames: [...new Set(rv64HelperExitResults.map((entry) =>
+      entry.name))],
+    generatedTciOpEquivalents: rv64HelperExitResults.reduce((count, entry) =>
+      count + entry.generatedTciOpEquivalents, 0),
+    helperExitStatus: STATUS_HELPER.toString(),
+    helperExitReason: "helper",
+    helperCalls: rv64HelperExitResults.reduce((count, entry) =>
+      count + entry.helpers.loads + entry.helpers.stores, 0),
+    opFamilies: [
+      "helper-exit-at-call",
+      "call-at-entry-fail-closed",
+      "int128-helper-return-fail-closed",
+    ],
+  },
   rv64BootPathFixtures: {
     fixtureExecutions: rv64BootPathResults.length,
     fixtureNames: [...new Set(rv64BootPathResults.map((entry) => entry.name))],
@@ -4008,5 +4106,6 @@ console.log(JSON.stringify({
   terminals: {
     goto_tb: results.filter((entry) => entry.terminal === "goto_tb").length,
     exit_tb: results.filter((entry) => entry.terminal === "exit_tb").length,
+    helper: results.filter((entry) => entry.terminal === "helper").length,
   },
 }, null, 2));

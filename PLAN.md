@@ -715,6 +715,29 @@ run that reaches a weaker marker than normal multi-user readiness.
     build, speed claim, BusDK work, or Bus Engine OS proof was run or enabled;
     R4d remains open for the supervisor-run Chrome proof of nonzero real RV64
     generated coverage and remaining fallback attribution.
+  - [x] R4d-f - Add helper-exit-at-call generated-output prefix semantics for
+    RV64 hot TBs. DoD: `INDEX_op_call` can terminate generated-output prefixes
+    by committing generated register state and returning
+    `TCG_WASM64_RUN_EXIT_HELPER`, unsupported helper-exit call classes fail
+    closed, call-containing TBs can count as generated-output-available
+    prefixes instead of being rejected wholesale, and deterministic tests cover
+    accepted and rejected call-exit shapes without a browser run. Accepted
+    2026-07-04: `tcg/wasm64.c` now treats supported helper calls as generated
+    prefix terminals, records generated-output words only through the helper
+    exit, and uses helper-exit prefix length rather than full TB op count for
+    generated-output availability. Common TCI helper return arities
+    void/u32/u64 are accepted; wider return state fails closed until modeled.
+    `scripts/ci/wasm-generated-output-equivalence-test.mjs` now includes
+    `rv64-call-exit-prefix-family`, which executes the generated prefix,
+    flushes register locals, returns helper exit status `5`, records the call
+    word pointer for host/TCI continuation, and leaves helper calls at zero.
+    Fail-closed fixtures cover a call at TB entry and an Int128-return helper.
+    Checks passed: `node scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`, and
+    `git diff --check`. No browser run, artifact build, speed claim, BusDK
+    work, or Bus Engine OS proof was run or enabled; R4d remains open for the
+    supervisor-run Chrome proof of nonzero real RV64 generated coverage and
+    remaining fallback attribution.
   - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster

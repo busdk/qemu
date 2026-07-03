@@ -271,6 +271,7 @@ typedef enum TCGWasm64TBMetadataFlags {
     TCG_WASM64_TB_METADATA_GENERATED_OUTPUT = 1u << 6,
     TCG_WASM64_TB_METADATA_OUTPUT_TRUNCATED = 1u << 7,
     TCG_WASM64_TB_METADATA_TRANSLATION_COUNTED = 1u << 8,
+    TCG_WASM64_TB_METADATA_HELPER_EXIT = 1u << 9,
 } TCGWasm64TBMetadataFlags;
 
 typedef enum TCGWasm64TranslateFallbackReason {
@@ -306,6 +307,7 @@ typedef struct TCGWasm64TBMetadata {
     uint32_t generated_supported_op_count;
     uint32_t generated_unsupported_op_count;
     uint32_t first_generated_unsupported_op;
+    uint32_t generated_helper_exit_op_count;
     uint32_t generated_output_size;
     uint32_t generated_output_op_count;
     uint32_t generated_output_checksum;
