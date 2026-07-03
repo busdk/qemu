@@ -1665,20 +1665,19 @@ for (const status of [
 }
 
 {
-  const child = spawnSync(process.execPath, [
-    runnerPath,
-    "--artifact-dir", "/tmp/artifacts",
-    "--kernel", "/tmp/kernel",
-    "--initrd", "/tmp/initrd",
-    "--min-wasm64-tcg-coverage-ppm", "0",
-  ], {
-    cwd: process.cwd(),
-    encoding: "utf8",
+  const output = captureStderr(() => {
+    assert.throws(
+      () => parseArgs([
+        "--artifact-dir", "/tmp/artifacts",
+        "--kernel", "/tmp/kernel",
+        "--initrd", "/tmp/initrd",
+        "--min-wasm64-tcg-coverage-ppm", "0",
+      ]),
+      (error) => error && error.status === 2,
+    );
   });
-
-  assert.equal(child.status, 2);
   assert.match(
-    `${child.stdout}${child.stderr}`,
+    output,
     /--min-wasm64-tcg-coverage-ppm must be an integer from 1 to 1000000/,
   );
 }
