@@ -124,3 +124,9 @@ the boundary counter is near 100%.
 Do not report the goal complete from a generic Linux smoke alone. The generic
 smoke proves QEMU infrastructure; Bus Engine OS remains the downstream guest
 proof target.
+
+Do not apply RISC-V smoke-test improvements to x86_64 estimates, or the
+reverse. A cross-ISA result may guide reusable accelerator architecture, but
+it changes a target's boot estimate only after the same mechanism is enabled
+and measured on that target with a comparable same-commit smoke or Bus Engine
+OS proof.
