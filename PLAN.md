@@ -1185,6 +1185,150 @@ run that reaches a weaker marker than normal multi-user readiness.
     permission, or unsupported `MemOp`; its first check command is
     `node scripts/ci/wasm-generated-output-equivalence-test.mjs` followed by
     `node scripts/ci/wasm64-translate-metadata-test.mjs`.
+    Slice 6 prep accepted 2026-07-03 on branch
+    `qemu/r4k-invalidation-map-20260703-12`: this is a source-map and
+    deterministic-fixture plan only; it does not implement broad invalidation
+    runtime, complete slice 6, run a browser smoke, claim a speedup, touch
+    RISC-V, or alter the direct-boundary path. The exact TB identity source
+    is `struct TranslationBlock` in `include/exec/translation-block.h`:
+    `pc`, `cs_base`, `flags`, `cflags`, `size`, `icount`, `tc.ptr`,
+    `tc.size`, `page_addr[2]`, `jmp_reset_offset[]`, `jmp_target_addr[]`,
+    `jmp_list_head`, `jmp_list_next[]`, and `jmp_dest[]`. QEMU publishes a
+    TB by `tb_gen_code()` in `accel/tcg/translate-all.c`, inserts the
+    `tb->tc.ptr` interval into the region tree with `tcg_tb_insert()` in
+    `tcg/region.c`, and links it into the physical-page/QHT lookup with
+    `tb_link_page()` in `accel/tcg/tb-maint.c`. Lookup identity is the
+    `tb_hash_func(tb_page_addr0(tb), pc-or-0-for-CF_PCREL, flags, cs_base,
+    cflags)` key used by `tb_link_page()` and by `tb_htable_lookup()` /
+    `tb_lookup_cmp()` in `accel/tcg/cpu-exec.c`; second-page identity is
+    checked with `tb_page_addr1()` and `get_page_addr_code()` when needed.
+    `CF_INVALID` in `TranslationBlock.cflags` is the in-struct stale flag,
+    protected by `jmp_lock`, but it is not safe as the only generated-code
+    guard because full TB flush resets code regions and may make stale TB
+    pointers invalid before generated Wasm can inspect them.
+    The exact TB invalidation and flush paths are `do_tb_phys_invalidate()`,
+    `tb_phys_invalidate()`, `tb_invalidate_phys_range()`,
+    `tb_invalidate_phys_range_fast()`, and
+    `tb_invalidate_phys_page_range__locked()` in
+    `accel/tcg/tb-maint.c`, plus `tb_flush__exclusive_or_serial()` and
+    `queue_tb_flush()`. `do_tb_phys_invalidate()` sets `CF_INVALID`, removes
+    the TB from `tb_ctx.htable` and page lists, clears jump-cache entries,
+    removes outgoing and incoming jumps, and increments
+    `tb_ctx.tb_phys_invalidate_count` only after successful QHT removal.
+    `tb_flush__exclusive_or_serial()` clears every CPU jump cache, resets
+    `tb_ctx.htable`, removes all TBs, resets TCG regions, increments
+    `tb_ctx.tb_flush_count`, and invokes plugin flush callbacks. Those two
+    fields in `struct TBContext` (`accel/tcg/tb-context.h`) are global stats,
+    not per-TB lifetime tokens; generated hotset bodies therefore need a
+    stable wasm64-owned `tb_generation` token, bumped by successful physical
+    invalidation and full flush before stale generated bodies are allowed to
+    run. A generated body must compare its stamped TB generation before it
+    dereferences any TB pointer, code pointer, chain table entry, or
+    generated-output binding; mismatch returns
+    `TCG_WASM64_RUN_EXIT_INVALIDATED` and increments `exits_invalidated`
+    before guest state or generated counters are updated.
+    The exact generated-output binding is `tcg_out_tb_start()` in
+    `tcg/wasm64/tcg-target.c.inc`, which calls
+    `tcg_wasm64_translate_begin(tcg_splitwx_to_rx(s->code_buf))` before
+    emitting the TCI fallback byte stream. `TCGWasm64TranslateEntry` in
+    `tcg/wasm64.c` is keyed by that `tb->tc.ptr` value and owns
+    `TCGWasm64TBMetadata metadata` plus the `generated_output[]` word buffer.
+    `TCGWasm64TBMetadata` in `tcg/wasm64.h` binds `tb_ptr`, `magic`,
+    `version`, `flags`, op counts, generated-supported/unsupported counts,
+    `generated_output_size`, `generated_output_op_count`,
+    `generated_output_checksum`, and `generated_output`. Lookup through
+    `tcg_wasm64_translate_lookup()` / `_mutable()` accepts only matching
+    `tb_ptr`, magic, version, and `TCG_WASM64_TB_METADATA_VALID`.
+    Generated-output availability requires
+    `tcg_wasm64_translate_generated_candidate()`, generated-output flag set,
+    no truncation, nonzero 4-byte-aligned output, output op count equal to
+    metadata op count and word count, and non-NULL output. The current live
+    one-TB proof reconstructs TB identity with
+    `tcg_tb_lookup((uintptr_t)tb_ptr)` and its JavaScript guard compares each
+    word from `metadata->generated_output` against live TB code at
+    `tb->tc.ptr`; drift currently reports
+    status `metadata-output-tb-code-mismatch`. Slice 6 must keep that
+    diagnostic but classify the `wasmjit_run()` rejection as invalidated:
+    zero generated work, `TCG_WASM64_RUN_EXIT_INVALIDATED`, and
+    `exits_invalidated=1`.
+    The exact address-space state source is `struct AddressSpace` and
+    `struct FlatView` in `include/system/memory.h`: `AddressSpace.root`,
+    RCU `current_map`, ioeventfd fields, listeners, and the `FlatView`
+    ranges/dispatch/root. `address_space_set_flatview()` in
+    `system/memory.c` swaps `as->current_map` under BQL when memory topology
+    changes, and `memory_region_transaction_commit()` walks every
+    `AddressSpace` when `memory_region_update_pending` is set.
+    `cpu_address_space_init()` in `system/physmem.c` registers
+    `CPUAddressSpace.tcg_as_listener.commit = tcg_commit`; `tcg_commit()`
+    runs `tlb_flush(cpu)` because CPU TLBs store RAM addresses. x86 address
+    spaces are `X86ASIdx_MEM` and `X86ASIdx_SMM` from `target/i386/cpu.h`,
+    initialized by `target/i386/tcg/system/tcg-cpu.c`; `x86_asidx_from_attrs()`
+    chooses SMM for secure attrs. There is no existing AddressSpace generation
+    field, so slice 6 needs a wasm64-owned `address_space_generation` token
+    for the CPU address-space snapshot used by generated bodies, bumped when
+    `old_view != new_view` for a CPU-visible address space or from the TCG
+    listener commit that already flushes the CPU TLB. A generated body must
+    compare this token before using cached address-space/TLB-derived RAM
+    assumptions; mismatch is an invalidated exit with zero generated work.
+    The exact TLB state source remains `CPUState.neg.tlb` in
+    `include/hw/core/cpu.h`: `CPUTLBCommon.lock`, `dirty`,
+    `full_flush_count`, `part_flush_count`, `elide_flush_count`;
+    per-`mmu_idx` `CPUTLBDesc.fulltlb`, `vtable`, `vfulltlb`,
+    large-page and sizing fields; and `CPUTLBDescFast.mask` / `table` from
+    `include/exec/tlb-common.h`, selected through `cpu_tlb_fast()` and
+    `mmuidx_to_fast_index()`. `tlb_flush_one_mmuidx_locked()`,
+    `tlb_flush_by_mmuidx()`, page/range flush helpers, and
+    `tlb_set_page_full()` in `accel/tcg/cputlb.c` can clear, resize, or
+    refill the fast table and full entries; `tlb_fill_align()` explicitly
+    warns that a fill can resize the table and invalidate prior TLB entry
+    pointers. `CPUTLBCommon` flush counts and dirty bits are stats and
+    bookkeeping, not a complete mirror-generation contract. If slice 5 uses
+    precomputed TLB mirror fields in `TCGWasm64RunContext`, slice 6 must add
+    a C-owned `tlb_mirror_generation` token that is bumped whenever the mirror
+    is refreshed or invalidated and compared before the first inline load/store
+    and before a chained target that reuses the mirror. If the implementation
+    instead reloads `CPUState.neg.tlb` per access, the TLB mirror mismatch
+    fixture should be omitted and the test must assert that no precomputed
+    mirror fields are used.
+    Deterministic slice-6 fixture names and expected counters are:
+    `r4k-invalidation-valid-unchanged-tb-executes` uses matching generated
+    output, TB generation, address-space generation, and TLB mirror generation
+    when present; it exits normally with `runExitReason=none`,
+    `generatedGuestInstructions=2`, `generatedChainLength=2`,
+    deterministic `generatedBodyTimeNs=2000`, `inlineTlbHitLoads=2`,
+    `inlineTlbHitStores=2`, helper/`qemu_ld`/`qemu_st` calls `0`, and all
+    synthetic exit counters including `exits_invalidated=0`.
+    `r4k-invalidation-generated-output-mismatch` mutates one recorded
+    generated-output word after metadata binding but before `wasmjit_run()`;
+    it must not call any generated body, reports diagnostic
+    `metadata-output-tb-code-mismatch`, and records
+    `generatedGuestInstructions=0`, `generatedChainLength=0`,
+    `generatedBodyTimeNs=0`, inline load/store/helper/`qemu_*` counts `0`,
+    `TCG_WASM64_RUN_EXIT_INVALIDATED`, and `exits_invalidated=1`.
+    `r4k-invalidation-tb-generation-mismatch` changes the current
+    `tb_generation` after body compilation; the entry guard fails before any
+    source TB body or TB pointer dereference, with the same zero generated
+    counters and `exits_invalidated=1`.
+    `r4k-invalidation-address-space-generation-mismatch` changes
+    `address_space_generation` before the first cached RAM/TLB assumption; it
+    has the same zero generated counters and invalidated exit.
+    `r4k-invalidation-tlb-mirror-generation-mismatch` is
+    required only if a precomputed mirror exists; it changes
+    `tlb_mirror_generation` before the first inline RAM access and expects the
+    same zero generated counters and invalidated exit. The existing
+    `r4k-two-tb-invalidated-chained-target` fixture should be upgraded from
+    its fixture-local generation word to the same TB-generation token used by
+    live hotsets: source TB state may be flushed to the deterministic expected
+    state after TB A, but the target body must not execute and the reported
+    generated metrics remain `generatedGuestInstructions=0`,
+    `generatedChainLength=0`, `generatedBodyTimeNs=0`,
+    inline load/store/helper/`qemu_*` counts `0`,
+    `TCG_WASM64_RUN_EXIT_INVALIDATED`, and `exits_invalidated=1`.
+    The first real implementation task is to add the narrow wasm64
+    invalidation-token context/descriptor fields, deterministic JS fixture
+    model, and C-side bump/read helpers with `QEMU_BUILD_BUG_ON()` offset
+    checks; generated code must fail closed on any token mismatch before
+    executing guest-visible work.
   - [ ] R4l - Run the x86_64 same-commit generic Chromium speed gate only
     after R4h-R4k have deterministic evidence. DoD: build one default-TCI
     `x86_64-softmmu` artifact and one accelerator artifact from the same
