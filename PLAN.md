@@ -1523,6 +1523,53 @@ run that reaches a weaker marker than normal multi-user readiness.
     build directory or `compile_commands.json`, and standalone
     `tcg/wasm64.c` compilation depends on generated QEMU config/target
     headers; configuring a full x86_64-softmmu build was outside this slice.
+    Slice 6 accepted 2026-07-03 on branch
+    `qemu/r4k-invalidation-impl-20260703-12`: the deterministic x86_64
+    accelerator contract now carries wasm64-owned invalidation tokens in
+    `TCGWasm64RunContext`: `tb_generation` and
+    `address_space_generation`, plus `TCGWasm64TLBMirror.generation` for the
+    precomputed TLB mirror added in slice 5. `tcg/wasm64.c` has
+    `QEMU_BUILD_BUG_ON()` layout checks for the new fields and narrow
+    C-owned read/bump helpers:
+    `tcg_wasm64_tb_generation()`, `tcg_wasm64_bump_tb_generation()`,
+    `tcg_wasm64_address_space_generation()`,
+    `tcg_wasm64_bump_address_space_generation()`,
+    `tcg_wasm64_tlb_mirror_generation()`, and
+    `tcg_wasm64_tlb_mirror_bump_generation()`; TLB mirror refresh bumps the
+    mirror token before republishing mirrored pointers. The deterministic
+    generated-output equivalence gate now reports `r4kInvalidationRejection`
+    with `5` fixtures. `r4k-invalidation-valid-unchanged-tb-executes`
+    validates matching generated output, TB generation `7`, address-space
+    generation `11`, and TLB mirror generation `13`, then executes the
+    two-TB hotset path with `generatedGuestInstructions=2`,
+    `generatedChainLength=2`, `generatedBodyTimeNs=2000`,
+    `inlineTlbHitLoads=2`, `inlineTlbHitStores=2`, helper/`qemu_ld`/
+    `qemu_st` calls all `0`, `runExitReason="none"`, and
+    `exits.invalidated=0`. Fail-closed fixtures cover
+    `r4k-invalidation-generated-output-mismatch`,
+    `r4k-invalidation-tb-generation-mismatch`,
+    `r4k-invalidation-address-space-generation-mismatch`, and
+    `r4k-invalidation-tlb-mirror-generation-mismatch`; all four report
+    `runExitReason="invalidated"`, `exits.invalidated=1`, zero generated
+    guest instructions, zero chain length, zero generated body time, zero
+    inline TLB loads/stores, and zero helper/`qemu_ld`/`qemu_st` calls. The
+    existing `r4k-two-tb-invalidated-chained-target` fixture now uses the
+    same run-context TB generation token instead of a fixture-local memory
+    word, and the stale generated-output diagnostic remains
+    `metadata-output-tb-code-mismatch` while the run rejection is classified
+    as `TCG_WASM64_RUN_EXIT_INVALIDATED`. Checks passed:
+    `git diff --check`,
+    `node --check scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+    `node --check scripts/ci/wasm64-runloop-contract-test.mjs`,
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`, and
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`. No browser
+    smoke, speed claim, broad generic x86 lowering, invalidation hook into
+    QEMU TB/page/address-space listeners, RISC-V work, BusDK work, or Bus
+    Engine OS proof was run or enabled; R4k deterministic slices are complete
+    and R4k remains open only for later integration/performance proof work
+    before R4l may run a browser speed gate.
   - [ ] R4l - Run the x86_64 same-commit generic Chromium speed gate only
     after R4h-R4k have deterministic evidence. DoD: build one default-TCI
     `x86_64-softmmu` artifact and one accelerator artifact from the same

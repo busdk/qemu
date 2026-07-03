@@ -150,6 +150,10 @@ QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, flags) !=
                   TCG_WASM64_RUN_CTX_FLAGS_OFFSET);
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, tlb) !=
                   TCG_WASM64_RUN_CTX_TLB_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, tb_generation) !=
+                  TCG_WASM64_RUN_CTX_TB_GENERATION_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunContext, address_space_generation) !=
+                  TCG_WASM64_RUN_CTX_ADDRESS_SPACE_GENERATION_OFFSET);
 QEMU_BUILD_BUG_ON(sizeof(TCGWasm64RunContext) != TCG_WASM64_RUN_CTX_SIZE);
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64TLBMirror, mask) !=
                   TCG_WASM64_TLB_MIRROR_MASK_OFFSET);
@@ -157,6 +161,8 @@ QEMU_BUILD_BUG_ON(offsetof(TCGWasm64TLBMirror, table) !=
                   TCG_WASM64_TLB_MIRROR_TABLE_OFFSET);
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64TLBMirror, fulltlb) !=
                   TCG_WASM64_TLB_MIRROR_FULLTLB_OFFSET);
+QEMU_BUILD_BUG_ON(offsetof(TCGWasm64TLBMirror, generation) !=
+                  TCG_WASM64_TLB_MIRROR_GENERATION_OFFSET);
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64TLBMirror, mmu_idx) !=
                   TCG_WASM64_TLB_MIRROR_MMU_IDX_OFFSET);
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64TLBMirror, target_page_bits) !=
@@ -302,6 +308,8 @@ static bool live_one_tb_enabled;
 static bool live_tb_coverage_enabled;
 static uint64_t summary_interval;
 static uint64_t live_tb_coverage_scan_limit;
+static uint64_t tcg_wasm64_current_tb_generation = 1;
+static uint64_t tcg_wasm64_current_address_space_generation = 1;
 
 static const char *tcg_wasm64_op_name(uint32_t op);
 
@@ -651,6 +659,51 @@ const char *tcg_wasm64_run_exit_reason_name(TCGWasm64RunExitReason reason)
     }
 }
 
+static uint64_t tcg_wasm64_next_generation(uint64_t generation)
+{
+    generation++;
+    return generation == 0 ? 1 : generation;
+}
+
+uint64_t tcg_wasm64_tb_generation(void)
+{
+    return tcg_wasm64_current_tb_generation;
+}
+
+uint64_t tcg_wasm64_bump_tb_generation(void)
+{
+    tcg_wasm64_current_tb_generation =
+        tcg_wasm64_next_generation(tcg_wasm64_current_tb_generation);
+    return tcg_wasm64_current_tb_generation;
+}
+
+uint64_t tcg_wasm64_address_space_generation(void)
+{
+    return tcg_wasm64_current_address_space_generation;
+}
+
+uint64_t tcg_wasm64_bump_address_space_generation(void)
+{
+    tcg_wasm64_current_address_space_generation =
+        tcg_wasm64_next_generation(
+            tcg_wasm64_current_address_space_generation);
+    return tcg_wasm64_current_address_space_generation;
+}
+
+uint64_t tcg_wasm64_tlb_mirror_generation(const TCGWasm64TLBMirror *mirror)
+{
+    return mirror ? mirror->generation : 0;
+}
+
+uint64_t tcg_wasm64_tlb_mirror_bump_generation(TCGWasm64TLBMirror *mirror)
+{
+    if (!mirror) {
+        return 0;
+    }
+    mirror->generation = tcg_wasm64_next_generation(mirror->generation);
+    return mirror->generation;
+}
+
 void tcg_wasm64_tlb_mirror_reset(TCGWasm64TLBMirror *mirror)
 {
     if (mirror) {
@@ -661,10 +714,14 @@ void tcg_wasm64_tlb_mirror_reset(TCGWasm64TLBMirror *mirror)
 void tcg_wasm64_tlb_mirror_refresh(TCGWasm64TLBMirror *mirror,
                                    CPUArchState *env, uint32_t mmu_idx)
 {
+    uint64_t generation;
+
     if (!mirror) {
         return;
     }
+    generation = tcg_wasm64_next_generation(mirror->generation);
     tcg_wasm64_tlb_mirror_reset(mirror);
+    mirror->generation = generation;
 
 #if defined(CONFIG_TCG) && !defined(CONFIG_USER_ONLY)
     if (!env || mmu_idx >= NB_MMU_MODES) {

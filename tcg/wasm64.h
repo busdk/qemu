@@ -148,6 +148,7 @@ typedef struct TCGWasm64TLBMirror {
     uintptr_t mask;
     uintptr_t table;
     uintptr_t fulltlb;
+    uint64_t generation;
     uint32_t mmu_idx;
     uint32_t target_page_bits;
     uint32_t cpu_tlb_entry_bits;
@@ -166,6 +167,8 @@ typedef struct TCGWasm64RunContext {
     uint32_t mode;
     uint32_t flags;
     TCGWasm64TLBMirror *tlb;
+    uint64_t tb_generation;
+    uint64_t address_space_generation;
 } TCGWasm64RunContext;
 
 #define TCG_WASM64_RUN_CTX_ENV_OFFSET 0u
@@ -176,19 +179,22 @@ typedef struct TCGWasm64RunContext {
 #define TCG_WASM64_RUN_CTX_MODE_OFFSET 40u
 #define TCG_WASM64_RUN_CTX_FLAGS_OFFSET 44u
 #define TCG_WASM64_RUN_CTX_TLB_OFFSET 48u
-#define TCG_WASM64_RUN_CTX_SIZE 56u
+#define TCG_WASM64_RUN_CTX_TB_GENERATION_OFFSET 56u
+#define TCG_WASM64_RUN_CTX_ADDRESS_SPACE_GENERATION_OFFSET 64u
+#define TCG_WASM64_RUN_CTX_SIZE 72u
 
 #define TCG_WASM64_TLB_MIRROR_MASK_OFFSET 0u
 #define TCG_WASM64_TLB_MIRROR_TABLE_OFFSET 8u
 #define TCG_WASM64_TLB_MIRROR_FULLTLB_OFFSET 16u
-#define TCG_WASM64_TLB_MIRROR_MMU_IDX_OFFSET 24u
-#define TCG_WASM64_TLB_MIRROR_TARGET_PAGE_BITS_OFFSET 28u
-#define TCG_WASM64_TLB_MIRROR_CPU_TLB_ENTRY_BITS_OFFSET 32u
-#define TCG_WASM64_TLB_MIRROR_TLB_ENTRY_SIZE_OFFSET 36u
-#define TCG_WASM64_TLB_MIRROR_TLB_FLAGS_MASK_OFFSET 40u
-#define TCG_WASM64_TLB_MIRROR_TLB_SLOW_FLAGS_MASK_OFFSET 44u
-#define TCG_WASM64_TLB_MIRROR_FLAGS_OFFSET 48u
-#define TCG_WASM64_TLB_MIRROR_SIZE 56u
+#define TCG_WASM64_TLB_MIRROR_GENERATION_OFFSET 24u
+#define TCG_WASM64_TLB_MIRROR_MMU_IDX_OFFSET 32u
+#define TCG_WASM64_TLB_MIRROR_TARGET_PAGE_BITS_OFFSET 36u
+#define TCG_WASM64_TLB_MIRROR_CPU_TLB_ENTRY_BITS_OFFSET 40u
+#define TCG_WASM64_TLB_MIRROR_TLB_ENTRY_SIZE_OFFSET 44u
+#define TCG_WASM64_TLB_MIRROR_TLB_FLAGS_MASK_OFFSET 48u
+#define TCG_WASM64_TLB_MIRROR_TLB_SLOW_FLAGS_MASK_OFFSET 52u
+#define TCG_WASM64_TLB_MIRROR_FLAGS_OFFSET 56u
+#define TCG_WASM64_TLB_MIRROR_SIZE 64u
 #define TCG_WASM64_TLB_MIRROR_VALID 1u
 
 #define TCG_WASM64_CPUTLB_ENTRY_ADDR_READ_OFFSET 0u
@@ -319,6 +325,12 @@ void tcg_wasm64_run_counters_add(TCGWasm64RunCounters *dst,
 void tcg_wasm64_run_count_exit(TCGWasm64RunCounters *counters,
                                TCGWasm64RunExitReason reason);
 const char *tcg_wasm64_run_exit_reason_name(TCGWasm64RunExitReason reason);
+uint64_t tcg_wasm64_tb_generation(void);
+uint64_t tcg_wasm64_bump_tb_generation(void);
+uint64_t tcg_wasm64_address_space_generation(void);
+uint64_t tcg_wasm64_bump_address_space_generation(void);
+uint64_t tcg_wasm64_tlb_mirror_generation(const TCGWasm64TLBMirror *mirror);
+uint64_t tcg_wasm64_tlb_mirror_bump_generation(TCGWasm64TLBMirror *mirror);
 void tcg_wasm64_tlb_mirror_reset(TCGWasm64TLBMirror *mirror);
 void tcg_wasm64_tlb_mirror_refresh(TCGWasm64TLBMirror *mirror,
                                    CPUArchState *env, uint32_t mmu_idx);

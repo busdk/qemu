@@ -108,6 +108,9 @@ const R4K_SOFTMMU_MMU_IDX = 2;
 const R4K_SOFTMMU_PAGE_BITS = WASMJIT_TLB_CONSTANTS.targetPageBits;
 const R4K_SOFTMMU_PAGE_MASK = WASMJIT_TLB_CONSTANTS.targetPageMask;
 const R4K_SOFTMMU_TLB_ENTRY_BITS = WASMJIT_TLB_ENTRY.bits;
+const R4K_INVALIDATION_TB_GENERATION = 7n;
+const R4K_INVALIDATION_ADDRESS_SPACE_GENERATION = 11n;
+const R4K_INVALIDATION_TLB_MIRROR_GENERATION = 13n;
 const RV64_ENV_RELATIVE_BASE_REG = 14;
 const RV64_ENV_RELATIVE_MIN_OFFSET = -16;
 const RV64_ENV_RELATIVE_MAX_EXCLUSIVE = 0x120;
@@ -1122,6 +1125,15 @@ function routeLiveGeneratedOutput(metadata) {
       reason: "metadata-output-tb-code-mismatch",
       jsStatusName: "metadata-output-tb-code-mismatch",
       generatedGuestInstructions: 0,
+      generatedChainLength: 0,
+      generatedBodyTimeNs: 0,
+      inlineTlbHitLoads: 0,
+      inlineTlbHitStores: 0,
+      helperCalls: 0,
+      qemuLdCalls: 0,
+      qemuStCalls: 0,
+      runExitReason: "invalidated",
+      exitsInvalidated: 1,
       shape,
     };
   }
@@ -1552,6 +1564,39 @@ function hotsetFailureReturn({ status, reason, tbId, value, counterOffset }) {
   ];
 }
 
+function hotsetInvalidatedReturn(tbId, value = i64Const(0n)) {
+  return hotsetFailureReturn({
+    status: BigInt(RUN_EXIT_REASON_INVALIDATED),
+    reason: RUN_EXIT_REASON_INVALIDATED,
+    tbId,
+    value,
+    counterOffset: WASMJIT_COUNTERS.exitsInvalidated,
+  });
+}
+
+function hotsetGenerationGuard({ actual, expected, tbId, value }) {
+  return ifBlock(
+    i64NeExpr(actual, i64Const(expected)),
+    hotsetInvalidatedReturn(tbId, value),
+  );
+}
+
+function hotsetTlbMirrorGenerationGuard(expected, tbId) {
+  const tlbPtr = i32WrapI64(i64Load(localGet(0), WASMJIT_RUN_CTX.tlb));
+
+  return [
+    ...ifBlock(
+      i32Eqz(tlbPtr),
+      hotsetInvalidatedReturn(tbId),
+    ),
+    ...hotsetGenerationGuard({
+      actual: i64Load(tlbPtr, WASMJIT_TLB_MIRROR.generation),
+      expected,
+      tbId,
+    }),
+  ];
+}
+
 function storeRunCounter(offset, value) {
   return i64Store(localGet(HOTSET_LOCAL_COUNTERS_PTR), i64Const(value), offset);
 }
@@ -1606,6 +1651,25 @@ function emitTwoTBHotsetModule(fixture) {
       instructions.push(...localSet(regLocal(reg), i64Load(localGet(1), reg * 8)));
     }
 
+    if (fixture.source.expectedGeneration !== undefined) {
+      instructions.push(...hotsetGenerationGuard({
+        actual: i64Load(localGet(0), WASMJIT_RUN_CTX.tbGeneration),
+        expected: fixture.source.expectedGeneration,
+        tbId: fixture.source.id,
+      }));
+    }
+    if (fixture.expectedAddressSpaceGeneration !== undefined) {
+      instructions.push(...hotsetGenerationGuard({
+        actual: i64Load(localGet(0), WASMJIT_RUN_CTX.addressSpaceGeneration),
+        expected: fixture.expectedAddressSpaceGeneration,
+        tbId: fixture.source.id,
+      }));
+    }
+    if (fixture.expectedTlbMirrorGeneration !== undefined) {
+      instructions.push(...hotsetTlbMirrorGenerationGuard(
+        fixture.expectedTlbMirrorGeneration, fixture.source.id));
+    }
+
     instructions.push(...source.body);
     instructions.push(...localSet(
       HOTSET_LOCAL_CHAIN_TARGET, i64Load(i32Const(source.terminal.ret), 0)));
@@ -1630,17 +1694,14 @@ function emitTwoTBHotsetModule(fixture) {
         counterOffset: WASMJIT_COUNTERS.exitsBudget,
       }),
     ));
-    instructions.push(...ifBlock(
-      [...i32Load(i32Const(fixture.target.generationAddress)),
-       ...i32Const(fixture.target.expectedGeneration), 0x47],
-      hotsetFailureReturn({
-        status: BigInt(RUN_EXIT_REASON_INVALIDATED),
-        reason: RUN_EXIT_REASON_INVALIDATED,
+    if (fixture.target.expectedGeneration !== undefined) {
+      instructions.push(...hotsetGenerationGuard({
+        actual: i64Load(localGet(0), WASMJIT_RUN_CTX.tbGeneration),
+        expected: fixture.target.expectedGeneration,
         tbId: fixture.target.id,
         value: localGet(HOTSET_LOCAL_CHAIN_TARGET),
-        counterOffset: WASMJIT_COUNTERS.exitsInvalidated,
-      }),
-    ));
+      }));
+    }
 
     if (!targetSupported) {
       instructions.push(...hotsetFailureReturn({
@@ -1752,8 +1813,28 @@ function createHotsetState(fixture, seed) {
   view.setBigUint64(dataBase + 0x110, BigInt(0x200000000 + seed), true);
   view.setBigUint64(dataBase + 0x118, BigInt(0x300000000 + seed), true);
   view.setBigUint64(sourceTerminal.ret, fixture.slotTarget, true);
-  view.setUint32(fixture.target.generationAddress,
-                 fixture.target.actualGeneration, true);
+  view.setBigUint64(
+    ctxPtr + WASMJIT_RUN_CTX.tbGeneration,
+    fixture.currentTbGeneration ?? fixture.source.expectedGeneration ?? 0n,
+    true,
+  );
+  view.setBigUint64(
+    ctxPtr + WASMJIT_RUN_CTX.addressSpaceGeneration,
+    fixture.currentAddressSpaceGeneration ?? 0n,
+    true,
+  );
+  if (fixture.currentTlbMirrorGeneration !== undefined) {
+    const mirrorPtr = 0x1800;
+
+    view.setBigUint64(ctxPtr + WASMJIT_RUN_CTX.tlb, BigInt(mirrorPtr), true);
+    view.setBigUint64(
+      mirrorPtr + WASMJIT_TLB_MIRROR.generation,
+      fixture.currentTlbMirrorGeneration,
+      true,
+    );
+    view.setUint32(mirrorPtr + WASMJIT_TLB_MIRROR.flags,
+                   WASMJIT_TLB_MIRROR_VALID, true);
+  }
 
   for (let reg = 0; reg < regs.length; reg++) {
     view.setBigUint64(regsPtr + reg * 8, regs[reg], true);
@@ -2379,11 +2460,16 @@ async function runTwoTBHotsetFixture(fixture, seed) {
   assert.equal(emission.moduleValid, true,
                `${fixture.name} emitted invalid hotset module`);
   const generated = createHotsetState(fixture, seed);
-  const reference = createHotsetState(fixture, seed);
+  const sourceProbe = createHotsetState(fixture, seed);
   const sourceExpected = interpretGeneratedOutput(
-    fixture.source.words, reference, fixture.source.relativeBase);
-  let finalExpected = sourceExpected;
-  let expectedState = "after-source-tb";
+    fixture.source.words, sourceProbe, fixture.source.relativeBase);
+  let reference = fixture.expectedState === "initial"
+    ? createHotsetState(fixture, seed)
+    : sourceProbe;
+  let finalExpected = fixture.expectedState === "initial"
+    ? { regs: reference.regs.slice() }
+    : sourceExpected;
+  let expectedState = fixture.expectedState || "after-source-tb";
 
   assert.equal(sourceExpected.status, STATUS_DISPATCH,
                `${fixture.name} source TB should dispatch`);
@@ -2609,14 +2695,13 @@ assert.deepEqual(
   "R4i live x86 fixture shape drifted",
 );
 
-const R4K_TWO_TB_HOTSET_TARGET_GENERATION_ADDRESS = 0x6800;
-const R4K_TWO_TB_HOTSET_TARGET_GENERATION = 7;
 const R4K_TWO_TB_HOTSET_DISPATCH_TARGET = 0x7200n;
 const r4kTwoTBHotsetSource = {
   id: 1,
   name: "r4k-two-tb-source-r4i-goto",
   relativeBase: 0x6000,
   words: r4iLiveX86Fixture.words,
+  expectedGeneration: R4K_INVALIDATION_TB_GENERATION,
   guestInstructions: 1,
 };
 
@@ -2626,9 +2711,7 @@ function r4kTwoTBHotsetTarget(overrides = {}) {
     name: "r4k-two-tb-target-add-exit",
     relativeBase: 0x6400,
     dispatchTarget: R4K_TWO_TB_HOTSET_DISPATCH_TARGET,
-    generationAddress: R4K_TWO_TB_HOTSET_TARGET_GENERATION_ADDRESS,
-    expectedGeneration: R4K_TWO_TB_HOTSET_TARGET_GENERATION,
-    actualGeneration: R4K_TWO_TB_HOTSET_TARGET_GENERATION,
+    expectedGeneration: R4K_INVALIDATION_TB_GENERATION,
     guestInstructions: 1,
     words: [
       OPS.tci_movi | (6 << 8) | (2 << 12),
@@ -2724,7 +2807,7 @@ const r4kTwoTBHotsetFixtures = [
     name: "r4k-two-tb-invalidated-chained-target",
     source: r4kTwoTBHotsetSource,
     target: r4kTwoTBHotsetTarget({
-      actualGeneration: R4K_TWO_TB_HOTSET_TARGET_GENERATION + 1,
+      expectedGeneration: R4K_INVALIDATION_TB_GENERATION + 1n,
     }),
     slotTarget: R4K_TWO_TB_HOTSET_DISPATCH_TARGET,
     budget: 2,
@@ -2740,6 +2823,79 @@ const r4kTwoTBHotsetFixtures = [
     expectedGeneratedChainLength: 0,
     expectedGeneratedBodyTimeNs: 0,
   },
+];
+
+function r4kInvalidationFixture(overrides = {}) {
+  return {
+    name: "r4k-invalidation-valid-unchanged-tb-executes",
+    source: r4kTwoTBHotsetSource,
+    target: r4kTwoTBHotsetTarget(),
+    slotTarget: R4K_TWO_TB_HOTSET_DISPATCH_TARGET,
+    budget: 2,
+    currentTbGeneration: R4K_INVALIDATION_TB_GENERATION,
+    expectedAddressSpaceGeneration:
+      R4K_INVALIDATION_ADDRESS_SPACE_GENERATION,
+    currentAddressSpaceGeneration:
+      R4K_INVALIDATION_ADDRESS_SPACE_GENERATION,
+    expectedTlbMirrorGeneration:
+      R4K_INVALIDATION_TLB_MIRROR_GENERATION,
+    currentTlbMirrorGeneration:
+      R4K_INVALIDATION_TLB_MIRROR_GENERATION,
+    expectedSuccess: true,
+    expectedStatus: STATUS_EXIT,
+    expectedRunExitReason: "none",
+    expectedFallbackReason: null,
+    expectedTargetShapeSupported: true,
+    expectedChainLength: 2,
+    expectedInlineLoads: 2,
+    expectedInlineStores: 2,
+    expectedGeneratedGuestInstructions: 2,
+    expectedGeneratedChainLength: 2,
+    expectedGeneratedBodyTimeNs: R4K_TWO_TB_HOTSET_BODY_TIME_NS,
+    ...overrides,
+  };
+}
+
+const r4kInvalidationFixtures = [
+  r4kInvalidationFixture(),
+  r4kInvalidationFixture({
+    name: "r4k-invalidation-tb-generation-mismatch",
+    currentTbGeneration: R4K_INVALIDATION_TB_GENERATION + 1n,
+    expectedSuccess: false,
+    expectedStatus: BigInt(RUN_EXIT_REASON_INVALIDATED),
+    expectedRunExitReason: "invalidated",
+    expectedFallbackReason: "tb-generation-mismatch",
+    expectedState: "initial",
+    expectedGeneratedGuestInstructions: 0,
+    expectedGeneratedChainLength: 0,
+    expectedGeneratedBodyTimeNs: 0,
+  }),
+  r4kInvalidationFixture({
+    name: "r4k-invalidation-address-space-generation-mismatch",
+    currentAddressSpaceGeneration:
+      R4K_INVALIDATION_ADDRESS_SPACE_GENERATION + 1n,
+    expectedSuccess: false,
+    expectedStatus: BigInt(RUN_EXIT_REASON_INVALIDATED),
+    expectedRunExitReason: "invalidated",
+    expectedFallbackReason: "address-space-generation-mismatch",
+    expectedState: "initial",
+    expectedGeneratedGuestInstructions: 0,
+    expectedGeneratedChainLength: 0,
+    expectedGeneratedBodyTimeNs: 0,
+  }),
+  r4kInvalidationFixture({
+    name: "r4k-invalidation-tlb-mirror-generation-mismatch",
+    currentTlbMirrorGeneration:
+      R4K_INVALIDATION_TLB_MIRROR_GENERATION + 1n,
+    expectedSuccess: false,
+    expectedStatus: BigInt(RUN_EXIT_REASON_INVALIDATED),
+    expectedRunExitReason: "invalidated",
+    expectedFallbackReason: "tlb-mirror-generation-mismatch",
+    expectedState: "initial",
+    expectedGeneratedGuestInstructions: 0,
+    expectedGeneratedChainLength: 0,
+    expectedGeneratedBodyTimeNs: 0,
+  }),
 ];
 
 const r4kSoftmmuFixtures = [
@@ -2977,6 +3133,7 @@ const results = [];
 const unsupportedResults = [];
 const unsupportedX86StateResults = [];
 const r4kTwoTBHotsetResults = [];
+const r4kInvalidationResults = [];
 const r4kSoftmmuResults = [];
 
 for (const fixture of fixtures) {
@@ -3008,6 +3165,10 @@ for (const fixture of unsupportedX86StateFixtures) {
 
 for (const fixture of r4kTwoTBHotsetFixtures) {
   r4kTwoTBHotsetResults.push(await runTwoTBHotsetFixture(fixture, 1));
+}
+
+for (const fixture of r4kInvalidationFixtures) {
+  r4kInvalidationResults.push(await runTwoTBHotsetFixture(fixture, 1));
 }
 
 for (const fixture of r4kSoftmmuFixtures) {
@@ -3215,6 +3376,52 @@ assert.equal(
     entry.fallbackReason === "invalidated-chain-target").exits.invalidated,
   "1",
 );
+assert.equal(r4kInvalidationResults.length, 4);
+const r4kInvalidationValid = r4kInvalidationResults.find((entry) =>
+  entry.name === "r4k-invalidation-valid-unchanged-tb-executes");
+const r4kInvalidationFailures = r4kInvalidationResults.filter((entry) =>
+  !entry.success);
+assert.equal(r4kInvalidationValid.success, true);
+assert.equal(r4kInvalidationValid.runExitReason, "none");
+assert.equal(r4kInvalidationValid.generatedGuestInstructions, "2");
+assert.equal(r4kInvalidationValid.generatedChainLength, "2");
+assert.equal(r4kInvalidationValid.generatedBodyTimeNs,
+             R4K_TWO_TB_HOTSET_BODY_TIME_NS.toString());
+assert.equal(r4kInvalidationValid.inlineTlbHitLoads, "2");
+assert.equal(r4kInvalidationValid.inlineTlbHitStores, "2");
+assert.equal(r4kInvalidationValid.helperCalls, "0");
+assert.equal(r4kInvalidationValid.qemuLdCalls, "0");
+assert.equal(r4kInvalidationValid.qemuStCalls, "0");
+assert.equal(r4kInvalidationValid.exits.invalidated, "0");
+assert.deepEqual(
+  r4kInvalidationFailures.map((entry) => entry.fallbackReason),
+  [
+    "tb-generation-mismatch",
+    "address-space-generation-mismatch",
+    "tlb-mirror-generation-mismatch",
+  ],
+);
+assert.deepEqual(
+  r4kInvalidationFailures.map((entry) => entry.expectedState),
+  ["initial", "initial", "initial"],
+);
+assert.deepEqual(
+  r4kInvalidationFailures.map((entry) => [
+    entry.runExitReason,
+    entry.generatedGuestInstructions,
+    entry.generatedChainLength,
+    entry.generatedBodyTimeNs,
+    entry.inlineTlbHitLoads,
+    entry.inlineTlbHitStores,
+    entry.helperCalls,
+    entry.qemuLdCalls,
+    entry.qemuStCalls,
+    entry.exits.invalidated,
+  ]),
+  r4kInvalidationFailures.map(() => [
+    "invalidated", "0", "0", "0", "0", "0", "0", "0", "0", "1",
+  ]),
+);
 const r4kLiveRoutingCases = [
   routeLiveGeneratedOutput(null),
   routeLiveGeneratedOutput({
@@ -3286,12 +3493,44 @@ assert.equal(r4kLiveRoutingCases.at(-1).moduleValid, true);
 const r4kSoftmmuStaleOutputMismatch = r4kLiveRoutingCases.find((entry) =>
   entry.reason === "metadata-output-tb-code-mismatch");
 assert.equal(r4kSoftmmuStaleOutputMismatch.generatedGuestInstructions, 0);
+assert.equal(r4kSoftmmuStaleOutputMismatch.generatedChainLength, 0);
+assert.equal(r4kSoftmmuStaleOutputMismatch.generatedBodyTimeNs, 0);
+assert.equal(r4kSoftmmuStaleOutputMismatch.inlineTlbHitLoads, 0);
+assert.equal(r4kSoftmmuStaleOutputMismatch.inlineTlbHitStores, 0);
+assert.equal(r4kSoftmmuStaleOutputMismatch.helperCalls, 0);
+assert.equal(r4kSoftmmuStaleOutputMismatch.qemuLdCalls, 0);
+assert.equal(r4kSoftmmuStaleOutputMismatch.qemuStCalls, 0);
+assert.equal(r4kSoftmmuStaleOutputMismatch.runExitReason, "invalidated");
+assert.equal(r4kSoftmmuStaleOutputMismatch.exitsInvalidated, 1);
+r4kInvalidationResults.push({
+  name: "r4k-invalidation-generated-output-mismatch",
+  success: false,
+  expectedState: "before-generated-body-call",
+  fallbackReason: r4kSoftmmuStaleOutputMismatch.reason,
+  runExitReason: r4kSoftmmuStaleOutputMismatch.runExitReason,
+  generatedGuestInstructions:
+    r4kSoftmmuStaleOutputMismatch.generatedGuestInstructions.toString(),
+  generatedChainLength:
+    r4kSoftmmuStaleOutputMismatch.generatedChainLength.toString(),
+  generatedBodyTimeNs:
+    r4kSoftmmuStaleOutputMismatch.generatedBodyTimeNs.toString(),
+  inlineTlbHitLoads:
+    r4kSoftmmuStaleOutputMismatch.inlineTlbHitLoads.toString(),
+  inlineTlbHitStores:
+    r4kSoftmmuStaleOutputMismatch.inlineTlbHitStores.toString(),
+  helperCalls: r4kSoftmmuStaleOutputMismatch.helperCalls.toString(),
+  qemuLdCalls: r4kSoftmmuStaleOutputMismatch.qemuLdCalls.toString(),
+  qemuStCalls: r4kSoftmmuStaleOutputMismatch.qemuStCalls.toString(),
+  exits: {
+    invalidated: r4kSoftmmuStaleOutputMismatch.exitsInvalidated.toString(),
+  },
+});
 r4kSoftmmuResults.push({
   name: "r4k-softmmu-stale-output-mismatch",
   emitter: PER_TB_EMITTER_NAME,
   moduleValid: false,
   status: "metadata-output-tb-code-mismatch",
-  runExitReason: "metadata-output-tb-code-mismatch",
+  runExitReason: "invalidated",
   fallbackReason: "metadata-output-tb-code-mismatch",
   expectedSuccess: false,
   inlineTlbHitLoads: "0",
@@ -3303,8 +3542,37 @@ r4kSoftmmuResults.push({
     mmio: "0",
     tlbMissOrFault: "0",
     unsupported: "0",
+    invalidated: "1",
   },
 });
+assert.equal(r4kInvalidationResults.length, 5);
+assert.deepEqual(
+  r4kInvalidationResults.map((entry) => entry.name),
+  [
+    "r4k-invalidation-valid-unchanged-tb-executes",
+    "r4k-invalidation-tb-generation-mismatch",
+    "r4k-invalidation-address-space-generation-mismatch",
+    "r4k-invalidation-tlb-mirror-generation-mismatch",
+    "r4k-invalidation-generated-output-mismatch",
+  ],
+);
+assert.deepEqual(
+  r4kInvalidationResults.filter((entry) => !entry.success).map((entry) => [
+    entry.runExitReason,
+    entry.generatedGuestInstructions,
+    entry.generatedChainLength,
+    entry.generatedBodyTimeNs,
+    entry.inlineTlbHitLoads,
+    entry.inlineTlbHitStores,
+    entry.helperCalls,
+    entry.qemuLdCalls,
+    entry.qemuStCalls,
+    entry.exits.invalidated,
+  ]),
+  r4kInvalidationResults.filter((entry) => !entry.success).map(() => [
+    "invalidated", "0", "0", "0", "0", "0", "0", "0", "0", "1",
+  ]),
+);
 const r4kSoftmmuNames = r4kSoftmmuResults.map((entry) => entry.name);
 assert.deepEqual(
   r4kSoftmmuNames,
@@ -3410,6 +3678,11 @@ assert.equal(
     entry.name === "r4k-softmmu-unmirrored-state").exits.unsupported,
   "1",
 );
+assert.equal(
+  r4kSoftmmuResults.find((entry) =>
+    entry.name === "r4k-softmmu-stale-output-mismatch").exits.invalidated,
+  "1",
+);
 console.log(JSON.stringify({
   format: 1,
   event: "generated-output-equivalence",
@@ -3474,6 +3747,17 @@ console.log(JSON.stringify({
       generatedChainLength: entry.generatedChainLength,
       generatedBodyTimeNs: entry.generatedBodyTimeNs,
     })),
+  },
+  r4kInvalidationRejection: {
+    fixtureCount: r4kInvalidationResults.length,
+    tbGenerationToken: R4K_INVALIDATION_TB_GENERATION.toString(),
+    addressSpaceGenerationToken:
+      R4K_INVALIDATION_ADDRESS_SPACE_GENERATION.toString(),
+    tlbMirrorGenerationToken:
+      R4K_INVALIDATION_TLB_MIRROR_GENERATION.toString(),
+    validUnchanged: r4kInvalidationValid,
+    failClosedCases: r4kInvalidationResults.filter((entry) =>
+      !entry.success),
   },
   r4kSoftmmuFastPath: {
     emitter: R4K_SOFTMMU_EMITTER_NAME,

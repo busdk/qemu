@@ -23,7 +23,9 @@ export const WASMJIT_RUN_CTX = {
   mode: 40,
   flags: 44,
   tlb: 48,
-  size: 56,
+  tbGeneration: 56,
+  addressSpaceGeneration: 64,
+  size: 72,
 };
 
 export const WASMJIT_RUN_EXIT = {
@@ -42,14 +44,15 @@ export const WASMJIT_TLB_MIRROR = {
   mask: 0,
   table: 8,
   fulltlb: 16,
-  mmuIdx: 24,
-  targetPageBits: 28,
-  cpuTlbEntryBits: 32,
-  tlbEntrySize: 36,
-  tlbFlagsMask: 40,
-  tlbSlowFlagsMask: 44,
-  flags: 48,
-  size: 56,
+  generation: 24,
+  mmuIdx: 32,
+  targetPageBits: 36,
+  cpuTlbEntryBits: 40,
+  tlbEntrySize: 44,
+  tlbFlagsMask: 48,
+  tlbSlowFlagsMask: 52,
+  flags: 56,
+  size: 64,
 };
 
 export const WASMJIT_TLB_MIRROR_VALID = 1;

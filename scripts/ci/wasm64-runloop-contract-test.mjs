@@ -93,7 +93,18 @@ for (const field of [
 }
 
 assert.match(header, /typedef struct TCGWasm64RunContext/);
-for (const field of ["env", "guest_ram", "budget", "counters", "exit", "mode", "flags", "tlb"]) {
+for (const field of [
+  "env",
+  "guest_ram",
+  "budget",
+  "counters",
+  "exit",
+  "mode",
+  "flags",
+  "tlb",
+  "tb_generation",
+  "address_space_generation",
+]) {
   assert.match(header, new RegExp(field));
 }
 assert.equal(macroValue("TCG_WASM64_RUN_CTX_ENV_OFFSET"), WASMJIT_RUN_CTX.env);
@@ -104,10 +115,19 @@ assert.equal(macroValue("TCG_WASM64_RUN_CTX_EXIT_OFFSET"), WASMJIT_RUN_CTX.exit)
 assert.equal(macroValue("TCG_WASM64_RUN_CTX_MODE_OFFSET"), WASMJIT_RUN_CTX.mode);
 assert.equal(macroValue("TCG_WASM64_RUN_CTX_FLAGS_OFFSET"), WASMJIT_RUN_CTX.flags);
 assert.equal(macroValue("TCG_WASM64_RUN_CTX_TLB_OFFSET"), WASMJIT_RUN_CTX.tlb);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_CTX_TB_GENERATION_OFFSET"),
+  WASMJIT_RUN_CTX.tbGeneration,
+);
+assert.equal(
+  macroValue("TCG_WASM64_RUN_CTX_ADDRESS_SPACE_GENERATION_OFFSET"),
+  WASMJIT_RUN_CTX.addressSpaceGeneration,
+);
 assert.equal(macroValue("TCG_WASM64_RUN_CTX_SIZE"), WASMJIT_RUN_CTX.size);
 assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_MASK_OFFSET"), WASMJIT_TLB_MIRROR.mask);
 assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_TABLE_OFFSET"), WASMJIT_TLB_MIRROR.table);
 assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_FULLTLB_OFFSET"), WASMJIT_TLB_MIRROR.fulltlb);
+assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_GENERATION_OFFSET"), WASMJIT_TLB_MIRROR.generation);
 assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_MMU_IDX_OFFSET"), WASMJIT_TLB_MIRROR.mmuIdx);
 assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_TARGET_PAGE_BITS_OFFSET"), WASMJIT_TLB_MIRROR.targetPageBits);
 assert.equal(macroValue("TCG_WASM64_TLB_MIRROR_CPU_TLB_ENTRY_BITS_OFFSET"), WASMJIT_TLB_MIRROR.cpuTlbEntryBits);
@@ -241,8 +261,17 @@ assert.match(runtime, /return "budget"/);
 assert.match(runtime, /return "tlb-miss-or-fault"/);
 assert.match(runtime, /return "invalidated"/);
 assert.match(runtime, /QEMU_BUILD_BUG_ON\(offsetof\(TCGWasm64RunContext, env\) !=/);
+assert.match(runtime, /QEMU_BUILD_BUG_ON\(offsetof\(TCGWasm64RunContext, tb_generation\) !=/);
+assert.match(runtime, /QEMU_BUILD_BUG_ON\(offsetof\(TCGWasm64RunContext, address_space_generation\) !=/);
 assert.match(runtime, /QEMU_BUILD_BUG_ON\(sizeof\(TCGWasm64RunContext\) != TCG_WASM64_RUN_CTX_SIZE\)/);
 assert.match(runtime, /QEMU_BUILD_BUG_ON\(offsetof\(TCGWasm64TLBMirror, mask\) !=/);
+assert.match(runtime, /QEMU_BUILD_BUG_ON\(offsetof\(TCGWasm64TLBMirror, generation\) !=/);
+assert.match(runtime, /tcg_wasm64_tb_generation/);
+assert.match(runtime, /tcg_wasm64_bump_tb_generation/);
+assert.match(runtime, /tcg_wasm64_address_space_generation/);
+assert.match(runtime, /tcg_wasm64_bump_address_space_generation/);
+assert.match(runtime, /tcg_wasm64_tlb_mirror_generation/);
+assert.match(runtime, /tcg_wasm64_tlb_mirror_bump_generation/);
 assert.match(runtime, /tcg_wasm64_tlb_mirror_refresh/);
 assert.match(runtime, /QEMU_BUILD_BUG_ON\(sizeof\(TCGWasm64RunExit\) != TCG_WASM64_RUN_EXIT_SIZE\)/);
 assert.match(runtime, /QEMU_BUILD_BUG_ON\(sizeof\(TCGWasm64RunCounters\) !=/);
