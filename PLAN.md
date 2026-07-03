@@ -1039,6 +1039,37 @@ run that reaches a weaker marker than normal multi-user readiness.
     No browser smoke, speed claim, two-TB chaining, broad SoftMMU/TLB
     lowering, helper exits, RISC-V work, BusDK work, or Bus Engine OS proof
     was run or enabled; R4k remains open for slices 4-6.
+    Slice 4 accepted 2026-07-03 on branch
+    `qemu/r4k-two-tb-hotset-20260703-11`: the deterministic equivalence gate
+    now includes a `r4k-two-tb-hotset-dispatch-fixture` module that exports a
+    single `wasmjit_run` entry, executes TB A from the accepted R4i recorded
+    `ld32u, tci_movi, tci_setcond32, brcond, tci_movi, st8, ld, tci_movi,
+    add, st, goto_tb` shape, reads A's recorded `goto_tb` slot, and dispatches
+    to a second generated TB body without returning to JavaScript/QEMU for the
+    chained-hit case. The successful fixture
+    `r4k-two-tb-chained-hit` reported one generated module call,
+    `moduleValid=true`, module byte length `1142`, matching source and target
+    dispatch target `29184`, register and memory state matched,
+    `generatedGuestInstructions=2`, `generatedChainLength=2`,
+    deterministic stand-in `generatedBodyTimeNs=2000`, inline TLB-hit loads
+    `2`, inline TLB-hit stores `2`, and zero helper, `qemu_ld`, and
+    `qemu_st` calls. Fail-closed deterministic fixtures now cover
+    `missing-chain-target`, `unsupported-chain-target-shape`,
+    `budget-before-second-tb`, and `invalidated-chain-target`; all four
+    negative cases reported `generatedGuestInstructions=0`,
+    `generatedChainLength=0`, `generatedBodyTimeNs=0`, matching state after
+    TB A only, and the expected exit counter (`exitsUnsupported=1`,
+    `exitsBudget=1`, or `exitsInvalidated=1`). Checks:
+    `git diff --check`, `node scripts/ci/wasm64-translate-metadata-test.mjs`
+    (`wasm64 translate metadata contract: ok`),
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`
+    (JSON event `generated-output-equivalence`, `r4kTwoTBHotset.fixtureCount=5`),
+    `node --check scripts/ci/wasm64-translate-metadata-test.mjs`, and
+    `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`.
+    This is deterministic local accelerator-shape evidence only, not a
+    browser smoke, browser speed claim, same-commit speed gate, broad
+    SoftMMU/TLB lowering, RISC-V work, BusDK work, or Bus Engine OS proof;
+    R4k remains open for slices 5-6.
   - [ ] R4l - Run the x86_64 same-commit generic Chromium speed gate only
     after R4h-R4k have deterministic evidence. DoD: build one default-TCI
     `x86_64-softmmu` artifact and one accelerator artifact from the same

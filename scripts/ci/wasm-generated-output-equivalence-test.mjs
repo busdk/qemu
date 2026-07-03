@@ -12,6 +12,11 @@ import {
   encodeS64,
   encodeU32,
 } from "./wasm-generated-block-prototype.mjs";
+import {
+  WASMJIT_COUNTERS,
+  WASMJIT_RUN_CTX,
+  WASMJIT_RUN_EXIT,
+} from "./wasmjit-runloop-model.mjs";
 
 const VALUE_I32 = 0x7f;
 const VALUE_I64 = 0x7e;
@@ -75,7 +80,13 @@ const R4I_LIVE_X86_SHAPE = [
 const STATUS_EXIT = 1n;
 const STATUS_DISPATCH = 2n;
 const STATUS_UNSUPPORTED = 6n;
+const RUN_EXIT_REASON_NONE = 0;
+const RUN_EXIT_REASON_BUDGET = 1;
+const RUN_EXIT_REASON_UNSUPPORTED = 6;
+const RUN_EXIT_REASON_INVALIDATED = 8;
 const PER_TB_EMITTER_NAME = "r4k-per-tb-function-body-emitter";
+const TWO_TB_HOTSET_EMITTER_NAME = "r4k-two-tb-hotset-dispatch-fixture";
+const TWO_TB_HOTSET_BODY_TIME_NS_PER_TB = 1000n;
 const X86_CPU_STATE_CONTRACT_VERSION = 1;
 const X86_REG_ENUMS = [
   "R_EAX", "R_ECX", "R_EDX", "R_EBX", "R_ESP", "R_EBP", "R_ESI", "R_EDI",
@@ -344,26 +355,9 @@ function targetIndexFromPtr(ptr, relativeBase) {
   return offset / 4;
 }
 
-function compileGeneratedOutputModule(words, relativeBase, diagnostics = null) {
-  const instructions = [];
+function splitGeneratedOutput(words, relativeBase) {
   const ops = [];
   let terminal = null;
-
-  if (diagnostics) {
-    diagnostics.emitter = PER_TB_EMITTER_NAME;
-    diagnostics.runtimeUnsupportedGuards = [];
-  }
-  instructions.push(...localSet(1, i32WrapI64(i64Load(localGet(0), 0))));
-  instructions.push(...localSet(2, i32WrapI64(i64Load(localGet(0), 8))));
-
-  function flushAllRegisterLocals() {
-    return Array.from({ length: 16 }, (_, reg) =>
-      i64Store(localGet(1), localGet(regLocal(reg)), reg * 8)).flat();
-  }
-
-  for (let reg = 0; reg < 16; reg++) {
-    instructions.push(...localSet(regLocal(reg), i64Load(localGet(1), reg * 8)));
-  }
 
   for (let index = 0; index < words.length; index++) {
     const insn = words[index] >>> 0;
@@ -375,6 +369,7 @@ function compileGeneratedOutputModule(words, relativeBase, diagnostics = null) {
 
     if (opc === OPS.exit_tb || opc === OPS.goto_tb) {
       const ptr = tbPtr + sextract(insn, 12, 20);
+
       terminal = {
         kind: opc === OPS.goto_tb ? "goto_tb" : "exit_tb",
         ret: ptr,
@@ -388,159 +383,168 @@ function compileGeneratedOutputModule(words, relativeBase, diagnostics = null) {
   if (terminal === null) {
     throw new Error("fixture must terminate with exit_tb or goto_tb");
   }
+  return { ops, terminal };
+}
 
-  function compileOp(op) {
-    const { insn, opc, r0, r1, r2 } = op;
+function flushGeneratedRegisterLocals() {
+  return Array.from({ length: 16 }, (_, reg) =>
+    i64Store(localGet(1), localGet(regLocal(reg)), reg * 8)).flat();
+}
 
-    if (opc === OPS.tci_movi) {
-      return localSet(regLocal(r0), i64Const(sextract(insn, 12, 20)));
+function compileSharedGeneratedOutputOp(op) {
+  const { insn, opc, r0, r1, r2 } = op;
+
+  if (opc === OPS.tci_movi) {
+    return localSet(regLocal(r0), i64Const(sextract(insn, 12, 20)));
+  }
+  if (opc === OPS.tci_movl) {
+    const ptr = op.tbPtr + sextract(insn, 12, 20);
+    return localSet(regLocal(r0), i64Load(i32Const(ptr), 0));
+  }
+  if (opc === OPS.ld32u || opc === OPS.ld32s) {
+    const ofs = sextract(insn, 16, 16);
+    const loaded = i32Load(memoryAddress(localGet(regLocal(r1)), ofs));
+
+    return localSet(regLocal(r0),
+                    opc === OPS.ld32u ? i64ExtendI32U(loaded)
+                                      : i64ExtendI32S(loaded));
+  }
+  if (opc === OPS.ld) {
+    const ofs = sextract(insn, 16, 16);
+
+    return localSet(regLocal(r0),
+                    i64Load(memoryAddress(localGet(regLocal(r1)), ofs)));
+  }
+  if (opc === OPS.st8) {
+    const ofs = sextract(insn, 16, 16);
+
+    return i32Store8(memoryAddress(localGet(regLocal(r1)), ofs),
+                     i32WrapI64(localGet(regLocal(r0))));
+  }
+  if (opc === OPS.st32) {
+    const ofs = sextract(insn, 16, 16);
+
+    return i32Store(memoryAddress(localGet(regLocal(r1)), ofs),
+                    i32WrapI64(localGet(regLocal(r0))));
+  }
+  if (opc === OPS.st) {
+    const ofs = sextract(insn, 16, 16);
+
+    return i64Store(memoryAddress(localGet(regLocal(r1)), ofs),
+                    localGet(regLocal(r0)));
+  }
+  if (opc === OPS.add || opc === OPS.and) {
+    return localSet(regLocal(r0), [
+      ...localGet(regLocal(r1)),
+      ...localGet(regLocal(r2)),
+      opc === OPS.add ? 0x7c : 0x83,
+    ]);
+  }
+  if (opc === OPS.neg) {
+    return localSet(regLocal(r0), [
+      ...i64Const(0),
+      ...localGet(regLocal(r1)),
+      0x7d,
+    ]);
+  }
+  if (opc === OPS.shl || opc === OPS.shr) {
+    return localSet(regLocal(r0), [
+      ...localGet(regLocal(r1)),
+      ...localGet(regLocal(r2)),
+      opc === OPS.shl ? 0x86 : 0x88,
+    ]);
+  }
+  if (opc === OPS.extract || opc === OPS.sextract) {
+    const pos = bits(insn, 16, 6);
+    const len = bits(insn, 22, 6);
+
+    if (len === 0 || pos + len > 64) {
+      return null;
     }
-    if (opc === OPS.tci_movl) {
-      const ptr = op.tbPtr + sextract(insn, 12, 20);
-      return localSet(regLocal(r0), i64Load(i32Const(ptr), 0));
-    }
-    if (opc === OPS.ld32u || opc === OPS.ld32s) {
-      const ofs = sextract(insn, 16, 16);
-
-      const loaded = i32Load(memoryAddress(localGet(regLocal(r1)), ofs));
-
-      return localSet(regLocal(r0),
-                      opc === OPS.ld32u ? i64ExtendI32U(loaded)
-                                        : i64ExtendI32S(loaded));
-    }
-    if (opc === OPS.ld) {
-      const ofs = sextract(insn, 16, 16);
-
-      return localSet(regLocal(r0),
-                      i64Load(memoryAddress(localGet(regLocal(r1)), ofs)));
-    }
-    if (opc === OPS.st8) {
-      const ofs = sextract(insn, 16, 16);
-
-      return i32Store8(memoryAddress(localGet(regLocal(r1)), ofs),
-                       i32WrapI64(localGet(regLocal(r0))));
-    }
-    if (opc === OPS.st32) {
-      const ofs = sextract(insn, 16, 16);
-
-      return i32Store(memoryAddress(localGet(regLocal(r1)), ofs),
-                      i32WrapI64(localGet(regLocal(r0))));
-    }
-    if (opc === OPS.st) {
-      const ofs = sextract(insn, 16, 16);
-
-      return i64Store(memoryAddress(localGet(regLocal(r1)), ofs),
-                      localGet(regLocal(r0)));
-    }
-    if (opc === OPS.add || opc === OPS.and) {
-      return localSet(regLocal(r0), [
-        ...localGet(regLocal(r1)),
-        ...localGet(regLocal(r2)),
-        opc === OPS.add ? 0x7c : 0x83,
-      ]);
-    }
-    if (opc === OPS.neg) {
-      return localSet(regLocal(r0), [
-        ...i64Const(0),
-        ...localGet(regLocal(r1)),
-        0x7d,
-      ]);
-    }
-    if (opc === OPS.shl || opc === OPS.shr) {
-      return localSet(regLocal(r0), [
-        ...localGet(regLocal(r1)),
-        ...localGet(regLocal(r2)),
-        opc === OPS.shl ? 0x86 : 0x88,
-      ]);
-    }
-    if (opc === OPS.extract || opc === OPS.sextract) {
-      const pos = bits(insn, 16, 6);
-      const len = bits(insn, 22, 6);
-
-      if (len === 0 || pos + len > 64) {
-        return null;
-      }
-      if (opc === OPS.extract) {
-        const mask = len === 64 ? -1n : ((1n << BigInt(len)) - 1n);
-
-        return localSet(regLocal(r0), [
-          ...localGet(regLocal(r1)),
-          ...i64Const(pos),
-          0x88,
-          ...i64Const(mask),
-          0x83,
-        ]);
-      }
-      const shift = 64 - pos - len;
-
-      return localSet(regLocal(r0), [
-        ...localGet(regLocal(r1)),
-        ...i64Const(shift),
-        0x86,
-        ...i64Const(shift),
-        0x87,
-      ]);
-    }
-    if (opc === OPS.deposit) {
-      const pos = bits(insn, 20, 6);
-      const len = bits(insn, 26, 6);
-
-      if (len === 0 || pos + len > 64) {
-        return null;
-      }
+    if (opc === OPS.extract) {
       const mask = len === 64 ? -1n : ((1n << BigInt(len)) - 1n);
-      const clearMask = BigInt.asUintN(
-        64, ~(BigInt.asUintN(64, mask) << BigInt(pos)));
 
       return localSet(regLocal(r0), [
         ...localGet(regLocal(r1)),
-        ...i64Const(clearMask),
-        0x83,
-        ...localGet(regLocal(r2)),
+        ...i64Const(pos),
+        0x88,
         ...i64Const(mask),
         0x83,
-        ...i64Const(pos),
-        0x86,
-        0x84,
       ]);
     }
-    if (opc === OPS.tci_setcond32) {
-      const condition = bits(insn, 20, 4);
-      const comparison = compare32Expr(i32WrapI64(localGet(regLocal(r1))),
-                                       i32WrapI64(localGet(regLocal(r2))),
-                                       condition);
+    const shift = 64 - pos - len;
 
-      return comparison === null ? null
-        : localSet(regLocal(r0), i64ExtendI32U(comparison));
-    }
-    if (opc === OPS.setcond) {
-      const condition = bits(insn, 20, 4);
-      const comparison = compare64Expr(localGet(regLocal(r1)),
-                                       localGet(regLocal(r2)),
-                                       condition);
-
-      return comparison === null ? null
-        : localSet(regLocal(r0), i64ExtendI32U(comparison));
-    }
-    if (opc === OPS.tci_qemu_ld_rrr) {
-      return localSet(regLocal(r0), callFunc(0, [
-        localGet(regLocal(14)),
-        localGet(regLocal(r1)),
-        localGet(regLocal(r2)),
-        i64Const(op.tbPtr),
-      ]));
-    }
-    if (opc === OPS.tci_qemu_st_rrr) {
-      return callFunc(1, [
-        localGet(regLocal(14)),
-        localGet(regLocal(r1)),
-        localGet(regLocal(r0)),
-        localGet(regLocal(r2)),
-        i64Const(op.tbPtr),
-      ]);
-    }
-    return null;
+    return localSet(regLocal(r0), [
+      ...localGet(regLocal(r1)),
+      ...i64Const(shift),
+      0x86,
+      ...i64Const(shift),
+      0x87,
+    ]);
   }
+  if (opc === OPS.deposit) {
+    const pos = bits(insn, 20, 6);
+    const len = bits(insn, 26, 6);
+
+    if (len === 0 || pos + len > 64) {
+      return null;
+    }
+    const mask = len === 64 ? -1n : ((1n << BigInt(len)) - 1n);
+    const clearMask = BigInt.asUintN(
+      64, ~(BigInt.asUintN(64, mask) << BigInt(pos)));
+
+    return localSet(regLocal(r0), [
+      ...localGet(regLocal(r1)),
+      ...i64Const(clearMask),
+      0x83,
+      ...localGet(regLocal(r2)),
+      ...i64Const(mask),
+      0x83,
+      ...i64Const(pos),
+      0x86,
+      0x84,
+    ]);
+  }
+  if (opc === OPS.tci_setcond32) {
+    const condition = bits(insn, 20, 4);
+    const comparison = compare32Expr(i32WrapI64(localGet(regLocal(r1))),
+                                     i32WrapI64(localGet(regLocal(r2))),
+                                     condition);
+
+    return comparison === null ? null
+      : localSet(regLocal(r0), i64ExtendI32U(comparison));
+  }
+  if (opc === OPS.setcond) {
+    const condition = bits(insn, 20, 4);
+    const comparison = compare64Expr(localGet(regLocal(r1)),
+                                     localGet(regLocal(r2)),
+                                     condition);
+
+    return comparison === null ? null
+      : localSet(regLocal(r0), i64ExtendI32U(comparison));
+  }
+  if (opc === OPS.tci_qemu_ld_rrr) {
+    return localSet(regLocal(r0), callFunc(0, [
+      localGet(regLocal(14)),
+      localGet(regLocal(r1)),
+      localGet(regLocal(r2)),
+      i64Const(op.tbPtr),
+    ]));
+  }
+  if (opc === OPS.tci_qemu_st_rrr) {
+    return callFunc(1, [
+      localGet(regLocal(14)),
+      localGet(regLocal(r1)),
+      localGet(regLocal(r0)),
+      localGet(regLocal(r2)),
+      i64Const(op.tbPtr),
+    ]);
+  }
+  return null;
+}
+
+function compileSharedGeneratedOutputBody(words, relativeBase, diagnostics = null) {
+  const { ops, terminal } = splitGeneratedOutput(words, relativeBase);
 
   function compileRange(start, end) {
     const code = [];
@@ -570,7 +574,7 @@ function compileGeneratedOutputModule(words, relativeBase, diagnostics = null) {
           code.push(...ifBlock(
             i64Truthy(localGet(regLocal(op.r0))),
             [
-              ...flushAllRegisterLocals(),
+              ...flushGeneratedRegisterLocals(),
               ...returnExpr(i64Const(STATUS_UNSUPPORTED)),
             ],
           ));
@@ -589,7 +593,7 @@ function compileGeneratedOutputModule(words, relativeBase, diagnostics = null) {
         index = targetIndex;
         continue;
       }
-      const compiled = compileOp(op);
+      const compiled = compileSharedGeneratedOutputOp(op);
 
       if (compiled === null) {
         return null;
@@ -605,15 +609,36 @@ function compileGeneratedOutputModule(words, relativeBase, diagnostics = null) {
   if (body === null) {
     throw new Error("fixture contains unsupported generated-output shape");
   }
-  instructions.push(...body);
-  instructions.push(...flushAllRegisterLocals());
+  return { body, terminal, ops };
+}
+
+function compileGeneratedOutputModule(words, relativeBase, diagnostics = null) {
+  const instructions = [];
+
+  if (diagnostics) {
+    diagnostics.emitter = PER_TB_EMITTER_NAME;
+    diagnostics.runtimeUnsupportedGuards = [];
+  }
+  instructions.push(...localSet(1, i32WrapI64(i64Load(localGet(0), 0))));
+  instructions.push(...localSet(2, i32WrapI64(i64Load(localGet(0), 8))));
+
+  for (let reg = 0; reg < 16; reg++) {
+    instructions.push(...localSet(regLocal(reg), i64Load(localGet(1), reg * 8)));
+  }
+
+  const compiled = compileSharedGeneratedOutputBody(
+    words, relativeBase, diagnostics);
+
+  instructions.push(...compiled.body);
+  instructions.push(...flushGeneratedRegisterLocals());
   instructions.push(...i64Store(
     localGet(2),
-    terminal.kind === "goto_tb" ? i64Load(i32Const(terminal.ret), 0)
-                                : i64Const(terminal.ret),
+    compiled.terminal.kind === "goto_tb"
+      ? i64Load(i32Const(compiled.terminal.ret), 0)
+      : i64Const(compiled.terminal.ret),
     0,
   ));
-  instructions.push(...i64Const(terminal.status));
+  instructions.push(...i64Const(compiled.terminal.status));
 
   return Uint8Array.from([
     0x00, 0x61, 0x73, 0x6d,
@@ -1275,6 +1300,421 @@ async function runRuntimeUnsupportedGuardFixture(fixture, seed) {
   };
 }
 
+function runExitReasonName(reason) {
+  if (reason === RUN_EXIT_REASON_NONE) {
+    return "none";
+  }
+  if (reason === RUN_EXIT_REASON_BUDGET) {
+    return "budget";
+  }
+  if (reason === RUN_EXIT_REASON_UNSUPPORTED) {
+    return "unsupported";
+  }
+  if (reason === RUN_EXIT_REASON_INVALIDATED) {
+    return "invalidated";
+  }
+  return `unknown-${reason}`;
+}
+
+const HOTSET_LOCAL_COUNTERS_PTR = 19;
+const HOTSET_LOCAL_BUDGET = 20;
+const HOTSET_LOCAL_CHAIN_TARGET = 21;
+
+function storeRunExit(reason, tbId, valueExpr) {
+  return [
+    ...i32Store(localGet(2), i32Const(reason), WASMJIT_RUN_EXIT.reason),
+    ...i32Store(localGet(2), i32Const(tbId), WASMJIT_RUN_EXIT.tbId),
+    ...i64Store(localGet(2), valueExpr, WASMJIT_RUN_EXIT.value),
+  ];
+}
+
+function incrementRunCounter(offset) {
+  return i64Store(localGet(HOTSET_LOCAL_COUNTERS_PTR), [
+    ...i64Load(localGet(HOTSET_LOCAL_COUNTERS_PTR), offset),
+    ...i64Const(1n),
+    0x7c,
+  ], offset);
+}
+
+function hotsetFailureReturn({ status, reason, tbId, value, counterOffset }) {
+  return [
+    ...flushGeneratedRegisterLocals(),
+    ...storeRunExit(reason, tbId, value),
+    ...incrementRunCounter(counterOffset),
+    ...returnExpr(i64Const(status)),
+  ];
+}
+
+function storeRunCounter(offset, value) {
+  return i64Store(localGet(HOTSET_LOCAL_COUNTERS_PTR), i64Const(value), offset);
+}
+
+function emitTwoTBHotsetModule(fixture) {
+  const diagnostics = {
+    emitter: TWO_TB_HOTSET_EMITTER_NAME,
+    runtimeUnsupportedGuards: [],
+  };
+
+  try {
+    const sourceEmission = emitPerTBFunctionBody(
+      fixture.source.words, fixture.source.relativeBase);
+    const source = compileSharedGeneratedOutputBody(
+      fixture.source.words, fixture.source.relativeBase, diagnostics);
+    const targetEmission = emitPerTBFunctionBody(
+      fixture.target.words, fixture.target.relativeBase);
+    const targetSupported = targetEmission.ok;
+    const target = targetSupported
+      ? compileSharedGeneratedOutputBody(
+        fixture.target.words, fixture.target.relativeBase, diagnostics)
+      : null;
+
+    if (!sourceEmission.ok) {
+      throw new Error(`two-TB hotset source unsupported: ${sourceEmission.reason}`);
+    }
+    if (source.terminal.kind !== "goto_tb") {
+      throw new Error("two-TB hotset source must terminate with goto_tb");
+    }
+    if (targetSupported && target.terminal.kind !== "exit_tb") {
+      throw new Error("two-TB hotset target fixture must terminate with exit_tb");
+    }
+
+    const generatedGuestInstructions =
+      BigInt(fixture.source.guestInstructions + fixture.target.guestInstructions);
+    const generatedBodyTimeNs =
+      BigInt(fixture.expectedChainLength) * TWO_TB_HOTSET_BODY_TIME_NS_PER_TB;
+    const instructions = [];
+
+    instructions.push(...localSet(
+      1, i32WrapI64(i64Load(localGet(0), WASMJIT_RUN_CTX.env))));
+    instructions.push(...localSet(
+      2, i32WrapI64(i64Load(localGet(0), WASMJIT_RUN_CTX.exit))));
+    instructions.push(...localSet(
+      HOTSET_LOCAL_COUNTERS_PTR,
+      i32WrapI64(i64Load(localGet(0), WASMJIT_RUN_CTX.counters))));
+    instructions.push(...localSet(
+      HOTSET_LOCAL_BUDGET,
+      i64Load(localGet(0), WASMJIT_RUN_CTX.budget)));
+
+    for (let reg = 0; reg < 16; reg++) {
+      instructions.push(...localSet(regLocal(reg), i64Load(localGet(1), reg * 8)));
+    }
+
+    instructions.push(...source.body);
+    instructions.push(...localSet(
+      HOTSET_LOCAL_CHAIN_TARGET, i64Load(i32Const(source.terminal.ret), 0)));
+    instructions.push(...ifBlock(
+      [...localGet(HOTSET_LOCAL_CHAIN_TARGET),
+       ...i64Const(fixture.target.dispatchTarget), 0x52],
+      hotsetFailureReturn({
+        status: STATUS_UNSUPPORTED,
+        reason: RUN_EXIT_REASON_UNSUPPORTED,
+        tbId: fixture.source.id,
+        value: localGet(HOTSET_LOCAL_CHAIN_TARGET),
+        counterOffset: WASMJIT_COUNTERS.exitsUnsupported,
+      }),
+    ));
+    instructions.push(...ifBlock(
+      [...localGet(HOTSET_LOCAL_BUDGET), ...i64Const(2n), 0x54],
+      hotsetFailureReturn({
+        status: BigInt(RUN_EXIT_REASON_BUDGET),
+        reason: RUN_EXIT_REASON_BUDGET,
+        tbId: fixture.target.id,
+        value: localGet(HOTSET_LOCAL_CHAIN_TARGET),
+        counterOffset: WASMJIT_COUNTERS.exitsBudget,
+      }),
+    ));
+    instructions.push(...ifBlock(
+      [...i32Load(i32Const(fixture.target.generationAddress)),
+       ...i32Const(fixture.target.expectedGeneration), 0x47],
+      hotsetFailureReturn({
+        status: BigInt(RUN_EXIT_REASON_INVALIDATED),
+        reason: RUN_EXIT_REASON_INVALIDATED,
+        tbId: fixture.target.id,
+        value: localGet(HOTSET_LOCAL_CHAIN_TARGET),
+        counterOffset: WASMJIT_COUNTERS.exitsInvalidated,
+      }),
+    ));
+
+    if (!targetSupported) {
+      instructions.push(...hotsetFailureReturn({
+        status: STATUS_UNSUPPORTED,
+        reason: RUN_EXIT_REASON_UNSUPPORTED,
+        tbId: fixture.target.id,
+        value: localGet(HOTSET_LOCAL_CHAIN_TARGET),
+        counterOffset: WASMJIT_COUNTERS.exitsUnsupported,
+      }));
+    } else {
+      instructions.push(...target.body);
+      instructions.push(...flushGeneratedRegisterLocals());
+      instructions.push(...storeRunExit(
+        RUN_EXIT_REASON_NONE, fixture.target.id, i64Const(target.terminal.ret)));
+      instructions.push(...storeRunCounter(
+        WASMJIT_COUNTERS.generatedGuestInstructions, generatedGuestInstructions));
+      instructions.push(...storeRunCounter(
+        WASMJIT_COUNTERS.generatedBodyTimeNs, generatedBodyTimeNs));
+      instructions.push(...storeRunCounter(
+        WASMJIT_COUNTERS.generatedChainLength,
+        BigInt(fixture.expectedChainLength)));
+      instructions.push(...storeRunCounter(
+        WASMJIT_COUNTERS.inlineTlbHitLoads, BigInt(fixture.expectedInlineLoads)));
+      instructions.push(...storeRunCounter(
+        WASMJIT_COUNTERS.inlineTlbHitStores,
+        BigInt(fixture.expectedInlineStores)));
+      instructions.push(...i64Const(STATUS_EXIT));
+    }
+
+    const moduleBytes = Uint8Array.from([
+      0x00, 0x61, 0x73, 0x6d,
+      0x01, 0x00, 0x00, 0x00,
+      ...section(1, vector([
+        functionType([VALUE_I32], [VALUE_I64]),
+        functionType([VALUE_I64, VALUE_I64, VALUE_I64, VALUE_I64],
+                     [VALUE_I64]),
+        functionType([VALUE_I64, VALUE_I64, VALUE_I64, VALUE_I64, VALUE_I64],
+                     []),
+      ])),
+      ...section(2, vector([
+        [...name("env"), ...name("memory"), 0x02, 0x00, 0x01],
+        [...name("env"), ...name("qemu_ld_rrr"), 0x00, ...encodeU32(1)],
+        [...name("env"), ...name("qemu_st_rrr"), 0x00, ...encodeU32(2)],
+      ])),
+      ...section(3, vector([[0x00]])),
+      ...section(7, vector([[...name("wasmjit_run"), 0x00, ...encodeU32(2)]])),
+      ...section(10, vector([functionBody(
+        instructions,
+        [
+          { count: 2, type: VALUE_I32 },
+          { count: 16, type: VALUE_I64 },
+          { count: 1, type: VALUE_I32 },
+          { count: 2, type: VALUE_I64 },
+        ],
+      )])),
+    ]);
+
+    return {
+      ok: WebAssembly.validate(moduleBytes),
+      emitter: TWO_TB_HOTSET_EMITTER_NAME,
+      reason: null,
+      moduleBytes,
+      moduleByteLength: moduleBytes.length,
+      moduleValid: WebAssembly.validate(moduleBytes),
+      targetShapeSupported: targetSupported,
+      targetUnsupportedReason: targetSupported ? null : targetEmission.reason,
+      runtimeUnsupportedGuards: diagnostics.runtimeUnsupportedGuards,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      emitter: TWO_TB_HOTSET_EMITTER_NAME,
+      reason: failClosedReason(error),
+      error: error instanceof Error ? error.message : String(error),
+      moduleValid: false,
+      targetShapeSupported: false,
+    };
+  }
+}
+
+function createHotsetState(fixture, seed) {
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const view = new DataView(memory.buffer);
+  const ctxPtr = 64;
+  const regsPtr = 256;
+  const countersPtr = 1024;
+  const exitPtr = 1408;
+  const dataBase = 0x3000 + seed * 0x100;
+  const regs = Array.from({ length: 16 }, (_, index) =>
+    BigInt(0x1000 + seed * 0x40 + index));
+  const sourceTerminal = splitGeneratedOutput(
+    fixture.source.words, fixture.source.relativeBase).terminal;
+
+  regs[4] = 0n;
+  regs[5] = 0n;
+  regs[13] = 0n;
+  regs[14] = BigInt(dataBase + 16);
+
+  view.setBigUint64(ctxPtr + WASMJIT_RUN_CTX.env, BigInt(regsPtr), true);
+  view.setBigUint64(ctxPtr + WASMJIT_RUN_CTX.guestRam, 0n, true);
+  view.setBigUint64(ctxPtr + WASMJIT_RUN_CTX.budget, BigInt(fixture.budget), true);
+  view.setBigUint64(ctxPtr + WASMJIT_RUN_CTX.counters, BigInt(countersPtr), true);
+  view.setBigUint64(ctxPtr + WASMJIT_RUN_CTX.exit, BigInt(exitPtr), true);
+  view.setUint32(ctxPtr + WASMJIT_RUN_CTX.mode, 1, true);
+  view.setUint32(ctxPtr + WASMJIT_RUN_CTX.flags, 0, true);
+  view.setUint32(dataBase, 7, true);
+  view.setBigUint64(dataBase + 0x10, BigInt(0x400000000 + seed), true);
+  view.setBigUint64(dataBase + 0x100, BigInt(0x100000000 + seed), true);
+  view.setBigUint64(dataBase + 0x110, BigInt(0x200000000 + seed), true);
+  view.setBigUint64(dataBase + 0x118, BigInt(0x300000000 + seed), true);
+  view.setBigUint64(sourceTerminal.ret, fixture.slotTarget, true);
+  view.setUint32(fixture.target.generationAddress,
+                 fixture.target.actualGeneration, true);
+
+  for (let reg = 0; reg < regs.length; reg++) {
+    view.setBigUint64(regsPtr + reg * 8, regs[reg], true);
+  }
+
+  return {
+    memory,
+    view,
+    ctxPtr,
+    regsPtr,
+    countersPtr,
+    exitPtr,
+    dataBase,
+    regs,
+    helpers: createHelpers(view),
+  };
+}
+
+function readHotsetCounters(view, countersPtr) {
+  function counter(offset) {
+    return view.getBigUint64(countersPtr + offset, true).toString();
+  }
+
+  return {
+    generatedGuestInstructions:
+      counter(WASMJIT_COUNTERS.generatedGuestInstructions),
+    generatedBodyTimeNs: counter(WASMJIT_COUNTERS.generatedBodyTimeNs),
+    generatedChainLength: counter(WASMJIT_COUNTERS.generatedChainLength),
+    inlineTlbHitLoads: counter(WASMJIT_COUNTERS.inlineTlbHitLoads),
+    inlineTlbHitStores: counter(WASMJIT_COUNTERS.inlineTlbHitStores),
+    helperCalls: counter(WASMJIT_COUNTERS.helperCalls),
+    qemuLoadCalls: counter(WASMJIT_COUNTERS.qemuLoadCalls),
+    qemuStoreCalls: counter(WASMJIT_COUNTERS.qemuStoreCalls),
+    exitsBudget: counter(WASMJIT_COUNTERS.exitsBudget),
+    exitsUnsupported: counter(WASMJIT_COUNTERS.exitsUnsupported),
+    exitsInvalidated: counter(WASMJIT_COUNTERS.exitsInvalidated),
+  };
+}
+
+function captureHotsetState(state) {
+  const exitReason = state.view.getUint32(
+    state.exitPtr + WASMJIT_RUN_EXIT.reason, true);
+
+  return {
+    regs: Array.from({ length: 16 }, (_, reg) =>
+      state.view.getBigUint64(state.regsPtr + reg * 8, true).toString()),
+    data: [
+      state.view.getUint32(state.dataBase, true),
+      state.view.getBigUint64(state.dataBase + 0x10, true).toString(),
+      state.view.getBigUint64(state.dataBase + 0x100, true).toString(),
+      state.view.getBigUint64(state.dataBase + 0x110, true).toString(),
+      state.view.getBigUint64(state.dataBase + 0x118, true).toString(),
+    ],
+    exit: {
+      reason: exitReason,
+      reasonName: runExitReasonName(exitReason),
+      tbId: state.view.getUint32(state.exitPtr + WASMJIT_RUN_EXIT.tbId, true),
+      value: state.view.getBigUint64(
+        state.exitPtr + WASMJIT_RUN_EXIT.value, true).toString(),
+    },
+    counters: readHotsetCounters(state.view, state.countersPtr),
+    helpers: {
+      calls: state.helpers.calls,
+      loads: state.helpers.calls.filter((call) => call.kind === "ld").length,
+      stores: state.helpers.calls.filter((call) => call.kind === "st").length,
+    },
+  };
+}
+
+function writeReferenceRegs(state, regs) {
+  for (let reg = 0; reg < regs.length; reg++) {
+    state.view.setBigUint64(state.regsPtr + reg * 8, regs[reg], true);
+  }
+}
+
+async function runTwoTBHotsetFixture(fixture, seed) {
+  const emission = emitTwoTBHotsetModule(fixture);
+
+  assert.equal(emission.ok, true, `${fixture.name} hotset emitter failed`);
+  assert.equal(emission.moduleValid, true,
+               `${fixture.name} emitted invalid hotset module`);
+  const generated = createHotsetState(fixture, seed);
+  const reference = createHotsetState(fixture, seed);
+  const sourceExpected = interpretGeneratedOutput(
+    fixture.source.words, reference, fixture.source.relativeBase);
+  let finalExpected = sourceExpected;
+  let expectedState = "after-source-tb";
+
+  assert.equal(sourceExpected.status, STATUS_DISPATCH,
+               `${fixture.name} source TB should dispatch`);
+  if (fixture.expectedSuccess) {
+    assert.equal(sourceExpected.ret, fixture.target.dispatchTarget,
+                 `${fixture.name} source dispatch target mismatch`);
+    reference.regs = sourceExpected.regs.slice();
+    finalExpected = interpretGeneratedOutput(
+      fixture.target.words, reference, fixture.target.relativeBase);
+    expectedState = "after-chained-target";
+  }
+  writeReferenceRegs(reference, finalExpected.regs);
+
+  const compiled = await WebAssembly.compile(emission.moduleBytes);
+  const instance = await WebAssembly.instantiate(compiled, {
+    env: {
+      memory: generated.memory,
+      qemu_ld_rrr: generated.helpers.qemuLd,
+      qemu_st_rrr: generated.helpers.qemuSt,
+    },
+  });
+  const status = instance.exports.wasmjit_run(generated.ctxPtr);
+  const generatedState = captureHotsetState(generated);
+  const referenceState = captureHotsetState(reference);
+
+  assert.equal(status, fixture.expectedStatus,
+               `${fixture.name} generated status mismatch`);
+  assert.deepEqual(
+    { regs: generatedState.regs, data: generatedState.data },
+    { regs: referenceState.regs, data: referenceState.data },
+    `${fixture.name} generated state mismatch`,
+  );
+  assert.equal(generatedState.counters.generatedGuestInstructions,
+               fixture.expectedGeneratedGuestInstructions.toString());
+  assert.equal(generatedState.counters.generatedChainLength,
+               fixture.expectedGeneratedChainLength.toString());
+  assert.equal(generatedState.counters.generatedBodyTimeNs,
+               fixture.expectedGeneratedBodyTimeNs.toString());
+  assert.equal(generatedState.counters.helperCalls, "0");
+  assert.equal(generatedState.counters.qemuLoadCalls, "0");
+  assert.equal(generatedState.counters.qemuStoreCalls, "0");
+  assert.equal(generatedState.helpers.loads, 0);
+  assert.equal(generatedState.helpers.stores, 0);
+  assert.equal(generatedState.exit.reasonName, fixture.expectedRunExitReason);
+  assert.equal(emission.targetShapeSupported, fixture.expectedTargetShapeSupported);
+
+  return {
+    name: fixture.name,
+    seed,
+    success: fixture.expectedSuccess,
+    expectedState,
+    generatedModuleCalls: 1,
+    status: status.toString(),
+    runExitReason: generatedState.exit.reasonName,
+    fallbackReason: fixture.expectedFallbackReason,
+    sourceDispatchTarget: sourceExpected.ret.toString(),
+    targetDispatchTarget: fixture.target.dispatchTarget.toString(),
+    registerStateMatched: true,
+    memoryStateMatched: true,
+    targetShapeSupported: emission.targetShapeSupported,
+    targetUnsupportedReason: emission.targetUnsupportedReason,
+    moduleValid: emission.moduleValid,
+    moduleByteLength: emission.moduleByteLength,
+    generatedGuestInstructions:
+      generatedState.counters.generatedGuestInstructions,
+    generatedChainLength: generatedState.counters.generatedChainLength,
+    generatedBodyTimeNs: generatedState.counters.generatedBodyTimeNs,
+    deterministicBodyTime: "one-thousand-ns-per-generated-TB-stand-in",
+    inlineTlbHitLoads: generatedState.counters.inlineTlbHitLoads,
+    inlineTlbHitStores: generatedState.counters.inlineTlbHitStores,
+    helperCalls: generatedState.counters.helperCalls,
+    qemuLdCalls: generatedState.counters.qemuLoadCalls,
+    qemuStCalls: generatedState.counters.qemuStoreCalls,
+    exits: {
+      budget: generatedState.counters.exitsBudget,
+      unsupported: generatedState.counters.exitsUnsupported,
+      invalidated: generatedState.counters.exitsInvalidated,
+    },
+  };
+}
+
 const fixtures = [
   {
     name: "live-x86-pre-r4i-ld32u-goto-tb-13",
@@ -1372,6 +1812,139 @@ assert.deepEqual(
   "R4i live x86 fixture shape drifted",
 );
 
+const R4K_TWO_TB_HOTSET_TARGET_GENERATION_ADDRESS = 0x6800;
+const R4K_TWO_TB_HOTSET_TARGET_GENERATION = 7;
+const R4K_TWO_TB_HOTSET_DISPATCH_TARGET = 0x7200n;
+const r4kTwoTBHotsetSource = {
+  id: 1,
+  name: "r4k-two-tb-source-r4i-goto",
+  relativeBase: 0x6000,
+  words: r4iLiveX86Fixture.words,
+  guestInstructions: 1,
+};
+
+function r4kTwoTBHotsetTarget(overrides = {}) {
+  return {
+    id: 2,
+    name: "r4k-two-tb-target-add-exit",
+    relativeBase: 0x6400,
+    dispatchTarget: R4K_TWO_TB_HOTSET_DISPATCH_TARGET,
+    generationAddress: R4K_TWO_TB_HOTSET_TARGET_GENERATION_ADDRESS,
+    expectedGeneration: R4K_TWO_TB_HOTSET_TARGET_GENERATION,
+    actualGeneration: R4K_TWO_TB_HOTSET_TARGET_GENERATION,
+    guestInstructions: 1,
+    words: [
+      OPS.tci_movi | (6 << 8) | (2 << 12),
+      OPS.add | (4 << 8) | (4 << 12) | (6 << 16),
+      OPS.exit_tb,
+    ],
+    ...overrides,
+  };
+}
+
+const R4K_TWO_TB_HOTSET_BODY_TIME_NS =
+  2n * TWO_TB_HOTSET_BODY_TIME_NS_PER_TB;
+const r4kTwoTBHotsetFixtures = [
+  {
+    name: "r4k-two-tb-chained-hit",
+    source: r4kTwoTBHotsetSource,
+    target: r4kTwoTBHotsetTarget(),
+    slotTarget: R4K_TWO_TB_HOTSET_DISPATCH_TARGET,
+    budget: 2,
+    expectedSuccess: true,
+    expectedStatus: STATUS_EXIT,
+    expectedRunExitReason: "none",
+    expectedFallbackReason: null,
+    expectedTargetShapeSupported: true,
+    expectedChainLength: 2,
+    expectedInlineLoads: 2,
+    expectedInlineStores: 2,
+    expectedGeneratedGuestInstructions: 2,
+    expectedGeneratedChainLength: 2,
+    expectedGeneratedBodyTimeNs: R4K_TWO_TB_HOTSET_BODY_TIME_NS,
+  },
+  {
+    name: "r4k-two-tb-missing-chained-target",
+    source: r4kTwoTBHotsetSource,
+    target: r4kTwoTBHotsetTarget(),
+    slotTarget: 0x7777n,
+    budget: 2,
+    expectedSuccess: false,
+    expectedStatus: STATUS_UNSUPPORTED,
+    expectedRunExitReason: "unsupported",
+    expectedFallbackReason: "missing-chain-target",
+    expectedTargetShapeSupported: true,
+    expectedChainLength: 2,
+    expectedInlineLoads: 2,
+    expectedInlineStores: 2,
+    expectedGeneratedGuestInstructions: 0,
+    expectedGeneratedChainLength: 0,
+    expectedGeneratedBodyTimeNs: 0,
+  },
+  {
+    name: "r4k-two-tb-unsupported-chained-target-shape",
+    source: r4kTwoTBHotsetSource,
+    target: r4kTwoTBHotsetTarget({
+      name: "r4k-two-tb-target-helper-unsupported",
+      words: [
+        OPS.call,
+        OPS.exit_tb,
+      ],
+    }),
+    slotTarget: R4K_TWO_TB_HOTSET_DISPATCH_TARGET,
+    budget: 2,
+    expectedSuccess: false,
+    expectedStatus: STATUS_UNSUPPORTED,
+    expectedRunExitReason: "unsupported",
+    expectedFallbackReason: "unsupported-chain-target-shape",
+    expectedTargetShapeSupported: false,
+    expectedChainLength: 2,
+    expectedInlineLoads: 2,
+    expectedInlineStores: 2,
+    expectedGeneratedGuestInstructions: 0,
+    expectedGeneratedChainLength: 0,
+    expectedGeneratedBodyTimeNs: 0,
+  },
+  {
+    name: "r4k-two-tb-budget-before-second-tb",
+    source: r4kTwoTBHotsetSource,
+    target: r4kTwoTBHotsetTarget(),
+    slotTarget: R4K_TWO_TB_HOTSET_DISPATCH_TARGET,
+    budget: 1,
+    expectedSuccess: false,
+    expectedStatus: BigInt(RUN_EXIT_REASON_BUDGET),
+    expectedRunExitReason: "budget",
+    expectedFallbackReason: "budget-before-second-tb",
+    expectedTargetShapeSupported: true,
+    expectedChainLength: 2,
+    expectedInlineLoads: 2,
+    expectedInlineStores: 2,
+    expectedGeneratedGuestInstructions: 0,
+    expectedGeneratedChainLength: 0,
+    expectedGeneratedBodyTimeNs: 0,
+  },
+  {
+    name: "r4k-two-tb-invalidated-chained-target",
+    source: r4kTwoTBHotsetSource,
+    target: r4kTwoTBHotsetTarget({
+      actualGeneration: R4K_TWO_TB_HOTSET_TARGET_GENERATION + 1,
+    }),
+    slotTarget: R4K_TWO_TB_HOTSET_DISPATCH_TARGET,
+    budget: 2,
+    expectedSuccess: false,
+    expectedStatus: BigInt(RUN_EXIT_REASON_INVALIDATED),
+    expectedRunExitReason: "invalidated",
+    expectedFallbackReason: "invalidated-chain-target",
+    expectedTargetShapeSupported: true,
+    expectedChainLength: 2,
+    expectedInlineLoads: 2,
+    expectedInlineStores: 2,
+    expectedGeneratedGuestInstructions: 0,
+    expectedGeneratedChainLength: 0,
+    expectedGeneratedBodyTimeNs: 0,
+  },
+];
+
 const unsupportedFixtures = [
   {
     name: "qemu-helper-mixed-unsupported-fallback",
@@ -1410,6 +1983,7 @@ const unsupportedX86StateFixtures = [
 const results = [];
 const unsupportedResults = [];
 const unsupportedX86StateResults = [];
+const r4kTwoTBHotsetResults = [];
 
 for (const fixture of fixtures) {
   for (const seed of fixture.seeds || [1, 2]) {
@@ -1436,6 +2010,10 @@ for (const fixture of unsupportedX86StateFixtures) {
     name: fixture.name,
     reason: support.reason,
   });
+}
+
+for (const fixture of r4kTwoTBHotsetFixtures) {
+  r4kTwoTBHotsetResults.push(await runTwoTBHotsetFixture(fixture, 1));
 }
 
 assert.equal(results.length, 13);
@@ -1521,6 +2099,77 @@ assert.deepEqual(r4iRuntimeUnsupported.flushedRegs, {
   [x86RegField(5)]: "0",
   [x86RegField(13)]: "1",
 });
+assert.equal(r4kTwoTBHotsetResults.length, 5);
+const r4kTwoTBHotsetHit = r4kTwoTBHotsetResults.find((entry) =>
+  entry.name === "r4k-two-tb-chained-hit");
+const r4kTwoTBHotsetFailures = r4kTwoTBHotsetResults.filter((entry) =>
+  !entry.success);
+assert.equal(r4kTwoTBHotsetHit.success, true);
+assert.equal(r4kTwoTBHotsetHit.generatedModuleCalls, 1);
+assert.equal(r4kTwoTBHotsetHit.status, STATUS_EXIT.toString());
+assert.equal(r4kTwoTBHotsetHit.runExitReason, "none");
+assert.equal(r4kTwoTBHotsetHit.fallbackReason, null);
+assert.equal(r4kTwoTBHotsetHit.generatedGuestInstructions, "2");
+assert.equal(r4kTwoTBHotsetHit.generatedChainLength, "2");
+assert.equal(r4kTwoTBHotsetHit.generatedBodyTimeNs,
+             R4K_TWO_TB_HOTSET_BODY_TIME_NS.toString());
+assert.equal(r4kTwoTBHotsetHit.helperCalls, "0");
+assert.equal(r4kTwoTBHotsetHit.qemuLdCalls, "0");
+assert.equal(r4kTwoTBHotsetHit.qemuStCalls, "0");
+assert.equal(r4kTwoTBHotsetHit.moduleValid, true);
+assert.equal(r4kTwoTBHotsetHit.targetShapeSupported, true);
+assert.deepEqual(
+  r4kTwoTBHotsetFailures.map((entry) => entry.fallbackReason),
+  [
+    "missing-chain-target",
+    "unsupported-chain-target-shape",
+    "budget-before-second-tb",
+    "invalidated-chain-target",
+  ],
+);
+assert.deepEqual(
+  r4kTwoTBHotsetFailures.map((entry) => entry.generatedGuestInstructions),
+  ["0", "0", "0", "0"],
+);
+assert.deepEqual(
+  r4kTwoTBHotsetFailures.map((entry) => entry.generatedChainLength),
+  ["0", "0", "0", "0"],
+);
+assert.deepEqual(
+  r4kTwoTBHotsetFailures.map((entry) => entry.generatedBodyTimeNs),
+  ["0", "0", "0", "0"],
+);
+assert.deepEqual(
+  r4kTwoTBHotsetFailures.map((entry) => entry.expectedState),
+  ["after-source-tb", "after-source-tb", "after-source-tb", "after-source-tb"],
+);
+assert.equal(
+  r4kTwoTBHotsetFailures.find((entry) =>
+    entry.fallbackReason === "missing-chain-target").exits.unsupported,
+  "1",
+);
+assert.equal(
+  r4kTwoTBHotsetFailures.find((entry) =>
+    entry.fallbackReason === "unsupported-chain-target-shape")
+    .targetUnsupportedReason,
+  "unsupported-shape",
+);
+assert.equal(
+  r4kTwoTBHotsetFailures.find((entry) =>
+    entry.fallbackReason === "unsupported-chain-target-shape")
+    .exits.unsupported,
+  "1",
+);
+assert.equal(
+  r4kTwoTBHotsetFailures.find((entry) =>
+    entry.fallbackReason === "budget-before-second-tb").exits.budget,
+  "1",
+);
+assert.equal(
+  r4kTwoTBHotsetFailures.find((entry) =>
+    entry.fallbackReason === "invalidated-chain-target").exits.invalidated,
+  "1",
+);
 const r4kLiveRoutingCases = [
   routeLiveGeneratedOutput(null),
   routeLiveGeneratedOutput({
@@ -1629,6 +2278,20 @@ console.log(JSON.stringify({
   r4iX86CpuStateContract:
     r4iEmitterResults[0].x86CpuStateContract,
   r4iRuntimeUnsupportedFlush: r4iRuntimeUnsupported,
+  r4kTwoTBHotset: {
+    emitter: TWO_TB_HOTSET_EMITTER_NAME,
+    fixtureCount: r4kTwoTBHotsetResults.length,
+    chainedHit: r4kTwoTBHotsetHit,
+    failClosedCases: r4kTwoTBHotsetFailures,
+    unsupportedCases: r4kTwoTBHotsetFailures.map((entry) => ({
+      name: entry.name,
+      fallbackReason: entry.fallbackReason,
+      runExitReason: entry.runExitReason,
+      generatedGuestInstructions: entry.generatedGuestInstructions,
+      generatedChainLength: entry.generatedChainLength,
+      generatedBodyTimeNs: entry.generatedBodyTimeNs,
+    })),
+  },
   r4kLiveMetadataRouting: r4kLiveRoutingCases,
   unsupportedX86StateFixtures: unsupportedX86StateResults,
   helperBoundaryFixtures: helperBoundaryResults.length,
