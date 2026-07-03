@@ -82,6 +82,32 @@ export const WASMJIT_HOTSET = {
   size: 16,
 };
 
+export const WASMJIT_TB_METADATA_FLAGS = {
+  valid: 1 << 0,
+  fallback: 1 << 1,
+  loweringProfile: 1 << 2,
+  profileLowerable: 1 << 3,
+  generatedCandidate: 1 << 4,
+  terminal: 1 << 5,
+  generatedOutput: 1 << 6,
+  outputTruncated: 1 << 7,
+};
+
+export const WASMJIT_TB_METADATA_MAGIC = 0x36574153;
+export const WASMJIT_TB_METADATA_VERSION = 1;
+
+export const WASMJIT_HOTSET_BUILD_STATUS = {
+  ok: "ok",
+  empty: "empty",
+  capacity: "capacity",
+  missingMetadata: "missing-metadata",
+  invalidMetadata: "invalid-metadata",
+  nonTerminal: "non-terminal",
+  unsupportedHotTb: "unsupported-hot-tb",
+  noGeneratedOutput: "no-generated-output",
+  outputTruncated: "output-truncated",
+};
+
 export function encodeU32(value) {
   if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
     throw new Error("encodeU32 expects an unsigned 32-bit integer");
@@ -123,6 +149,101 @@ function normalizeWorkload(workload) {
     return workload;
   }
   throw new Error(`unsupported wasmjit run-loop workload: ${workload}`);
+}
+
+function metadataBaseValid(metadata) {
+  return metadata &&
+    metadata.magic === WASMJIT_TB_METADATA_MAGIC &&
+    metadata.version === WASMJIT_TB_METADATA_VERSION &&
+    (metadata.flags & WASMJIT_TB_METADATA_FLAGS.valid) !== 0;
+}
+
+function generatedOutputAvailable(metadata) {
+  if (!metadataBaseValid(metadata)) {
+    return false;
+  }
+  if ((metadata.flags & WASMJIT_TB_METADATA_FLAGS.generatedCandidate) === 0 ||
+      (metadata.flags & WASMJIT_TB_METADATA_FLAGS.terminal) === 0 ||
+      metadata.generatedUnsupportedOpCount !== 0) {
+    return false;
+  }
+  if ((metadata.flags & WASMJIT_TB_METADATA_FLAGS.generatedOutput) === 0 ||
+      (metadata.flags & WASMJIT_TB_METADATA_FLAGS.outputTruncated) !== 0) {
+    return false;
+  }
+  return metadata.generatedOutputSize !== 0 &&
+    metadata.generatedOutputSize % 4 === 0 &&
+    metadata.generatedOutputOpCount === metadata.opCount &&
+    metadata.generatedOutputOpCount === metadata.generatedOutputSize / 4 &&
+    Array.isArray(metadata.generatedOutput);
+}
+
+export function buildHotsetFromMetadataModel(metadata, { capacity = metadata.length } = {}) {
+  if (metadata.length === 0) {
+    return { ok: false, status: WASMJIT_HOTSET_BUILD_STATUS.empty };
+  }
+  if (metadata.length > capacity || metadata.length > 0xffffffff) {
+    return { ok: false, status: WASMJIT_HOTSET_BUILD_STATUS.capacity };
+  }
+
+  const tbs = [];
+  for (const [index, current] of metadata.entries()) {
+    if (!current) {
+      return {
+        ok: false,
+        status: WASMJIT_HOTSET_BUILD_STATUS.missingMetadata,
+      };
+    }
+    if (!metadataBaseValid(current)) {
+      return {
+        ok: false,
+        status: WASMJIT_HOTSET_BUILD_STATUS.invalidMetadata,
+      };
+    }
+    if ((current.flags & WASMJIT_TB_METADATA_FLAGS.terminal) === 0) {
+      return { ok: false, status: WASMJIT_HOTSET_BUILD_STATUS.nonTerminal };
+    }
+    if ((current.flags & WASMJIT_TB_METADATA_FLAGS.generatedCandidate) === 0 ||
+        current.generatedUnsupportedOpCount !== 0) {
+      return {
+        ok: false,
+        status: WASMJIT_HOTSET_BUILD_STATUS.unsupportedHotTb,
+      };
+    }
+    if ((current.flags & WASMJIT_TB_METADATA_FLAGS.outputTruncated) !== 0) {
+      return {
+        ok: false,
+        status: WASMJIT_HOTSET_BUILD_STATUS.outputTruncated,
+      };
+    }
+    if (!generatedOutputAvailable(current)) {
+      return {
+        ok: false,
+        status: WASMJIT_HOTSET_BUILD_STATUS.noGeneratedOutput,
+      };
+    }
+
+    const tbId = index + 1;
+    const immediate = BigInt(current.generatedOutputChecksum ||
+      current.generatedOutputOpCount || 1);
+    tbs.push({
+      tbId,
+      nextTbId: index + 1 === metadata.length ? 1 : tbId + 1,
+      op: (index & 1) ? 2 : 1,
+      guestInstructions: current.generatedOutputOpCount,
+      immediate,
+    });
+  }
+
+  return {
+    ok: true,
+    status: WASMJIT_HOTSET_BUILD_STATUS.ok,
+    hotset: {
+      tbCount: tbs.length,
+      entryTbId: tbs[0].tbId,
+      tbs,
+    },
+  };
 }
 
 function utf8Bytes(text) {

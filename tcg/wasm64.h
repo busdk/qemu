@@ -11,6 +11,7 @@
 #ifndef TCG_WASM64_H
 #define TCG_WASM64_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 typedef struct CPUArchState CPUArchState;
@@ -232,6 +233,18 @@ typedef struct TCGWasm64RunHotset {
 #define TCG_WASM64_RUN_HOTSET_TBS_OFFSET 8u
 #define TCG_WASM64_RUN_HOTSET_SIZE 16u
 
+typedef enum TCGWasm64RunHotsetBuildStatus {
+    TCG_WASM64_RUN_HOTSET_BUILD_OK = 0,
+    TCG_WASM64_RUN_HOTSET_BUILD_EMPTY = 1,
+    TCG_WASM64_RUN_HOTSET_BUILD_CAPACITY = 2,
+    TCG_WASM64_RUN_HOTSET_BUILD_MISSING_METADATA = 3,
+    TCG_WASM64_RUN_HOTSET_BUILD_INVALID_METADATA = 4,
+    TCG_WASM64_RUN_HOTSET_BUILD_NON_TERMINAL = 5,
+    TCG_WASM64_RUN_HOTSET_BUILD_UNSUPPORTED_HOT_TB = 6,
+    TCG_WASM64_RUN_HOTSET_BUILD_NO_GENERATED_OUTPUT = 7,
+    TCG_WASM64_RUN_HOTSET_BUILD_OUTPUT_TRUNCATED = 8,
+} TCGWasm64RunHotsetBuildStatus;
+
 #define TCG_WASM64_TB_METADATA_MAGIC 0x36574153u /* "SAW6" */
 #define TCG_WASM64_TB_METADATA_VERSION 1u
 
@@ -306,6 +319,15 @@ bool tcg_wasm64_translate_generated_candidate(
     const TCGWasm64TBMetadata *metadata);
 bool tcg_wasm64_translate_generated_output_available(
     const TCGWasm64TBMetadata *metadata);
+bool tcg_wasm64_run_hotset_build_from_metadata(
+    TCGWasm64RunHotset *hotset,
+    TCGWasm64RunHotsetTB *out_tbs,
+    size_t out_capacity,
+    const TCGWasm64TBMetadata *const *metadata,
+    size_t metadata_count,
+    TCGWasm64RunHotsetBuildStatus *status);
+const char *tcg_wasm64_run_hotset_build_status_name(
+    TCGWasm64RunHotsetBuildStatus status);
 bool tcg_wasm64_backend_available(void);
 uintptr_t tcg_tci_qemu_tb_exec(CPUArchState *env, const void *tb_ptr);
 

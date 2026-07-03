@@ -63,6 +63,9 @@ assert.match(header, /tcg_wasm64_translate_note_tci_insn\(uint32_t op,\s*uint32_
 assert.match(header, /tcg_wasm64_translate_lookup\(const void \*tb_ptr\)/);
 assert.match(header, /tcg_wasm64_translate_generated_candidate/);
 assert.match(header, /tcg_wasm64_translate_generated_output_available/);
+assert.match(header, /tcg_wasm64_run_hotset_build_from_metadata/);
+assert.match(header, /TCG_WASM64_RUN_HOTSET_BUILD_UNSUPPORTED_HOT_TB/);
+assert.match(header, /TCG_WASM64_RUN_HOTSET_BUILD_NO_GENERATED_OUTPUT/);
 assert.match(header, /uintptr_t tcg_tci_qemu_tb_exec\(CPUArchState \*env,\s*const void \*tb_ptr\)/);
 
 assert.match(runtime, /TCG_WASM64_TRANSLATE_CACHE_SIZE/);
@@ -102,6 +105,10 @@ assert.match(runtime, /generated_output_op_count == metadata->op_count/);
 assert.match(runtime, /generated_output_op_count ==\s*\n\s*metadata->generated_output_size \/ sizeof\(uint32_t\)/);
 assert.match(runtime, /TCG_WASM64_TB_METADATA_TERMINAL/);
 assert.match(runtime, /tcg_wasm64_translate_generated_candidate\(metadata\)/);
+assert.match(runtime, /tcg_wasm64_run_hotset_build_from_metadata/);
+assert.match(runtime, /tcg_wasm64_run_hotset_metadata_ready/);
+assert.match(runtime, /TCG_WASM64_RUN_HOTSET_BUILD_UNSUPPORTED_HOT_TB/);
+assert.match(runtime, /TCG_WASM64_RUN_HOTSET_BUILD_NO_GENERATED_OUTPUT/);
 assert.doesNotMatch(runtime, /uintptr_t tcg_tci_qemu_tb_exec\(CPUArchState \*env,\s*const void \*tb_ptr\);/);
 
 assert.doesNotMatch(tci, /tci_wasm_metadata_generated_candidate/);

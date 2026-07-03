@@ -14,11 +14,12 @@ The target MVP is a browser-hosted QEMU system emulator that can boot a
 downstream Bus Engine acceptance target is a browser-runnable Bus Engine OS
 demo with serial diagnostics, visible graphics, and keyboard input that can be
 embedded on ``busdk.com/engine/`` as a screenshot-like or live-preview item.
-The QEMU work remains generic and product-neutral.  The accepted console boot
-proof remains the regression gate, but the active browser MVP expansion now
-includes a basic 2D graphics path and keyboard input.  The MVP does not
-require WebGPU, accelerated 3D, production networking, or durable browser
-storage.  The experimental
+The QEMU work remains generic and product-neutral.  The active five-minute
+boot goal is the WebAssembly accelerator path only; graphics, keyboard input,
+WebGPU, accelerated 3D, production networking, durable browser storage, and
+snapshot/restore shortcuts stay outside this goal unless they are separately
+promoted.  The accepted console boot proof remains the regression gate.  The
+experimental
 ``ktock/qemu-wasm`` code is research material only; the upstreamable work must
 be designed as native QEMU support rather than importing the fork wholesale.
 
@@ -241,11 +242,98 @@ run-loop summary was emitted at ``10704`` ms and reported ``ok=true``,
 helper/``qemu_ld``/``qemu_st`` calls, and one budget exit with no MMIO, TLB,
 interrupt, helper, unsupported, HLT, or invalidation exits.
 
-This proof keeps the runtime ABI alive on the active RISC-V artifact family,
-but it does not satisfy the speed gate.  The generic smoke was slightly slower
-than the R1 default-TCI baseline of ``140119`` ms.  The next accelerator item
-therefore remains attaching the descriptor-backed run-loop ABI to real
-translated RISC-V TB metadata before another same-commit browser speed gate.
+This proof kept the runtime ABI alive on the active RISC-V artifact family,
+but it did not satisfy the speed gate.  The generic smoke was slightly slower
+than the R1 default-TCI baseline of ``140119`` ms.
+
+RISC-V 64 metadata-hotset proof
+===============================
+
+The next accepted slice attaches the descriptor-backed run-loop ABI to
+generated-output metadata.  It is still structural proof, not a speed gate:
+the metadata describes generated output and no-silent-fallback eligibility,
+but the generated hotset does not yet execute full Linux TB semantics.
+
+``tcg_wasm64_run_hotset_build_from_metadata()`` consumes
+``TCGWasm64TBMetadata`` records and builds ``TCGWasm64RunHotset`` descriptors
+only when every hot TB is valid, terminal, a generated candidate, untruncated,
+and has complete generated output.  Unsupported metadata fails closed with
+explicit statuses such as ``missing-metadata``, ``invalid-metadata``,
+``non-terminal``, ``unsupported-hot-tb``, ``no-generated-output``, and
+``output-truncated``.  The browser runtime smoke now reports
+``source=metadata-hotset`` and ``hotset_build_status`` so a passing summary
+cannot be mistaken for the rejected direct-boundary path.
+
+Deterministic checks:
+
+.. code-block:: console
+
+  $ git diff --check
+  $ node scripts/ci/wasmjit-runloop-model-test.mjs
+  $ node scripts/ci/wasm64-runloop-contract-test.mjs
+  $ node scripts/ci/wasm64-translate-metadata-test.mjs
+  $ python3 scripts/ci/wasm-build-artifacts-local-test.py
+  $ node scripts/ci/wasm-browser-smoke-args-test.mjs
+  $ node --check scripts/ci/wasm-browser-smoke.mjs
+  $ node --check scripts/ci/wasm-browser-smoke-runner.mjs
+  $ node scripts/ci/wasm-browser-smoke-runner-test.mjs
+
+The runner test and artifact build were run outside the sandbox because Node
+child-process spawning and Docker access are blocked there.
+
+The RISC-V backend artifact was built with:
+
+.. code-block:: console
+
+  $ python3 scripts/ci/wasm-build-artifacts-local.py \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-backend-artifacts \
+      --target riscv64 \
+      --tcg-wasm64-backend \
+      --jobs auto \
+      --build-image
+
+Meson reported ``TCG backend: experimental wasm64 with TCI fallback``.
+Artifact SHA-256 values were:
+
+* ``qemu-system-riscv64.js``:
+  ``deacddbeece42e2fc36a2a1d63883dcd801048bdd9dacde6ae3c3b6c2b99dc17``
+* ``qemu-system-riscv64.wasm``:
+  ``9dc3b75e248766d00870fd4716aa01419af12ef76ce9c7cf9210b42804adc2ea``
+* manifest:
+  ``5ce1495ea9063f236cf873ca8416ca829be2bbbc7ca55152b48dd6232f781ea7``
+
+The browser proof used Chromium ``149.0.7827.55``:
+
+.. code-block:: console
+
+  $ npm exec --yes --package=playwright -- node \
+      scripts/ci/wasm-browser-smoke-runner.mjs \
+      --artifact-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-backend-artifacts \
+      --guest-manifest /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-guest/tuxboot-browser-smoke-guest.json \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-browser-smoke/wasm-browser-smoke-result.json \
+      --screenshot /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-browser-smoke/wasm-browser-smoke.png \
+      --timeout-ms 180000 \
+      --progress-sample-interval-ms 10000 \
+      --progress-sample-limit 40 \
+      --wasm64-runloop-smoke
+
+The generic RISC-V smoke reached ``Welcome to TuxTest`` in ``138928`` ms.
+Boot milestones were first Linux printk at ``36082`` ms, root block discovery
+at ``39754`` ms, rootfs mounted at ``50420`` ms, and init started at
+``51331`` ms.  The metadata-hotset run-loop summary was emitted at ``9655``
+ms and reported ``ok=true``, ``hotset_build_status=ok``,
+``generated_guest_instructions=4000000``, ``fallback_guest_instructions=0``,
+``generated_body_time_ns=5140000``, ``compile_time_ns=635000``,
+``instantiate_time_ns=70000``, ``generated_chain_length=1000000``,
+``inline_tlb_hit_loads=1000000``, ``inline_tlb_hit_stores=1000000``, zero
+helper/``qemu_ld``/``qemu_st`` calls, and one budget exit with no MMIO, TLB,
+interrupt, helper, unsupported, HLT, or invalidation exits.
+
+This proof does not complete the speed gate.  The next accelerator item is
+R3f: replace structural metadata-hotset proof with generated execution of real
+translated RISC-V TB semantics, first in deterministic ALU/branch and TLB-hit
+RAM hotset proofs.  Only after that semantic proof passes should a
+same-commit default-TCI versus accelerator browser speed comparison run.
 
 Strict definition of done
 =========================

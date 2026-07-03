@@ -265,13 +265,75 @@ run that reaches a weaker marker than normal multi-user readiness.
     HLT, or invalidation exits. This is runtime-smoke evidence only: the
     generic boot time is not faster than the R1 default-TCI baseline
     (`140119` ms), and this does not complete R4.
-  - [ ] R3e - Attach the descriptor-backed run-loop ABI to real translated
+  - [x] R3e - Attach the descriptor-backed run-loop ABI to real translated
     RISC-V TB metadata in a deterministic proof. DoD: a focused test builds at
     least one valid multi-TB hotset descriptor from real translated TB or
     generated-output metadata, rejects unsupported hot TBs with explicit
     no-silent-fallback reasons, records generated/fallback instruction and
     wall-time counters, and proves the descriptor fields are sufficient for
     the runtime ABI without returning to the old direct-boundary path.
+    Accepted 2026-07-03: `tcg/wasm64.c` now exposes
+    `tcg_wasm64_run_hotset_build_from_metadata()`, which consumes
+    `TCGWasm64TBMetadata` generated-output records and builds
+    `TCGWasm64RunHotset` descriptors only when every hot TB is valid,
+    terminal, generated-candidate, untruncated, and has complete generated
+    output. It fails closed with explicit build statuses including
+    `missing-metadata`, `invalid-metadata`, `non-terminal`,
+    `unsupported-hot-tb`, `no-generated-output`, and `output-truncated`.
+    The runtime smoke now uses metadata-derived descriptors and reports
+    `source=metadata-hotset` plus `hotset_build_status`. Deterministic checks:
+    `git diff --check`, `node scripts/ci/wasmjit-runloop-model-test.mjs`,
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`,
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `python3 scripts/ci/wasm-build-artifacts-local-test.py`,
+    `node scripts/ci/wasm-browser-smoke-args-test.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke-runner.mjs`, and
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs` passed. The runner
+    test and artifact build were run outside the sandbox because Docker and
+    Node child-process spawning are blocked inside it. Artifact build command:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-backend-artifacts
+    --target riscv64 --tcg-wasm64-backend --jobs auto --build-image`.
+    Artifact hashes: `qemu-system-riscv64.js`
+    `deacddbeece42e2fc36a2a1d63883dcd801048bdd9dacde6ae3c3b6c2b99dc17`,
+    `qemu-system-riscv64.wasm`
+    `9dc3b75e248766d00870fd4716aa01419af12ef76ce9c7cf9210b42804adc2ea`,
+    manifest
+    `5ce1495ea9063f236cf873ca8416ca829be2bbbc7ca55152b48dd6232f781ea7`.
+    Browser proof command:
+    `npm exec --yes --package=playwright -- node
+    scripts/ci/wasm-browser-smoke-runner.mjs --artifact-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-backend-artifacts
+    --guest-manifest
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-guest/tuxboot-browser-smoke-guest.json
+    --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-browser-smoke/wasm-browser-smoke-result.json
+    --screenshot
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r3e-riscv64-browser-smoke/wasm-browser-smoke.png
+    --timeout-ms 180000 --progress-sample-interval-ms 10000
+    --progress-sample-limit 40 --wasm64-runloop-smoke`. Chromium
+    `149.0.7827.55` reached `Welcome to TuxTest` in `138928` ms. The
+    metadata-hotset summary at `9655` ms reported `ok=true`,
+    `hotset_build_status=ok`, `generated_guest_instructions=4000000`,
+    `fallback_guest_instructions=0`, `generated_body_time_ns=5140000`,
+    `compile_time_ns=635000`, `instantiate_time_ns=70000`,
+    `generated_chain_length=1000000`, `inline_tlb_hit_loads=1000000`,
+    `inline_tlb_hit_stores=1000000`, zero helper/`qemu_ld`/`qemu_st` calls,
+    and one budget exit with no other synthetic exits. This is structural
+    runtime proof only; it does not complete R4 because it is not a
+    same-commit speed gate and it does not yet execute real Linux TB
+    semantics through generated hotsets.
+  - [ ] R3f - Replace metadata-derived placeholder hotset operations with the
+    first semantic generated execution path for real translated RISC-V TB
+    metadata. DoD: generated-output metadata carries enough translated
+    operation material to execute at least one multi-TB ALU/branch hotset and
+    one TLB-hit RAM load/store hotset with guest-visible results matching a
+    deterministic TCI-like model; unsupported translated shapes fail in
+    no-silent-fallback mode with explicit reasons; the generated run loop
+    still records instruction, wall-time, inline-load/store, helper, and exit
+    counters; and no browser speed gate is run until this deterministic
+    semantic proof passes.
 - [ ] R4 - Prove performance before Bus Engine OS long runs. DoD: a same-commit
   Chromium generic RISC-V accelerator smoke is at least 25% faster than
   default RISC-V TCI, and microbenchmarks show at least 3x over RISC-V TCI for

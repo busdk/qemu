@@ -239,6 +239,23 @@ assert.equal(
 );
 assert.equal(macroValue("TCG_WASM64_RUN_HOTSET_TB_SIZE"), WASMJIT_HOTSET_TB.size);
 assert.match(header, /typedef struct TCGWasm64RunHotset/);
+assert.match(header, /typedef enum TCGWasm64RunHotsetBuildStatus/);
+for (const name of [
+  "TCG_WASM64_RUN_HOTSET_BUILD_OK",
+  "TCG_WASM64_RUN_HOTSET_BUILD_EMPTY",
+  "TCG_WASM64_RUN_HOTSET_BUILD_CAPACITY",
+  "TCG_WASM64_RUN_HOTSET_BUILD_MISSING_METADATA",
+  "TCG_WASM64_RUN_HOTSET_BUILD_INVALID_METADATA",
+  "TCG_WASM64_RUN_HOTSET_BUILD_NON_TERMINAL",
+  "TCG_WASM64_RUN_HOTSET_BUILD_UNSUPPORTED_HOT_TB",
+  "TCG_WASM64_RUN_HOTSET_BUILD_NO_GENERATED_OUTPUT",
+  "TCG_WASM64_RUN_HOTSET_BUILD_OUTPUT_TRUNCATED",
+]) {
+  assert.match(header, new RegExp(name));
+  assert.match(runtime, new RegExp(name));
+}
+assert.match(header, /tcg_wasm64_run_hotset_build_from_metadata/);
+assert.match(header, /tcg_wasm64_run_hotset_build_status_name/);
 assert.equal(
   macroValue("TCG_WASM64_RUN_HOTSET_TB_COUNT_OFFSET"),
   WASMJIT_HOTSET.tbCount,
@@ -272,6 +289,15 @@ assert.match(runtime, /hotsetOpRamAddConst = 1/);
 assert.match(runtime, /hotsetOpRamXorConst = 2/);
 assert.match(runtime, /smoke_hotset/);
 assert.match(runtime, /tcg_wasm64_runloop_hotset_expected_value/);
+assert.match(runtime, /tcg_wasm64_run_hotset_build_from_metadata/);
+assert.match(runtime, /tcg_wasm64_translate_generated_output_available/);
+assert.match(runtime, /TCG_WASM64_TB_METADATA_GENERATED_CANDIDATE/);
+assert.match(runtime, /TCG_WASM64_TB_METADATA_TERMINAL/);
+assert.match(runtime, /TCG_WASM64_TB_METADATA_OUTPUT_TRUNCATED/);
+assert.match(runtime, /generated_unsupported_op_count != 0/);
+assert.match(runtime, /\\"source\\":\\"%s\\"/);
+assert.match(runtime, /hotset_build_status/);
+assert.match(runtime, /metadata-hotset/);
 assert.match(runtime, /0x02,\s*0x07,\s*0x00,\s*0x80,\s*0x80,\s*0x10/);
 assert.match(runtime, /generated_guest_instructions == budget \* 4/);
 assert.match(runtime, /inline_tlb_hit_loads == budget/);
