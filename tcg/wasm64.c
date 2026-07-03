@@ -22,6 +22,7 @@
 #endif
 
 #define TCG_WASM64_TRANSLATE_CACHE_SIZE 8192u
+#define TCG_WASM64_TRANSLATE_CACHE_PROBE_LIMIT 32u
 #define TCG_WASM64_RUNLOOP_ENV_FILE "/qemu-tci-env"
 #define TCG_WASM64_RUNLOOP_SMOKE_BUDGET 1000000u
 #define TCG_WASM64_RUNLOOP_SMOKE_GUEST_INSNS_PER_STEP 4u
@@ -304,11 +305,72 @@ static uint64_t live_tb_coverage_scan_limit;
 
 static const char *tcg_wasm64_op_name(uint32_t op);
 
-static TCGWasm64TranslateEntry *tcg_wasm64_translate_entry(const void *tb_ptr)
+static uintptr_t tcg_wasm64_translate_cache_index(const void *tb_ptr)
 {
     uintptr_t hash = (uintptr_t)tb_ptr >> 4;
 
-    return &translate_cache[hash % TCG_WASM64_TRANSLATE_CACHE_SIZE];
+    return hash % TCG_WASM64_TRANSLATE_CACHE_SIZE;
+}
+
+static bool tcg_wasm64_translate_entry_valid(
+    const TCGWasm64TranslateEntry *entry)
+{
+    const TCGWasm64TBMetadata *metadata = &entry->metadata;
+
+    return entry->tb_ptr &&
+           metadata->magic == TCG_WASM64_TB_METADATA_MAGIC &&
+           metadata->version == TCG_WASM64_TB_METADATA_VERSION &&
+           (metadata->flags & TCG_WASM64_TB_METADATA_VALID);
+}
+
+static bool tcg_wasm64_translate_entry_matches(
+    const TCGWasm64TranslateEntry *entry, const void *tb_ptr)
+{
+    return tcg_wasm64_translate_entry_valid(entry) &&
+           entry->tb_ptr == tb_ptr &&
+           entry->metadata.tb_ptr == tb_ptr;
+}
+
+static TCGWasm64TranslateEntry *tcg_wasm64_translate_entry_for_insert(
+    const void *tb_ptr)
+{
+    uintptr_t start = tcg_wasm64_translate_cache_index(tb_ptr);
+    TCGWasm64TranslateEntry *first_empty = NULL;
+
+    for (uint32_t probe = 0;
+         probe < TCG_WASM64_TRANSLATE_CACHE_PROBE_LIMIT;
+         probe++) {
+        TCGWasm64TranslateEntry *entry = &translate_cache[
+            (start + probe) % TCG_WASM64_TRANSLATE_CACHE_SIZE];
+
+        if (entry->tb_ptr == tb_ptr) {
+            return entry;
+        }
+        if (!first_empty && !tcg_wasm64_translate_entry_valid(entry)) {
+            first_empty = entry;
+        }
+    }
+
+    return first_empty ? first_empty : &translate_cache[start];
+}
+
+static TCGWasm64TranslateEntry *tcg_wasm64_translate_entry_for_lookup(
+    const void *tb_ptr)
+{
+    uintptr_t start = tcg_wasm64_translate_cache_index(tb_ptr);
+
+    for (uint32_t probe = 0;
+         probe < TCG_WASM64_TRANSLATE_CACHE_PROBE_LIMIT;
+         probe++) {
+        TCGWasm64TranslateEntry *entry = &translate_cache[
+            (start + probe) % TCG_WASM64_TRANSLATE_CACHE_SIZE];
+
+        if (tcg_wasm64_translate_entry_matches(entry, tb_ptr)) {
+            return entry;
+        }
+    }
+
+    return NULL;
 }
 
 void tcg_wasm64_counters_reset(TCGWasm64Counters *counters)
@@ -3908,7 +3970,7 @@ void tcg_wasm64_translate_begin(const void *tb_ptr)
         return;
     }
 
-    entry = tcg_wasm64_translate_entry(tb_ptr);
+    entry = tcg_wasm64_translate_entry_for_insert(tb_ptr);
     entry->tb_ptr = tb_ptr;
     memset(&entry->metadata, 0, sizeof(entry->metadata));
     memset(entry->generated_output, 0, sizeof(entry->generated_output));
@@ -4029,42 +4091,32 @@ void tcg_wasm64_translate_note_tci_insn(uint32_t op, uint32_t insn)
 const TCGWasm64TBMetadata *tcg_wasm64_translate_lookup(const void *tb_ptr)
 {
     TCGWasm64TranslateEntry *entry;
-    const TCGWasm64TBMetadata *metadata;
 
     if (!tb_ptr) {
         return NULL;
     }
 
-    entry = tcg_wasm64_translate_entry(tb_ptr);
-    metadata = &entry->metadata;
-    if (entry->tb_ptr != tb_ptr ||
-        metadata->magic != TCG_WASM64_TB_METADATA_MAGIC ||
-        metadata->version != TCG_WASM64_TB_METADATA_VERSION ||
-        !(metadata->flags & TCG_WASM64_TB_METADATA_VALID)) {
+    entry = tcg_wasm64_translate_entry_for_lookup(tb_ptr);
+    if (!entry) {
         return NULL;
     }
-    return metadata;
+    return &entry->metadata;
 }
 
 static TCGWasm64TBMetadata *tcg_wasm64_translate_lookup_mutable(
     const void *tb_ptr)
 {
     TCGWasm64TranslateEntry *entry;
-    TCGWasm64TBMetadata *metadata;
 
     if (!tb_ptr) {
         return NULL;
     }
 
-    entry = tcg_wasm64_translate_entry(tb_ptr);
-    metadata = &entry->metadata;
-    if (entry->tb_ptr != tb_ptr ||
-        metadata->magic != TCG_WASM64_TB_METADATA_MAGIC ||
-        metadata->version != TCG_WASM64_TB_METADATA_VERSION ||
-        !(metadata->flags & TCG_WASM64_TB_METADATA_VALID)) {
+    entry = tcg_wasm64_translate_entry_for_lookup(tb_ptr);
+    if (!entry) {
         return NULL;
     }
-    return metadata;
+    return &entry->metadata;
 }
 
 bool tcg_wasm64_translate_generated_candidate(
