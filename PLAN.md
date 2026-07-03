@@ -862,7 +862,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `R4i` remains open until a real live TB instance has TB identity,
     `TranslationBlock.icount`, same-input CPU/TB state, and nonzero generated
     guest-instruction retirement.
-  - [ ] R4j - Decide whether the bespoke descriptor ABI remains viable or the
+  - [x] R4j - Decide whether the bespoke descriptor ABI remains viable or the
     x86 lane switches to a reference-shaped per-TB generated function body.
     DoD: after R4i, record whether the descriptor ABI expressed the dominant
     real TB shape without per-shape special cases. Continue the descriptor ABI
@@ -870,7 +870,32 @@ run that reaches a weaker marker than normal multi-user readiness.
     per-TB generated function body modeled on the `ktock/qemu-wasm`
     `wasm64-tcg-b` reference while preserving this branch's run/exit loop,
     internal chaining/hotset target, no-silent-fallback mode, and metrics
-    contract. Do not accept sunk-cost arguments as evidence.
+    contract. Do not accept sunk-cost arguments as evidence. Accepted
+    2026-07-03: switch the x86 R4k implementation vehicle to a
+    reference-shaped per-TB generated function body. R4i proved one live
+    translated `x86_64-softmmu` TB with shape `ld32u, tci_movi,
+    tci_setcond32, brcond, tci_movi, st8, ld, tci_movi, add, st, goto_tb`
+    through generated Wasm reached from `wasmjit_run()`, differentially
+    verified against TCI. That proof did not show that the bespoke descriptor
+    ABI can naturally express R4k. The C/JS implementation of the proof still
+    hard-codes the selected shape's scratch layout, register locals
+    (`r4`, `r5`, `r13`, `r14`), branch form, inline TLB-hit access sequence,
+    `goto_tb` slot delta, dispatch target, status, expected writes, and
+    counter increments. The side-band descriptor/metadata ABI currently
+    records TCI words, counts, first unsupported opcodes, and availability
+    flags; it does not encode a general per-TB body with CPU-state layout,
+    guest-instruction retirement, internal chaining/hotset dispatch, inline
+    SoftMMU/TLB-hit guards for arbitrary load/store shapes, helper/synthetic
+    exit sites, invalidation generation, or no-silent-fallback hot-path
+    policy. Continuing it would require another descriptor field or
+    shape-specific case for each R4k requirement, which is the
+    sunk-cost/one-shape pattern R4j was meant to reject. The existing
+    deterministic `scripts/ci/wasm-generated-output-equivalence-test.mjs`
+    body compiler is the design model for R4k: decode each TB's recorded TCI
+    words into one generated function body, fail closed for unsupported
+    shapes, and keep this branch's `TCGWasm64RunContext`/`wasmjit_run()`
+    run-exit loop, metrics, strict fallback mode, and future hotset/chaining
+    table.
   - [ ] R4k - Expand from the one-TB proof to x86_64 generated bodies with
     internal chaining and inline SoftMMU/TLB-hit RAM load/store fast paths.
     DoD: generated x86_64 bodies retire counted guest instructions inside
@@ -880,7 +905,25 @@ run that reaches a weaker marker than normal multi-user readiness.
     MMIO, permission fault, page-crossing, unsupported helper, invalidation,
     interrupt, and budget expiry must exit or fall back with precise reason
     counters. No-silent-fallback performance mode must fail loudly for
-    unsupported hot x86 paths.
+    unsupported hot x86 paths. Ordered implementation slices after R4j:
+    (1) add a deterministic per-TB function-body emitter scaffold for the R4i
+    TCI-word shape that compiles the recorded words into a body instead of
+    the hard-coded one-TB path; prove byte/module validity and differential
+    equivalence locally with `wasm-generated-output-equivalence-test.mjs`
+    extended to cover the selected emitter path; (2) define and test the x86
+    CPU-state contract for general registers, RIP/EIP, lazy condition-code
+    inputs, and required flush points, with no browser run; (3) connect one
+    live translated TB to the per-TB body path through `wasmjit_run()` and
+    require nonzero generated guest-instruction retirement plus precise
+    no-silent-fallback failure when the selected hot shape is unsupported;
+    (4) add a deterministic two-TB hotset/`goto_tb` dispatch fixture that
+    stays inside generated Wasm for chained hits and exits only for missing,
+    invalidated, interrupt, helper, unsupported, or budget cases; (5) replace
+    shape-specific load/store handling with guarded x86 SoftMMU/TLB-hit RAM
+    load and store fast paths, with deterministic hit/miss/MMIO/page-fault/
+    page-crossing tests and zero `qemu_ld`/`qemu_st` calls on proven hits;
+    (6) add stale-TB/address-space invalidation rejection and metrics tests.
+    Browser smokes remain blocked until these deterministic slices pass.
   - [ ] R4l - Run the x86_64 same-commit generic Chromium speed gate only
     after R4h-R4k have deterministic evidence. DoD: build one default-TCI
     `x86_64-softmmu` artifact and one accelerator artifact from the same
