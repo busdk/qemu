@@ -3502,6 +3502,183 @@ assert.equal(r4kSoftmmuStaleOutputMismatch.qemuLdCalls, 0);
 assert.equal(r4kSoftmmuStaleOutputMismatch.qemuStCalls, 0);
 assert.equal(r4kSoftmmuStaleOutputMismatch.runExitReason, "invalidated");
 assert.equal(r4kSoftmmuStaleOutputMismatch.exitsInvalidated, 1);
+
+function simulateR4mLiveGeneratedExec({
+  name,
+  enabled,
+  noFallback = false,
+  metadata,
+}) {
+  if (!enabled) {
+    return {
+      name,
+      enabled,
+      ok: true,
+      path: "tci",
+      generatedGuestInstructions: 0,
+      generatedBodyTimeNs: 0,
+      generatedChainLength: 0,
+      inlineTlbHitLoads: 0,
+      inlineTlbHitStores: 0,
+      helperCalls: 0,
+      qemuLdCalls: 0,
+      qemuStCalls: 0,
+      compatFallback: false,
+      noSilentFallback: noFallback,
+      failedClosed: false,
+      exits: { unsupported: 0, invalidated: 0 },
+    };
+  }
+
+  const route = routeLiveGeneratedOutput(metadata);
+  if (!route.ok) {
+    const invalidated = route.runExitReason === "invalidated";
+    return {
+      name,
+      enabled,
+      ok: false,
+      path: noFallback ? "fail-closed" : "tci-fallback",
+      reason: route.reason,
+      generatedGuestInstructions: 0,
+      generatedBodyTimeNs: 0,
+      generatedChainLength: 0,
+      inlineTlbHitLoads: 0,
+      inlineTlbHitStores: 0,
+      helperCalls: 0,
+      qemuLdCalls: 0,
+      qemuStCalls: 0,
+      compatFallback: !noFallback,
+      noSilentFallback: noFallback,
+      failedClosed: noFallback,
+      exits: {
+        unsupported: invalidated ? 0 : 1,
+        invalidated: invalidated ? 1 : 0,
+      },
+    };
+  }
+
+  return {
+    name,
+    enabled,
+    ok: true,
+    path: "generated",
+    reason: null,
+    generatedGuestInstructions: route.generatedGuestInstructions,
+    generatedBodyTimeNs: 1000,
+    generatedChainLength: 1,
+    inlineTlbHitLoads: 2,
+    inlineTlbHitStores: 2,
+    helperCalls: 0,
+    qemuLdCalls: 0,
+    qemuStCalls: 0,
+    compatFallback: false,
+    noSilentFallback: noFallback,
+    failedClosed: false,
+    exits: { unsupported: 0, invalidated: 0 },
+  };
+}
+
+const r4mLiveGeneratedExecCases = [
+  simulateR4mLiveGeneratedExec({
+    name: "r4m-disabled-keeps-tci",
+    enabled: false,
+    metadata: null,
+  }),
+  simulateR4mLiveGeneratedExec({
+    name: "r4m-supported-metadata-backed-live-tb-generated",
+    enabled: true,
+    metadata: {
+      opCount: R4I_LIVE_X86_SHAPE.length,
+      generatedOutputAvailable: true,
+      generatedOutputSize: r4iLiveX86Fixture.words.length * 4,
+      words: r4iLiveX86Fixture.words,
+      relativeBase: r4iLiveX86Fixture.relativeBase,
+      guestInstructions: 1,
+    },
+  }),
+  simulateR4mLiveGeneratedExec({
+    name: "r4m-unsupported-no-silent-fallback-fails-closed",
+    enabled: true,
+    noFallback: true,
+    metadata: {
+      opCount: R4I_LIVE_X86_SHAPE.length,
+      generatedOutputAvailable: true,
+      generatedOutputSize: r4iLiveX86Fixture.words.length * 4,
+      words: [
+        ...r4iLiveX86Fixture.words.slice(0, -1),
+        OPS.exit_tb,
+      ],
+      relativeBase: r4iLiveX86Fixture.relativeBase,
+      guestInstructions: 1,
+    },
+  }),
+  simulateR4mLiveGeneratedExec({
+    name: "r4m-stale-output-invalidates-zero-generated-work",
+    enabled: true,
+    metadata: {
+      opCount: R4I_LIVE_X86_SHAPE.length,
+      generatedOutputAvailable: true,
+      generatedOutputSize: r4iLiveX86Fixture.words.length * 4,
+      words: r4iLiveX86Fixture.words,
+      tbWords: r4iLiveX86Fixture.words.map((word, index) =>
+        index === 1 ? (word ^ 0x10) >>> 0 : word),
+      relativeBase: r4iLiveX86Fixture.relativeBase,
+      guestInstructions: 1,
+    },
+  }),
+  simulateR4mLiveGeneratedExec({
+    name: "r4m-compat-fallback-explicit-and-counted",
+    enabled: true,
+    metadata: {
+      opCount: R4I_LIVE_X86_SHAPE.length,
+      generatedOutputAvailable: false,
+      generatedOutputSize: 0,
+      words: [],
+      relativeBase: r4iLiveX86Fixture.relativeBase,
+      guestInstructions: 1,
+    },
+  }),
+];
+assert.deepEqual(
+  r4mLiveGeneratedExecCases.map((entry) => entry.path),
+  ["tci", "generated", "fail-closed", "tci-fallback", "tci-fallback"],
+);
+assert.equal(
+  r4mLiveGeneratedExecCases.find((entry) =>
+    entry.name === "r4m-supported-metadata-backed-live-tb-generated")
+    .generatedGuestInstructions,
+  1,
+);
+assert.equal(
+  r4mLiveGeneratedExecCases.find((entry) =>
+    entry.name === "r4m-supported-metadata-backed-live-tb-generated")
+    .qemuLdCalls,
+  0,
+);
+assert.equal(
+  r4mLiveGeneratedExecCases.find((entry) =>
+    entry.name === "r4m-unsupported-no-silent-fallback-fails-closed")
+    .failedClosed,
+  true,
+);
+assert.equal(
+  r4mLiveGeneratedExecCases.find((entry) =>
+    entry.name === "r4m-stale-output-invalidates-zero-generated-work")
+    .exits.invalidated,
+  1,
+);
+assert.equal(
+  r4mLiveGeneratedExecCases.find((entry) =>
+    entry.name === "r4m-stale-output-invalidates-zero-generated-work")
+    .generatedGuestInstructions,
+  0,
+);
+assert.equal(
+  r4mLiveGeneratedExecCases.find((entry) =>
+    entry.name === "r4m-compat-fallback-explicit-and-counted")
+    .compatFallback,
+  true,
+);
 r4kInvalidationResults.push({
   name: "r4k-invalidation-generated-output-mismatch",
   success: false,
@@ -3765,6 +3942,16 @@ console.log(JSON.stringify({
     fixtures: r4kSoftmmuResults,
     ramHits: r4kSoftmmuRamHits,
     failClosedCases: r4kSoftmmuFailClosed,
+  },
+  r4mLiveGeneratedExec: {
+    fixtureCount: r4mLiveGeneratedExecCases.length,
+    fixtures: r4mLiveGeneratedExecCases,
+    generatedFixtures: r4mLiveGeneratedExecCases.filter((entry) =>
+      entry.path === "generated").length,
+    failClosedFixtures: r4mLiveGeneratedExecCases.filter((entry) =>
+      entry.failedClosed).length,
+    compatFallbackFixtures: r4mLiveGeneratedExecCases.filter((entry) =>
+      entry.compatFallback).length,
   },
   r4kLiveMetadataRouting: r4kLiveRoutingCases,
   unsupportedX86StateFixtures: unsupportedX86StateResults,

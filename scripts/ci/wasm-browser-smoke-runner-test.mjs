@@ -77,9 +77,11 @@ assert.match(browserSmokeSource, /QEMU_WASM64_TCG_SUMMARY/);
 assert.match(browserSmokeSource, /QEMU_WASM64_ONE_TB_DIFFERENTIAL/);
 assert.match(browserSmokeSource, /QEMU_WASM64_LIVE_ONE_TB_DIFFERENTIAL/);
 assert.match(browserSmokeSource, /QEMU_WASM64_LIVE_TB_COVERAGE/);
+assert.match(browserSmokeSource, /QEMU_WASM64_LIVE_GENERATED_EXEC/);
+assert.match(browserSmokeSource, /QEMU_WASM64_LIVE_GENERATED_EXEC_NO_FALLBACK/);
 assert.match(
   browserSmokeSource,
-  /config\.tciProgress \|\|\s*config\.tciWasmGeneratedTrace \|\|\s*config\.wasm64RunloopSmoke \|\|\s*config\.wasm64OneTbDifferential \|\|\s*config\.wasm64LiveOneTbDifferential \|\|\s*config\.wasm64LiveTbCoverage \|\|\s*config\.wasm64TcgSummary/,
+  /config\.tciProgress \|\|\s*config\.tciWasmGeneratedTrace \|\|\s*config\.wasm64RunloopSmoke \|\|\s*config\.wasm64OneTbDifferential \|\|\s*config\.wasm64LiveOneTbDifferential \|\|\s*config\.wasm64LiveTbCoverage \|\|\s*config\.wasm64LiveGeneratedExec \|\|\s*config\.wasm64TcgSummary/,
 );
 
 for (const status of [
@@ -1264,6 +1266,8 @@ for (const status of [
     wasm64OneTbDifferential: true,
     wasm64LiveOneTbDifferential: true,
     wasm64LiveTbCoverage: true,
+    wasm64LiveGeneratedExec: true,
+    wasm64LiveGeneratedExecNoFallback: true,
     wasm64RunloopSmoke: true,
   });
 
@@ -1272,6 +1276,8 @@ for (const status of [
   assert.equal(url.searchParams.get("wasm64OneTbDifferential"), "1");
   assert.equal(url.searchParams.get("wasm64LiveOneTbDifferential"), "1");
   assert.equal(url.searchParams.get("wasm64LiveTbCoverage"), "1");
+  assert.equal(url.searchParams.get("wasm64LiveGeneratedExec"), "1");
+  assert.equal(url.searchParams.get("wasm64LiveGeneratedExecNoFallback"), "1");
   assert.equal(url.searchParams.get("wasm64RunloopSmoke"), "1");
 }
 
@@ -1554,6 +1560,8 @@ for (const status of [
     wasm64OneTbDifferential: true,
     wasm64LiveOneTbDifferential: true,
     wasm64LiveTbCoverage: true,
+    wasm64LiveGeneratedExec: true,
+    wasm64LiveGeneratedExecNoFallback: true,
     wasm64RunloopSmoke: true,
   }, "HeadlessChrome/141.0.7390.37");
 
@@ -1601,6 +1609,8 @@ for (const status of [
   assert.equal(result.wasm64OneTbDifferential, true);
   assert.equal(result.wasm64LiveOneTbDifferential, true);
   assert.equal(result.wasm64LiveTbCoverage, true);
+  assert.equal(result.wasm64LiveGeneratedExec, true);
+  assert.equal(result.wasm64LiveGeneratedExecNoFallback, true);
   assert.equal(result.wasm64RunloopSmoke, true);
   assert.equal(Object.hasOwn(result, "tciWasmSubset"), false);
   assert.equal(Object.hasOwn(result, "tciWasmGeneratedOnly"), false);

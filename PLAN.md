@@ -1626,6 +1626,45 @@ run that reaches a weaker marker than normal multi-user readiness.
     current artifact as a speed gate but not sufficient to close R4l's dynamic
     metric requirements. Do not start an x86_64 Bus Engine OS browser proof
     from this artifact.
+  - [x] R4m - R4k follow-up: connect metadata-backed live x86 TBs to
+    generated execution before TCI fallback. DoD: document the failed R4l
+    diagnosis that the accelerator artifact still reached normal guest
+    execution through `tcg_tci_qemu_tb_exec()` instead of live generated
+    body retirement; add an opt-in runner/runtime flag for live generated
+    execution; attempt generated execution from `tcg_wasm64_tb_exec()` only
+    when metadata exists, generated output is available, the output still
+    matches the same live TB identity, and the R4k per-TB body shape is
+    supported; keep compat fallback explicit and counted; make no-silent
+    fallback mode fail loudly for unsupported/stale enabled TBs; and add
+    deterministic tests proving disabled mode keeps TCI, supported
+    metadata-backed TBs record nonzero generated guest-instruction
+    retirement, unsupported metadata fails closed in no-fallback mode, stale
+    output invalidates with zero generated work, and compat fallback is
+    explicit. This item is not a browser speed claim; R4l must be rerun only
+    after live generated execution metrics predict nonzero generated guest
+    work in Chromium.
+    Accepted slice evidence: based on QEMU
+    `59c39716044a72dbfa7fd95e04659ba7b413ee89`, the opt-in
+    `QEMU_WASM64_LIVE_GENERATED_EXEC` /
+    `QEMU_WASM64_LIVE_GENERATED_EXEC_NO_FALLBACK` runtime flags and matching
+    browser-runner flags are present. `tcg_wasm64_tb_exec()` now attempts
+    metadata-backed generated execution before TCI fallback only when the
+    live TB has metadata, generated output, supported R4k body shape, and a
+    matching live `TranslationBlock`; compatibility fallback is reported, and
+    no-silent-fallback mode fails closed. Checks:
+    `git diff --check`, `node --check
+    scripts/ci/wasm64-translate-metadata-test.mjs`, `node --check
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node --check
+    scripts/ci/wasm-browser-smoke-runner.mjs`, `node --check
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs`, `node --check
+    scripts/ci/wasm-browser-smoke.mjs`, `node
+    scripts/ci/wasm64-translate-metadata-test.mjs`, `node
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+    scripts/ci/wasm64-runloop-contract-test.mjs`, `node
+    scripts/ci/wasm-browser-smoke-runner-test.mjs`, and `node
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. Compile/browser
+    proof was not run on this supervisor host because `ninja`, `meson`, and
+    `emcc` were not available on `PATH`; this slice makes no R4l speed claim.
 - [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
   accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
   cold in browser-hosted QEMU/WASM with the accelerator and reaches

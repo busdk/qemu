@@ -189,6 +189,12 @@ Options:
   --wasm64-live-tb-coverage
                      Enable opt-in generated execution proof for one real
                      live generated-output TB before falling back to TCI
+  --wasm64-live-generated-exec
+                     Enable opt-in live metadata-backed generated TB execution
+                     before TCI fallback
+  --wasm64-live-generated-exec-no-fallback
+                     Fail loudly instead of silently using TCI when live
+                     generated execution rejects an enabled TB
   --wasm64-runloop-smoke
                      Enable opt-in QEMU wasm64 run/exit runtime smoke
   --wasm64-tcg-summary
@@ -297,6 +303,8 @@ export function parseArgs(argv) {
     wasm64OneTbDifferential: false,
     wasm64LiveOneTbDifferential: false,
     wasm64LiveTbCoverage: false,
+    wasm64LiveGeneratedExec: false,
+    wasm64LiveGeneratedExecNoFallback: false,
     wasm64RunloopSmoke: false,
     wasm64TcgSummary: false,
     wasm64TcgSummaryInterval: 10000,
@@ -538,6 +546,14 @@ export function parseArgs(argv) {
     } else if (arg === "--wasm64-live-tb-coverage") {
       options.wasm64LiveTbCoverage = true;
       explicit.add("wasm64LiveTbCoverage");
+    } else if (arg === "--wasm64-live-generated-exec") {
+      options.wasm64LiveGeneratedExec = true;
+      explicit.add("wasm64LiveGeneratedExec");
+    } else if (arg === "--wasm64-live-generated-exec-no-fallback") {
+      options.wasm64LiveGeneratedExec = true;
+      options.wasm64LiveGeneratedExecNoFallback = true;
+      explicit.add("wasm64LiveGeneratedExec");
+      explicit.add("wasm64LiveGeneratedExecNoFallback");
     } else if (arg === "--wasm64-runloop-smoke") {
       options.wasm64RunloopSmoke = true;
       explicit.add("wasm64RunloopSmoke");
@@ -580,6 +596,8 @@ export function parseArgs(argv) {
       "wasm64OneTbDifferential",
       "wasm64LiveOneTbDifferential",
       "wasm64LiveTbCoverage",
+      "wasm64LiveGeneratedExec",
+      "wasm64LiveGeneratedExecNoFallback",
       "wasm64RunloopSmoke",
       "wasm64TcgSummary",
       "requireWasm64TcgCoverage",
@@ -1604,6 +1622,12 @@ export function browserSmokeUrl(options) {
   if (options.wasm64LiveTbCoverage) {
     url.searchParams.set("wasm64LiveTbCoverage", "1");
   }
+  if (options.wasm64LiveGeneratedExec) {
+    url.searchParams.set("wasm64LiveGeneratedExec", "1");
+  }
+  if (options.wasm64LiveGeneratedExecNoFallback) {
+    url.searchParams.set("wasm64LiveGeneratedExecNoFallback", "1");
+  }
   if (options.wasm64TcgSummary) {
     url.searchParams.set("wasm64TcgSummary", "1");
     url.searchParams.set(
@@ -1733,6 +1757,9 @@ export function initialSmokeResult(options, browserVersion) {
     wasm64LiveOneTbDifferential:
       Boolean(options.wasm64LiveOneTbDifferential),
     wasm64LiveTbCoverage: Boolean(options.wasm64LiveTbCoverage),
+    wasm64LiveGeneratedExec: Boolean(options.wasm64LiveGeneratedExec),
+    wasm64LiveGeneratedExecNoFallback:
+      Boolean(options.wasm64LiveGeneratedExecNoFallback),
     wasm64TcgSummary: Boolean(options.wasm64TcgSummary),
     wasm64TcgSummaryInterval: Number.isInteger(options.wasm64TcgSummaryInterval)
       ? options.wasm64TcgSummaryInterval

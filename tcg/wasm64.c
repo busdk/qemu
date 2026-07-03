@@ -33,6 +33,10 @@
     "QEMU_WASM64_LIVE_ONE_TB_DIFFERENTIAL"
 #define TCG_WASM64_LIVE_TB_COVERAGE_ENV \
     "QEMU_WASM64_LIVE_TB_COVERAGE"
+#define TCG_WASM64_LIVE_GENERATED_EXEC_ENV \
+    "QEMU_WASM64_LIVE_GENERATED_EXEC"
+#define TCG_WASM64_LIVE_GENERATED_EXEC_NO_FALLBACK_ENV \
+    "QEMU_WASM64_LIVE_GENERATED_EXEC_NO_FALLBACK"
 #define TCG_WASM64_LIVE_TB_COVERAGE_SCAN_LIMIT_ENV \
     "QEMU_WASM64_LIVE_TB_COVERAGE_SCAN_LIMIT"
 #define TCG_WASM64_ONE_TB_NAME "live-x86-pre-r4i-ld32u-goto-tb-13"
@@ -47,6 +51,7 @@
 #define TCG_WASM64_ONE_TB_STATUS_DISPATCH 2u
 #define TCG_WASM64_LIVE_TB_STATUS_EXIT 1u
 #define TCG_WASM64_LIVE_TB_STATUS_UNSUPPORTED 6u
+#define TCG_WASM64_LIVE_TB_STATUS_INVALIDATED 8u
 #define TCG_WASM64_ONE_TB_EXECUTED_TCI_OP_EQUIVALENTS 11u
 #define TCG_WASM64_ONE_TB_MEMORY_LOADS 2u
 #define TCG_WASM64_ONE_TB_MEMORY_WRITES 2u
@@ -114,6 +119,16 @@ typedef enum TCGWasm64LiveOneTBResultIndex {
     TCG_WASM64_LIVE_ONE_TB_RESULT_QEMU_ST_CALLS,
     TCG_WASM64_LIVE_ONE_TB_RESULT__MAX,
 } TCGWasm64LiveOneTBResultIndex;
+
+typedef enum TCGWasm64LiveGeneratedExecResultIndex {
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_RET,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_GUEST_INSNS,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_TCI_OPS,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_OUTPUT_WORDS,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT__MAX,
+} TCGWasm64LiveGeneratedExecResultIndex;
 
 typedef enum TCGWasm64RunloopSmokeWorkload {
     TCG_WASM64_RUNLOOP_SMOKE_ALU_BRANCH = 0,
@@ -296,6 +311,7 @@ static __thread bool live_one_tb_metadata_missing_reported;
 static __thread bool live_one_tb_output_unavailable_reported;
 static __thread bool live_one_tb_unsupported_shape_reported;
 static __thread uint64_t live_one_tb_differential_scanned;
+static __thread uint64_t live_generated_exec_attempted;
 static __thread bool live_tb_coverage_checked;
 static __thread bool live_tb_coverage_no_shape_reported;
 static __thread uint64_t live_tb_coverage_scanned;
@@ -303,9 +319,12 @@ static volatile uint64_t tcg_wasm64_runloop_smoke_sink;
 static gsize summary_env_initialized;
 static gsize live_one_tb_env_initialized;
 static gsize live_tb_coverage_env_initialized;
+static gsize live_generated_exec_env_initialized;
 static bool summary_enabled;
 static bool live_one_tb_enabled;
 static bool live_tb_coverage_enabled;
+static bool live_generated_exec_enabled;
+static bool live_generated_exec_no_fallback;
 static uint64_t summary_interval;
 static uint64_t live_tb_coverage_scan_limit;
 static uint64_t tcg_wasm64_current_tb_generation = 1;
@@ -858,6 +877,24 @@ static bool tcg_wasm64_live_tb_coverage_enabled(void)
         g_once_init_leave(&live_tb_coverage_env_initialized, 1);
     }
     return live_tb_coverage_enabled;
+}
+
+static bool tcg_wasm64_live_generated_exec_enabled(void)
+{
+    if (unlikely(g_once_init_enter(&live_generated_exec_env_initialized))) {
+        live_generated_exec_enabled = tcg_wasm64_runloop_env_bool(
+            TCG_WASM64_LIVE_GENERATED_EXEC_ENV);
+        live_generated_exec_no_fallback = tcg_wasm64_runloop_env_bool(
+            TCG_WASM64_LIVE_GENERATED_EXEC_NO_FALLBACK_ENV);
+        g_once_init_leave(&live_generated_exec_env_initialized, 1);
+    }
+    return live_generated_exec_enabled;
+}
+
+static bool tcg_wasm64_live_generated_exec_no_fallback(void)
+{
+    (void)tcg_wasm64_live_generated_exec_enabled();
+    return live_generated_exec_no_fallback;
 }
 
 static void tcg_wasm64_summary_maybe_report(void)
@@ -2391,6 +2428,454 @@ EM_JS(int, tcg_wasm64_live_one_tb_differential_js,
     }
 });
 
+EM_JS(int, tcg_wasm64_live_generated_exec_js,
+      (uintptr_t context_arg, uintptr_t scratch_arg, uintptr_t counters_arg,
+       uintptr_t exit_arg, uintptr_t result_arg, uintptr_t tb_arg,
+       uintptr_t env_arg, uint64_t guest_insns_arg,
+       uintptr_t generated_output_arg, uint32_t generated_output_size_arg), {
+    if (typeof wasmMemory === "undefined" || !wasmMemory) {
+        return 1;
+    }
+
+    const context = Number(context_arg);
+    const scratch = Number(scratch_arg);
+    const counters = Number(counters_arg);
+    const exit = Number(exit_arg);
+    const result = Number(result_arg);
+    const tbPtr = Number(tb_arg);
+    const envPtr = Number(env_arg);
+    const guestInsns = BigInt(guest_insns_arg);
+    const generatedOutputPtr = Number(generated_output_arg);
+    const generatedOutputSize = Number(generated_output_size_arg);
+    const stackPtr = scratch + 0x3000;
+    const statusDispatch = 2n;
+    const statusUnsupported = 6n;
+    const valueI64 = 0x7e;
+    const expectedShape = [
+        "ld32u", "tci_movi", "tci_setcond32", "brcond", "tci_movi",
+        "st8", "ld", "tci_movi", "add", "st", "goto_tb",
+    ];
+    const envRelativeBaseReg = 14;
+    const envRelativeMinOffset = -16;
+    const envRelativeMaxExclusive = 0x120;
+    const ops = {
+        brcond: 4,
+        add: 7,
+        ld32u: 28,
+        ld: 30,
+        st8: 53,
+        st: 56,
+        exit_tb: 72,
+        goto_tb: 73,
+        tci_movi: 125,
+        tci_setcond32: 136,
+    };
+
+    function encodeU32(value) {
+        const bytes = [];
+        let current = Number(value) >>> 0;
+        do {
+            let byte = current & 0x7f;
+            current >>>= 7;
+            if (current !== 0) {
+                byte |= 0x80;
+            }
+            bytes.push(byte);
+        } while (current !== 0);
+        return bytes;
+    }
+
+    function encodeS64(value) {
+        let current = BigInt.asIntN(64, BigInt(value));
+        const bytes = [];
+        for (;;) {
+            let byte = Number(current & 0x7fn);
+            const sign = (byte & 0x40) !== 0;
+            current >>= 7n;
+            const done = (current === 0n && !sign) ||
+                         (current === -1n && sign);
+            if (!done) {
+                byte |= 0x80;
+            }
+            bytes.push(byte);
+            if (done) {
+                return bytes;
+            }
+        }
+    }
+
+    function name(text) {
+        const bytes = Array.from(new TextEncoder().encode(text));
+        return [...encodeU32(bytes.length), ...bytes];
+    }
+
+    function vector(items) {
+        return [...encodeU32(items.length), ...items.flat()];
+    }
+
+    function section(id, payload) {
+        return [id, ...encodeU32(payload.length), ...payload];
+    }
+
+    function functionType(params, results) {
+        return [
+            0x60,
+            ...vector(params.map((param) => [param])),
+            ...vector(results.map((value) => [value])),
+        ];
+    }
+
+    function functionBody(instructions, locals = []) {
+        const body = [
+            ...vector(locals.map(({ count, type }) =>
+                [...encodeU32(count), type])),
+            ...instructions,
+            0x0b,
+        ];
+        return [...encodeU32(body.length), ...body];
+    }
+
+    function memArg(align, offset) {
+        return [...encodeU32(align), ...encodeU32(offset)];
+    }
+
+    function localGet(index) {
+        return [0x20, ...encodeU32(index)];
+    }
+
+    function localSet(index, expr) {
+        return [...expr, 0x21, ...encodeU32(index)];
+    }
+
+    function i32Const(value) {
+        return [0x41, ...encodeU32(value >>> 0)];
+    }
+
+    function i64Const(value) {
+        return [0x42, ...encodeS64(value)];
+    }
+
+    function i64Add(lhs, rhs) {
+        return [...lhs, ...rhs, 0x7c];
+    }
+
+    function i32WrapI64(expr) {
+        return [...expr, 0xa7];
+    }
+
+    function i64ExtendI32U(expr) {
+        return [...expr, 0xad];
+    }
+
+    function i64Load(address) {
+        return [...address, 0x29, ...memArg(3, 0)];
+    }
+
+    function i32Load(address) {
+        return [...address, 0x28, ...memArg(2, 0)];
+    }
+
+    function i64Store(address, value) {
+        return [...address, ...value, 0x37, ...memArg(3, 0)];
+    }
+
+    function i32Store8(address, value) {
+        return [...address, ...value, 0x3a, ...memArg(0, 0)];
+    }
+
+    function i64LoadAtPtr(ptrLocal, offset) {
+        return [...localGet(ptrLocal), 0x29, ...memArg(3, offset)];
+    }
+
+    function i64StoreAtPtr(ptrLocal, offset, value) {
+        return [...localGet(ptrLocal), ...value, 0x37, ...memArg(3, offset)];
+    }
+
+    function i32StoreAtPtr(ptrLocal, offset, value) {
+        return [...localGet(ptrLocal), ...value, 0x36, ...memArg(2, offset)];
+    }
+
+    function addressAdd(base, offset) {
+        return i64Add(base, i64Const(offset));
+    }
+
+    function incrementCounter(ptrLocal, offset, value) {
+        return i64StoreAtPtr(ptrLocal, offset, i64Add(
+            i64LoadAtPtr(ptrLocal, offset), i64Const(BigInt(value))));
+    }
+
+    function bits(value, start, length) {
+        return (value >>> start) & ((1 << length) - 1);
+    }
+
+    function sextract(value, start, length) {
+        const mask = (1 << length) - 1;
+        let extracted = (value >>> start) & mask;
+        const sign = 1 << (length - 1);
+        if ((extracted & sign) !== 0) {
+            extracted |= ~mask;
+        }
+        return extracted;
+    }
+
+    function opName(opc) {
+        for (const [name, value] of Object.entries(ops)) {
+            if (value === opc) {
+                return name;
+            }
+        }
+        return "unknown";
+    }
+
+    function readGeneratedOutputWords() {
+        if (generatedOutputPtr === 0 || generatedOutputSize === 0 ||
+            generatedOutputSize % 4 !== 0) {
+            return null;
+        }
+        const wordCount = generatedOutputSize / 4;
+        const words = [];
+        for (let i = 0; i < wordCount; i++) {
+            words.push(HEAPU32[generatedOutputPtr / 4 + i] >>> 0);
+        }
+        return words;
+    }
+
+    function generatedOutputShapeSupported(words) {
+        const shape = words.map((insn) => opName(bits(insn >>> 0, 0, 8)));
+        return shape.length === expectedShape.length &&
+               shape.every((item, index) => item === expectedShape[index]);
+    }
+
+    function envRelativeOffset(insn, r1, size) {
+        const offset = sextract(insn, 16, 16);
+        if (r1 !== envRelativeBaseReg ||
+            offset < envRelativeMinOffset ||
+            offset + size > envRelativeMaxExclusive) {
+            throw new Error("unsupported live generated env-relative memory");
+        }
+        return BigInt(offset);
+    }
+
+    function buildGeneratedInstructions(words) {
+        const countersPtr = 1;
+        const exitPtr = 2;
+        const regLocalBase = 3;
+        const emitted = [
+            ...localSet(countersPtr, i64LoadAtPtr(0, 24)),
+            ...localSet(exitPtr, i64LoadAtPtr(0, 32)),
+        ];
+        let inlineLoads = 0;
+        let inlineStores = 0;
+        let executedOps = 0;
+        let terminal = null;
+
+        function regLocal(reg) {
+            return regLocalBase + reg;
+        }
+
+        function returnUnsupported() {
+            return [
+                ...i32StoreAtPtr(exitPtr, 0, i32Const(Number(statusUnsupported))),
+                ...i64StoreAtPtr(exitPtr, 32, i64Const(0n)),
+                ...incrementCounter(countersPtr, 168, 1),
+                ...i64Const(statusUnsupported),
+            ];
+        }
+
+        for (let reg = 0; reg < 16; reg++) {
+            emitted.push(...localSet(regLocal(reg), i64Const(0n)));
+        }
+        emitted.push(...localSet(regLocal(14), i64Const(BigInt(envPtr))));
+        emitted.push(...localSet(regLocal(15), i64Const(BigInt(stackPtr))));
+
+        for (let index = 0; index < words.length; index++) {
+            const insn = words[index] >>> 0;
+            const opc = bits(insn, 0, 8);
+            const r0 = bits(insn, 8, 4);
+            const r1 = bits(insn, 12, 4);
+            const r2 = bits(insn, 16, 4);
+            const currentTbPtr = (index + 1) * 4;
+
+            executedOps++;
+            if (opc === ops.goto_tb || opc === ops.exit_tb) {
+                terminal = {
+                    kind: opc,
+                    ptrOffset: currentTbPtr + sextract(insn, 12, 20),
+                };
+                break;
+            } else if (opc === ops.ld32u) {
+                emitted.push(...localSet(regLocal(r0), i64ExtendI32U(
+                    i32Load(addressAdd(localGet(regLocal(r1)),
+                                       envRelativeOffset(insn, r1, 4))))));
+                inlineLoads++;
+            } else if (opc === ops.ld) {
+                emitted.push(...localSet(regLocal(r0),
+                    i64Load(addressAdd(localGet(regLocal(r1)),
+                                       envRelativeOffset(insn, r1, 8)))));
+                inlineLoads++;
+            } else if (opc === ops.tci_movi) {
+                emitted.push(...localSet(regLocal(r0),
+                                         i64Const(sextract(insn, 12, 20))));
+            } else if (opc === ops.tci_setcond32) {
+                const condition = bits(insn, 20, 4);
+                if (condition !== 2) {
+                    throw new Error("unsupported live generated condition");
+                }
+                emitted.push(...localSet(regLocal(r0), i64ExtendI32U([
+                    ...i32WrapI64(localGet(regLocal(r1))),
+                    ...i32WrapI64(localGet(regLocal(r2))),
+                    0x48,
+                ])));
+            } else if (opc === ops.brcond) {
+                const targetOffset = currentTbPtr + sextract(insn, 12, 20);
+                const targetIndex = targetOffset / 4;
+
+                if (targetOffset % 4 !== 0 || targetIndex <= index) {
+                    throw new Error("unsupported live generated branch target");
+                }
+                if (targetIndex > words.length - 1) {
+                    emitted.push(...[
+                        ...localGet(regLocal(r0)),
+                        0x50, 0x45,
+                        0x04, 0x40,
+                        ...returnUnsupported(),
+                        0x0b,
+                    ]);
+                } else {
+                    throw new Error("unsupported live generated in-range branch");
+                }
+            } else if (opc === ops.st8) {
+                emitted.push(...i32Store8(
+                    addressAdd(localGet(regLocal(r1)),
+                               envRelativeOffset(insn, r1, 1)),
+                    i32WrapI64(localGet(regLocal(r0)))));
+                inlineStores++;
+            } else if (opc === ops.st) {
+                emitted.push(...i64Store(
+                    addressAdd(localGet(regLocal(r1)),
+                               envRelativeOffset(insn, r1, 8)),
+                    localGet(regLocal(r0))));
+                inlineStores++;
+            } else if (opc === ops.add) {
+                emitted.push(...localSet(regLocal(r0), i64Add(
+                    localGet(regLocal(r1)), localGet(regLocal(r2)))));
+            } else {
+                throw new Error(`unsupported live generated opcode ${opc}`);
+            }
+        }
+
+        if (terminal === null) {
+            throw new Error("live generated-output body has no terminal");
+        }
+
+        emitted.push(...i32StoreAtPtr(exitPtr, 0, i32Const(Number(statusDispatch))));
+        emitted.push(...i64StoreAtPtr(
+            exitPtr, 32,
+            terminal.kind === ops.goto_tb
+                ? i64Load(i64Const(BigInt(tbPtr + terminal.ptrOffset)))
+                : i64Const(BigInt(tbPtr + terminal.ptrOffset))));
+        emitted.push(...incrementCounter(countersPtr, 0, guestInsns));
+        emitted.push(...incrementCounter(countersPtr, 80, 1));
+        emitted.push(...incrementCounter(countersPtr, 88, inlineLoads));
+        emitted.push(...incrementCounter(countersPtr, 96, inlineStores));
+        emitted.push(...i64Const(statusDispatch));
+        buildGeneratedInstructions.generatedTciOps = executedOps;
+        buildGeneratedInstructions.inlineLoads = inlineLoads;
+        buildGeneratedInstructions.inlineStores = inlineStores;
+        return emitted;
+    }
+
+    function setResult(index, value) {
+        HEAPU64[result / 8 + index] = BigInt.asUintN(64, BigInt(value));
+    }
+
+    try {
+        const words = readGeneratedOutputWords();
+        if (!words || words.length === 0) {
+            setResult(0, 4n);
+            return 4;
+        }
+        if (!generatedOutputShapeSupported(words)) {
+            setResult(0, 5n);
+            return 5;
+        }
+        for (let i = 0; i < words.length; i++) {
+            if ((HEAPU32[tbPtr / 4 + i] >>> 0) !== words[i]) {
+                HEAPU32[exit / 4] = 8;
+                setResult(0, 3n);
+                return 3;
+            }
+        }
+
+        const bytes = Uint8Array.from([
+            0x00, 0x61, 0x73, 0x6d,
+            0x01, 0x00, 0x00, 0x00,
+            ...section(1, vector([
+                functionType([valueI64], [valueI64]),
+            ])),
+            ...section(2, vector([
+                [
+                    ...name("env"), ...name("memory"),
+                    0x02, 0x07, 0x00, 0x80, 0x80, 0x10,
+                ],
+            ])),
+            ...section(3, vector([[0x00]])),
+            ...section(7, vector([
+                [...name("wasmjit_run"), 0x00, ...encodeU32(0)],
+            ])),
+            ...section(10, vector([
+                functionBody(buildGeneratedInstructions(words), [
+                    { count: 20, type: valueI64 },
+                ]),
+            ])),
+        ]);
+        if (!WebAssembly.validate(bytes)) {
+            setResult(0, 7n);
+            return 7;
+        }
+
+        for (let i = 0; i < 192 / 8; i++) {
+            HEAPU64[counters / 8 + i] = 0n;
+        }
+        for (let i = 0; i < 48 / 8; i++) {
+            HEAPU64[exit / 8 + i] = 0n;
+        }
+        HEAPU64[context / 8 + 0] = BigInt(envPtr);
+        HEAPU64[context / 8 + 2] = guestInsns;
+        HEAPU64[context / 8 + 3] = BigInt(counters);
+        HEAPU64[context / 8 + 4] = BigInt(exit);
+
+        const compileStart = performance.now();
+        const module = new WebAssembly.Module(bytes);
+        const compileNs = BigInt(Math.round(
+            (performance.now() - compileStart) * 1000000));
+        const instantiateStart = performance.now();
+        const instance = new WebAssembly.Instance(module, {
+            env: { memory: wasmMemory },
+        });
+        const instantiateNs = BigInt(Math.round(
+            (performance.now() - instantiateStart) * 1000000));
+        const generatedStart = performance.now();
+        const generatedStatus = instance.exports.wasmjit_run(BigInt(context));
+        const generatedNs = BigInt(Math.round(
+            (performance.now() - generatedStart) * 1000000));
+
+        HEAPU64[counters / 8 + 2] = generatedNs;
+        HEAPU64[counters / 8 + 8] = compileNs;
+        HEAPU64[counters / 8 + 9] = instantiateNs;
+        setResult(0, 0n);
+        setResult(1, generatedStatus);
+        setResult(2, HEAPU64[exit / 8 + 4]);
+        setResult(3, HEAPU64[counters / 8 + 0]);
+        setResult(4, BigInt(buildGeneratedInstructions.generatedTciOps));
+        setResult(5, BigInt(words.length));
+        return 0;
+    } catch (error) {
+        setResult(0, 6n);
+        return 6;
+    }
+});
+
 EM_JS(int, tcg_wasm64_live_tb_coverage_js,
       (uintptr_t context_arg, uintptr_t counters_arg, uintptr_t exit_arg,
        uintptr_t result_arg, uintptr_t tb_arg, uint64_t guest_insns_arg,
@@ -3851,7 +4336,8 @@ static void tcg_wasm64_count_live_tb_coverage_denominator(const void *tb_ptr)
     if (!tb_ptr ||
         (!tcg_wasm64_summary_enabled() &&
          !tcg_wasm64_live_one_tb_enabled() &&
-         !tcg_wasm64_live_tb_coverage_enabled())) {
+         !tcg_wasm64_live_tb_coverage_enabled() &&
+         !tcg_wasm64_live_generated_exec_enabled())) {
         return;
     }
 
@@ -3953,6 +4439,317 @@ static void tcg_wasm64_live_tb_coverage_maybe(
     }
     tcg_wasm64_report_live_tb_coverage(
         tb, metadata, &run_counters, &exit, result, ok);
+}
+
+static void tcg_wasm64_live_generated_exec_count_reject(
+    TCGWasm64Counters *counters, TCGWasm64RunExitReason reason)
+{
+    TCGWasm64ExitReason summary_reason = TCG_WASM64_EXIT_UNSUPPORTED;
+
+    if (counters) {
+        tcg_wasm64_count_fallback(counters, TCG_WASM64_FALLBACK_RUNTIME);
+    }
+    translated_counters.fallback_runtime++;
+    switch (reason) {
+    case TCG_WASM64_RUN_EXIT_MMIO:
+        summary_reason = TCG_WASM64_EXIT_MMIO;
+        break;
+    case TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT:
+        summary_reason = TCG_WASM64_EXIT_TLB_MISS;
+        break;
+    case TCG_WASM64_RUN_EXIT_INTERRUPT:
+        summary_reason = TCG_WASM64_EXIT_INTERRUPT;
+        break;
+    case TCG_WASM64_RUN_EXIT_INVALIDATED:
+        summary_reason = TCG_WASM64_EXIT_INVALIDATION;
+        break;
+    case TCG_WASM64_RUN_EXIT_UNSUPPORTED:
+    default:
+        summary_reason = TCG_WASM64_EXIT_UNSUPPORTED;
+        break;
+    }
+    tcg_wasm64_count_exit(&translated_counters, summary_reason);
+}
+
+static void tcg_wasm64_live_generated_exec_fail_closed(
+    const char *reason, bool no_fallback)
+{
+    if (!no_fallback) {
+        return;
+    }
+    g_error("qemu-wasm64-live-generated-exec: no-silent-fallback: %s",
+            reason);
+}
+
+static void tcg_wasm64_report_live_generated_exec(
+    const char *reason, const TranslationBlock *tb,
+    const TCGWasm64TBMetadata *metadata,
+    const TCGWasm64RunCounters *run_counters,
+    const TCGWasm64RunExit *exit, const uint64_t *result, bool ok,
+    bool no_fallback)
+{
+    fprintf(stderr,
+            "qemu-wasm64-runloop: {\"format\":1,"
+            "\"event\":\"live-generated-exec\","
+            "\"ok\":%s,"
+            "\"reason\":\"%s\","
+            "\"compat_fallback\":%s,"
+            "\"no_silent_fallback\":%s,"
+            "\"tb_ptr\":\"0x%" PRIxPTR "\","
+            "\"has_tb\":%s,"
+            "\"tb_pc\":\"0x%" PRIx64 "\","
+            "\"tb_cs_base\":\"0x%" PRIx64 "\","
+            "\"tb_flags\":%" PRIu32 ","
+            "\"tb_cflags\":%" PRIu32 ","
+            "\"tb_size\":%" PRIu16 ","
+            "\"tb_icount\":%" PRIu16 ","
+            "\"has_metadata\":%s,"
+            "\"metadata_generated_output_available\":%s,"
+            "\"metadata_generated_output_size\":%" PRIu32 ","
+            "\"metadata_generated_output_op_count\":%" PRIu32 ","
+            "\"metadata_generated_output_checksum\":%" PRIu32 ","
+            "\"metadata_first_generated_unsupported_op\":%" PRIu32 ","
+            "\"metadata_first_generated_unsupported_op_name\":\"%s\","
+            "\"generated_guest_instructions\":%" PRIu64 ","
+            "\"generated_tci_op_equivalents\":%" PRIu64 ","
+            "\"generated_output_words\":%" PRIu64 ","
+            "\"generated_body_time_ns\":%" PRIu64 ","
+            "\"tci_dispatch_time_ns\":%" PRIu64 ","
+            "\"compile_time_ns\":%" PRIu64 ","
+            "\"instantiate_time_ns\":%" PRIu64 ","
+            "\"generated_chain_length\":%" PRIu64 ","
+            "\"inline_tlb_hit_loads\":%" PRIu64 ","
+            "\"inline_tlb_hit_stores\":%" PRIu64 ","
+            "\"helper_calls\":%" PRIu64 ","
+            "\"qemu_ld_calls\":%" PRIu64 ","
+            "\"qemu_st_calls\":%" PRIu64 ","
+            "\"exits_budget\":%" PRIu64 ","
+            "\"exits_mmio\":%" PRIu64 ","
+            "\"exits_tlb_miss_or_fault\":%" PRIu64 ","
+            "\"exits_interrupt\":%" PRIu64 ","
+            "\"exits_helper\":%" PRIu64 ","
+            "\"exits_unsupported\":%" PRIu64 ","
+            "\"exits_hlt\":%" PRIu64 ","
+            "\"exits_invalidated\":%" PRIu64 ","
+            "\"generated_status\":%" PRIu64 ","
+            "\"generated_ret\":%" PRIu64 ","
+            "\"exit_reason\":\"%s\","
+            "\"exit_reason_code\":%u,"
+            "\"exit_value\":%" PRIu64 ","
+            "\"js_status\":%" PRIu64 ","
+            "\"js_status_name\":\"%s\","
+            "\"attempt_index\":%" PRIu64 "}\n",
+            ok ? "true" : "false",
+            reason ? reason : "unknown",
+            ok ? "false" : "true",
+            no_fallback ? "true" : "false",
+            tb ? (uintptr_t)tb->tc.ptr : 0,
+            tb ? "true" : "false",
+            tb ? (uint64_t)tb->pc : 0,
+            tb ? tb->cs_base : 0,
+            tb ? tb->flags : 0,
+            tb ? tb_cflags(tb) : 0,
+            tb ? tb->size : 0,
+            tb ? tb->icount : 0,
+            metadata ? "true" : "false",
+            tcg_wasm64_translate_generated_output_available(metadata) ?
+                "true" : "false",
+            metadata ? metadata->generated_output_size : 0,
+            metadata ? metadata->generated_output_op_count : 0,
+            metadata ? metadata->generated_output_checksum : 0,
+            metadata ? metadata->first_generated_unsupported_op : UINT32_MAX,
+            metadata ? tcg_wasm64_op_name(
+                metadata->first_generated_unsupported_op) : "none",
+            run_counters ? run_counters->generated_guest_instructions : 0,
+            result ? result[
+                TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_TCI_OPS] : 0,
+            result ? result[
+                TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_OUTPUT_WORDS] : 0,
+            run_counters ? run_counters->generated_body_time_ns : 0,
+            run_counters ? run_counters->tci_dispatch_time_ns : 0,
+            run_counters ? run_counters->compile_time_ns : 0,
+            run_counters ? run_counters->instantiate_time_ns : 0,
+            run_counters ? run_counters->generated_chain_length : 0,
+            run_counters ? run_counters->inline_tlb_hit_loads : 0,
+            run_counters ? run_counters->inline_tlb_hit_stores : 0,
+            run_counters ? run_counters->helper_calls : 0,
+            run_counters ? run_counters->qemu_ld_calls : 0,
+            run_counters ? run_counters->qemu_st_calls : 0,
+            run_counters ? run_counters->exits_budget : 0,
+            run_counters ? run_counters->exits_mmio : 0,
+            run_counters ? run_counters->exits_tlb_miss_or_fault : 0,
+            run_counters ? run_counters->exits_interrupt : 0,
+            run_counters ? run_counters->exits_helper : 0,
+            run_counters ? run_counters->exits_unsupported : 0,
+            run_counters ? run_counters->exits_hlt : 0,
+            run_counters ? run_counters->exits_invalidated : 0,
+            result ? result[
+                TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS] : 0,
+            result ? result[
+                TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_RET] : 0,
+            exit ? tcg_wasm64_run_exit_reason_name(
+                (TCGWasm64RunExitReason)exit->reason) : "unknown",
+            exit ? exit->reason : 0,
+            exit ? exit->value : 0,
+            result ? result[
+                TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] : 0,
+            result ? tcg_wasm64_live_one_tb_js_status_name(result[
+                TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS]) : "unknown",
+            live_generated_exec_attempted);
+}
+
+static bool tcg_wasm64_live_generated_exec_reject(
+    const char *reason, const void *tb_ptr,
+    const TCGWasm64TBMetadata *metadata, const TranslationBlock *tb,
+    TCGWasm64RunExitReason exit_reason, TCGWasm64Counters *counters,
+    bool no_fallback)
+{
+    TCGWasm64RunCounters run_counters;
+    TCGWasm64RunExit exit = { 0 };
+    uint64_t result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT__MAX] = { 0 };
+
+    tcg_wasm64_run_counters_reset(&run_counters);
+    exit.reason = exit_reason;
+    tcg_wasm64_run_count_exit(&run_counters, exit_reason);
+    if (exit_reason == TCG_WASM64_RUN_EXIT_INVALIDATED) {
+        result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] = 3;
+    } else if (exit_reason == TCG_WASM64_RUN_EXIT_UNSUPPORTED) {
+        result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] = 5;
+    } else {
+        result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] = 6;
+    }
+
+    tcg_wasm64_live_generated_exec_count_reject(counters, exit_reason);
+    tcg_wasm64_report_live_generated_exec(reason, tb, metadata, &run_counters,
+                                          &exit, result, false, no_fallback);
+    tcg_wasm64_live_generated_exec_fail_closed(reason, no_fallback);
+    (void)tb_ptr;
+    return false;
+}
+
+static bool tcg_wasm64_live_generated_exec_try(
+    CPUArchState *env, const void *tb_ptr, const TCGWasm64TBMetadata *metadata,
+    TCGWasm64Counters *counters, uintptr_t *ret)
+{
+    TranslationBlock *tb;
+    TCGWasm64RunCounters run_counters;
+    TCGWasm64RunExit exit = { 0 };
+    TCGWasm64RunContext context = { 0 };
+    uint64_t result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT__MAX] = { 0 };
+    uint64_t guest_insns;
+    bool no_fallback;
+    bool ok;
+
+    if (!tcg_wasm64_live_generated_exec_enabled()) {
+        return false;
+    }
+
+    live_generated_exec_attempted++;
+    no_fallback = tcg_wasm64_live_generated_exec_no_fallback();
+    translated_counters.generated_attempts++;
+    if (!metadata) {
+        return tcg_wasm64_live_generated_exec_reject(
+            "metadata-missing", tb_ptr, metadata, NULL,
+            TCG_WASM64_RUN_EXIT_UNSUPPORTED, counters, no_fallback);
+    }
+    if (!tcg_wasm64_translate_generated_output_available(metadata)) {
+        return tcg_wasm64_live_generated_exec_reject(
+            "generated-output-unavailable", tb_ptr, metadata, NULL,
+            TCG_WASM64_RUN_EXIT_UNSUPPORTED, counters, no_fallback);
+    }
+    if (!tcg_wasm64_live_one_tb_generated_output_shape_supported(metadata)) {
+        return tcg_wasm64_live_generated_exec_reject(
+            "selected-body-shape-unsupported", tb_ptr, metadata, NULL,
+            TCG_WASM64_RUN_EXIT_UNSUPPORTED, counters, no_fallback);
+    }
+
+    tb = tcg_tb_lookup((uintptr_t)tb_ptr);
+    if (!tb || tb->tc.ptr != tb_ptr || tb->icount == 0) {
+        return tcg_wasm64_live_generated_exec_reject(
+            "tb-identity-missing-or-stale", tb_ptr, metadata, tb,
+            TCG_WASM64_RUN_EXIT_INVALIDATED, counters, no_fallback);
+    }
+    guest_insns = tb->icount;
+
+    tcg_wasm64_run_counters_reset(&run_counters);
+    memset(&exit, 0, sizeof(exit));
+    context.env = env;
+    context.budget = guest_insns;
+    context.counters = &run_counters;
+    context.exit = &exit;
+    context.mode = no_fallback ? TCG_WASM64_RUN_MODE_PERF_PROOF :
+                                 TCG_WASM64_RUN_MODE_COMPAT;
+    context.tb_generation = tcg_wasm64_tb_generation();
+    context.address_space_generation = tcg_wasm64_address_space_generation();
+
+#ifdef CONFIG_EMSCRIPTEN
+    {
+        g_autofree uint8_t *scratch = g_malloc0(
+            TCG_WASM64_ONE_TB_SCRATCH_SIZE);
+        int js_status = tcg_wasm64_live_generated_exec_js(
+            (uintptr_t)&context, (uintptr_t)scratch,
+            (uintptr_t)&run_counters, (uintptr_t)&exit, (uintptr_t)result,
+            (uintptr_t)tb_ptr, (uintptr_t)env, guest_insns,
+            (uintptr_t)metadata->generated_output,
+            metadata->generated_output_size);
+
+        result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] = js_status;
+    }
+#else
+    result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] = 1;
+#endif
+
+    if (exit.reason == 0) {
+        exit.reason = (uint32_t)result[
+            TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS];
+    }
+    if (exit.reason == TCG_WASM64_LIVE_TB_STATUS_UNSUPPORTED) {
+        tcg_wasm64_run_count_exit(&run_counters,
+                                  TCG_WASM64_RUN_EXIT_UNSUPPORTED);
+    } else if (exit.reason == TCG_WASM64_LIVE_TB_STATUS_INVALIDATED ||
+               result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] == 3) {
+        exit.reason = TCG_WASM64_RUN_EXIT_INVALIDATED;
+        tcg_wasm64_run_count_exit(&run_counters,
+                                  TCG_WASM64_RUN_EXIT_INVALIDATED);
+    }
+
+    ok = result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] == 0 &&
+         result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS] ==
+             TCG_WASM64_ONE_TB_STATUS_DISPATCH &&
+         result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_RET] != 0 &&
+         result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_GUEST_INSNS] ==
+             guest_insns &&
+         run_counters.generated_guest_instructions == guest_insns &&
+         run_counters.generated_chain_length == 1 &&
+         run_counters.inline_tlb_hit_loads == TCG_WASM64_ONE_TB_MEMORY_LOADS &&
+         run_counters.inline_tlb_hit_stores ==
+             TCG_WASM64_ONE_TB_MEMORY_WRITES &&
+         run_counters.helper_calls == 0 &&
+         run_counters.qemu_ld_calls == 0 &&
+         run_counters.qemu_st_calls == 0;
+
+    if (!ok) {
+        TCGWasm64RunExitReason reject_reason =
+            exit.reason == TCG_WASM64_RUN_EXIT_INVALIDATED ?
+            TCG_WASM64_RUN_EXIT_INVALIDATED : TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+
+        tcg_wasm64_live_generated_exec_count_reject(counters, reject_reason);
+        tcg_wasm64_report_live_generated_exec(
+            "generated-exec-rejected", tb, metadata, &run_counters,
+            &exit, result, false, no_fallback);
+        tcg_wasm64_live_generated_exec_fail_closed(
+            "generated-exec-rejected", no_fallback);
+        return false;
+    }
+
+    translated_counters.generated_compiled++;
+    translated_counters.generated_executed++;
+    translated_counters.generated_coverage_numerator += guest_insns;
+    tcg_wasm64_report_live_generated_exec(
+        "generated-exec-dispatch", tb, metadata, &run_counters, &exit,
+        result, true, no_fallback);
+    *ret = result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_RET];
+    return true;
 }
 
 static bool tcg_wasm64_translate_op_supported(uint32_t op)
@@ -4521,12 +5318,22 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
         tcg_wasm64_count_live_tb_coverage_denominator(tb_ptr);
         tcg_wasm64_live_one_tb_differential_maybe(env, tb_ptr, metadata);
         tcg_wasm64_live_tb_coverage_maybe(env, tb_ptr, metadata);
+        if (tcg_wasm64_live_generated_exec_try(env, tb_ptr, metadata,
+                                               counters, &ret)) {
+            tcg_wasm64_summary_maybe_report();
+            return ret;
+        }
         tcg_wasm64_summary_maybe_report();
     } else {
         translated_counters.translated_metadata_misses++;
         tcg_wasm64_count_live_tb_coverage_denominator(tb_ptr);
         tcg_wasm64_live_one_tb_differential_maybe(env, tb_ptr, NULL);
         tcg_wasm64_live_tb_coverage_maybe(env, tb_ptr, NULL);
+        if (tcg_wasm64_live_generated_exec_try(env, tb_ptr, NULL,
+                                               counters, &ret)) {
+            tcg_wasm64_summary_maybe_report();
+            return ret;
+        }
     }
     active_counters = counters;
     ret = tcg_tci_qemu_tb_exec(env, tb_ptr);

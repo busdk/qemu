@@ -223,6 +223,8 @@ assert.match(runtime, /QEMU_WASM64_TCG_SUMMARY_INTERVAL/);
 assert.match(runtime, /QEMU_WASM64_ONE_TB_DIFFERENTIAL/);
 assert.match(runtime, /QEMU_WASM64_LIVE_ONE_TB_DIFFERENTIAL/);
 assert.match(runtime, /QEMU_WASM64_LIVE_TB_COVERAGE/);
+assert.match(runtime, /QEMU_WASM64_LIVE_GENERATED_EXEC/);
+assert.match(runtime, /QEMU_WASM64_LIVE_GENERATED_EXEC_NO_FALLBACK/);
 assert.match(runtime, /QEMU_WASM64_LIVE_TB_COVERAGE_SCAN_LIMIT/);
 assert.match(runtime, /TCG_WASM64_ONE_TB_NAME "live-x86-pre-r4i-ld32u-goto-tb-13"/);
 assert.match(runtime, /TCG_WASM64_LIVE_ONE_TB_NAME "live-x86-r4i-ld32u-goto-tb-11"/);
@@ -245,12 +247,10 @@ assert.match(runtime, /module-validation-failed/);
 assert.match(runtime, /metadata_generated_output_size/);
 assert.match(runtime, /metadata_generated_output_op_count/);
 assert.match(runtime, /js_status_name/);
-assert.doesNotMatch(
-  runtime.match(
-    /EM_JS\(int, tcg_wasm64_live_one_tb_differential_js,[\s\S]*?const words = \[([\s\S]*?)\];/,
-  )?.[0] || "",
-  /const words = \[/,
-);
+const liveOneTbDifferentialJs = runtime.match(
+  /EM_JS\(int, tcg_wasm64_live_one_tb_differential_js,[\s\S]*?\n\}\);\n\nEM_JS\(int, tcg_wasm64_live_generated_exec_js,/,
+)?.[0] || "";
+assert.doesNotMatch(liveOneTbDifferentialJs, /const words = \[/);
 assert.match(runtime, /tcg_wasm64_one_tb_differential_js/);
 assert.match(runtime, /tcg_wasm64_live_one_tb_differential_js/);
 assert.match(runtime, /\.\.\.name\("wasmjit_run"\)/);
@@ -286,6 +286,37 @@ assert.match(runtime, /tcg_wasm64_live_tb_coverage_shape_supported/);
 assert.match(runtime, /tcg_wasm64_live_tb_coverage_op_supported/);
 assert.match(runtime, /tcg_wasm64_count_live_tb_coverage_denominator/);
 assert.match(runtime, /tcg_wasm64_live_tb_coverage_maybe\(env, tb_ptr, metadata\)/);
+assert.match(runtime, /tcg_wasm64_live_generated_exec_enabled/);
+assert.match(runtime, /tcg_wasm64_live_generated_exec_no_fallback/);
+assert.match(runtime, /tcg_wasm64_live_generated_exec_js/);
+assert.match(runtime, /tcg_wasm64_live_generated_exec_try\(env, tb_ptr, metadata,\s*\n\s*counters, &ret\)/);
+assert.match(runtime, /tcg_wasm64_live_generated_exec_try\(env, tb_ptr, NULL,\s*\n\s*counters, &ret\)/);
+assert.match(runtime, /tcg_wasm64_live_generated_exec_fail_closed/);
+assert.match(runtime, /g_error\("qemu-wasm64-live-generated-exec: no-silent-fallback/);
+assert.match(runtime, /\\"event\\":\\"live-generated-exec/);
+assert.match(runtime, /\\"compat_fallback\\":%s/);
+assert.match(runtime, /\\"no_silent_fallback\\":%s/);
+assert.match(runtime, /\\"generated_guest_instructions\\":%" PRIu64/);
+assert.match(runtime, /\\"generated_body_time_ns\\":%" PRIu64/);
+assert.match(runtime, /\\"inline_tlb_hit_loads\\":%" PRIu64/);
+assert.match(runtime, /\\"inline_tlb_hit_stores\\":%" PRIu64/);
+assert.match(runtime, /\\"qemu_ld_calls\\":%" PRIu64/);
+assert.match(runtime, /\\"qemu_st_calls\\":%" PRIu64/);
+assert.match(runtime, /\\"exits_invalidated\\":%" PRIu64/);
+assert.match(runtime, /"metadata-output-tb-code-mismatch"/);
+assert.match(runtime, /"metadata-missing"/);
+assert.match(runtime, /"generated-output-unavailable"/);
+assert.match(runtime, /"selected-body-shape-unsupported"/);
+assert.match(runtime, /"tb-identity-missing-or-stale"/);
+assert.match(runtime, /translated_counters\.generated_attempts\+\+/);
+assert.match(runtime, /translated_counters\.generated_executed\+\+/);
+assert.match(runtime, /translated_counters\.generated_coverage_numerator \+= guest_insns/);
+assert.match(runtime, /run_counters\.qemu_ld_calls == 0/);
+assert.match(runtime, /run_counters\.qemu_st_calls == 0/);
+assert.match(runtime, /TCG_WASM64_RUN_EXIT_INVALIDATED/);
+assert.match(runtime, /TCG_WASM64_RUN_MODE_COMPAT/);
+assert.match(runtime, /TCG_WASM64_RUN_MODE_PERF_PROOF/);
+assert.match(runtime, /tcg_tci_qemu_tb_exec\(env, tb_ptr\)/);
 assert.match(runtime, /\\"event\\":\\"live-tb-coverage\\"/);
 assert.match(runtime, /\\"guest_state_commit\\":false/);
 assert.match(runtime, /TCG_WASM64_LIVE_TB_COVERAGE_ENV/);
@@ -404,6 +435,12 @@ for (const fixtureName of [
   assert.match(generatedEquivalence, new RegExp(fixtureName));
 }
 assert.match(generatedEquivalence, /r4kSoftmmuFastPath/);
+assert.match(generatedEquivalence, /r4mLiveGeneratedExec/);
+assert.match(generatedEquivalence, /r4m-disabled-keeps-tci/);
+assert.match(generatedEquivalence, /r4m-supported-metadata-backed-live-tb-generated/);
+assert.match(generatedEquivalence, /r4m-unsupported-no-silent-fallback-fails-closed/);
+assert.match(generatedEquivalence, /r4m-stale-output-invalidates-zero-generated-work/);
+assert.match(generatedEquivalence, /r4m-compat-fallback-explicit-and-counted/);
 assert.match(generatedEquivalence, /RV64_ENV_RELATIVE_BASE_REG/);
 assert.match(generatedEquivalence, /rv64-env-relative-load-store-family/);
 assert.match(generatedEquivalence, /rv64-env-relative-non-env-base-fails-closed/);
