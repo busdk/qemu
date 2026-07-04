@@ -2479,6 +2479,21 @@ run that reaches a weaker marker than normal multi-user readiness.
     generated guest-instruction retirement for at least one measured live x86
     multi-access body; the next bounded preflight must report whether
     generated execution moved above zero and how the reject histogram changed.
+  - [ ] R4s8a - Attribute live metadata/output TB-code mismatches before
+    widening execution policy. DoD: split `js-status-metadata-output-tb-code-
+    mismatch` into deterministic categories before treating it as generic
+    invalidation: TCI branch/label relocation such as `brcond`, TCI pool
+    relocation such as `tci_movl` or helper/call pool entries, true stale or
+    reused TB code, and unknown mismatch. Add summary attribution for the first
+    mismatch index, decoded op when available, metadata word, and live word.
+    Add deterministic fixtures in
+    `scripts/ci/wasm-generated-output-equivalence-test.mjs` and metadata
+    assertions in `scripts/ci/wasm64-translate-metadata-test.mjs`. This item
+    must not widen generated execution policy or claim speed; it decides
+    whether metadata should be rebound after TCI relocations/pool finalization
+    or whether some mismatches are real stale-code invalidations. R4s8
+    multi-access support is mechanically independent, but may expose more of
+    this mismatch once more bodies are admitted.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
