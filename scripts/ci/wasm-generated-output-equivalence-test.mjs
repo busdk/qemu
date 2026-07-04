@@ -1852,7 +1852,31 @@ function routeLiveGeneratedOutput(metadata) {
       generatedGuestInstructions: 0,
     };
   }
-  const shape = decodedShape(metadata.words);
+  const normalizedOutput =
+    normalizeMetadataOutputWords(metadata.words, metadata.tbWords);
+
+  if (!normalizedOutput.ok) {
+    return {
+      ok: false,
+      reason: "metadata-output-tb-code-mismatch",
+      jsStatusName: "metadata-output-tb-code-mismatch",
+      jsStatusRejectReason: normalizedOutput.mismatch.reason,
+      metadataOutputMismatch: normalizedOutput.mismatch,
+      generatedGuestInstructions: 0,
+      generatedChainLength: 0,
+      generatedBodyTimeNs: 0,
+      inlineTlbHitLoads: 0,
+      inlineTlbHitStores: 0,
+      helperCalls: 0,
+      qemuLdCalls: 0,
+      qemuStCalls: 0,
+      runExitReason: "invalidated",
+      exitsInvalidated: 1,
+      shape: decodedShape(metadata.words),
+    };
+  }
+  const words = normalizedOutput.words;
+  const shape = decodedShape(words);
   const supportedOps = new Set([
     "add",
     "and",
@@ -1895,31 +1919,8 @@ function routeLiveGeneratedOutput(metadata) {
       shape,
     };
   }
-  const metadataOutputMismatch =
-    firstMetadataOutputMismatch(metadata.words, metadata.tbWords);
 
-  if (metadataOutputMismatch) {
-    return {
-      ok: false,
-      reason: "metadata-output-tb-code-mismatch",
-      jsStatusName: "metadata-output-tb-code-mismatch",
-      jsStatusRejectReason: metadataOutputMismatch.reason,
-      metadataOutputMismatch,
-      generatedGuestInstructions: 0,
-      generatedChainLength: 0,
-      generatedBodyTimeNs: 0,
-      inlineTlbHitLoads: 0,
-      inlineTlbHitStores: 0,
-      helperCalls: 0,
-      qemuLdCalls: 0,
-      qemuStCalls: 0,
-      runExitReason: "invalidated",
-      exitsInvalidated: 1,
-      shape,
-    };
-  }
-
-  const emission = emitPerTBFunctionBody(metadata.words, metadata.relativeBase);
+  const emission = emitPerTBFunctionBody(words, metadata.relativeBase);
 
   if (!emission.ok) {
     return {
@@ -1938,6 +1939,9 @@ function routeLiveGeneratedOutput(metadata) {
     jsStatusName: "ok",
     generatedGuestInstructions: metadata.guestInstructions,
     shape,
+    normalizedBranchLabelRelocations:
+      normalizedOutput.branchLabelRelocations,
+    normalizedWords: words,
     moduleValid: emission.moduleValid,
     moduleByteLength: emission.moduleByteLength,
     softmmuLowering: emission.softmmuLowering,
@@ -2874,13 +2878,23 @@ function metadataOutputMismatchReason({ metadataWord = 0, liveWord = 0 } = {}) {
   if (op !== liveOp) {
     return "js-status-metadata-output-stale-tb-code";
   }
-  if (op === OPS.brcond) {
+  if (isBranchLabelRelocation(metadataWord, liveWord)) {
     return "js-status-metadata-output-branch-label-relocation";
   }
   if (op === OPS.tci_movl || op === OPS.call) {
     return "js-status-metadata-output-pool-relocation";
   }
   return "js-status-metadata-output-unknown-mismatch";
+}
+
+function isBranchLabelRelocation(metadataWord = 0, liveWord = 0) {
+  const metadata = metadataWord >>> 0;
+  const live = liveWord >>> 0;
+
+  return bits(metadata, 0, 8) === OPS.brcond &&
+    bits(live, 0, 8) === OPS.brcond &&
+    ((metadata ^ live) & 0xfff) === 0 &&
+    metadata !== live;
 }
 
 function firstMetadataOutputMismatch(words, tbWords) {
@@ -2907,6 +2921,66 @@ function firstMetadataOutputMismatch(words, tbWords) {
     }
   }
   return null;
+}
+
+function normalizeMetadataOutputWords(words, tbWords) {
+  if (!tbWords) {
+    return {
+      ok: true,
+      words: words.map((word) => word >>> 0),
+      branchLabelRelocations: 0,
+    };
+  }
+  const normalized = words.map((word) => word >>> 0);
+  const limit = Math.max(words.length, tbWords.length);
+  let branchLabelRelocations = 0;
+
+  if (words.length !== tbWords.length) {
+    const index = Math.min(words.length, tbWords.length);
+    const metadataWord = words[index] >>> 0;
+    const liveWord = tbWords[index] >>> 0;
+
+    return {
+      ok: false,
+      mismatch: {
+        reason: metadataOutputMismatchReason({ metadataWord, liveWord }),
+        index,
+        op: bits(metadataWord, 0, 8),
+        opName: OP_NAMES[bits(metadataWord, 0, 8)] ?? "unknown",
+        metadataWord,
+        liveWord,
+      },
+    };
+  }
+  for (let index = 0; index < limit; index++) {
+    const metadataWord = words[index] >>> 0;
+    const liveWord = tbWords[index] >>> 0;
+
+    if (metadataWord === liveWord) {
+      continue;
+    }
+    if (isBranchLabelRelocation(metadataWord, liveWord)) {
+      normalized[index] = liveWord;
+      branchLabelRelocations++;
+      continue;
+    }
+    return {
+      ok: false,
+      mismatch: {
+        reason: metadataOutputMismatchReason({ metadataWord, liveWord }),
+        index,
+        op: bits(metadataWord, 0, 8),
+        opName: OP_NAMES[bits(metadataWord, 0, 8)] ?? "unknown",
+        metadataWord,
+        liveWord,
+      },
+    };
+  }
+  return {
+    ok: true,
+    words: normalized,
+    branchLabelRelocations,
+  };
 }
 
 function classifyLiveGeneratedExecReject({
@@ -5683,21 +5757,54 @@ assert.deepEqual(r4kSoftmmuStaleOutputMismatch.metadataOutputMismatch, {
   liveWord: (r4iLiveX86Fixture.words[1] ^ 0x10) >>> 0,
 });
 
-const r4s8aMetadataOutputMismatchFixtures = [
+const r4s8bInRangeBranchRelocationWords = [
+  opImm20(OPS.tci_movi, 1, 1),
+  opBranch(1, 4),
+  opImm20(OPS.tci_movi, 2, 2),
+  opImm20(OPS.tci_movi, 3, 3),
+  opImm20(OPS.goto_tb, 0, -4),
+];
+const r4s8bBranchRelocationRoute = routeLiveGeneratedOutput({
+  opCount: r4s8bInRangeBranchRelocationWords.length,
+  generatedOutputAvailable: true,
+  generatedOutputSize: r4s8bInRangeBranchRelocationWords.length * 4,
+  words: r4s8bInRangeBranchRelocationWords,
+  tbWords: r4s8bInRangeBranchRelocationWords.map((word, index) =>
+    index === 1 ? opBranch(1, 8) : word),
+  relativeBase: r4iLiveX86Fixture.relativeBase,
+  guestInstructions: 1,
+});
+assert.equal(r4s8bBranchRelocationRoute.ok, true);
+assert.equal(r4s8bBranchRelocationRoute.reason, null);
+assert.equal(r4s8bBranchRelocationRoute.generatedGuestInstructions, 1);
+assert.equal(r4s8bBranchRelocationRoute.moduleValid, true);
+assert.equal(r4s8bBranchRelocationRoute.normalizedBranchLabelRelocations, 1);
+assert.equal(
+  r4s8bBranchRelocationRoute.normalizedWords[1],
+  opBranch(1, 8),
+);
+const r4s8bObservedX86BranchRelocationRoute = routeLiveGeneratedOutput({
+  opCount: r4iLiveX86Fixture.words.length,
+  generatedOutputAvailable: true,
+  generatedOutputSize: r4iLiveX86Fixture.words.length * 4,
+  words: r4iLiveX86Fixture.words.map((word, index) =>
+    index === 3 ? 0x00000d04 : word),
+  tbWords: r4iLiveX86Fixture.words,
+  relativeBase: r4iLiveX86Fixture.relativeBase,
+  guestInstructions: 1,
+});
+assert.equal(r4s8bObservedX86BranchRelocationRoute.ok, true);
+assert.equal(r4s8bObservedX86BranchRelocationRoute.reason, null);
+assert.equal(r4s8bObservedX86BranchRelocationRoute.generatedGuestInstructions,
+             1);
+assert.equal(
+  r4s8bObservedX86BranchRelocationRoute.normalizedWords[3],
+  0x00020d04,
+);
+
+const r4s8bMetadataOutputMismatchFixtures = [
   {
-    name: "r4s8a-brcond-relocation-attribution",
-    words: r4iLiveX86Fixture.words,
-    tbWords: r4iLiveX86Fixture.words.map((word, index) =>
-      index === 3 ? (word ^ 0x1000) >>> 0 : word),
-    expected: {
-      reason: "js-status-metadata-output-branch-label-relocation",
-      index: 3,
-      op: OPS.brcond,
-      opName: "brcond",
-    },
-  },
-  {
-    name: "r4s8a-pool-relocation-attribution",
+    name: "r4s8b-pool-relocation-still-rejects",
     words: [
       OPS.tci_movl | (2 << 8) | (4 << 12),
       OPS.exit_tb,
@@ -5714,7 +5821,7 @@ const r4s8aMetadataOutputMismatchFixtures = [
     },
   },
   {
-    name: "r4s8a-stale-reused-tb-code-attribution",
+    name: "r4s8b-stale-reused-tb-code-still-rejects",
     words: r4iLiveX86Fixture.words,
     tbWords: r4iLiveX86Fixture.words.map((word, index) =>
       index === 1 ? (OPS.mov | (1 << 8) | (2 << 12)) >>> 0 : word),
@@ -5726,7 +5833,7 @@ const r4s8aMetadataOutputMismatchFixtures = [
     },
   },
   {
-    name: "r4s8a-unknown-same-op-mismatch-attribution",
+    name: "r4s8b-unknown-same-op-mismatch-still-rejects",
     words: r4iLiveX86Fixture.words,
     tbWords: r4iLiveX86Fixture.words.map((word, index) =>
       index === 1 ? (word ^ 0x1000) >>> 0 : word),
@@ -5737,9 +5844,32 @@ const r4s8aMetadataOutputMismatchFixtures = [
       opName: "tci_movi",
     },
   },
+  {
+    name: "r4s8b-brcond-non-label-mismatch-still-rejects",
+    words: r4iLiveX86Fixture.words,
+    tbWords: r4iLiveX86Fixture.words.map((word, index) =>
+      index === 3 ? (word ^ 0x100) >>> 0 : word),
+    expected: {
+      reason: "js-status-metadata-output-unknown-mismatch",
+      index: 3,
+      op: OPS.brcond,
+      opName: "brcond",
+    },
+  },
+  {
+    name: "r4s8b-length-mismatch-still-rejects",
+    words: [OPS.exit_tb],
+    tbWords: [OPS.exit_tb, OPS.exit_tb],
+    expected: {
+      reason: "js-status-metadata-output-stale-tb-code",
+      index: 1,
+      op: 0,
+      opName: "unknown",
+    },
+  },
 ];
 
-for (const fixture of r4s8aMetadataOutputMismatchFixtures) {
+for (const fixture of r4s8bMetadataOutputMismatchFixtures) {
   const route = routeLiveGeneratedOutput({
     opCount: fixture.words.length,
     generatedOutputAvailable: true,

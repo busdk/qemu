@@ -3013,6 +3013,35 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         return words;
     }
 
+    function brcondLabelRelocation(metadataWord, liveWord) {
+        const metadataOp = bits(metadataWord >>> 0, 0, 8);
+        const liveOp = bits(liveWord >>> 0, 0, 8);
+
+        return metadataOp === ops.brcond &&
+               liveOp === ops.brcond &&
+               ((metadataWord ^ liveWord) & 0xfff) === 0;
+    }
+
+    function normalizeGeneratedOutputWords(words) {
+        const normalized = words.slice();
+
+        for (let i = 0; i < normalized.length; i++) {
+            const metadataWord = normalized[i] >>> 0;
+            const liveWord = HEAPU32[tbPtr / 4 + i] >>> 0;
+
+            if (metadataWord === liveWord) {
+                continue;
+            }
+            if (brcondLabelRelocation(metadataWord, liveWord)) {
+                normalized[i] = liveWord;
+                continue;
+            }
+            recordMetadataOutputMismatch(i, metadataWord, liveWord);
+            return null;
+        }
+        return normalized;
+    }
+
     function generatedOutputShapeSupported(words) {
         let terminalSeen = false;
 
@@ -3734,24 +3763,20 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
     }
 
     try {
-        const words = readGeneratedOutputWords();
-        if (!words || words.length === 0) {
+        const metadataWords = readGeneratedOutputWords();
+        if (!metadataWords || metadataWords.length === 0) {
             setResult(0, 4n);
             return 4;
+        }
+        const words = normalizeGeneratedOutputWords(metadataWords);
+        if (!words) {
+            HEAPU32[exit / 4] = 8;
+            setResult(0, 3n);
+            return 3;
         }
         if (!generatedOutputShapeSupported(words)) {
             setResult(0, 5n);
             return 5;
-        }
-        for (let i = 0; i < words.length; i++) {
-            const liveWord = HEAPU32[tbPtr / 4 + i] >>> 0;
-
-            if (liveWord !== words[i]) {
-                HEAPU32[exit / 4] = 8;
-                recordMetadataOutputMismatch(i, words[i], liveWord);
-                setResult(0, 3n);
-                return 3;
-            }
         }
 
         const checksum = generatedOutputChecksum(words);
@@ -7440,6 +7465,8 @@ tcg_wasm64_live_generated_exec_metadata_output_mismatch_reason(
 {
     uint32_t op =
         (uint32_t)result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MISMATCH_OP];
+    uint32_t metadata_word = (uint32_t)result[
+        TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MISMATCH_METADATA_WORD];
     uint32_t live_word = (uint32_t)result[
         TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MISMATCH_LIVE_WORD];
     uint32_t live_op = tcg_wasm64_tci_word_op(live_word);
@@ -7450,7 +7477,10 @@ tcg_wasm64_live_generated_exec_metadata_output_mismatch_reason(
 
     switch ((TCGOpcode)op) {
     case INDEX_op_brcond:
-        return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_METADATA_OUTPUT_BRANCH_LABEL_RELOCATION;
+        if (((metadata_word ^ live_word) & 0xfff) == 0) {
+            return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_METADATA_OUTPUT_BRANCH_LABEL_RELOCATION;
+        }
+        return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_METADATA_OUTPUT_UNKNOWN_MISMATCH;
     case INDEX_op_call:
     case INDEX_op_tci_movl:
         return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_METADATA_OUTPUT_POOL_RELOCATION;
