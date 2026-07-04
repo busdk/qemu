@@ -8349,3 +8349,68 @@ the probe scan for each run.  The useful result is the narrowed next blocker:
 metadata now resolves on the live boot path, env-relative direct-memory ops
 lower in the bounded fixture-supported shape, and the next R4d implementation
 target is the ``call`` blocker before another R4c comparison.
+
+R4r x86 live-body rejection attribution - 2026-07-04
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+QEMU commit ``d41fcfb5c1`` added bounded aggregate attribution to the x86
+``QEMU_WASM64_LIVE_GENERATED_EXEC_PREFLIGHT`` summary.  The new fields are
+``selected_body_no_terminal`` and ``selected_body_unsupported_ops[]``.  They
+record why the selected live x86 generated-output body failed the supported
+shape gate without emitting one line per attempted TB and without enabling a
+new execution path.
+
+Checks before the browser run:
+
+* ``git diff --check``;
+* ``node --check scripts/ci/wasm-browser-smoke-runner.mjs``;
+* ``node --check scripts/ci/wasm-browser-smoke.mjs``;
+* ``node --check scripts/ci/wasm-generated-output-equivalence-test.mjs``;
+* ``node scripts/ci/wasm64-translate-metadata-test.mjs``;
+* ``node scripts/ci/wasm-generated-output-equivalence-test.mjs``;
+* ``node scripts/ci/wasm64-runloop-contract-test.mjs``;
+* ``node scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs``.
+
+The x86_64 backend artifact was built with::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4r-x86-shape-attribution-artifacts-b9610b0-20260704 --target x86_64 --tcg-wasm64-backend --jobs 20
+
+Artifact hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``60422b8c66aade4edac81b84dee5b7744eaee58619a47b66318668781980d512``;
+* ``qemu-system-x86_64.wasm`` =
+  ``b4e8803716f4d4da6c99b81468b320d59addb34dd13533d8c815f715832e4820``;
+* manifest =
+  ``0b460e19f42c13d819f7e386889d96a43f168fe9898fd05bfdeb66a2f62c9867``.
+
+The bounded Chromium ``149.0.7827.55`` preflight used the current generic
+x86_64 TuxBoot manifest
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-d447dd5-guest-current/tuxboot-browser-smoke-guest.json``
+and wrote result JSON
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4r-x86-shape-attribution-preflight-b9610b0-20260704/wasm-browser-smoke-result.json``
+(SHA256
+``786d78f113532c1596eabd67f42439e02e7f68f27208cec37c8ddf8245ed4093``)
+and screenshot
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4r-x86-shape-attribution-preflight-b9610b0-20260704/wasm-browser-smoke.png``
+(SHA256
+``20695051a3f5d2db1da15014bc8e5acce4799eb68a4de004d0f5b07dac33af1b``).
+
+The summary emitted at ``2406`` ms reported
+``reason=preflight-zero-generated-exec``, attempts ``100``, successes ``0``,
+rejects ``100``, generated guest instructions ``0``, generated coverage
+``0 / 555``, hotset ``goto_tb`` sources ``54``, target metadata hits ``9``,
+target output hits ``9``, stale targets ``45``,
+``selected_body_no_terminal=0``, and top selected-body unsupported ops:
+
+* ``tci_qemu_st_rrr=65``;
+* ``tci_qemu_ld_rrr=26``;
+* ``call=5``.
+
+This is x86 diagnostic evidence only.  It makes no speed claim, does not
+permit the R4l speed gate, and does not permit a Bus Engine OS browser proof.
+It names the next x86 implementation target: generated handling for the
+measured QEMU load/store helper shapes, using the R4k inline SoftMMU/TLB-hit
+guard on clean RAM hits and synthetic exits for miss/fault, MMIO,
+page-crossing, slow flags, unmirrored state, unsupported ``MemOp``, or
+helper-sensitive cases.

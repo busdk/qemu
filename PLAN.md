@@ -1887,6 +1887,76 @@ run that reaches a weaker marker than normal multi-user readiness.
   does not provide useful x86 generated guest execution. It makes no speed
   claim, does not permit R4l, and does not permit a Bus Engine OS browser
   proof.
+- [x] R4r - Attribute the selected x86 live body shapes that block generated
+  execution before implementing another accelerator slice. DoD: the bounded
+  `--wasm64-live-generated-exec-preflight` summary records the top first
+  unsupported generated op names for `selected-body-shape-unsupported`
+  rejects, records whether bodies had no terminal, does not emit per-attempt
+  output, does not broaden the rejected direct-boundary path, and produces a
+  current Chromium diagnostic that names the dominant live blocker family.
+  Accepted 2026-07-04: QEMU commit
+  `d41fcfb5c1` (`wasm64: attribute live x86 body rejections`) added bounded
+  aggregate fields `selected_body_no_terminal` and
+  `selected_body_unsupported_ops[]` to the live-generated-exec summary.
+  Checks passed before the browser run: `git diff --check`, `node --check
+  scripts/ci/wasm-browser-smoke-runner.mjs`, `node --check
+  scripts/ci/wasm-browser-smoke.mjs`, `node --check
+  scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+  `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+  `node scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+  `node scripts/ci/wasm64-runloop-contract-test.mjs`, and
+  `node scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`.
+  Artifact build command:
+  `python3 scripts/ci/wasm-build-artifacts-local.py --out
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4r-x86-shape-attribution-artifacts-b9610b0-20260704
+  --target x86_64 --tcg-wasm64-backend --jobs 20`. Artifact hashes:
+  `qemu-system-x86_64.js`
+  `60422b8c66aade4edac81b84dee5b7744eaee58619a47b66318668781980d512`,
+  `qemu-system-x86_64.wasm`
+  `b4e8803716f4d4da6c99b81468b320d59addb34dd13533d8c815f715832e4820`,
+  manifest
+  `0b460e19f42c13d819f7e386889d96a43f168fe9898fd05bfdeb66a2f62c9867`.
+  Bounded Chromium `149.0.7827.55` preflight command:
+  `npm exec --yes --package=playwright -- node
+  scripts/ci/wasm-browser-smoke-runner.mjs --artifact-dir
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4r-x86-shape-attribution-artifacts-b9610b0-20260704
+  --guest-manifest
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4l-d447dd5-guest-current/tuxboot-browser-smoke-guest.json
+  --out
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4r-x86-shape-attribution-preflight-b9610b0-20260704/wasm-browser-smoke-result.json
+  --screenshot
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4r-x86-shape-attribution-preflight-b9610b0-20260704/wasm-browser-smoke.png
+  --port 8127 --timeout-ms 60000 --max-output-bytes 100000
+  --page-text-tail-bytes 100000 --wasm64-live-generated-exec
+  --wasm64-live-generated-exec-preflight
+  --wasm64-live-generated-exec-preflight-limit 100 --wasm64-tcg-summary
+  --wasm64-tcg-summary-interval 1000`. Result JSON SHA-256:
+  `786d78f113532c1596eabd67f42439e02e7f68f27208cec37c8ddf8245ed4093`;
+  screenshot SHA-256:
+  `20695051a3f5d2db1da15014bc8e5acce4799eb68a4de004d0f5b07dac33af1b`.
+  The diagnostic summary at `2406` ms reported
+  `preflight-zero-generated-exec`, attempts `100`, successes `0`, rejects
+  `100`, generated guest instructions `0`, generated coverage `0 / 555`,
+  hotset `goto_tb` sources `54`, target metadata hits `9`, target output
+  hits `9`, stale targets `45`, `selected_body_no_terminal=0`, and top
+  selected-body unsupported ops `tci_qemu_st_rrr=65`,
+  `tci_qemu_ld_rrr=26`, and `call=5`. This is diagnostic evidence only:
+  no speed claim is made, R4l remains blocked, and no Bus Engine OS browser
+  proof is permitted.
+- [ ] R4s - Implement the next x86_64 live generated-body slice for measured
+  QEMU memory-helper shapes. DoD: `tci_qemu_ld_rrr` and
+  `tci_qemu_st_rrr` generated-output words can be handled in the real
+  `wasmjit_run()` path for the R4r-selected live body family by using the
+  existing R4k SoftMMU/TLB-hit guard on clean RAM hits and returning precise
+  synthetic exits for miss/fault, MMIO, page crossing, slow flags,
+  unmirrored state, unsupported `MemOp`, or helper-sensitive cases. The
+  implementation must not call `qemu_ld`/`qemu_st` helpers on proven TLB-hit
+  RAM accesses, must preserve strict TCI compatibility fallback, must update
+  generated instruction/body-time/inline-TLB/exit counters, and must include
+  deterministic differential tests before any browser preflight. A bounded
+  x86 Chromium preflight may run only after those deterministic tests pass,
+  and R4l remains blocked until that preflight reports nonzero generated
+  guest-instruction retirement from live x86 TBs.
 - [x] R7 - Dispatch available RISC-V generated output from the live wasm64
   run loop before TCI fallback. DoD: when live TB metadata reports
   `tcg_wasm64_translate_generated_output_available()` and the RV64
