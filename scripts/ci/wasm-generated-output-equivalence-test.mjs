@@ -879,6 +879,12 @@ const SHARED_SOFTMMU_LOCAL_FULL_PTR = 41;
 const SHARED_SOFTMMU_LOCAL_COMPARATOR = 42;
 const SHARED_SOFTMMU_LOCAL_ADDEND = 43;
 const SHARED_SOFTMMU_LOCAL_HOST_ADDR = 44;
+const SHARED_SOFTMMU_MAX_DEFERRED_ACCESSES = 4;
+const SHARED_SOFTMMU_ACCESS_LOCAL_BASE = 45;
+
+function sharedSoftmmuAccessLocal(index, field) {
+  return SHARED_SOFTMMU_ACCESS_LOCAL_BASE + index * 4 + field;
+}
 
 function i64ConstFromContract(value) {
   return i64Const(BigInt.asIntN(64, BigInt(value)));
@@ -917,7 +923,7 @@ function sharedSoftmmuFailureReturn({
   ];
 }
 
-function compileSharedSoftmmuAccessOp(op, diagnostics = null) {
+function compileSharedSoftmmuAccessParts(op, diagnostics = null, accessIndex = 0) {
   const { opc, r0, r1, r2 } = op;
   const isLoad = opc === OPS.tci_qemu_ld_rrr;
   const isStore = opc === OPS.tci_qemu_st_rrr;
@@ -950,6 +956,10 @@ function compileSharedSoftmmuAccessOp(op, diagnostics = null) {
     counterOffset: WASMJIT_COUNTERS.exitsMmio,
   });
   const code = [];
+  const commit = [];
+  const hostLocal = sharedSoftmmuAccessLocal(accessIndex, 0);
+  const valueLocal = sharedSoftmmuAccessLocal(accessIndex, 1);
+  const memopLocal = sharedSoftmmuAccessLocal(accessIndex, 2);
 
   if (!isLoad && !isStore) {
     return null;
@@ -1148,6 +1158,8 @@ function compileSharedSoftmmuAccessOp(op, diagnostics = null) {
     SHARED_SOFTMMU_LOCAL_HOST_ADDR,
     i64AddExpr(localGet(SHARED_SOFTMMU_LOCAL_TADDR),
                localGet(SHARED_SOFTMMU_LOCAL_ADDEND))));
+  code.push(...localSet(hostLocal, localGet(SHARED_SOFTMMU_LOCAL_HOST_ADDR)));
+  code.push(...localSet(memopLocal, localGet(SHARED_SOFTMMU_LOCAL_MEMOP)));
 
   if (isLoad) {
     code.push(...ifBlock(
@@ -1174,35 +1186,42 @@ function compileSharedSoftmmuAccessOp(op, diagnostics = null) {
       localSet(regLocal(r0), i64Load(
         i32WrapI64(localGet(SHARED_SOFTMMU_LOCAL_HOST_ADDR)))),
     ));
-    code.push(...sharedIncrementCounter(WASMJIT_COUNTERS.inlineTlbHitLoads));
+    commit.push(...sharedIncrementCounter(WASMJIT_COUNTERS.inlineTlbHitLoads));
   } else {
-    code.push(...ifBlock(
+    code.push(...localSet(valueLocal, localGet(SHARED_SOFTMMU_LOCAL_VALUE)));
+    commit.push(...ifBlock(
       i64EqExpr(
-        i64AndExpr(localGet(SHARED_SOFTMMU_LOCAL_MEMOP),
+        i64AndExpr(localGet(memopLocal),
                    i64Const(BigInt(MO_SIZE))),
         i64Const(BigInt(MO_8))),
-      i32Store8(i32WrapI64(localGet(SHARED_SOFTMMU_LOCAL_HOST_ADDR)),
-                i32WrapI64(localGet(SHARED_SOFTMMU_LOCAL_VALUE))),
+      i32Store8(i32WrapI64(localGet(hostLocal)),
+                i32WrapI64(localGet(valueLocal))),
     ));
-    code.push(...ifBlock(
+    commit.push(...ifBlock(
       i64EqExpr(
-        i64AndExpr(localGet(SHARED_SOFTMMU_LOCAL_MEMOP),
+        i64AndExpr(localGet(memopLocal),
                    i64Const(BigInt(MO_SIZE))),
         i64Const(BigInt(MO_32))),
-      i32Store(i32WrapI64(localGet(SHARED_SOFTMMU_LOCAL_HOST_ADDR)),
-               i32WrapI64(localGet(SHARED_SOFTMMU_LOCAL_VALUE))),
+      i32Store(i32WrapI64(localGet(hostLocal)),
+               i32WrapI64(localGet(valueLocal))),
     ));
-    code.push(...ifBlock(
+    commit.push(...ifBlock(
       i64EqExpr(
-        i64AndExpr(localGet(SHARED_SOFTMMU_LOCAL_MEMOP),
+        i64AndExpr(localGet(memopLocal),
                    i64Const(BigInt(MO_SIZE))),
         i64Const(BigInt(MO_64))),
-      i64Store(i32WrapI64(localGet(SHARED_SOFTMMU_LOCAL_HOST_ADDR)),
-               localGet(SHARED_SOFTMMU_LOCAL_VALUE)),
+      i64Store(i32WrapI64(localGet(hostLocal)),
+               localGet(valueLocal)),
     ));
-    code.push(...sharedIncrementCounter(WASMJIT_COUNTERS.inlineTlbHitStores));
+    commit.push(...sharedIncrementCounter(WASMJIT_COUNTERS.inlineTlbHitStores));
   }
-  return code;
+  return { guard: code, commit };
+}
+
+function compileSharedSoftmmuAccessOp(op, diagnostics = null) {
+  const parts = compileSharedSoftmmuAccessParts(op, diagnostics, 0);
+
+  return parts === null ? null : [...parts.guard, ...parts.commit];
 }
 
 function compileSharedGeneratedOutputOp(op, diagnostics = null) {
@@ -1366,18 +1385,58 @@ function compileSharedGeneratedOutputBody(words, relativeBase, diagnostics = nul
   const { ops, terminal } = splitGeneratedOutput(words, relativeBase);
   const softmmuOps = ops.filter((op) =>
     op.opc === OPS.tci_qemu_ld_rrr || op.opc === OPS.tci_qemu_st_rrr);
+  const allOrNothingSoftmmu = softmmuOps.length > 1;
+  const directMemoryOps = new Set([
+    OPS.ld32u, OPS.ld32s, OPS.ld, OPS.st8, OPS.st32, OPS.st,
+  ]);
+  const deferredSoftmmuCommits = [];
+  let nextSoftmmuAccessIndex = 0;
 
-  if (softmmuOps.length > 1) {
+  function unsupportedMultiAccess(reason, op = softmmuOps.at(-1)) {
     if (diagnostics) {
       diagnostics.runtimeUnsupportedGuards.push({
-        index: softmmuOps[1].index,
-        op: OP_NAMES[softmmuOps[1].opc] ||
-          `opcode-${softmmuOps[1].opc}`,
-        reason: "softmmu-multiple-memops-unsupported",
+        index: op ? op.index : -1,
+        op: op ? (OP_NAMES[op.opc] || `opcode-${op.opc}`) : "unknown",
+        reason,
         count: softmmuOps.length,
       });
     }
     throw new Error("fixture contains unsupported generated-output shape");
+  }
+  if (softmmuOps.length > SHARED_SOFTMMU_MAX_DEFERRED_ACCESSES) {
+    unsupportedMultiAccess("softmmu-multiple-memops-too-many");
+  }
+  if (allOrNothingSoftmmu) {
+    const unsupportedDirectMemory = ops.find((op) =>
+      directMemoryOps.has(op.opc));
+    const unsupportedBranch = ops.find((op) => op.opc === OPS.brcond);
+    let sawStore = false;
+    const unsupportedLoadAfterStore = ops.find((op) => {
+      if (op.opc === OPS.tci_qemu_st_rrr) {
+        sawStore = true;
+        return false;
+      }
+      return sawStore && op.opc === OPS.tci_qemu_ld_rrr;
+    });
+
+    if (unsupportedDirectMemory) {
+      unsupportedMultiAccess(
+        "softmmu-multi-access-direct-memory-unsupported",
+        unsupportedDirectMemory,
+      );
+    }
+    if (unsupportedBranch) {
+      unsupportedMultiAccess(
+        "softmmu-multi-access-control-flow-unsupported",
+        unsupportedBranch,
+      );
+    }
+    if (unsupportedLoadAfterStore) {
+      unsupportedMultiAccess(
+        "softmmu-multi-access-store-before-load-unsupported",
+        unsupportedLoadAfterStore,
+      );
+    }
   }
 
   function compileRange(start, end) {
@@ -1427,6 +1486,20 @@ function compileSharedGeneratedOutputBody(words, relativeBase, diagnostics = nul
         index = targetIndex;
         continue;
       }
+      if (allOrNothingSoftmmu &&
+          (op.opc === OPS.tci_qemu_ld_rrr ||
+           op.opc === OPS.tci_qemu_st_rrr)) {
+        const parts = compileSharedSoftmmuAccessParts(
+          op, diagnostics, nextSoftmmuAccessIndex++);
+
+        if (parts === null) {
+          return null;
+        }
+        code.push(...parts.guard);
+        deferredSoftmmuCommits.push(...parts.commit);
+        index++;
+        continue;
+      }
       const compiled = compileSharedGeneratedOutputOp(op, diagnostics);
 
       if (compiled === null) {
@@ -1442,6 +1515,9 @@ function compileSharedGeneratedOutputBody(words, relativeBase, diagnostics = nul
 
   if (body === null) {
     throw new Error("fixture contains unsupported generated-output shape");
+  }
+  if (allOrNothingSoftmmu) {
+    body.push(...deferredSoftmmuCommits);
   }
   return { body, terminal, ops };
 }
@@ -1497,7 +1573,7 @@ function compileGeneratedOutputModule(words, relativeBase, diagnostics = null) {
         { count: 2, type: VALUE_I32 },
         { count: 16, type: VALUE_I64 },
         { count: 7, type: VALUE_I32 },
-        { count: 19, type: VALUE_I64 },
+        { count: 35, type: VALUE_I64 },
       ],
     )])),
   ]);
@@ -2615,6 +2691,82 @@ async function runRuntimeUnsupportedGuardFixture(fixture, seed) {
       [x86RegField(13)]:
         generated.view.getBigUint64(generated.regsPtr + 13 * 8, true).toString(),
     },
+  };
+}
+
+async function runR4s8LaterAccessFailsFixture() {
+  const fixture = {
+    name: "r4s8-store-store-later-fail-no-partial-store",
+    relativeBase: 0x6100,
+    words: [
+      opReg(OPS.tci_qemu_st_rrr, 0, 14, 13),
+      opReg(OPS.tci_qemu_st_rrr, 6, 12, 13),
+      OPS.exit_tb,
+    ],
+  };
+  const generated = createState(fixture.relativeBase, fixture.words, 1);
+  const failingStoreAddress =
+    BigInt(generated.dataBase + 0x10) +
+    (1n << BigInt(WASMJIT_TLB_CONSTANTS.targetPageBits));
+
+  generated.view.setBigUint64(generated.regsPtr + 12 * 8,
+                              failingStoreAddress, true);
+  const beforeRam64 =
+    generated.view.getBigUint64(generated.dataBase + 0x10, true);
+  const beforeRegs = Array.from({ length: 16 }, (_, reg) =>
+    generated.view.getBigUint64(generated.regsPtr + reg * 8, true));
+  const emission = emitPerTBFunctionBody(fixture.words, fixture.relativeBase);
+
+  assert.equal(emission.ok, true, `${fixture.name} emitter failed closed`);
+  assert.equal(emission.softmmuLowering, SHARED_SOFTMMU_LOWERING_NAME);
+  assert.equal(emission.softmmuLoweredOps, 2);
+
+  const compiled = await WebAssembly.compile(emission.moduleBytes);
+  const instance = await WebAssembly.instantiate(compiled, {
+    env: {
+      memory: generated.memory,
+      qemu_ld_rrr: generated.helpers.qemuLd,
+      qemu_st_rrr: generated.helpers.qemuSt,
+    },
+  });
+  const status = instance.exports.run(generated.ctxPtr);
+  const counters = softmmuCounterSnapshot(
+    generated.view, generated.countersPtr);
+  const exit = readSoftmmuExit(generated.view, generated.retPtr);
+  const afterRam64 =
+    generated.view.getBigUint64(generated.dataBase + 0x10, true);
+  const afterRegs = Array.from({ length: 16 }, (_, reg) =>
+    generated.view.getBigUint64(generated.regsPtr + reg * 8, true));
+
+  assert.equal(status, STATUS_TLB_MISS_OR_FAULT);
+  assert.equal(exit.reasonName, "tlb-miss-or-fault");
+  assert.equal(afterRam64, beforeRam64);
+  assert.deepEqual(afterRegs, beforeRegs);
+  assert.equal(counters.generatedGuestInstructions, 0n);
+  assert.equal(counters.inlineTlbHitLoads, 0n);
+  assert.equal(counters.inlineTlbHitStores, 0n);
+  assert.equal(counters.helperCalls, 0n);
+  assert.equal(counters.qemuLdCalls, 0n);
+  assert.equal(counters.qemuStCalls, 0n);
+  assert.equal(counters.exitsTlbMissOrFault, 1n);
+
+  return {
+    name: fixture.name,
+    status: status.toString(),
+    runExitReason: exit.reasonName,
+    storeGuardCanPassBeforeLaterStoreFails: true,
+    partialStoreCommitted: false,
+    registerFlushCommitted: false,
+    dispatchTargetCommitted: false,
+    generatedGuestInstructions: counters.generatedGuestInstructions.toString(),
+    inlineTlbHitLoads: counters.inlineTlbHitLoads.toString(),
+    inlineTlbHitStores: counters.inlineTlbHitStores.toString(),
+    helperCalls: counters.helperCalls.toString(),
+    qemuLdCalls: counters.qemuLdCalls.toString(),
+    qemuStCalls: counters.qemuStCalls.toString(),
+    exitsTlbMissOrFault: counters.exitsTlbMissOrFault.toString(),
+    ramBefore: beforeRam64.toString(),
+    ramAfter: afterRam64.toString(),
   };
 }
 
@@ -4334,6 +4486,42 @@ const fixtures = [
     ],
   },
   {
+    name: "r4s8-qemu-load-load-all-or-nothing",
+    terminal: "exit_tb",
+    relativeBase: 0x5f40,
+    seeds: [1],
+    guestInstructions: 1,
+    words: [
+      opReg(OPS.tci_qemu_ld_rrr, 3, 14, 13),
+      opReg(OPS.tci_qemu_ld_rrr, 4, 14, 13),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4s8-qemu-load-store-all-or-nothing",
+    terminal: "exit_tb",
+    relativeBase: 0x5f80,
+    seeds: [1],
+    guestInstructions: 1,
+    words: [
+      opReg(OPS.tci_qemu_ld_rrr, 3, 14, 13),
+      opReg(OPS.tci_qemu_st_rrr, 3, 14, 13),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4s8-qemu-store-store-all-or-nothing",
+    terminal: "exit_tb",
+    relativeBase: 0x5fc0,
+    seeds: [1],
+    guestInstructions: 1,
+    words: [
+      opReg(OPS.tci_qemu_st_rrr, 6, 14, 13),
+      opReg(OPS.tci_qemu_st_rrr, 7, 14, 13),
+      OPS.exit_tb,
+    ],
+  },
+  {
     name: "rv64-call-exit-prefix-family",
     terminal: "helper",
     relativeBase: 0x5e00,
@@ -4956,15 +5144,14 @@ const r6Rv64SoftmmuFixtures = [
 
 const unsupportedFixtures = [
   {
-    name: "qemu-ld-st-multiple-memops-fails-closed",
+    name: "qemu-store-load-multiple-memops-fails-closed",
     relativeBase: 0x5400,
     expectedRuntimeUnsupportedGuards: [
-      "softmmu-multiple-memops-unsupported",
+      "softmmu-multi-access-store-before-load-unsupported",
     ],
     words: [
-      OPS.tci_qemu_ld_rrr | (3 << 8) | (14 << 12) | (13 << 16),
-      OPS.add | (3 << 8) | (3 << 12) | (5 << 16),
       OPS.tci_qemu_st_rrr | (3 << 8) | (14 << 12) | (13 << 16),
+      OPS.tci_qemu_ld_rrr | (4 << 8) | (14 << 12) | (13 << 16),
       OPS.exit_tb,
     ],
   },
@@ -5081,9 +5268,11 @@ for (const fixture of r6Rv64SoftmmuFixtures) {
   r6Rv64SoftmmuResults.push(await runSoftmmuFixture(fixture));
 }
 
-assert.equal(results.length, 19);
+const r4s8LaterAccessFails = await runR4s8LaterAccessFailsFixture();
+
+assert.equal(results.length, 22);
 assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 7);
-assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 10);
+assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 13);
 assert.equal(results.filter((entry) => entry.terminal === "helper").length, 2);
 const helperBoundaryResults = results.filter((entry) =>
   entry.helpers.loads > 0 || entry.helpers.stores > 0);
@@ -5099,6 +5288,8 @@ const liveX86Results = results.filter((entry) =>
   entry.name === "live-x86-pre-r4i-ld32u-goto-tb-13");
 const r4iEmitterResults = results.filter((entry) =>
   entry.name === "live-x86-r4i-ld32u-goto-tb-11");
+const r4s8MultiAccessExecutableResults = results.filter((entry) =>
+  entry.name.startsWith("r4s8-qemu-"));
 assert.equal(liveX86Results.length, 2);
 assert.equal(
   liveX86Results.filter((entry) =>
@@ -5118,6 +5309,58 @@ assert.equal(r4iEmitterResults[0].memoryWrites, 2);
 assert.equal(r4iEmitterResults[0].helpers.loads, 0);
 assert.equal(r4iEmitterResults[0].helpers.stores, 0);
 assert.equal(r4iEmitterResults[0].x86CpuStateContract.ok, true);
+assert.deepEqual(
+  r4s8MultiAccessExecutableResults.map((entry) => [
+    entry.name,
+    entry.inlineTlbHitLoads,
+    entry.inlineTlbHitStores,
+    entry.helpers.loads,
+    entry.helpers.stores,
+    entry.registerStateMatched,
+    entry.memoryStateMatched,
+  ]),
+  [
+    [
+      "r4s8-qemu-load-load-all-or-nothing",
+      2,
+      0,
+      0,
+      0,
+      true,
+      true,
+    ],
+    [
+      "r4s8-qemu-load-store-all-or-nothing",
+      1,
+      1,
+      0,
+      0,
+      true,
+      true,
+    ],
+    [
+      "r4s8-qemu-store-store-all-or-nothing",
+      0,
+      2,
+      0,
+      0,
+      true,
+      true,
+    ],
+  ],
+);
+assert.equal(r4s8LaterAccessFails.runExitReason, "tlb-miss-or-fault");
+assert.equal(r4s8LaterAccessFails.partialStoreCommitted, false);
+assert.equal(r4s8LaterAccessFails.registerFlushCommitted, false);
+assert.equal(r4s8LaterAccessFails.dispatchTargetCommitted, false);
+assert.equal(r4s8LaterAccessFails.generatedGuestInstructions, "0");
+assert.equal(r4s8LaterAccessFails.inlineTlbHitLoads, "0");
+assert.equal(r4s8LaterAccessFails.inlineTlbHitStores, "0");
+assert.equal(r4s8LaterAccessFails.helperCalls, "0");
+assert.equal(r4s8LaterAccessFails.qemuLdCalls, "0");
+assert.equal(r4s8LaterAccessFails.qemuStCalls, "0");
+assert.equal(r4s8LaterAccessFails.exitsTlbMissOrFault, "1");
+assert.equal(r4s8LaterAccessFails.ramAfter, r4s8LaterAccessFails.ramBefore);
 assert.equal(rv64BootPathResults.length, 4);
 assert.deepEqual(
   [...new Set(rv64BootPathResults.map((entry) => entry.name))],
@@ -5569,6 +5812,12 @@ function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_I
   let memopCount = 0;
   let qemuLdOps = 0;
   let qemuStOps = 0;
+  let multiAccessUnsupported = false;
+  let sawStoreAccess = false;
+  let loadAfterStore = false;
+  let storeBeforeLaterGuardCanFail = false;
+  const accessOrder = [];
+  const memops = [];
 
   function markUnknown(reg) {
     if (reg < known.length) {
@@ -5613,12 +5862,6 @@ function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_I
     if (op === OPS.tci_qemu_ld_rrr || op === OPS.tci_qemu_st_rrr) {
       hasMemop = true;
       memopCount++;
-      if (memopCount > 1) {
-        return {
-          reason: "selected-body-softmmu-multi-access-unsupported",
-          hasMemop,
-        };
-      }
       if (r2 >= known.length || !known[r2]) {
         return { reason: "selected-body-memop-unproven", hasMemop };
       }
@@ -5629,6 +5872,33 @@ function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_I
       if (memopReason !== null) {
         return { reason: memopReason, hasMemop, memop };
       }
+      if (op === OPS.tci_qemu_st_rrr) {
+        qemuStOps++;
+        sawStoreAccess = true;
+        accessOrder.push("store");
+      } else {
+        if (sawStoreAccess) {
+          loadAfterStore = true;
+          storeBeforeLaterGuardCanFail = true;
+        }
+        qemuLdOps++;
+        accessOrder.push("load");
+      }
+      memops.push(memop);
+      if (memopCount > SHARED_SOFTMMU_MAX_DEFERRED_ACCESSES) {
+        return {
+          reason: "selected-body-softmmu-multi-access-unsupported",
+          hasMemop,
+          multiAccessAttribution: {
+            accessCount: memopCount,
+            order: accessOrder.slice(),
+            loadCount: qemuLdOps,
+            storeCount: qemuStOps,
+            memops: memops.slice(),
+            storeBeforeLaterGuardCanFail,
+          },
+        };
+      }
       if (mmuIdx !== currentMmuIdx) {
         return {
           reason: "selected-body-memop-unexpected-mmu-idx",
@@ -5636,23 +5906,46 @@ function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_I
         };
       }
       if (op === OPS.tci_qemu_ld_rrr) {
-        qemuLdOps++;
         markUnknown(r0);
-      } else {
-        qemuStOps++;
       }
       continue;
+    }
+    if ([OPS.brcond, OPS.ld32u, OPS.ld32s, OPS.ld,
+         OPS.st8, OPS.st32, OPS.st].includes(op)) {
+      multiAccessUnsupported = true;
     }
     if (r4s5bOpWritesR0(op)) {
       markUnknown(r0);
     }
   }
 
+  if (memopCount > 1 && (multiAccessUnsupported || loadAfterStore)) {
+    return {
+      reason: "selected-body-softmmu-multi-access-unsupported",
+      hasMemop,
+      multiAccessAttribution: {
+        accessCount: memopCount,
+        order: accessOrder.slice(),
+        loadCount: qemuLdOps,
+        storeCount: qemuStOps,
+        memops: memops.slice(),
+        storeBeforeLaterGuardCanFail,
+      },
+    };
+  }
   return {
     reason: null,
     hasMemop,
     qemuLdOps,
     qemuStOps,
+    multiAccessAttribution: memopCount > 1 ? {
+      accessCount: memopCount,
+      order: accessOrder.slice(),
+      loadCount: qemuLdOps,
+      storeCount: qemuStOps,
+      memops: memops.slice(),
+      storeBeforeLaterGuardCanFail,
+    } : null,
     tlbMirrorRefreshed: hasMemop,
     tlbMirrorValidated: hasMemop,
   };
@@ -5732,6 +6025,7 @@ function simulateR4mLiveGeneratedExec({
       path: noFallback ? "fail-closed" : "tci-fallback",
       reason: memopValidation.reason,
       rejectedMemop: memopValidation.memop,
+      multiAccessAttribution: memopValidation.multiAccessAttribution || null,
       generatedGuestInstructions: 0,
       generatedBodyTimeNs: 0,
       generatedChainLength: 0,
@@ -5806,6 +6100,7 @@ function simulateR4mLiveGeneratedExec({
     exits: { unsupported: 0, invalidated: 0 },
     softmmuLowering: route.softmmuLowering || null,
     softmmuLoweredOps: route.softmmuLoweredOps || 0,
+    multiAccessAttribution: memopValidation.multiAccessAttribution || null,
     tlbMirrorRefreshed: memopValidation.tlbMirrorRefreshed || false,
     tlbMirrorValidated: memopValidation.tlbMirrorValidated || false,
   };
@@ -6039,6 +6334,38 @@ function r4s5bMultipleMemoryMetadata() {
   };
 }
 
+function r4s8MultiMemoryMetadata(accesses, overrides = {}) {
+  const oi = ((((overrides.memop ?? (MO_32 | MO_ATOM_NONE)) <<
+                TCG_WASM64_MEMOPIDX_SHIFT) |
+               (overrides.mmuIdx ?? R4K_SOFTMMU_MMU_IDX)) >>> 0);
+  const words = [
+    opImm20(OPS.tci_movi, 2, oi),
+    ...(overrides.prefixWords || []),
+  ];
+
+  for (const [index, access] of accesses.entries()) {
+    if (access === "branch") {
+      words.push(opBranch(0, 4));
+      continue;
+    }
+    words.push(opReg(
+      access === "store" ? OPS.tci_qemu_st_rrr : OPS.tci_qemu_ld_rrr,
+      access === "store" ? 0 : 3 + index,
+      1,
+      2,
+    ));
+  }
+  words.push(OPS.exit_tb);
+  return {
+    opCount: words.length,
+    generatedOutputAvailable: true,
+    generatedOutputSize: words.length * 4,
+    words,
+    relativeBase: 0x1000,
+    guestInstructions: 1,
+  };
+}
+
 const r4s5bCases = [
   {
     name: "r4s5c-valid-load-enters-generic-softmmu-lowering",
@@ -6076,9 +6403,58 @@ const r4s5bCases = [
     }),
   },
   {
-    name: "r4s5c-multiple-memops-reject-before-partial-store",
+    name: "r4s8-store-load-rejects-alias-risk-with-attribution",
+    legacyName: "r4s5c-multiple-memops-reject-before-partial-store",
     expectedReason: "selected-body-softmmu-multi-access-unsupported",
+    expectedMultiAccessAttribution: {
+      accessCount: 2,
+      order: ["store", "load"],
+      loadCount: 1,
+      storeCount: 1,
+      memops: [MO_32 | MO_ATOM_NONE, MO_32 | MO_ATOM_NONE],
+      storeBeforeLaterGuardCanFail: true,
+    },
     metadata: r4s5bMultipleMemoryMetadata(),
+  },
+  {
+    name: "r4s8-load-load-admitted-all-guards-before-commit",
+    expectedReason: null,
+    expectedPath: "generated",
+    expectedInlineTlbHitLoads: 2,
+    expectedInlineTlbHitStores: 0,
+    expectedSoftmmuLoweredOps: 2,
+    metadata: r4s8MultiMemoryMetadata(["load", "load"]),
+  },
+  {
+    name: "r4s8-load-store-admitted-all-guards-before-commit",
+    expectedReason: null,
+    expectedPath: "generated",
+    expectedInlineTlbHitLoads: 1,
+    expectedInlineTlbHitStores: 1,
+    expectedSoftmmuLoweredOps: 2,
+    metadata: r4s8MultiMemoryMetadata(["load", "store"]),
+  },
+  {
+    name: "r4s8-store-store-admitted-all-guards-before-commit",
+    expectedReason: null,
+    expectedPath: "generated",
+    expectedInlineTlbHitLoads: 0,
+    expectedInlineTlbHitStores: 2,
+    expectedSoftmmuLoweredOps: 2,
+    metadata: r4s8MultiMemoryMetadata(["store", "store"]),
+  },
+  {
+    name: "r4s8-branchy-multi-access-rejects-with-attribution",
+    expectedReason: "selected-body-softmmu-multi-access-unsupported",
+    expectedMultiAccessAttribution: {
+      accessCount: 2,
+      order: ["store", "load"],
+      loadCount: 1,
+      storeCount: 1,
+      memops: [MO_32 | MO_ATOM_NONE, MO_32 | MO_ATOM_NONE],
+      storeBeforeLaterGuardCanFail: true,
+    },
+    metadata: r4s8MultiMemoryMetadata(["store", "branch", "load"]),
   },
   {
     name: "r4s5b-unproven-oi-rejects-before-inline-ram",
@@ -6169,7 +6545,8 @@ for (const testCase of r4s5bCases) {
     assert.equal(testCase.result.generatedGuestInstructions, 1);
     assert.equal(testCase.result.softmmuLowering,
                  SHARED_SOFTMMU_LOWERING_NAME);
-    assert.equal(testCase.result.softmmuLoweredOps, 1);
+    assert.equal(testCase.result.softmmuLoweredOps,
+                 testCase.expectedSoftmmuLoweredOps || 1);
     assert.equal(testCase.result.tlbMirrorRefreshed, true);
     assert.equal(testCase.result.tlbMirrorValidated, true);
     assert.equal(testCase.result.inlineTlbHitLoads,
@@ -6189,10 +6566,29 @@ for (const testCase of r4s5bCases) {
   assert.equal(testCase.result.inlineTlbHitStores, 0);
   assert.equal(testCase.result.rejects, 1);
   assert.equal(testCase.result.exits.unsupported, 1);
+  if (testCase.expectedMultiAccessAttribution) {
+    assert.deepEqual(
+      testCase.result.multiAccessAttribution,
+      testCase.expectedMultiAccessAttribution,
+    );
+  }
   assert.equal(testCase.noFallbackResult.reason, testCase.expectedReason);
   assert.equal(testCase.noFallbackResult.path, "fail-closed");
   assert.equal(testCase.noFallbackResult.failedClosed, true);
 }
+const r4s8MultiAccessRouteResults = r4s5bCases
+  .filter((entry) => entry.name.startsWith("r4s8-"))
+  .map((entry) => ({
+    name: entry.name,
+    path: entry.result.path,
+    reason: entry.result.reason,
+    generatedGuestInstructions: entry.result.generatedGuestInstructions,
+    inlineTlbHitLoads: entry.result.inlineTlbHitLoads,
+    inlineTlbHitStores: entry.result.inlineTlbHitStores,
+    softmmuLowering: entry.result.softmmuLowering,
+    softmmuLoweredOps: entry.result.softmmuLoweredOps,
+    multiAccessAttribution: entry.result.multiAccessAttribution,
+  }));
 const r4s7MemopRejectAttributionReasons = new Set([
   "selected-body-memop-unsupported-size",
   "selected-body-memop-unsupported-alignment",
@@ -6925,6 +7321,21 @@ console.log(JSON.stringify({
       qemuStCalls: r6Rv64SoftmmuRamHits.reduce(
         (count, entry) => count + BigInt(entry.qemuStCalls), 0n).toString(),
     },
+  },
+  r4s8MultiAccessSoftmmu: {
+    admittedSubset: [
+      "load+load",
+      "load+store",
+      "store-only",
+    ],
+    rejectedSubset: [
+      "store-before-load",
+      "multi-access-with-control-flow-or-direct-memory",
+      "more-than-four-accesses",
+    ],
+    executableFixtures: r4s8MultiAccessExecutableResults,
+    laterAccessFailsNoPartialStore: r4s8LaterAccessFails,
+    routingFixtures: r4s8MultiAccessRouteResults,
   },
   r4mLiveGeneratedExec: {
     fixtureCount: r4mLiveGeneratedExecCases.length,

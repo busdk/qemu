@@ -2458,7 +2458,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `0xa01` for unsupported size and `0xae0` for unsupported alignment.
     `wasm64Tcg` was enabled but `summaryCount=0`, so the metrics gate failed
     with `tcg_missing=2`. R4l remains blocked.
-  - [ ] R4s8 - Support or precisely reject measured x86 multi-access
+  - [x] R4s8 - Support or precisely reject measured x86 multi-access
     SoftMMU bodies without partial side effects. DoD: using the post-R4s7
     preflight histogram, add deterministic attribution for selected
     `tci_qemu_ld_rrr`/`tci_qemu_st_rrr` bodies rejected as
@@ -2479,6 +2479,32 @@ run that reaches a weaker marker than normal multi-user readiness.
     generated guest-instruction retirement for at least one measured live x86
     multi-access body; the next bounded preflight must report whether
     generated execution moved above zero and how the reject histogram changed.
+    Accepted deterministic slice 2026-07-04: incorporated R4s8a metadata
+    mismatch attribution from QEMU `develop` commit `054a9eaad7`, added
+    `reject_multi_accesses` attribution, and admitted only the all-or-nothing
+    RAM-hit subset `load+load`, `load+store`, and store-only/store+store.
+    Generic store-before-load remains rejected as
+    `selected-body-softmmu-multi-access-unsupported` with attribution
+    `accessCount=2`, `order=store,load`, `loadCount=1`, `storeCount=1`,
+    `memops=[0xa02,0xa02]`, and `storeBeforeLaterGuardCanFail=true`.
+    Executable fixtures proved `r4s8-qemu-load-load-all-or-nothing`
+    retired one generated guest instruction with inline hits `loads=2`,
+    `stores=0`; `r4s8-qemu-load-store-all-or-nothing` retired one with
+    inline hits `loads=1`, `stores=1`; and
+    `r4s8-qemu-store-store-all-or-nothing` retired one with inline hits
+    `loads=0`, `stores=2`, all with zero helper calls and matched register
+    and memory state. The later-access-fails fixture
+    `r4s8-store-store-later-fail-no-partial-store` returned
+    `tlb-miss-or-fault` with RAM unchanged, no partial store, no register
+    flush, no dispatch target, generated guest instructions `0`, inline hits
+    `0/0`, helper/qemu calls `0`, and `exitsTlbMissOrFault=1`. Checks:
+    `git diff --check`, `node --check
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node --check
+    scripts/ci/wasm64-translate-metadata-test.mjs`, `node
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+    scripts/ci/wasm64-translate-metadata-test.mjs`, and `node
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs` passed. No
+    browser or Chromium run was performed.
   - [x] R4s8a - Attribute live metadata/output TB-code mismatches before
     widening execution policy. DoD: split `js-status-metadata-output-tb-code-
     mismatch` into deterministic categories before treating it as generic

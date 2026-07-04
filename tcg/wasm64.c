@@ -202,6 +202,8 @@ typedef enum TCGWasm64LiveGeneratedExecRejectReason {
 } TCGWasm64LiveGeneratedExecRejectReason;
 
 #define TCG_WASM64_LIVE_MEMOP_REJECT_SLOTS 8
+#define TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES 4
+#define TCG_WASM64_LIVE_MULTI_ACCESS_REJECT_SLOTS 8
 
 typedef struct TCGWasm64LiveMemOpRejectStat {
     MemOp memop;
@@ -216,6 +218,16 @@ typedef struct TCGWasm64MetadataOutputMismatch {
     uint32_t metadata_word;
     uint32_t live_word;
 } TCGWasm64MetadataOutputMismatch;
+
+typedef struct TCGWasm64LiveMultiAccessRejectStat {
+    uint32_t access_count;
+    uint32_t load_count;
+    uint32_t store_count;
+    char order[TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES + 1];
+    MemOp memops[TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES];
+    bool store_before_later_guard;
+    uint64_t count;
+} TCGWasm64LiveMultiAccessRejectStat;
 
 typedef enum TCGWasm64RunloopSmokeWorkload {
     TCG_WASM64_RUNLOOP_SMOKE_ALU_BRANCH = 0,
@@ -454,6 +466,9 @@ static __thread TCGWasm64LiveMemOpRejectStat
         [TCG_WASM64_LIVE_MEMOP_REJECT_SLOTS];
 static __thread TCGWasm64MetadataOutputMismatch
     live_generated_exec_first_metadata_output_mismatch;
+static __thread TCGWasm64LiveMultiAccessRejectStat
+    live_generated_exec_reject_multi_accesses[
+        TCG_WASM64_LIVE_MULTI_ACCESS_REJECT_SLOTS];
 static __thread bool live_tb_coverage_checked;
 static __thread bool live_tb_coverage_no_shape_reported;
 static __thread uint64_t live_tb_coverage_scanned;
@@ -3107,11 +3122,37 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         const softComparator = 32;
         const softAddend = 33;
         const softHostAddr = 34;
+        const softMaxDeferredAccesses = 4;
+        const softAccessLocalBase = 35;
         const terminalIndex = words.findIndex((insn) => {
             const opc = bits(insn >>> 0, 0, 8);
 
             return opc === ops.goto_tb || opc === ops.exit_tb;
         });
+        const bodyWords = terminalIndex < 0 ?
+            words : words.slice(0, terminalIndex);
+        const softmmuAccessCount = bodyWords.filter((insn) => {
+            const opc = bits(insn >>> 0, 0, 8);
+
+            return opc === ops.tci_qemu_ld_rrr ||
+                   opc === ops.tci_qemu_st_rrr;
+        }).length;
+        const allOrNothingSoftmmu = softmmuAccessCount > 1;
+        const deferredSoftmmuCommits = [];
+        let nextSoftmmuAccessIndex = 0;
+        let softLoadAfterStore = false;
+        let sawSoftStore = false;
+
+        for (const insn of bodyWords) {
+            const opc = bits(insn >>> 0, 0, 8);
+
+            if (opc === ops.tci_qemu_st_rrr) {
+                sawSoftStore = true;
+            } else if (opc === ops.tci_qemu_ld_rrr && sawSoftStore) {
+                softLoadAfterStore = true;
+                break;
+            }
+        }
 
         function regLocal(reg) {
             return regLocalBase + reg;
@@ -3119,6 +3160,10 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
 
         function ifBlock(condition, thenBody) {
             return [...condition, 0x04, 0x40, ...thenBody, 0x0b];
+        }
+
+        function softAccessLocal(index, field) {
+            return softAccessLocalBase + index * 4 + field;
         }
 
         function incrementRunCounter(offset) {
@@ -3168,12 +3213,16 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
             addrReg,
             valueReg,
             oiReg,
+            accessIndex = 0,
         }) {
             const accessType = softmmuAccessType(access);
             const comparatorOffset = softmmuComparatorOffset(access);
             const inlineCounterOffset = access === "store" ?
                 runCounters.inlineTlbHitStores :
                 runCounters.inlineTlbHitLoads;
+            const hostLocal = softAccessLocal(accessIndex, 0);
+            const valueLocal = softAccessLocal(accessIndex, 1);
+            const memopLocal = softAccessLocal(accessIndex, 2);
             const unsupportedReturn = softmmuFailureReturn({
                 status: statusUnsupported,
                 reason: runExitUnsupported,
@@ -3200,16 +3249,16 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                 i32WrapI64(localGet(softHostAddr))));
             const loadQuad = i64Load(i32WrapI64(localGet(softHostAddr)));
             const storeByte = i32Store8(
-                i32WrapI64(localGet(softHostAddr)),
-                i32WrapI64(localGet(softValue)));
+                i32WrapI64(localGet(hostLocal)),
+                i32WrapI64(localGet(valueLocal)));
             const storeWord = i32Store(
-                i32WrapI64(localGet(softHostAddr)),
-                i32WrapI64(localGet(softValue)));
+                i32WrapI64(localGet(hostLocal)),
+                i32WrapI64(localGet(valueLocal)));
             const storeQuad = i64Store(
-                i32WrapI64(localGet(softHostAddr)),
-                localGet(softValue));
+                i32WrapI64(localGet(hostLocal)),
+                localGet(valueLocal));
 
-            return [
+            const guard = [
                 ...localSet(softTaddr, localGet(addrReg)),
                 ...localSet(softOi, localGet(oiReg)),
                 ...(access === "store"
@@ -3350,19 +3399,10 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                     unsupportedReturn),
                 ...localSet(softHostAddr,
                     i64Add(localGet(softTaddr), localGet(softAddend))),
+                ...localSet(hostLocal, localGet(softHostAddr)),
+                ...localSet(memopLocal, localGet(softMemop)),
                 ...(access === "store" ? [
-                    ...ifBlock(i64Eq(
-                        i64And(localGet(softMemop), i64Const(memOp.sizeMask)),
-                        i64Const(memOp.byte)),
-                        storeByte),
-                    ...ifBlock(i64Eq(
-                        i64And(localGet(softMemop), i64Const(memOp.sizeMask)),
-                        i64Const(memOp.word)),
-                        storeWord),
-                    ...ifBlock(i64Eq(
-                        i64And(localGet(softMemop), i64Const(memOp.sizeMask)),
-                        i64Const(memOp.quad)),
-                        storeQuad),
+                    ...localSet(valueLocal, localGet(softValue)),
                 ] : [
                     ...ifBlock(i64Eq(
                         i64And(localGet(softMemop), i64Const(memOp.sizeMask)),
@@ -3377,8 +3417,26 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                         i64Const(memOp.quad)),
                         localSet(dst, loadQuad)),
                 ]),
+            ];
+            const commit = access === "store" ? [
+                ...ifBlock(i64Eq(
+                    i64And(localGet(memopLocal), i64Const(memOp.sizeMask)),
+                    i64Const(memOp.byte)),
+                    storeByte),
+                ...ifBlock(i64Eq(
+                    i64And(localGet(memopLocal), i64Const(memOp.sizeMask)),
+                    i64Const(memOp.word)),
+                    storeWord),
+                ...ifBlock(i64Eq(
+                    i64And(localGet(memopLocal), i64Const(memOp.sizeMask)),
+                    i64Const(memOp.quad)),
+                    storeQuad),
+                ...incrementRunCounter(inlineCounterOffset),
+            ] : [
                 ...incrementRunCounter(inlineCounterOffset),
             ];
+
+            return { guard, commit };
         }
 
         function compileOp(index, insn) {
@@ -3525,6 +3583,8 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                     dst,
                     addrReg: src1,
                     oiReg: src2,
+                    accessIndex: allOrNothingSoftmmu ?
+                        nextSoftmmuAccessIndex++ : 0,
                 });
             }
             if (opc === ops.tci_qemu_st_rrr) {
@@ -3534,6 +3594,8 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                     addrReg: src1,
                     valueReg: dst,
                     oiReg: src2,
+                    accessIndex: allOrNothingSoftmmu ?
+                        nextSoftmmuAccessIndex++ : 0,
                 });
             }
             if (opc === ops.mb) {
@@ -3588,7 +3650,14 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                 if (compiled === null) {
                     return null;
                 }
-                code.push(...compiled);
+                if (Array.isArray(compiled)) {
+                    code.push(...compiled);
+                } else if (allOrNothingSoftmmu) {
+                    code.push(...compiled.guard);
+                    deferredSoftmmuCommits.push(...compiled.commit);
+                } else {
+                    code.push(...compiled.guard, ...compiled.commit);
+                }
                 index++;
             }
             return code;
@@ -3603,12 +3672,16 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         if (terminalIndex < 0) {
             throw new Error("live generated-output body has no terminal");
         }
-        if (words.slice(0, terminalIndex).filter((insn) => {
-            const opc = bits(insn >>> 0, 0, 8);
+        if (softmmuAccessCount > softMaxDeferredAccesses ||
+            (allOrNothingSoftmmu && softLoadAfterStore) ||
+            (allOrNothingSoftmmu && bodyWords.some((insn) => {
+                const opc = bits(insn >>> 0, 0, 8);
 
-            return opc === ops.tci_qemu_ld_rrr ||
-                   opc === ops.tci_qemu_st_rrr;
-        }).length > 1) {
+                return opc === ops.brcond ||
+                       opc === ops.ld || opc === ops.ld32s ||
+                       opc === ops.ld32u || opc === ops.st ||
+                       opc === ops.st8 || opc === ops.st32;
+            }))) {
             throw new Error("unsupported live generated-output multi-access shape");
         }
         {
@@ -3625,6 +3698,9 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                 throw new Error("unsupported live generated-output shape");
             }
             emitted.push(...body);
+            if (allOrNothingSoftmmu) {
+                emitted.push(...deferredSoftmmuCommits);
+            }
         }
         executedOps++;
 
@@ -3716,7 +3792,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                 ])),
                 ...section(10, vector([
                     functionBody(instructions, [
-                        { count: 35, type: valueI64 },
+                        { count: 51, type: valueI64 },
                     ]),
                 ])),
             ]);
@@ -6775,6 +6851,79 @@ static void tcg_wasm64_live_generated_exec_count_memop_reject(
     stats[TCG_WASM64_LIVE_MEMOP_REJECT_SLOTS - 1].count++;
 }
 
+static bool tcg_wasm64_live_generated_exec_multi_access_stat_matches(
+    const TCGWasm64LiveMultiAccessRejectStat *stat, uint32_t access_count,
+    uint32_t load_count, uint32_t store_count, const char *order,
+    const MemOp *memops, bool store_before_later_guard)
+{
+    if (stat->count == 0 ||
+        stat->access_count != access_count ||
+        stat->load_count != load_count ||
+        stat->store_count != store_count ||
+        stat->store_before_later_guard != store_before_later_guard ||
+        strncmp(stat->order, order, sizeof(stat->order)) != 0) {
+        return false;
+    }
+    for (uint32_t i = 0; i < MIN(access_count,
+                                  TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES);
+         i++) {
+        if (stat->memops[i] != memops[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void tcg_wasm64_live_generated_exec_store_multi_access_stat(
+    TCGWasm64LiveMultiAccessRejectStat *stat, uint32_t access_count,
+    uint32_t load_count, uint32_t store_count, const char *order,
+    const MemOp *memops, bool store_before_later_guard)
+{
+    stat->access_count = access_count;
+    stat->load_count = load_count;
+    stat->store_count = store_count;
+    stat->store_before_later_guard = store_before_later_guard;
+    memset(stat->order, 0, sizeof(stat->order));
+    memcpy(stat->order, order, MIN(strlen(order), sizeof(stat->order) - 1));
+    memset(stat->memops, 0, sizeof(stat->memops));
+    for (uint32_t i = 0; i < MIN(access_count,
+                                  TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES);
+         i++) {
+        stat->memops[i] = memops[i];
+    }
+    stat->count = 1;
+}
+
+static void tcg_wasm64_live_generated_exec_count_multi_access_reject(
+    uint32_t access_count, uint32_t load_count, uint32_t store_count,
+    const char *order, const MemOp *memops, bool store_before_later_guard)
+{
+    for (size_t i = 0; i < TCG_WASM64_LIVE_MULTI_ACCESS_REJECT_SLOTS; i++) {
+        TCGWasm64LiveMultiAccessRejectStat *stat =
+            &live_generated_exec_reject_multi_accesses[i];
+
+        if (tcg_wasm64_live_generated_exec_multi_access_stat_matches(
+                stat, access_count, load_count, store_count, order, memops,
+                store_before_later_guard)) {
+            stat->count++;
+            return;
+        }
+    }
+    for (size_t i = 0; i < TCG_WASM64_LIVE_MULTI_ACCESS_REJECT_SLOTS; i++) {
+        TCGWasm64LiveMultiAccessRejectStat *stat =
+            &live_generated_exec_reject_multi_accesses[i];
+
+        if (stat->count == 0) {
+            tcg_wasm64_live_generated_exec_store_multi_access_stat(
+                stat, access_count, load_count, store_count, order, memops,
+                store_before_later_guard);
+            return;
+        }
+    }
+    live_generated_exec_reject_multi_accesses[
+        TCG_WASM64_LIVE_MULTI_ACCESS_REJECT_SLOTS - 1].count++;
+}
+
 typedef struct TCGWasm64LiveMemOpState {
     bool known[16];
     uint32_t value[16];
@@ -6845,6 +6994,26 @@ static bool tcg_wasm64_live_generated_exec_op_writes_r0(TCGOpcode op)
     }
 }
 
+static bool tcg_wasm64_live_generated_exec_op_direct_memory(TCGOpcode op)
+{
+    switch (op) {
+    case INDEX_op_ld:
+    case INDEX_op_ld32s:
+    case INDEX_op_ld32u:
+    case INDEX_op_st:
+    case INDEX_op_st8:
+    case INDEX_op_st32:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool tcg_wasm64_live_generated_exec_op_control_flow(TCGOpcode op)
+{
+    return op == INDEX_op_brcond;
+}
+
 static TCGWasm64LiveGeneratedExecRejectReason
 tcg_wasm64_live_generated_exec_validate_memop(MemOp memop)
 {
@@ -6884,8 +7053,16 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
 {
     TCGWasm64LiveMemOpState state = { 0 };
     bool have_mmu_idx = false;
+    bool multi_access_unsupported = false;
+    bool saw_store_access = false;
+    bool load_after_store = false;
+    bool store_before_later_guard = false;
     uint32_t proven_mmu_idx = 0;
     uint32_t memop_count = 0;
+    uint32_t load_count = 0;
+    uint32_t store_count = 0;
+    char access_order[TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES + 1] = { 0 };
+    MemOp access_memops[TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES] = { 0 };
 
     *has_memop = false;
     *mmu_idx_out = 0;
@@ -6910,6 +7087,7 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
         case INDEX_op_tci_qemu_st_rrr:
         {
             uint32_t oi_reg = tcg_wasm64_tci_word_r2(word);
+            bool is_store = op == INDEX_op_tci_qemu_st_rrr;
             MemOpIdx oi;
             MemOp memop;
             unsigned mmu_idx;
@@ -6920,9 +7098,6 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
 
             *has_memop = true;
             memop_count++;
-            if (memop_count > 1) {
-                return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_MULTI_ACCESS_UNSUPPORTED;
-            }
             if (oi_reg >= ARRAY_SIZE(state.known) || !state.known[oi_reg]) {
                 return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNPROVEN;
             }
@@ -6934,6 +7109,25 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
                 tcg_wasm64_live_generated_exec_count_memop_reject(reason,
                                                                   memop);
                 return reason;
+            }
+            if (is_store) {
+                store_count++;
+                saw_store_access = true;
+            } else {
+                if (saw_store_access) {
+                    load_after_store = true;
+                    store_before_later_guard = true;
+                }
+                load_count++;
+            }
+            if (memop_count <= TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES) {
+                access_order[memop_count - 1] = is_store ? 'S' : 'L';
+                access_memops[memop_count - 1] = memop;
+            } else {
+                tcg_wasm64_live_generated_exec_count_multi_access_reject(
+                    memop_count, load_count, store_count, access_order,
+                    access_memops, store_before_later_guard);
+                return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_MULTI_ACCESS_UNSUPPORTED;
             }
 #if defined(CONFIG_USER_ONLY)
             return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_UNAVAILABLE;
@@ -6958,11 +7152,22 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
             break;
         }
         default:
+            if (tcg_wasm64_live_generated_exec_op_direct_memory(op) ||
+                tcg_wasm64_live_generated_exec_op_control_flow(op)) {
+                multi_access_unsupported = true;
+            }
             if (tcg_wasm64_live_generated_exec_op_writes_r0(op)) {
                 tcg_wasm64_live_memop_state_unknown(&state, r0);
             }
             break;
         }
+    }
+    if (memop_count > 1 && (multi_access_unsupported ||
+                            load_after_store)) {
+        tcg_wasm64_live_generated_exec_count_multi_access_reject(
+            memop_count, load_count, store_count, access_order,
+            access_memops, store_before_later_guard);
+        return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_MULTI_ACCESS_UNSUPPORTED;
     }
     if (have_mmu_idx) {
         *mmu_idx_out = proven_mmu_idx;
@@ -7014,6 +7219,38 @@ static void tcg_wasm64_print_live_generated_exec_reject_memops(void)
                     stat->count);
             first = false;
         }
+    }
+}
+
+static void tcg_wasm64_print_live_generated_exec_reject_multi_accesses(void)
+{
+    bool first = true;
+
+    for (size_t slot = 0; slot < TCG_WASM64_LIVE_MULTI_ACCESS_REJECT_SLOTS;
+         slot++) {
+        const TCGWasm64LiveMultiAccessRejectStat *stat =
+            &live_generated_exec_reject_multi_accesses[slot];
+
+        if (stat->count == 0) {
+            continue;
+        }
+        fprintf(stderr,
+                "%s{\"reason\":\"selected-body-softmmu-multi-access-unsupported\","
+                "\"access_count\":%u,\"order\":\"%s\","
+                "\"loads\":%u,\"stores\":%u,"
+                "\"store_before_later_guard\":%s,\"memops\":[",
+                first ? "" : ",",
+                stat->access_count, stat->order,
+                stat->load_count, stat->store_count,
+                stat->store_before_later_guard ? "true" : "false");
+        for (uint32_t i = 0; i < MIN(stat->access_count,
+                                     TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES);
+             i++) {
+            fprintf(stderr, "%s\"0x%x\"", i == 0 ? "" : ",",
+                    (unsigned)stat->memops[i]);
+        }
+        fprintf(stderr, "],\"count\":%" PRIu64 "}", stat->count);
+        first = false;
     }
 }
 
@@ -7176,6 +7413,9 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
     fprintf(stderr, "],"
             "\"reject_memops\":[");
     tcg_wasm64_print_live_generated_exec_reject_memops();
+    fprintf(stderr, "],"
+            "\"reject_multi_accesses\":[");
+    tcg_wasm64_print_live_generated_exec_reject_multi_accesses();
     fprintf(stderr, "]}\n");
 }
 
