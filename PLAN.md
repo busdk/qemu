@@ -1835,6 +1835,58 @@ run that reaches a weaker marker than normal multi-user readiness.
   `478`. This accepts only target-attribution evidence, makes no speed claim,
   does not permit R4l, and points the next slice at live hotset execution for
   source and target TBs that already have generated output.
+- [x] R4q - Recheck the current x86_64 live-generated-exec preflight after
+  later QEMU/RISC-V accelerator commits landed on `origin/develop`. DoD:
+  fetch `origin/develop`, confirm the local QEMU checkout is at current
+  remote tip, build a fresh `x86_64-softmmu` backend artifact, run only the
+  bounded `--wasm64-live-generated-exec-preflight` Chromium diagnostic, and
+  record whether the current x86 lane now retires any generated guest
+  instructions before considering another R4l speed gate. Accepted
+  2026-07-04: `git fetch origin` confirmed both `HEAD` and `origin/develop`
+  at `61bb7cb40b418719abb5f243263c3cfa3acd491d` (`wasm64: commit safe live
+  generated RV64 TBs`). Deterministic checks passed on that exact tree:
+  `git diff --check`, `node --check
+  scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+  `node scripts/ci/wasm64-translate-metadata-test.mjs`, and
+  `node scripts/ci/wasm-generated-output-equivalence-test.mjs --json >
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4q-current-equivalence-61bb7cb-20260704.json`.
+  The equivalence JSON still reports local x86 accelerator-shape fixtures:
+  `r4iPerTBEmitterGeneratedGuestInstructions=1`,
+  `r4kTwoTBHotset.chainedHit.generatedGuestInstructions=2`, and
+  `r4kSoftmmuFastPath.ramHits` with zero helper, `qemu_ld`, and `qemu_st`
+  calls.
+
+  Fresh artifact build command:
+  `python3 scripts/ci/wasm-build-artifacts-local.py --out
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4q-current-x86-accelerator-artifacts-61bb7cb-20260704
+  --target x86_64 --tcg-wasm64-backend --jobs 20`. Artifact hashes:
+  `qemu-system-x86_64.js`
+  `7c5417d44d1447d134823a34ca6e96d79af46ad7b6a1662aecfcfc21c0ab10d9`,
+  `qemu-system-x86_64.wasm`
+  `f897c313850cb50c51a36f0860b0cba52dec8c360b94100ac7436db70c4fcefc`,
+  manifest
+  `1e1549533aaef66b30de80253ee096180e95675b909e56b8f4239f6ea89494be`.
+  Bounded Chromium `149.0.7827.55` preflight against the current generic
+  x86_64 TuxBoot manifest wrote result JSON
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4q-current-x86-preflight-61bb7cb-20260704/wasm-browser-smoke-result.json`
+  (SHA-256
+  `037a927da4c0734807c76e83b1cd2ed2651b9af21da4908bf1720a0138769035`)
+  and screenshot
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4q-current-x86-preflight-61bb7cb-20260704/wasm-browser-smoke.png`
+  (SHA-256
+  `11b3836bc1ca04dacc673e8c72de32e01f80db42f6d91b145dfe20d333de1891`).
+  The run timed out at `60186` ms without `QEMU_WASM_LINUX_BOOT_OK` after
+  an early Emscripten abort, and the aggregate preflight summary at
+  `2458` ms reported `reason=preflight-zero-generated-exec`,
+  `attempts=100`, `successes=0`, `rejects=100`,
+  `generated_guest_instructions=0`, generated coverage `0 / 555`,
+  `hotset_goto_sources=54`, `hotset_target_metadata_hits=9`,
+  `hotset_target_output_hits=9`, `hotset_target_stale=45`, and reject
+  reasons `selected-body-shape-unsupported=96` plus
+  `generated-exec-rejected=4`. This confirms that the latest QEMU tip still
+  does not provide useful x86 generated guest execution. It makes no speed
+  claim, does not permit R4l, and does not permit a Bus Engine OS browser
+  proof.
 - [x] R7 - Dispatch available RISC-V generated output from the live wasm64
   run loop before TCI fallback. DoD: when live TB metadata reports
   `tcg_wasm64_translate_generated_output_available()` and the RV64
