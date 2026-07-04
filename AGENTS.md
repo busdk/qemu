@@ -149,3 +149,15 @@ reverse. A cross-ISA result may guide reusable accelerator architecture, but
 it changes a target's boot estimate only after the same mechanism is enabled
 and measured on that target with a comparable same-commit smoke or Bus Engine
 OS proof.
+
+## Research notes (BusDK docs site)
+
+Authoritative, allowlist-sourced findings for this accelerator live under
+`../busdk/docs/docs/research/` (public). Reuse them instead of re-researching:
+- `wasm-alignment-and-atomics.md` - WASM plain loads/stores never trap on
+  misalignment; WASM ATOMICS require natural alignment and trap otherwise (this
+  is V8's "operation does not support unaligned accesses"). Emit plain accesses
+  for possibly-unaligned guest loads/stores; NEVER emit a raw WASM atomic
+  unless the address is provably aligned - fall back instead.
+- `riscv64-atomics-alignment.md` - RV64 A-extension atomics require natural
+  alignment; only aligned guest atomics are safe to lower to WASM atomics.
