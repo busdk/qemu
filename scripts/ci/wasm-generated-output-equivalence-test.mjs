@@ -910,6 +910,16 @@ function envRelativeMemoryAddressI64(op, size) {
     : null;
 }
 
+function directEnvLoadSupported(op) {
+  if (op.opc === OPS.ld32u || op.opc === OPS.ld32s) {
+    return envRelativeAccessSupported(op, 4);
+  }
+  if (op.opc === OPS.ld) {
+    return envRelativeAccessSupported(op, 8);
+  }
+  return false;
+}
+
 function targetIndexFromPtr(ptr, relativeBase) {
   const offset = ptr - relativeBase;
 
@@ -2263,6 +2273,12 @@ function routeLiveGeneratedOutput(metadata) {
     metadata.relativeBase,
     metadata.emitOptions || {},
   );
+  const { ops } = splitGeneratedOutput(words, metadata.relativeBase);
+  const inlineTlbHitLoads = ops.filter((op) =>
+    op.opc === OPS.tci_qemu_ld_rrr || directEnvLoadSupported(op)).length;
+  const inlineTlbHitStores = ops.filter((op) =>
+    op.opc === OPS.tci_qemu_st_rrr ||
+    [OPS.st8, OPS.st32, OPS.st].includes(op.opc)).length;
 
   if (!emission.ok) {
     return {
@@ -2293,8 +2309,8 @@ function routeLiveGeneratedOutput(metadata) {
     runtimeUnsupportedGuards: emission.runtimeUnsupportedGuards,
     softmmuLowering: emission.softmmuLowering,
     softmmuLoweredOps: emission.softmmuLoweredOps,
-    inlineTlbHitLoads: shape.filter((op) => op === "tci_qemu_ld_rrr").length,
-    inlineTlbHitStores: shape.filter((op) => op === "tci_qemu_st_rrr").length,
+    inlineTlbHitLoads,
+    inlineTlbHitStores,
   };
 }
 
@@ -5173,6 +5189,20 @@ const fixtures = [
     ],
   },
   {
+    name: "r4s8-qemu-store-envload-store-store-all-or-nothing",
+    terminal: "exit_tb",
+    relativeBase: 0x60a0,
+    seeds: [1],
+    guestInstructions: 1,
+    words: [
+      opReg(OPS.tci_qemu_st_rrr, 6, 14, 13),
+      opMem(OPS.ld, 8, RV64_ENV_RELATIVE_BASE_REG, -16),
+      opReg(OPS.tci_qemu_st_rrr, 8, 14, 13),
+      opReg(OPS.tci_qemu_st_rrr, 9, 14, 13),
+      OPS.exit_tb,
+    ],
+  },
+  {
     name: "r4s21b-x86-env-direct-fields-with-qemu-load-store-all-or-nothing",
     terminal: "exit_tb",
     relativeBase: 0x6060,
@@ -6013,9 +6043,9 @@ for (const fixture of r6Rv64SoftmmuFixtures) {
 const r4s8LaterAccessFails = await runR4s8LaterAccessFailsFixture();
 const r4s21bLaterAccessFails = await runR4s21bLaterAccessFailsFixture();
 
-assert.equal(results.length, 26);
+assert.equal(results.length, 27);
 assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 8);
-assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 16);
+assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 17);
 assert.equal(results.filter((entry) => entry.terminal === "helper").length, 2);
 const helperBoundaryResults = results.filter((entry) =>
   entry.helpers.loads > 0 || entry.helpers.stores > 0);
@@ -6095,6 +6125,15 @@ assert.deepEqual(
       "r4s8-qemu-store-store-all-or-nothing",
       0,
       2,
+      0,
+      0,
+      true,
+      true,
+    ],
+    [
+      "r4s8-qemu-store-envload-store-store-all-or-nothing",
+      1,
+      3,
       0,
       0,
       true,
@@ -7794,6 +7833,49 @@ function r4s8MultiMemoryMetadata(accesses, overrides = {}) {
   };
 }
 
+function r4s8StoreDirectEnvLoadStoreStoreMetadata() {
+  const oi = (((MO_32 | MO_ATOM_NONE) << TCG_WASM64_MEMOPIDX_SHIFT) |
+              R4K_SOFTMMU_MMU_IDX) >>> 0;
+  const words = [
+    opImm20(OPS.tci_movi, 2, oi),
+    opReg(OPS.tci_qemu_st_rrr, 0, 1, 2),
+    opMem(OPS.ld, 8, RV64_ENV_RELATIVE_BASE_REG, -16),
+    opReg(OPS.tci_qemu_st_rrr, 8, 1, 2),
+    opReg(OPS.tci_qemu_st_rrr, 9, 1, 2),
+    OPS.exit_tb,
+  ];
+
+  return {
+    opCount: words.length,
+    generatedOutputAvailable: true,
+    generatedOutputSize: words.length * 4,
+    words,
+    relativeBase: 0x1000,
+    guestInstructions: 1,
+  };
+}
+
+function r4s8StoreDirectEnvStoreStoreMetadata() {
+  const oi = (((MO_32 | MO_ATOM_NONE) << TCG_WASM64_MEMOPIDX_SHIFT) |
+              R4K_SOFTMMU_MMU_IDX) >>> 0;
+  const words = [
+    opImm20(OPS.tci_movi, 2, oi),
+    opReg(OPS.tci_qemu_st_rrr, 0, 1, 2),
+    opMem(OPS.st, 8, RV64_ENV_RELATIVE_BASE_REG, 0),
+    opReg(OPS.tci_qemu_st_rrr, 9, 1, 2),
+    OPS.exit_tb,
+  ];
+
+  return {
+    opCount: words.length,
+    generatedOutputAvailable: true,
+    generatedOutputSize: words.length * 4,
+    words,
+    relativeBase: 0x1000,
+    guestInstructions: 1,
+  };
+}
+
 const r4s5bCases = [
   {
     name: "r4s5c-valid-load-enters-generic-softmmu-lowering",
@@ -7875,7 +7957,7 @@ const r4s5bCases = [
     name: "r4s21-direct-memory-multi-access-admitted",
     expectedReason: null,
     expectedPath: "generated",
-    expectedInlineTlbHitLoads: 2,
+    expectedInlineTlbHitLoads: 3,
     expectedInlineTlbHitStores: 0,
     expectedSoftmmuLoweredOps: 2,
     metadata: r4s8MultiMemoryMetadata(["load", "load"], {
@@ -7904,8 +7986,8 @@ const r4s5bCases = [
     name: "r4s21b-x86-env-direct-fields-multi-access-admitted",
     expectedReason: null,
     expectedPath: "generated",
-    expectedInlineTlbHitLoads: 1,
-    expectedInlineTlbHitStores: 1,
+    expectedInlineTlbHitLoads: 2,
+    expectedInlineTlbHitStores: 3,
     expectedSoftmmuLoweredOps: 2,
     metadata: r4s8MultiMemoryMetadata(["load", "store"], {
       prefixWords: [
@@ -7963,6 +8045,15 @@ const r4s5bCases = [
     ]),
   },
   {
+    name: "r4s8-store-direct-env-load-store-store-admitted",
+    expectedReason: null,
+    expectedPath: "generated",
+    expectedInlineTlbHitLoads: 1,
+    expectedInlineTlbHitStores: 3,
+    expectedSoftmmuLoweredOps: 3,
+    metadata: r4s8StoreDirectEnvLoadStoreStoreMetadata(),
+  },
+  {
     name: "r4s8-branchy-multi-access-rejects-with-attribution",
     expectedReason: "selected-body-control-flow-unsupported",
     expectedMultiAccessAttribution: {
@@ -7974,6 +8065,15 @@ const r4s5bCases = [
       storeBeforeLaterGuardCanFail: true,
     },
     metadata: r4s8MultiMemoryMetadata(["store", "branch", "load"]),
+  },
+  {
+    name: "r4s8-direct-env-store-multi-access-admitted",
+    expectedReason: null,
+    expectedPath: "generated",
+    expectedInlineTlbHitLoads: 0,
+    expectedInlineTlbHitStores: 3,
+    expectedSoftmmuLoweredOps: 2,
+    metadata: r4s8StoreDirectEnvStoreStoreMetadata(),
   },
   {
     name: "r4s5b-unproven-oi-rejects-before-inline-ram",
