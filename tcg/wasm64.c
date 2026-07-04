@@ -142,6 +142,46 @@ typedef enum TCGWasm64LiveGeneratedExecRejectReason {
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SHAPE_UNSUPPORTED,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_TB_IDENTITY_MISSING_OR_STALE,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_REJECTED,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_NO_MEMORY,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_INVALIDATED,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_OUTPUT_MISSING,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_MODULE_ERROR,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_EMIT_ERROR,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_VALIDATE_ERROR,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_COMPILE_ERROR,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_INSTANTIATE_ERROR,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_EXECUTE_ERROR,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_ERROR,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_READ_OUTPUT,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_CHECKSUM,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_BUILD,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_MODULE_ASSEMBLY,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_VALIDATE,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_STATE_INIT,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_COMPILE,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_INSTANTIATE,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_EXECUTE,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_RESULT_WRITE,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_ERROR,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_ENV_RELATIVE,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_CONDITION,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_BRANCH_TARGET,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_IN_RANGE_BRANCH,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_EXTRACT,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_DEPOSIT,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_OPCODE,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_NO_TERMINAL,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BYTE_ASSEMBLY_ERROR,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BYTE_BIGINT,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BYTE_NONNUMERIC,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BYTE_NONINTEGER,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BYTE_OUT_OF_RANGE,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_STATUS_NOT_DISPATCH,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_RET_ZERO,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_GUEST_INSN_MISMATCH,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_COUNTER_MISMATCH,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_CHAIN_MISMATCH,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_HELPER_ESCAPE,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT__MAX,
 } TCGWasm64LiveGeneratedExecRejectReason;
 
@@ -1667,6 +1707,14 @@ EM_JS(int, tcg_wasm64_one_tb_differential_js,
     }
 
     try {
+        let generatedInstructions;
+        try {
+            generatedInstructions = buildGeneratedInstructions(words);
+        } catch (error) {
+            setResult(0, 13n);
+            return 13;
+        }
+
         const bytes = Uint8Array.from([
             0x00, 0x61, 0x73, 0x6d,
             0x01, 0x00, 0x00, 0x00,
@@ -2475,7 +2523,8 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
       (uintptr_t context_arg, uintptr_t scratch_arg, uintptr_t counters_arg,
        uintptr_t exit_arg, uintptr_t result_arg, uintptr_t tb_arg,
        uintptr_t env_arg, uint64_t guest_insns_arg,
-       uintptr_t generated_output_arg, uint32_t generated_output_size_arg), {
+       uintptr_t generated_output_arg, uint32_t generated_output_size_arg,
+       uint32_t generated_output_checksum_arg), {
     if (typeof wasmMemory === "undefined" || !wasmMemory) {
         return 1;
     }
@@ -2490,28 +2539,46 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
     const guestInsns = BigInt(guest_insns_arg);
     const generatedOutputPtr = Number(generated_output_arg);
     const generatedOutputSize = Number(generated_output_size_arg);
+    const generatedOutputChecksum = Number(generated_output_checksum_arg) >>> 0;
     const stackPtr = scratch + 0x3000;
     const statusDispatch = 2n;
     const statusUnsupported = 6n;
     const valueI64 = 0x7e;
-    const expectedShape = [
-        "ld32u", "tci_movi", "tci_setcond32", "brcond", "tci_movi",
-        "st8", "ld", "tci_movi", "add", "st", "goto_tb",
-    ];
     const envRelativeBaseReg = 14;
     const envRelativeMinOffset = -16;
     const envRelativeMaxExclusive = 0x120;
+    let unexpectedPhase = 0;
     const ops = {
+        call: 2,
         brcond: 4,
+        mb: 5,
+        mov: 6,
         add: 7,
+        and: 8,
+        deposit: 16,
+        extract: 22,
         ld32u: 28,
+        ld32s: 29,
         ld: 30,
+        mul: 32,
+        neg: 38,
+        or: 42,
+        setcond: 49,
+        sextract: 50,
+        shl: 51,
+        shr: 52,
         st8: 53,
+        st32: 55,
         st: 56,
+        sub: 57,
+        xor: 58,
         exit_tb: 72,
         goto_tb: 73,
         tci_movi: 125,
+        tci_movl: 126,
         tci_setcond32: 136,
+        tci_qemu_ld_rrr: 138,
+        tci_qemu_st_rrr: 139,
     };
 
     function encodeU32(value) {
@@ -2602,8 +2669,16 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         return [...lhs, ...rhs, 0x7c];
     }
 
+    function i64Binary(lhs, rhs, opcode) {
+        return [...lhs, ...rhs, opcode];
+    }
+
     function i32WrapI64(expr) {
         return [...expr, 0xa7];
+    }
+
+    function i64ExtendI32S(expr) {
+        return [...expr, 0xac];
     }
 
     function i64ExtendI32U(expr) {
@@ -2626,6 +2701,10 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         return [...address, ...value, 0x3a, ...memArg(0, 0)];
     }
 
+    function i32Store(address, value) {
+        return [...address, ...value, 0x36, ...memArg(2, 0)];
+    }
+
     function i64LoadAtPtr(ptrLocal, offset) {
         return [...localGet(ptrLocal), 0x29, ...memArg(3, offset)];
     }
@@ -2640,6 +2719,10 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
 
     function addressAdd(base, offset) {
         return i64Add(base, i64Const(offset));
+    }
+
+    function returnExpr(expr) {
+        return [...expr, 0x0f];
     }
 
     function incrementCounter(ptrLocal, offset, value) {
@@ -2670,6 +2753,64 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         return "unknown";
     }
 
+    function buildErrorStatus(error) {
+        const message = error && error.message ? String(error.message) :
+            String(error);
+
+        if (message.includes("env-relative memory")) {
+            return 19;
+        }
+        if (message.includes("condition")) {
+            return 20;
+        }
+        if (message.includes("branch target")) {
+            return 21;
+        }
+        if (message.includes("in-range branch")) {
+            return 22;
+        }
+        if (message.includes("extract")) {
+            return 23;
+        }
+        if (message.includes("deposit")) {
+            return 24;
+        }
+        if (message.includes("opcode")) {
+            return 25;
+        }
+        if (message.includes("no terminal")) {
+            return 26;
+        }
+        return 13;
+    }
+
+    function unexpectedStatusForPhase() {
+        switch (unexpectedPhase) {
+        case 1:
+            return 27;
+        case 2:
+            return 28;
+        case 3:
+            return 29;
+        case 4:
+            return 30;
+        case 5:
+            return 31;
+        case 6:
+            return 32;
+        case 7:
+            return 33;
+        case 8:
+            return 34;
+        case 9:
+            return 35;
+        case 10:
+            return 36;
+        default:
+            return 12;
+        }
+    }
+
     function readGeneratedOutputWords() {
         if (generatedOutputPtr === 0 || generatedOutputSize === 0 ||
             generatedOutputSize % 4 !== 0) {
@@ -2683,10 +2824,94 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         return words;
     }
 
-    function generatedOutputShapeSupported(words) {
-        const shape = words.map((insn) => opName(bits(insn >>> 0, 0, 8)));
-        return shape.length === expectedShape.length &&
-               shape.every((item, index) => item === expectedShape[index]);
+    function checksumByte(checksum, value) {
+        let current = Number(checksum) >>> 0;
+        if (current === 0) {
+            current = 2166136261;
+        }
+        current ^= Number(value) & 0xff;
+        return Math.imul(current, 16777619) >>> 0;
+    }
+
+    function checksumGeneratedOutput(words) {
+        let checksum = 0;
+        for (const word of words) {
+            checksum = checksumByte(checksum, word);
+            checksum = checksumByte(checksum, word >>> 8);
+            checksum = checksumByte(checksum, word >>> 16);
+            checksum = checksumByte(checksum, word >>> 24);
+        }
+        return checksum >>> 0;
+    }
+
+    function compare32Expr(lhs, rhs, condition) {
+        switch (condition) {
+        case 0:
+            return [0x41, 0x00];
+        case 1:
+            return [0x41, 0x01];
+        case 8:
+            return [...lhs, ...rhs, 0x46];
+        case 9:
+            return [...lhs, ...rhs, 0x47];
+        case 12:
+            return [...lhs, ...rhs, 0x71, 0x45];
+        case 13:
+            return [...lhs, ...rhs, 0x71, 0x45, 0x45];
+        case 2:
+            return [...lhs, ...rhs, 0x48];
+        case 3:
+            return [...lhs, ...rhs, 0x4e];
+        case 6:
+            return [...lhs, ...rhs, 0x4a];
+        case 7:
+            return [...lhs, ...rhs, 0x4c];
+        case 10:
+            return [...lhs, ...rhs, 0x49];
+        case 11:
+            return [...lhs, ...rhs, 0x4f];
+        case 14:
+            return [...lhs, ...rhs, 0x4b];
+        case 15:
+            return [...lhs, ...rhs, 0x4d];
+        default:
+            return null;
+        }
+    }
+
+    function compare64Expr(lhs, rhs, condition) {
+        switch (condition) {
+        case 0:
+            return [0x41, 0x00];
+        case 1:
+            return [0x41, 0x01];
+        case 8:
+            return [...lhs, ...rhs, 0x51];
+        case 9:
+            return [...lhs, ...rhs, 0x52];
+        case 12:
+            return [...lhs, ...rhs, 0x83, 0x50];
+        case 13:
+            return [...lhs, ...rhs, 0x83, 0x50, 0x45];
+        case 2:
+            return [...lhs, ...rhs, 0x53];
+        case 3:
+            return [...lhs, ...rhs, 0x59];
+        case 6:
+            return [...lhs, ...rhs, 0x55];
+        case 7:
+            return [...lhs, ...rhs, 0x57];
+        case 10:
+            return [...lhs, ...rhs, 0x54];
+        case 11:
+            return [...lhs, ...rhs, 0x5a];
+        case 14:
+            return [...lhs, ...rhs, 0x56];
+        case 15:
+            return [...lhs, ...rhs, 0x58];
+        default:
+            return null;
+        }
     }
 
     function envRelativeOffset(insn, r1, size) {
@@ -2721,7 +2946,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                 ...i32StoreAtPtr(exitPtr, 0, i32Const(Number(statusUnsupported))),
                 ...i64StoreAtPtr(exitPtr, 32, i64Const(0n)),
                 ...incrementCounter(countersPtr, 168, 1),
-                ...i64Const(statusUnsupported),
+                ...returnExpr(i64Const(statusUnsupported)),
             ];
         }
 
@@ -2751,6 +2976,11 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                     i32Load(addressAdd(localGet(regLocal(r1)),
                                        envRelativeOffset(insn, r1, 4))))));
                 inlineLoads++;
+            } else if (opc === ops.ld32s) {
+                emitted.push(...localSet(regLocal(r0), i64ExtendI32S(
+                    i32Load(addressAdd(localGet(regLocal(r1)),
+                                       envRelativeOffset(insn, r1, 4))))));
+                inlineLoads++;
             } else if (opc === ops.ld) {
                 emitted.push(...localSet(regLocal(r0),
                     i64Load(addressAdd(localGet(regLocal(r1)),
@@ -2759,16 +2989,31 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
             } else if (opc === ops.tci_movi) {
                 emitted.push(...localSet(regLocal(r0),
                                          i64Const(sextract(insn, 12, 20))));
+            } else if (opc === ops.tci_movl) {
+                emitted.push(...localSet(regLocal(r0),
+                    i64Load(i64Const(BigInt(tbPtr + currentTbPtr +
+                                            sextract(insn, 12, 20))))));
             } else if (opc === ops.tci_setcond32) {
                 const condition = bits(insn, 20, 4);
-                if (condition !== 2) {
+                const comparison = compare32Expr(
+                    i32WrapI64(localGet(regLocal(r1))),
+                    i32WrapI64(localGet(regLocal(r2))),
+                    condition);
+                if (comparison === null) {
                     throw new Error("unsupported live generated condition");
                 }
-                emitted.push(...localSet(regLocal(r0), i64ExtendI32U([
-                    ...i32WrapI64(localGet(regLocal(r1))),
-                    ...i32WrapI64(localGet(regLocal(r2))),
-                    0x48,
-                ])));
+                emitted.push(...localSet(regLocal(r0),
+                                         i64ExtendI32U(comparison)));
+            } else if (opc === ops.setcond) {
+                const condition = bits(insn, 20, 4);
+                const comparison = compare64Expr(
+                    localGet(regLocal(r1)), localGet(regLocal(r2)),
+                    condition);
+                if (comparison === null) {
+                    throw new Error("unsupported live generated condition");
+                }
+                emitted.push(...localSet(regLocal(r0),
+                                         i64ExtendI32U(comparison)));
             } else if (opc === ops.brcond) {
                 const targetOffset = currentTbPtr + sextract(insn, 12, 20);
                 const targetIndex = targetOffset / 4;
@@ -2793,17 +3038,93 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                                envRelativeOffset(insn, r1, 1)),
                     i32WrapI64(localGet(regLocal(r0)))));
                 inlineStores++;
+            } else if (opc === ops.st32) {
+                emitted.push(...i32Store(
+                    addressAdd(localGet(regLocal(r1)),
+                               envRelativeOffset(insn, r1, 4)),
+                    i32WrapI64(localGet(regLocal(r0)))));
+                inlineStores++;
             } else if (opc === ops.st) {
                 emitted.push(...i64Store(
                     addressAdd(localGet(regLocal(r1)),
                                envRelativeOffset(insn, r1, 8)),
                     localGet(regLocal(r0))));
                 inlineStores++;
-            } else if (opc === ops.add) {
-                emitted.push(...localSet(regLocal(r0), i64Add(
-                    localGet(regLocal(r1)), localGet(regLocal(r2)))));
+            } else if (opc === ops.add || opc === ops.sub ||
+                       opc === ops.mul || opc === ops.and ||
+                       opc === ops.or || opc === ops.xor ||
+                       opc === ops.shl || opc === ops.shr) {
+                const opByte = opc === ops.add ? 0x7c :
+                               opc === ops.sub ? 0x7d :
+                               opc === ops.mul ? 0x7e :
+                               opc === ops.and ? 0x83 :
+                               opc === ops.or ? 0x84 :
+                               opc === ops.xor ? 0x85 :
+                               opc === ops.shl ? 0x86 : 0x88;
+                emitted.push(...localSet(regLocal(r0), i64Binary(
+                    localGet(regLocal(r1)), localGet(regLocal(r2)), opByte)));
+            } else if (opc === ops.mov) {
+                emitted.push(...localSet(regLocal(r0),
+                                         localGet(regLocal(r1))));
+            } else if (opc === ops.mb) {
+                continue;
+            } else if (opc === ops.neg) {
+                emitted.push(...localSet(regLocal(r0), i64Binary(
+                    i64Const(0n), localGet(regLocal(r1)), 0x7d)));
+            } else if (opc === ops.extract || opc === ops.sextract) {
+                const pos = bits(insn, 16, 6);
+                const len = bits(insn, 22, 6);
+                if (len === 0 || pos + len > 64) {
+                    throw new Error("unsupported live generated extract");
+                }
+                if (opc === ops.extract) {
+                    const mask = len === 64 ? -1n :
+                        ((1n << BigInt(len)) - 1n);
+                    emitted.push(...localSet(regLocal(r0), [
+                        ...localGet(regLocal(r1)),
+                        ...i64Const(pos),
+                        0x88,
+                        ...i64Const(mask),
+                        0x83,
+                    ]));
+                } else {
+                    const shift = 64 - pos - len;
+                    emitted.push(...localSet(regLocal(r0), [
+                        ...localGet(regLocal(r1)),
+                        ...i64Const(shift),
+                        0x86,
+                        ...i64Const(shift),
+                        0x87,
+                    ]));
+                }
+            } else if (opc === ops.deposit) {
+                const pos = bits(insn, 20, 6);
+                const len = bits(insn, 26, 6);
+                if (len === 0 || pos + len > 64) {
+                    throw new Error("unsupported live generated deposit");
+                }
+                const mask = len === 64 ? -1n :
+                    ((1n << BigInt(len)) - 1n);
+                const clearMask = BigInt.asUintN(
+                    64, ~(BigInt.asUintN(64, mask) << BigInt(pos)));
+                emitted.push(...localSet(regLocal(r0), [
+                    ...localGet(regLocal(r1)),
+                    ...i64Const(clearMask),
+                    0x83,
+                    ...localGet(regLocal(r2)),
+                    ...i64Const(mask),
+                    0x83,
+                    ...i64Const(pos),
+                    0x86,
+                    0x84,
+                ]));
+            } else if (opc === ops.tci_qemu_ld_rrr ||
+                       opc === ops.tci_qemu_st_rrr ||
+                       opc === ops.call) {
+                emitted.push(...returnUnsupported());
+                break;
             } else {
-                throw new Error(`unsupported live generated opcode ${opc}`);
+                throw new Error(`unsupported live generated opcode ${opc} (${opName(opc)})`);
             }
         }
 
@@ -2833,50 +3154,89 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
     }
 
     try {
+        unexpectedPhase = 1;
         const words = readGeneratedOutputWords();
         if (!words || words.length === 0) {
             setResult(0, 4n);
             return 4;
         }
-        if (!generatedOutputShapeSupported(words)) {
-            setResult(0, 5n);
-            return 5;
+        unexpectedPhase = 2;
+        if (checksumGeneratedOutput(words) !== generatedOutputChecksum) {
+            HEAPU32[exit / 4] = 8;
+            setResult(0, 3n);
+            return 3;
         }
-        for (let i = 0; i < words.length; i++) {
-            if ((HEAPU32[tbPtr / 4 + i] >>> 0) !== words[i]) {
-                HEAPU32[exit / 4] = 8;
-                setResult(0, 3n);
-                return 3;
+
+        let generatedInstructions;
+        unexpectedPhase = 3;
+        try {
+            generatedInstructions = buildGeneratedInstructions(words);
+        } catch (error) {
+            const status = buildErrorStatus(error);
+            setResult(0, BigInt(status));
+            return status;
+        }
+
+        let bytes;
+        unexpectedPhase = 4;
+        try {
+            const moduleBytes = [
+                0x00, 0x61, 0x73, 0x6d,
+                0x01, 0x00, 0x00, 0x00,
+                ...section(1, vector([
+                    functionType([valueI64], [valueI64]),
+                ])),
+                ...section(2, vector([
+                    [
+                        ...name("env"), ...name("memory"),
+                        0x02, 0x07, 0x00, 0x80, 0x80, 0x10,
+                    ],
+                ])),
+                ...section(3, vector([[0x00]])),
+                ...section(7, vector([
+                    [...name("wasmjit_run"), 0x00, ...encodeU32(0)],
+                ])),
+                ...section(10, vector([
+                    functionBody(generatedInstructions, [
+                        { count: 20, type: valueI64 },
+                    ]),
+                ])),
+            ];
+            for (let i = 0; i < moduleBytes.length; i++) {
+                const byte = moduleBytes[i];
+                if (typeof byte === "bigint") {
+                    setResult(0, 15n);
+                    setResult(5, BigInt(i));
+                    return 15;
+                }
+                if (typeof byte !== "number" || !Number.isFinite(byte)) {
+                    setResult(0, 16n);
+                    setResult(5, BigInt(i));
+                    return 16;
+                }
+                if (!Number.isInteger(byte)) {
+                    setResult(0, 17n);
+                    setResult(5, BigInt(i));
+                    return 17;
+                }
+                if (byte < 0 || byte > 0xff) {
+                    setResult(0, 18n);
+                    setResult(5, BigInt(i));
+                    return 18;
+                }
             }
+            bytes = Uint8Array.from(moduleBytes);
+        } catch (error) {
+            setResult(0, 14n);
+            return 14;
         }
-
-        const bytes = Uint8Array.from([
-            0x00, 0x61, 0x73, 0x6d,
-            0x01, 0x00, 0x00, 0x00,
-            ...section(1, vector([
-                functionType([valueI64], [valueI64]),
-            ])),
-            ...section(2, vector([
-                [
-                    ...name("env"), ...name("memory"),
-                    0x02, 0x07, 0x00, 0x80, 0x80, 0x10,
-                ],
-            ])),
-            ...section(3, vector([[0x00]])),
-            ...section(7, vector([
-                [...name("wasmjit_run"), 0x00, ...encodeU32(0)],
-            ])),
-            ...section(10, vector([
-                functionBody(buildGeneratedInstructions(words), [
-                    { count: 20, type: valueI64 },
-                ]),
-            ])),
-        ]);
+        unexpectedPhase = 5;
         if (!WebAssembly.validate(bytes)) {
-            setResult(0, 7n);
-            return 7;
+            setResult(0, 8n);
+            return 8;
         }
 
+        unexpectedPhase = 6;
         for (let i = 0; i < 192 / 8; i++) {
             HEAPU64[counters / 8 + i] = 0n;
         }
@@ -2888,21 +3248,43 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         HEAPU64[context / 8 + 3] = BigInt(counters);
         HEAPU64[context / 8 + 4] = BigInt(exit);
 
+        unexpectedPhase = 7;
         const compileStart = performance.now();
-        const module = new WebAssembly.Module(bytes);
+        let module;
+        try {
+            module = new WebAssembly.Module(bytes);
+        } catch (error) {
+            setResult(0, 9n);
+            return 9;
+        }
         const compileNs = BigInt(Math.round(
             (performance.now() - compileStart) * 1000000));
+        unexpectedPhase = 8;
         const instantiateStart = performance.now();
-        const instance = new WebAssembly.Instance(module, {
-            env: { memory: wasmMemory },
-        });
+        let instance;
+        try {
+            instance = new WebAssembly.Instance(module, {
+                env: { memory: wasmMemory },
+            });
+        } catch (error) {
+            setResult(0, 10n);
+            return 10;
+        }
         const instantiateNs = BigInt(Math.round(
             (performance.now() - instantiateStart) * 1000000));
+        unexpectedPhase = 9;
         const generatedStart = performance.now();
-        const generatedStatus = instance.exports.wasmjit_run(BigInt(context));
+        let generatedStatus;
+        try {
+            generatedStatus = instance.exports.wasmjit_run(BigInt(context));
+        } catch (error) {
+            setResult(0, 11n);
+            return 11;
+        }
         const generatedNs = BigInt(Math.round(
             (performance.now() - generatedStart) * 1000000));
 
+        unexpectedPhase = 10;
         HEAPU64[counters / 8 + 2] = generatedNs;
         HEAPU64[counters / 8 + 8] = compileNs;
         HEAPU64[counters / 8 + 9] = instantiateNs;
@@ -2914,8 +3296,12 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         setResult(5, BigInt(words.length));
         return 0;
     } catch (error) {
-        setResult(0, 6n);
-        return 6;
+        try {
+            setResult(0, BigInt(unexpectedStatusForPhase()));
+        } catch (nestedError) {
+            /* Nothing else can be reported to the C caller. */
+        }
+        return unexpectedStatusForPhase();
     }
 });
 
@@ -4475,6 +4861,24 @@ static bool tcg_wasm64_generated_terminal_parse(
     return false;
 }
 
+static bool tcg_wasm64_live_generated_exec_terminal_supported(
+    const TCGWasm64TBMetadata *metadata)
+{
+    TCGWasm64GeneratedTerminal terminal;
+
+    if (!tcg_wasm64_generated_terminal_parse(metadata, &terminal)) {
+        return false;
+    }
+
+    /*
+     * R4p only admits chainable TBs into the live generated execution path.
+     * exit_tb-only bodies remain deterministic-emitter coverage until the
+     * live run loop can publish an exit result without pretending it is a
+     * dispatch target.
+     */
+    return terminal.op == INDEX_op_goto_tb;
+}
+
 static void tcg_wasm64_live_generated_exec_probe_hotset_target(
     const void *tb_ptr, const TCGWasm64TBMetadata *metadata,
     const TranslationBlock *tb)
@@ -5220,6 +5624,86 @@ static const char *tcg_wasm64_live_generated_exec_reject_reason_name(
         return "tb-identity-missing-or-stale";
     case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_REJECTED:
         return "generated-exec-rejected";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_NO_MEMORY:
+        return "generated-exec-js-no-memory";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_INVALIDATED:
+        return "generated-exec-js-invalidated";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_OUTPUT_MISSING:
+        return "generated-exec-js-output-missing";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_MODULE_ERROR:
+        return "generated-exec-js-module-error";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_EMIT_ERROR:
+        return "generated-exec-js-emit-error";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_VALIDATE_ERROR:
+        return "generated-exec-js-validate-error";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_COMPILE_ERROR:
+        return "generated-exec-js-compile-error";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_INSTANTIATE_ERROR:
+        return "generated-exec-js-instantiate-error";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_EXECUTE_ERROR:
+        return "generated-exec-js-execute-error";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_ERROR:
+        return "generated-exec-js-unexpected-error";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_READ_OUTPUT:
+        return "generated-exec-js-unexpected-read-output";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_CHECKSUM:
+        return "generated-exec-js-unexpected-checksum";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_BUILD:
+        return "generated-exec-js-unexpected-build";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_MODULE_ASSEMBLY:
+        return "generated-exec-js-unexpected-module-assembly";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_VALIDATE:
+        return "generated-exec-js-unexpected-validate";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_STATE_INIT:
+        return "generated-exec-js-unexpected-state-init";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_COMPILE:
+        return "generated-exec-js-unexpected-compile";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_INSTANTIATE:
+        return "generated-exec-js-unexpected-instantiate";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_EXECUTE:
+        return "generated-exec-js-unexpected-execute";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_RESULT_WRITE:
+        return "generated-exec-js-unexpected-result-write";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_ERROR:
+        return "generated-exec-js-build-error";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_ENV_RELATIVE:
+        return "generated-exec-js-build-env-relative";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_CONDITION:
+        return "generated-exec-js-build-condition";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_BRANCH_TARGET:
+        return "generated-exec-js-build-branch-target";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_IN_RANGE_BRANCH:
+        return "generated-exec-js-build-in-range-branch";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_EXTRACT:
+        return "generated-exec-js-build-extract";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_DEPOSIT:
+        return "generated-exec-js-build-deposit";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_OPCODE:
+        return "generated-exec-js-build-opcode";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_NO_TERMINAL:
+        return "generated-exec-js-build-no-terminal";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BYTE_ASSEMBLY_ERROR:
+        return "generated-exec-js-byte-assembly-error";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BYTE_BIGINT:
+        return "generated-exec-js-byte-bigint";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BYTE_NONNUMERIC:
+        return "generated-exec-js-byte-nonnumeric";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BYTE_NONINTEGER:
+        return "generated-exec-js-byte-noninteger";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BYTE_OUT_OF_RANGE:
+        return "generated-exec-js-byte-out-of-range";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_STATUS_NOT_DISPATCH:
+        return "generated-exec-status-not-dispatch";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_RET_ZERO:
+        return "generated-exec-ret-zero";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_GUEST_INSN_MISMATCH:
+        return "generated-exec-guest-insn-mismatch";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_COUNTER_MISMATCH:
+        return "generated-exec-counter-mismatch";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_CHAIN_MISMATCH:
+        return "generated-exec-chain-mismatch";
+    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_HELPER_ESCAPE:
+        return "generated-exec-helper-escape";
     default:
         return "unknown";
     }
@@ -5242,6 +5726,167 @@ tcg_wasm64_live_generated_exec_reject_reason(const char *reason)
     if (g_strcmp0(reason, "tb-identity-missing-or-stale") == 0) {
         return
             TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_TB_IDENTITY_MISSING_OR_STALE;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-no-memory") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_NO_MEMORY;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-invalidated") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_INVALIDATED;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-output-missing") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_OUTPUT_MISSING;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-module-error") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_MODULE_ERROR;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-emit-error") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_EMIT_ERROR;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-validate-error") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_VALIDATE_ERROR;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-compile-error") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_COMPILE_ERROR;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-instantiate-error") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_INSTANTIATE_ERROR;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-execute-error") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_EXECUTE_ERROR;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-unexpected-error") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_ERROR;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-unexpected-read-output") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_READ_OUTPUT;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-unexpected-checksum") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_CHECKSUM;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-unexpected-build") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_BUILD;
+    }
+    if (g_strcmp0(reason,
+                  "generated-exec-js-unexpected-module-assembly") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_MODULE_ASSEMBLY;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-unexpected-validate") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_VALIDATE;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-unexpected-state-init") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_STATE_INIT;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-unexpected-compile") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_COMPILE;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-unexpected-instantiate") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_INSTANTIATE;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-unexpected-execute") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_EXECUTE;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-unexpected-result-write") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_UNEXPECTED_RESULT_WRITE;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-build-error") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_ERROR;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-build-env-relative") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_ENV_RELATIVE;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-build-condition") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_CONDITION;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-build-branch-target") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_BRANCH_TARGET;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-build-in-range-branch") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_IN_RANGE_BRANCH;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-build-extract") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_EXTRACT;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-build-deposit") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_DEPOSIT;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-build-opcode") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_OPCODE;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-build-no-terminal") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BUILD_NO_TERMINAL;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-byte-assembly-error") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BYTE_ASSEMBLY_ERROR;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-byte-bigint") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BYTE_BIGINT;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-byte-nonnumeric") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BYTE_NONNUMERIC;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-byte-noninteger") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BYTE_NONINTEGER;
+    }
+    if (g_strcmp0(reason, "generated-exec-js-byte-out-of-range") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_JS_BYTE_OUT_OF_RANGE;
+    }
+    if (g_strcmp0(reason, "generated-exec-status-not-dispatch") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_STATUS_NOT_DISPATCH;
+    }
+    if (g_strcmp0(reason, "generated-exec-ret-zero") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_RET_ZERO;
+    }
+    if (g_strcmp0(reason, "generated-exec-guest-insn-mismatch") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_GUEST_INSN_MISMATCH;
+    }
+    if (g_strcmp0(reason, "generated-exec-counter-mismatch") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_COUNTER_MISMATCH;
+    }
+    if (g_strcmp0(reason, "generated-exec-chain-mismatch") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_CHAIN_MISMATCH;
+    }
+    if (g_strcmp0(reason, "generated-exec-helper-escape") == 0) {
+        return
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_HELPER_ESCAPE;
     }
     return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_REJECTED;
 }
@@ -5386,6 +6031,113 @@ static bool tcg_wasm64_live_generated_exec_reject(
     return false;
 }
 
+static const char *tcg_wasm64_live_generated_exec_failure_reason(
+    uint64_t result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT__MAX],
+    const TCGWasm64RunCounters *run_counters,
+    const TCGWasm64RunExit *exit,
+    uint64_t guest_insns)
+{
+    switch (result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS]) {
+    case 0:
+        break;
+    case 1:
+        return "generated-exec-js-no-memory";
+    case 3:
+        return "generated-exec-js-invalidated";
+    case 4:
+        return "generated-exec-js-output-missing";
+    case 6:
+        return "generated-exec-js-module-error";
+    case 7:
+        return "generated-exec-js-emit-error";
+    case 8:
+        return "generated-exec-js-validate-error";
+    case 9:
+        return "generated-exec-js-compile-error";
+    case 10:
+        return "generated-exec-js-instantiate-error";
+    case 11:
+        return "generated-exec-js-execute-error";
+    case 12:
+        return "generated-exec-js-unexpected-error";
+    case 27:
+        return "generated-exec-js-unexpected-read-output";
+    case 28:
+        return "generated-exec-js-unexpected-checksum";
+    case 29:
+        return "generated-exec-js-unexpected-build";
+    case 30:
+        return "generated-exec-js-unexpected-module-assembly";
+    case 31:
+        return "generated-exec-js-unexpected-validate";
+    case 32:
+        return "generated-exec-js-unexpected-state-init";
+    case 33:
+        return "generated-exec-js-unexpected-compile";
+    case 34:
+        return "generated-exec-js-unexpected-instantiate";
+    case 35:
+        return "generated-exec-js-unexpected-execute";
+    case 36:
+        return "generated-exec-js-unexpected-result-write";
+    case 13:
+        return "generated-exec-js-build-error";
+    case 19:
+        return "generated-exec-js-build-env-relative";
+    case 20:
+        return "generated-exec-js-build-condition";
+    case 21:
+        return "generated-exec-js-build-branch-target";
+    case 22:
+        return "generated-exec-js-build-in-range-branch";
+    case 23:
+        return "generated-exec-js-build-extract";
+    case 24:
+        return "generated-exec-js-build-deposit";
+    case 25:
+        return "generated-exec-js-build-opcode";
+    case 26:
+        return "generated-exec-js-build-no-terminal";
+    case 14:
+        return "generated-exec-js-byte-assembly-error";
+    case 15:
+        return "generated-exec-js-byte-bigint";
+    case 16:
+        return "generated-exec-js-byte-nonnumeric";
+    case 17:
+        return "generated-exec-js-byte-noninteger";
+    case 18:
+        return "generated-exec-js-byte-out-of-range";
+    default:
+        return "generated-exec-rejected";
+    }
+
+    if (result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS] !=
+        TCG_WASM64_ONE_TB_STATUS_DISPATCH) {
+        return "generated-exec-status-not-dispatch";
+    }
+    if (result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_RET] == 0) {
+        return "generated-exec-ret-zero";
+    }
+    if (result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_GUEST_INSNS] !=
+        guest_insns) {
+        return "generated-exec-guest-insn-mismatch";
+    }
+    if (run_counters->generated_guest_instructions != guest_insns) {
+        return "generated-exec-counter-mismatch";
+    }
+    if (run_counters->generated_chain_length != 1) {
+        return "generated-exec-chain-mismatch";
+    }
+    if (run_counters->helper_calls != 0 ||
+        run_counters->qemu_ld_calls != 0 ||
+        run_counters->qemu_st_calls != 0 ||
+        exit->reason == TCG_WASM64_RUN_EXIT_HELPER) {
+        return "generated-exec-helper-escape";
+    }
+    return "generated-exec-rejected";
+}
+
 static bool tcg_wasm64_live_generated_exec_try(
     CPUArchState *env, const void *tb_ptr, const TCGWasm64TBMetadata *metadata,
     TCGWasm64Counters *counters, uintptr_t *ret)
@@ -5418,7 +6170,7 @@ static bool tcg_wasm64_live_generated_exec_try(
     }
     tb = tcg_tb_lookup((uintptr_t)tb_ptr);
     tcg_wasm64_live_generated_exec_probe_hotset_target(tb_ptr, metadata, tb);
-    if (!tcg_wasm64_live_one_tb_generated_output_shape_supported(metadata)) {
+    if (!tcg_wasm64_live_generated_exec_terminal_supported(metadata)) {
         return tcg_wasm64_live_generated_exec_reject(
             "selected-body-shape-unsupported", tb_ptr, metadata, NULL,
             TCG_WASM64_RUN_EXIT_UNSUPPORTED, counters, no_fallback);
@@ -5451,7 +6203,8 @@ static bool tcg_wasm64_live_generated_exec_try(
             (uintptr_t)&run_counters, (uintptr_t)&exit, (uintptr_t)result,
             (uintptr_t)tb_ptr, (uintptr_t)env, guest_insns,
             (uintptr_t)metadata->generated_output,
-            metadata->generated_output_size);
+            metadata->generated_output_size,
+            metadata->generated_output_checksum);
 
         result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] = js_status;
     }
@@ -5481,9 +6234,6 @@ static bool tcg_wasm64_live_generated_exec_try(
              guest_insns &&
          run_counters.generated_guest_instructions == guest_insns &&
          run_counters.generated_chain_length == 1 &&
-         run_counters.inline_tlb_hit_loads == TCG_WASM64_ONE_TB_MEMORY_LOADS &&
-         run_counters.inline_tlb_hit_stores ==
-             TCG_WASM64_ONE_TB_MEMORY_WRITES &&
          run_counters.helper_calls == 0 &&
          run_counters.qemu_ld_calls == 0 &&
          run_counters.qemu_st_calls == 0;
@@ -5492,17 +6242,18 @@ static bool tcg_wasm64_live_generated_exec_try(
         TCGWasm64RunExitReason reject_reason =
             exit.reason == TCG_WASM64_RUN_EXIT_INVALIDATED ?
             TCG_WASM64_RUN_EXIT_INVALIDATED : TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+        const char *reject_detail =
+            tcg_wasm64_live_generated_exec_failure_reason(
+                result, &run_counters, &exit, guest_insns);
 
-        tcg_wasm64_live_generated_exec_count_reason(
-            "generated-exec-rejected");
+        tcg_wasm64_live_generated_exec_count_reason(reject_detail);
         tcg_wasm64_live_generated_exec_count_reject(counters, reject_reason);
         tcg_wasm64_live_generated_exec_preflight_maybe_fail();
         if (no_fallback) {
-            tcg_wasm64_report_live_generated_exec_summary(
-                "generated-exec-rejected");
+            tcg_wasm64_report_live_generated_exec_summary(reject_detail);
         }
-        tcg_wasm64_live_generated_exec_fail_closed(
-            "generated-exec-rejected", no_fallback);
+        tcg_wasm64_live_generated_exec_fail_closed(reject_detail,
+                                                   no_fallback);
         return false;
     }
 

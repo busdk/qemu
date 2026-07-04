@@ -1629,6 +1629,23 @@ run that reaches a weaker marker than normal multi-user readiness.
     Engine OS proof was run or enabled; R4k deterministic slices are complete
     and R4k remains open only for later integration/performance proof work
     before R4l may run a browser speed gate.
+  - [ ] R4q - Implement live x86 in-range branch lowering inside
+    `wasmjit_run()` before any further R4l speed gate. R4p proved that the
+    current live x86 generated-output attempts reach the generic emitter but
+    fail with `generated-exec-js-build-in-range-branch=54`. Prediction:
+    lowering forward in-range `brcond` targets into internal Wasm control flow
+    or explicit hotset dispatch should change the bounded x86 preflight from
+    zero generated guest instructions to nonzero generated retirement for the
+    currently blocked metadata-backed TBs, without returning to the QEMU main
+    loop for that in-range branch. DoD: deterministic generated-output tests
+    cover at least one forward in-range branch fixture that executes generated
+    code and one fail-closed backward/self branch fixture; helper, `qemu_ld`,
+    `qemu_st`, stale metadata, and unsupported target shape failures remain
+    explicit; a current x86 Chromium bounded preflight records nonzero
+    generated guest instructions or a new precise blocker other than
+    `generated-exec-js-build-in-range-branch`; and the result records hashes,
+    browser version, command, JSON path, and timings. This item makes no speed
+    claim and does not permit a Bus Engine OS proof.
   - [ ] R4l - Run the x86_64 same-commit generic Chromium speed gate only
     after R4h-R4k have deterministic evidence. DoD: build one default-TCI
     `x86_64-softmmu` artifact and one accelerator artifact from the same
@@ -1835,6 +1852,83 @@ run that reaches a weaker marker than normal multi-user readiness.
   `478`. This accepts only target-attribution evidence, makes no speed claim,
   does not permit R4l, and points the next slice at live hotset execution for
   source and target TBs that already have generated output.
+- [x] R4p - Route supported live x86 generated-output bodies through the
+  generic per-TB/hotset emitter instead of the old exact R4i shape gate before
+  another R4l speed attempt. Prediction: this should change the bounded x86
+  preflight gate from `generated_guest_instructions=0` to nonzero generated
+  guest-instruction retirement for at least one live metadata-backed TB, while
+  preserving fail-closed rejection for unsupported source shapes and making no
+  speed claim. DoD: the live generated-exec path no longer rejects every
+  non-R4i source before emission; generated output identity, terminal shape,
+  target availability, unsupported op, helper/`qemu_ld`/`qemu_st`, and stale
+  metadata failures remain explicit aggregate reject reasons; deterministic
+  tests cover a live non-exact generated-output source accepted by the generic
+  emitter plus fail-closed unsupported and stale cases; and one bounded
+  Chromium preflight on current x86 artifacts records either nonzero generated
+  guest instructions or a new precise source-shape blocker that names the
+  unsupported mechanism. This item does not permit R4l, does not run a Bus
+  Engine OS proof, and does not optimize or accept the rejected direct-boundary
+  path.
+  Current-QEMU diagnostic 2026-07-04: after `git fetch origin`, both the main
+  QEMU checkout and this task worktree were at `origin/develop`
+  `0a847d03dd96bf790a5e8c7a262feac82557a8b8` (`wasm64: execute rv64 live
+  coverage prefixes`). Build command: `python3
+  scripts/ci/wasm-build-artifacts-local.py --out
+  /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4p-live-build-reason-artifacts-0a847d03-20260704
+  --target x86_64 --tcg-wasm64-backend --jobs 20`; hashes:
+  `qemu-system-x86_64.js`
+  `3f64de6d16974a81ea28ec7b114f110a4d8ee9999de8832344dea5077fd1d989`,
+  `qemu-system-x86_64.wasm`
+  `286fd60190b2c9651a6c26c48be8df855b2afcd30fa1187773b31c279afea00a`,
+  manifest
+  `24ebdd453bd71ec413cf02300021a9548a452088d43ee3fc3b015297cfbf7634`.
+  Checks before build: `git diff --check`, `node --check
+  scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+  scripts/ci/wasm-generated-output-equivalence-test.mjs`, and `node
+  scripts/ci/wasm64-translate-metadata-test.mjs`. Bounded Chromium
+  `149.0.7827.55` preflight wrote
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4p-live-build-reason-preflight-0a847d03-20260704/wasm-browser-smoke-result.json`
+  and timed out at `60207` ms without `QEMU_WASM_LINUX_BOOT_OK`. The runloop
+  summary still failed with `preflight-zero-generated-exec`: attempts `100`,
+  successes `0`, generated guest instructions `0`, denominator `555`, hotset
+  `goto_tb` sources `54`, metadata hits `9`, output hits `9`, stale targets
+  `45`, reject reasons `selected-body-shape-unsupported=46` and
+  `generated-exec-js-unexpected-error=54`. This rejects the slice as
+  accelerator progress; next work must classify the unexpected JS error or
+  replace the boundary with the planned long-running wasmjit run/exit path
+  rather than run another speed gate.
+  Accepted diagnostic slice 2026-07-04: the unexpected JS bucket was
+  classified without changing the fail-closed semantics. The corrected build
+  command reused the artifact directory
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4p-live-phase-attribution-artifacts-0a847d03-20260704`
+  with `--target x86_64 --tcg-wasm64-backend --jobs 20`; hashes:
+  `qemu-system-x86_64.js`
+  `20824458252c252034511fdde5387f4a4882b07e9dace160302b97ed20706b1c`,
+  `qemu-system-x86_64.wasm`
+  `44b53d36ba55d5a354f71927cd46d0a9322e46d8a511b14fa22c4b04e3a35808`,
+  manifest
+  `f6e80506fcf50a6c96de18f52e77658d915a66bd12fc90e90d9ee9a94c76db60`.
+  Checks: `git diff --check`, `node --check
+  scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+  scripts/ci/wasm64-translate-metadata-test.mjs`, and `node
+  scripts/ci/wasm-generated-output-equivalence-test.mjs` with compact output
+  saved to
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4p-live-phase-attribution-equivalence-20260704.json`
+  (`sha256:34e09ccfb5172cfe7777a8b8dee9b1a44b2d7879e7f49b4befa09ae7eee6120b`).
+  Bounded Chromium `149.0.7827.55` preflight wrote
+  `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4p-live-phase-attribution-preflight-fixed-0a847d03-20260704/wasm-browser-smoke-result.json`
+  (`sha256:a67bbaeee1ef6443e33d3cc6739b1131a21e75ff112c9bd7bc9b5e7910908553`)
+  and timed out at `60197` ms without `QEMU_WASM_LINUX_BOOT_OK`. The runloop
+  summary still reports attempts `100`, successes `0`, generated guest
+  instructions `0`, denominator `555`, hotset `goto_tb` sources `54`,
+  metadata hits `9`, output hits `9`, stale targets `45`, but the opaque
+  `generated-exec-js-unexpected-error` bucket is gone. The precise live x86
+  blocker is now `generated-exec-js-build-in-range-branch=54`, with the
+  remaining attempts at `selected-body-shape-unsupported=46`. This accepts
+  only R4p diagnostic attribution. It does not permit R4l, makes no speed
+  claim, and points the next x86 slice at in-range branch lowering/internal
+  hotset dispatch inside `wasmjit_run()` rather than another boundary-coverage
+  or smoke-speed run.
 - [x] R7 - Dispatch available RISC-V generated output from the live wasm64
   run loop before TCI fallback. DoD: when live TB metadata reports
   `tcg_wasm64_translate_generated_output_available()` and the RV64

@@ -1225,12 +1225,9 @@ function routeLiveGeneratedOutput(metadata) {
     };
   }
   const shape = decodedShape(metadata.words);
-  const selectedHotShape = metadata.opCount === R4I_LIVE_X86_SHAPE.length &&
-    shape[0] === "ld32u";
+  const terminal = shape.find((op) => op === "goto_tb" || op === "exit_tb");
 
-  if (!selectedHotShape ||
-      shape.length !== R4I_LIVE_X86_SHAPE.length ||
-      !shape.every((name, index) => name === R4I_LIVE_X86_SHAPE[index])) {
+  if (terminal !== "goto_tb") {
     return {
       ok: false,
       reason: "selected-body-shape-unsupported",
@@ -2811,6 +2808,26 @@ const fixtures = [
     ],
   },
   {
+    name: "live-x86-r4p-generic-move-logic-goto",
+    terminal: "goto_tb",
+    relativeBase: 0x4680,
+    seeds: [1],
+    guestInstructions: 3,
+    words: [
+      opImm20(OPS.tci_movi, 1, 0x123),
+      opImm20(OPS.tci_movl, 9, 0),
+      opImm20(OPS.tci_movi, 2, 0x55),
+      opReg(OPS.mov, 3, 1),
+      opReg(OPS.or, 4, 3, 2),
+      opReg(OPS.xor, 5, 4, 2),
+      opReg(OPS.and, 6, 4, 2),
+      opReg(OPS.sub, 7, 5, 6),
+      opReg(OPS.mul, 8, 7, 2),
+      OPS.mb,
+      opImm20(OPS.goto_tb, 0, -36),
+    ],
+  },
+  {
     name: "trace-goto-16",
     terminal: "goto_tb",
     relativeBase: 0x4800,
@@ -2942,6 +2959,8 @@ assert.deepEqual(
   R4I_LIVE_X86_SHAPE,
   "R4i live x86 fixture shape drifted",
 );
+const r4pGenericLiveX86Fixture = fixtures.find((fixture) =>
+  fixture.name === "live-x86-r4p-generic-move-logic-goto");
 
 const R4K_TWO_TB_HOTSET_DISPATCH_TARGET = 0x7200n;
 const r4kTwoTBHotsetSource = {
@@ -3431,8 +3450,8 @@ for (const fixture of r4kSoftmmuFixtures) {
   r4kSoftmmuResults.push(await runSoftmmuFixture(fixture));
 }
 
-assert.equal(results.length, 21);
-assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 7);
+assert.equal(results.length, 22);
+assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 8);
 assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 12);
 assert.equal(results.filter((entry) => entry.terminal === "helper").length, 2);
 const helperBoundaryResults = results.filter((entry) =>
@@ -3752,6 +3771,14 @@ const r4kLiveRoutingCases = [
     relativeBase: r4iLiveX86Fixture.relativeBase,
     guestInstructions: 1,
   }),
+  routeLiveGeneratedOutput({
+    opCount: r4pGenericLiveX86Fixture.words.length,
+    generatedOutputAvailable: true,
+    generatedOutputSize: r4pGenericLiveX86Fixture.words.length * 4,
+    words: r4pGenericLiveX86Fixture.words,
+    relativeBase: r4pGenericLiveX86Fixture.relativeBase,
+    guestInstructions: r4pGenericLiveX86Fixture.guestInstructions,
+  }),
 ];
 assert.deepEqual(
   r4kLiveRoutingCases.map((entry) => entry.reason),
@@ -3762,13 +3789,27 @@ assert.deepEqual(
     "unsupported-shape",
     "metadata-output-tb-code-mismatch",
     null,
+    null,
   ],
 );
 assert.deepEqual(
   r4kLiveRoutingCases.map((entry) => entry.generatedGuestInstructions),
-  [0, 0, 0, 0, 0, 1],
+  [0, 0, 0, 0, 0, 1, 3],
 );
 assert.equal(r4kLiveRoutingCases.at(-1).moduleValid, true);
+assert.deepEqual(r4kLiveRoutingCases.at(-1).shape, [
+  "tci_movi",
+  "tci_movl",
+  "tci_movi",
+  "mov",
+  "or",
+  "xor",
+  "and",
+  "sub",
+  "mul",
+  "mb",
+  "goto_tb",
+]);
 const r4kSoftmmuStaleOutputMismatch = r4kLiveRoutingCases.find((entry) =>
   entry.reason === "metadata-output-tb-code-mismatch");
 assert.equal(r4kSoftmmuStaleOutputMismatch.generatedGuestInstructions, 0);
