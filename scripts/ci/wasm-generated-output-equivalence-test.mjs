@@ -185,6 +185,9 @@ const MO_AMASK = 0x7 << 5;
 const MO_ALIGN_4 = 2 << 5;
 const MO_ALIGN_TLB_ONLY = 1 << 8;
 const MO_ATOM_SHIFT = 9;
+const MO_ATOM_IFALIGN_PAIR = 1 << MO_ATOM_SHIFT;
+const MO_ATOM_WITHIN16 = 2 << MO_ATOM_SHIFT;
+const MO_ATOM_SUBALIGN = 4 << MO_ATOM_SHIFT;
 const MO_ATOM_NONE = 5 << MO_ATOM_SHIFT;
 const MO_ATOM_MASK = 7 << MO_ATOM_SHIFT;
 const MO_UNSUPPORTED_HIGH_FLAG = 1 << 12;
@@ -348,6 +351,7 @@ assert.equal(MO_BSWAP, headerDefine("TCG_WASM64_MEMOP_BSWAP"));
 assert.equal(MO_AMASK, headerDefine("TCG_WASM64_MEMOP_AMASK"));
 assert.equal(MO_ALIGN_TLB_ONLY,
              headerDefine("TCG_WASM64_MEMOP_ALIGN_TLB_ONLY"));
+assert.equal(MO_ATOM_NONE, headerDefine("TCG_WASM64_MEMOP_ATOM_NONE"));
 assert.equal(MO_ATOM_MASK, headerDefine("TCG_WASM64_MEMOP_ATOM_MASK"));
 const TCG_WASM64_MEMOPIDX_SHIFT =
   headerDefine("TCG_WASM64_MEMOPIDX_SHIFT");
@@ -1030,8 +1034,7 @@ function compileSharedSoftmmuAccessOp(op, diagnostics = null) {
       i64Const(0n)),
     unsupportedReturn,
   ));
-  for (const flag of [MO_SIGN, MO_BSWAP, MO_AMASK, MO_ALIGN_TLB_ONLY,
-                      MO_ATOM_MASK]) {
+  for (const flag of [MO_SIGN, MO_BSWAP, MO_AMASK, MO_ALIGN_TLB_ONLY]) {
     code.push(...ifBlock(
       i64NeExpr(
         i64AndExpr(localGet(SHARED_SOFTMMU_LOCAL_MEMOP),
@@ -1040,6 +1043,13 @@ function compileSharedSoftmmuAccessOp(op, diagnostics = null) {
       unsupportedReturn,
     ));
   }
+  code.push(...ifBlock(
+    i64NeExpr(
+      i64AndExpr(localGet(SHARED_SOFTMMU_LOCAL_MEMOP),
+                 i64Const(BigInt(MO_ATOM_MASK))),
+      i64Const(BigInt(MO_ATOM_NONE))),
+    unsupportedReturn,
+  ));
   for (const [memop, size] of [[MO_8, 1], [MO_32, 4], [MO_64, 8]]) {
     code.push(...ifBlock(
       i64EqExpr(
@@ -2308,7 +2318,8 @@ function createState(relativeBase, words, seed) {
 
   regs[4] = 0n;
   regs[5] = 0n;
-  regs[13] = BigInt((MO_64 << TCG_WASM64_MEMOPIDX_SHIFT) |
+  regs[13] = BigInt(((MO_64 | MO_ATOM_NONE) <<
+                     TCG_WASM64_MEMOPIDX_SHIFT) |
                     R4K_SOFTMMU_MMU_IDX);
   regs[14] = BigInt(dataBase + 16);
   view.setBigUint64(ctxPtr + WASMJIT_RUN_CTX.env, BigInt(regsPtr), true);
@@ -3378,13 +3389,15 @@ function softmmuMemOpIdx(memop, mmuIdx = R4K_SOFTMMU_MMU_IDX) {
 }
 
 function softmmuAccessSize(memop) {
-  if (memop === MO_8) {
+  const size = memop & MO_SIZE;
+
+  if (size === MO_8) {
     return 1;
   }
-  if (memop === MO_32) {
+  if (size === MO_32) {
     return 4;
   }
-  if (memop === MO_64) {
+  if (size === MO_64) {
     return 8;
   }
   throw new Error(`unsupported fixture memop ${memop}`);
@@ -3648,7 +3661,8 @@ function emitSoftmmuFastPathModule(fixture) {
                localGet(SOFTMMU_LOCAL_ADDEND))));
 
   if (access === "load") {
-    const loaded = generatedMemop === MO_32
+    const generatedSize = generatedMemop & MO_SIZE;
+    const loaded = generatedSize === MO_32
       ? i64ExtendI32U(i32Load(i32WrapI64(localGet(SOFTMMU_LOCAL_HOST_ADDR))))
       : i64Load(i32WrapI64(localGet(SOFTMMU_LOCAL_HOST_ADDR)));
 
@@ -3657,11 +3671,13 @@ function emitSoftmmuFastPathModule(fixture) {
     instructions.push(...softmmuIncrementCounter(
       WASMJIT_COUNTERS.inlineTlbHitLoads));
   } else {
-    if (generatedMemop === MO_8) {
+    const generatedSize = generatedMemop & MO_SIZE;
+
+    if (generatedSize === MO_8) {
       instructions.push(...i32Store8(
         i32WrapI64(localGet(SOFTMMU_LOCAL_HOST_ADDR)),
         i32WrapI64(localGet(SOFTMMU_LOCAL_VALUE))));
-    } else if (generatedMemop === MO_32) {
+    } else if (generatedSize === MO_32) {
       instructions.push(...i32Store(
         i32WrapI64(localGet(SOFTMMU_LOCAL_HOST_ADDR)),
         i32WrapI64(localGet(SOFTMMU_LOCAL_VALUE))));
@@ -3833,16 +3849,17 @@ function readSoftmmuExit(view, exitPtr) {
 
 function applySoftmmuReferenceRamAccess(state, fixture) {
   const value = state.view.getBigUint64(state.regsPtr, true);
+  const generatedSize = fixture.generatedMemop & MO_SIZE;
 
   if (fixture.access === "load") {
-    if (fixture.generatedMemop === MO_8) {
+    if (generatedSize === MO_8) {
       state.view.setBigUint64(
         state.regsPtr, BigInt(state.view.getUint8(state.hostAddr)), true);
-    } else if (fixture.generatedMemop === MO_32) {
+    } else if (generatedSize === MO_32) {
       state.view.setBigUint64(
         state.regsPtr, BigInt(state.view.getUint32(state.hostAddr, true)),
         true);
-    } else if (fixture.generatedMemop === MO_64) {
+    } else if (generatedSize === MO_64) {
       state.view.setBigUint64(
         state.regsPtr, state.view.getBigUint64(state.hostAddr, true), true);
     } else {
@@ -3851,12 +3868,12 @@ function applySoftmmuReferenceRamAccess(state, fixture) {
     return;
   }
 
-  if (fixture.generatedMemop === MO_8) {
+  if (generatedSize === MO_8) {
     state.view.setUint8(state.hostAddr, Number(value & 0xffn));
-  } else if (fixture.generatedMemop === MO_32) {
+  } else if (generatedSize === MO_32) {
     state.view.setUint32(
       state.hostAddr, Number(value & 0xffffffffn), true);
-  } else if (fixture.generatedMemop === MO_64) {
+  } else if (generatedSize === MO_64) {
     state.view.setBigUint64(state.hostAddr, value, true);
   } else {
     throw new Error(`unsupported reference store memop ${fixture.generatedMemop}`);
@@ -4465,7 +4482,7 @@ const r4kSoftmmuFixtures = [
     name: "r4k-softmmu-ld32u-tlb-hit-ram",
     access: "load",
     fallbackReason: null,
-    generatedMemop: MO_32,
+    generatedMemop: MO_32 | MO_ATOM_NONE,
     initialRam32: 0x89abcdef,
     expectedSuccess: true,
     expectedStatus: STATUS_EXIT,
@@ -4482,7 +4499,7 @@ const r4kSoftmmuFixtures = [
     name: "r4k-softmmu-ld-tlb-hit-ram",
     access: "load",
     fallbackReason: null,
-    generatedMemop: MO_64,
+    generatedMemop: MO_64 | MO_ATOM_NONE,
     initialRam64: 0x0123456789abcdefn,
     expectedSuccess: true,
     expectedStatus: STATUS_EXIT,
@@ -4499,7 +4516,7 @@ const r4kSoftmmuFixtures = [
     name: "r4k-softmmu-st8-tlb-hit-ram",
     access: "store",
     fallbackReason: null,
-    generatedMemop: MO_8,
+    generatedMemop: MO_8 | MO_ATOM_NONE,
     storeValue: 0xaan,
     expectedSuccess: true,
     expectedStatus: STATUS_EXIT,
@@ -4516,7 +4533,7 @@ const r4kSoftmmuFixtures = [
     name: "r4k-softmmu-st-tlb-hit-ram",
     access: "store",
     fallbackReason: null,
-    generatedMemop: MO_64,
+    generatedMemop: MO_64 | MO_ATOM_NONE,
     storeValue: 0x0102030405060708n,
     expectedSuccess: true,
     expectedStatus: STATUS_EXIT,
@@ -4533,7 +4550,7 @@ const r4kSoftmmuFixtures = [
     name: "r4k-softmmu-tlb-miss",
     access: "load",
     fallbackReason: "tlb-miss",
-    generatedMemop: MO_32,
+    generatedMemop: MO_32 | MO_ATOM_NONE,
     comparator: 0x3000n,
     expectedSuccess: false,
     expectedStatus: STATUS_TLB_MISS_OR_FAULT,
@@ -4548,7 +4565,7 @@ const r4kSoftmmuFixtures = [
     name: "r4k-softmmu-mmio",
     access: "load",
     fallbackReason: "mmio",
-    generatedMemop: MO_32,
+    generatedMemop: MO_32 | MO_ATOM_NONE,
     comparatorFlags: Number(WASMJIT_TLB_CONSTANTS.forceSlow),
     slowFlags: WASMJIT_TLB_CONSTANTS.mmio,
     expectedSuccess: false,
@@ -4564,7 +4581,7 @@ const r4kSoftmmuFixtures = [
     name: "r4k-softmmu-permission-fault",
     access: "load",
     fallbackReason: "permission-fault",
-    generatedMemop: MO_32,
+    generatedMemop: MO_32 | MO_ATOM_NONE,
     comparatorFlags: Number(WASMJIT_TLB_CONSTANTS.invalidMask),
     expectedSuccess: false,
     expectedStatus: STATUS_TLB_MISS_OR_FAULT,
@@ -4579,7 +4596,7 @@ const r4kSoftmmuFixtures = [
     name: "r4k-softmmu-page-crossing",
     access: "load",
     fallbackReason: "page-crossing",
-    generatedMemop: MO_64,
+    generatedMemop: MO_64 | MO_ATOM_NONE,
     taddr: 0xffcn,
     expectedSuccess: false,
     expectedStatus: STATUS_TLB_MISS_OR_FAULT,
@@ -4595,8 +4612,8 @@ const r4kSoftmmuFixtures = [
     name: "r4k-softmmu-unsupported-memop",
     access: "load",
     fallbackReason: "unsupported-memop",
-    generatedMemop: MO_32,
-    oiMemop: MO_16,
+    generatedMemop: MO_32 | MO_ATOM_NONE,
+    oiMemop: MO_16 | MO_ATOM_NONE,
     expectedSuccess: false,
     expectedStatus: STATUS_UNSUPPORTED,
     expectedRunExitReason: "unsupported",
@@ -4610,7 +4627,7 @@ const r4kSoftmmuFixtures = [
     name: "r4k-softmmu-slow-flags",
     access: "store",
     fallbackReason: "slow-flags",
-    generatedMemop: MO_64,
+    generatedMemop: MO_64 | MO_ATOM_NONE,
     comparatorFlags: Number(WASMJIT_TLB_CONSTANTS.forceSlow),
     slowFlags: WASMJIT_TLB_CONSTANTS.watchpoint,
     expectedSuccess: false,
@@ -4626,7 +4643,7 @@ const r4kSoftmmuFixtures = [
     name: "r4k-softmmu-unmirrored-state",
     access: "load",
     fallbackReason: "unmirrored-state",
-    generatedMemop: MO_32,
+    generatedMemop: MO_32 | MO_ATOM_NONE,
     mirrorFlags: 0,
     expectedSuccess: false,
     expectedStatus: STATUS_UNSUPPORTED,
@@ -4641,7 +4658,7 @@ const r4kSoftmmuFixtures = [
     name: "r4k-softmmu-null-mirror",
     access: "load",
     fallbackReason: "null-mirror",
-    generatedMemop: MO_32,
+    generatedMemop: MO_32 | MO_ATOM_NONE,
     tlbPointer: 0,
     expectedSuccess: false,
     expectedStatus: STATUS_UNSUPPORTED,
@@ -4656,7 +4673,7 @@ const r4kSoftmmuFixtures = [
     name: "r4k-softmmu-missing-table",
     access: "load",
     fallbackReason: "missing-table",
-    generatedMemop: MO_32,
+    generatedMemop: MO_32 | MO_ATOM_NONE,
     tablePointer: 0,
     expectedSuccess: false,
     expectedStatus: STATUS_UNSUPPORTED,
@@ -4671,7 +4688,7 @@ const r4kSoftmmuFixtures = [
     name: "r4k-softmmu-stale-mmu-mirror",
     access: "load",
     fallbackReason: "stale-mmu-mirror",
-    generatedMemop: MO_32,
+    generatedMemop: MO_32 | MO_ATOM_NONE,
     mirrorMmuIdx: R4K_SOFTMMU_MMU_IDX + 1,
     expectedSuccess: false,
     expectedStatus: STATUS_UNSUPPORTED,
@@ -4686,7 +4703,7 @@ const r4kSoftmmuFixtures = [
     name: "r4k-softmmu-layout-constant-mismatch",
     access: "load",
     fallbackReason: "layout-constant-mismatch",
-    generatedMemop: MO_32,
+    generatedMemop: MO_32 | MO_ATOM_NONE,
     mirrorTargetPageBits: R4K_SOFTMMU_PAGE_BITS + 1,
     expectedSuccess: false,
     expectedStatus: STATUS_UNSUPPORTED,
@@ -4711,7 +4728,7 @@ const r6Rv64SoftmmuFixtures = [
   r6Rv64SoftmmuFixture("ld32u-tlb-hit-ram", {
     access: "load",
     fallbackReason: null,
-    generatedMemop: MO_32,
+    generatedMemop: MO_32 | MO_ATOM_NONE,
     initialRam32: 0x10203040,
     expectedSuccess: true,
     expectedStatus: STATUS_EXIT,
@@ -4727,7 +4744,7 @@ const r6Rv64SoftmmuFixtures = [
   r6Rv64SoftmmuFixture("ld-tlb-hit-ram", {
     access: "load",
     fallbackReason: null,
-    generatedMemop: MO_64,
+    generatedMemop: MO_64 | MO_ATOM_NONE,
     initialRam64: 0x0fedcba987654321n,
     expectedSuccess: true,
     expectedStatus: STATUS_EXIT,
@@ -4743,7 +4760,7 @@ const r6Rv64SoftmmuFixtures = [
   r6Rv64SoftmmuFixture("st8-tlb-hit-ram", {
     access: "store",
     fallbackReason: null,
-    generatedMemop: MO_8,
+    generatedMemop: MO_8 | MO_ATOM_NONE,
     storeValue: 0x5an,
     expectedSuccess: true,
     expectedStatus: STATUS_EXIT,
@@ -4759,7 +4776,7 @@ const r6Rv64SoftmmuFixtures = [
   r6Rv64SoftmmuFixture("st32-tlb-hit-ram", {
     access: "store",
     fallbackReason: null,
-    generatedMemop: MO_32,
+    generatedMemop: MO_32 | MO_ATOM_NONE,
     storeValue: 0x01020304n,
     expectedSuccess: true,
     expectedStatus: STATUS_EXIT,
@@ -4775,7 +4792,7 @@ const r6Rv64SoftmmuFixtures = [
   r6Rv64SoftmmuFixture("st-tlb-hit-ram", {
     access: "store",
     fallbackReason: null,
-    generatedMemop: MO_64,
+    generatedMemop: MO_64 | MO_ATOM_NONE,
     storeValue: 0xaabbccddeeff0011n,
     expectedSuccess: true,
     expectedStatus: STATUS_EXIT,
@@ -4791,7 +4808,7 @@ const r6Rv64SoftmmuFixtures = [
   r6Rv64SoftmmuFixture("tlb-miss", {
     access: "load",
     fallbackReason: "tlb-miss",
-    generatedMemop: MO_32,
+    generatedMemop: MO_32 | MO_ATOM_NONE,
     comparator: 0x3000n,
     expectedSuccess: false,
     expectedStatus: STATUS_TLB_MISS_OR_FAULT,
@@ -4805,7 +4822,7 @@ const r6Rv64SoftmmuFixtures = [
   r6Rv64SoftmmuFixture("mmio", {
     access: "load",
     fallbackReason: "mmio",
-    generatedMemop: MO_32,
+    generatedMemop: MO_32 | MO_ATOM_NONE,
     comparatorFlags: Number(WASMJIT_TLB_CONSTANTS.forceSlow),
     slowFlags: WASMJIT_TLB_CONSTANTS.mmio,
     expectedSuccess: false,
@@ -4820,7 +4837,7 @@ const r6Rv64SoftmmuFixtures = [
   r6Rv64SoftmmuFixture("permission-fault", {
     access: "load",
     fallbackReason: "permission-fault",
-    generatedMemop: MO_32,
+    generatedMemop: MO_32 | MO_ATOM_NONE,
     comparatorFlags: Number(WASMJIT_TLB_CONSTANTS.invalidMask),
     expectedSuccess: false,
     expectedStatus: STATUS_TLB_MISS_OR_FAULT,
@@ -4834,7 +4851,7 @@ const r6Rv64SoftmmuFixtures = [
   r6Rv64SoftmmuFixture("page-crossing", {
     access: "load",
     fallbackReason: "page-crossing",
-    generatedMemop: MO_64,
+    generatedMemop: MO_64 | MO_ATOM_NONE,
     taddr: 0xffcn,
     expectedSuccess: false,
     expectedStatus: STATUS_TLB_MISS_OR_FAULT,
@@ -5356,7 +5373,7 @@ function r4s5bValidateMemop(memop) {
   if ((memop & (MO_AMASK | MO_ALIGN_TLB_ONLY)) !== 0) {
     return "selected-body-memop-unsupported-alignment";
   }
-  if ((memop & MO_ATOM_MASK) !== 0) {
+  if ((memop & MO_ATOM_MASK) !== MO_ATOM_NONE) {
     return "selected-body-memop-unsupported-atomic";
   }
   return null;
@@ -5427,7 +5444,7 @@ function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_I
       const mmuIdx = oi & TCG_WASM64_MEMOPIDX_MMU_MASK;
       const memopReason = r4s5bValidateMemop(memop);
       if (memopReason !== null) {
-        return { reason: memopReason, hasMemop };
+        return { reason: memopReason, hasMemop, memop };
       }
       if (mmuIdx !== currentMmuIdx) {
         return {
@@ -5531,6 +5548,7 @@ function simulateR4mLiveGeneratedExec({
       ok: false,
       path: noFallback ? "fail-closed" : "tci-fallback",
       reason: memopValidation.reason,
+      rejectedMemop: memopValidation.memop,
       generatedGuestInstructions: 0,
       generatedBodyTimeNs: 0,
       generatedChainLength: 0,
@@ -5788,7 +5806,7 @@ assert.equal(r4s4NoFallbackHelperExitReject.exits.unsupported, 1);
 assert.equal(r4s4NoFallbackHelperExitReject.failedClosed, true);
 
 function r4s5bMemoryWords({
-  memop = MO_32,
+  memop = MO_32 | MO_ATOM_NONE,
   mmuIdx = R4K_SOFTMMU_MMU_IDX,
   op = OPS.tci_qemu_ld_rrr,
   oiReg = 2,
@@ -5819,7 +5837,7 @@ function r4s5bMemoryMetadata(overrides = {}) {
 }
 
 function r4s5bMultipleMemoryMetadata() {
-  const oi = ((MO_32 << TCG_WASM64_MEMOPIDX_SHIFT) |
+  const oi = (((MO_32 | MO_ATOM_NONE) << TCG_WASM64_MEMOPIDX_SHIFT) |
               R4K_SOFTMMU_MMU_IDX) >>> 0;
   const words = [
     opImm20(OPS.tci_movi, 2, oi),
@@ -5856,6 +5874,25 @@ const r4s5bCases = [
     metadata: r4s5bMemoryMetadata({ op: OPS.tci_qemu_st_rrr }),
   },
   {
+    name: "r4s7-atom-none-load-admitted-ram-hit",
+    expectedReason: null,
+    expectedPath: "generated",
+    expectedInlineTlbHitLoads: 1,
+    expectedInlineTlbHitStores: 0,
+    metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_ATOM_NONE }),
+  },
+  {
+    name: "r4s7-atom-none-store-admitted-ram-hit",
+    expectedReason: null,
+    expectedPath: "generated",
+    expectedInlineTlbHitLoads: 0,
+    expectedInlineTlbHitStores: 1,
+    metadata: r4s5bMemoryMetadata({
+      memop: MO_32 | MO_ATOM_NONE,
+      op: OPS.tci_qemu_st_rrr,
+    }),
+  },
+  {
     name: "r4s5c-multiple-memops-reject-before-partial-store",
     expectedReason: "selected-body-softmmu-multi-access-unsupported",
     metadata: r4s5bMultipleMemoryMetadata(),
@@ -5873,33 +5910,50 @@ const r4s5bCases = [
   {
     name: "r4s5b-unsupported-size-rejects-before-inline-ram",
     expectedReason: "selected-body-memop-unsupported-size",
-    metadata: r4s5bMemoryMetadata({ memop: MO_16 }),
+    metadata: r4s5bMemoryMetadata({ memop: MO_16 | MO_ATOM_NONE }),
   },
   {
     name: "r4s5b-sign-flag-rejects-before-inline-ram",
     expectedReason: "selected-body-memop-unsupported-sign",
-    metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_SIGN }),
+    metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_SIGN | MO_ATOM_NONE }),
   },
   {
     name: "r4s5b-endian-flag-rejects-before-inline-ram",
     expectedReason: "selected-body-memop-unsupported-endian",
-    metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_BSWAP }),
+    metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_BSWAP | MO_ATOM_NONE }),
   },
   {
     name: "r4s5b-alignment-flag-rejects-before-inline-ram",
     expectedReason: "selected-body-memop-unsupported-alignment",
-    metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_ALIGN_4 }),
+    metadata: r4s5bMemoryMetadata({
+      memop: MO_32 | MO_ALIGN_4 | MO_ATOM_NONE,
+    }),
   },
   {
-    name: "r4s5b-atomic-flag-rejects-before-inline-ram",
+    name: "r4s7-default-atomic-mode-rejects-before-inline-ram",
     expectedReason: "selected-body-memop-unsupported-atomic",
-    metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_ATOM_NONE }),
+    metadata: r4s5bMemoryMetadata({ memop: MO_32 }),
+  },
+  {
+    name: "r4s7-ifalign-pair-rejects-before-inline-ram",
+    expectedReason: "selected-body-memop-unsupported-atomic",
+    metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_ATOM_IFALIGN_PAIR }),
+  },
+  {
+    name: "r4s7-within16-rejects-before-inline-ram",
+    expectedReason: "selected-body-memop-unsupported-atomic",
+    metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_ATOM_WITHIN16 }),
+  },
+  {
+    name: "r4s7-subalign-rejects-before-inline-ram",
+    expectedReason: "selected-body-memop-unsupported-atomic",
+    metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_ATOM_SUBALIGN }),
   },
   {
     name: "r4s5b-high-flag-rejects-before-inline-ram",
     expectedReason: "selected-body-memop-unsupported-high-flags",
     metadata: r4s5bMemoryMetadata({
-      memop: MO_32 | MO_UNSUPPORTED_HIGH_FLAG,
+      memop: MO_32 | MO_ATOM_NONE | MO_UNSUPPORTED_HIGH_FLAG,
     }),
   },
   {
@@ -5956,6 +6010,58 @@ for (const testCase of r4s5bCases) {
   assert.equal(testCase.noFallbackResult.path, "fail-closed");
   assert.equal(testCase.noFallbackResult.failedClosed, true);
 }
+const r4s7MemopRejectAttributionReasons = new Set([
+  "selected-body-memop-unsupported-size",
+  "selected-body-memop-unsupported-alignment",
+  "selected-body-memop-unsupported-atomic",
+]);
+const r4s7MemopRejectAttribution = r4s5bCases
+  .filter((entry) => r4s7MemopRejectAttributionReasons.has(
+    entry.expectedReason))
+  .map((entry) => ({
+    name: entry.name,
+    reason: entry.result.reason,
+    memop: entry.result.rejectedMemop,
+    memopHex: `0x${entry.result.rejectedMemop.toString(16)}`,
+  }));
+assert.deepEqual(r4s7MemopRejectAttribution, [
+  {
+    name: "r4s5b-unsupported-size-rejects-before-inline-ram",
+    reason: "selected-body-memop-unsupported-size",
+    memop: MO_16 | MO_ATOM_NONE,
+    memopHex: `0x${(MO_16 | MO_ATOM_NONE).toString(16)}`,
+  },
+  {
+    name: "r4s5b-alignment-flag-rejects-before-inline-ram",
+    reason: "selected-body-memop-unsupported-alignment",
+    memop: MO_32 | MO_ALIGN_4 | MO_ATOM_NONE,
+    memopHex: `0x${(MO_32 | MO_ALIGN_4 | MO_ATOM_NONE).toString(16)}`,
+  },
+  {
+    name: "r4s7-default-atomic-mode-rejects-before-inline-ram",
+    reason: "selected-body-memop-unsupported-atomic",
+    memop: MO_32,
+    memopHex: `0x${MO_32.toString(16)}`,
+  },
+  {
+    name: "r4s7-ifalign-pair-rejects-before-inline-ram",
+    reason: "selected-body-memop-unsupported-atomic",
+    memop: MO_32 | MO_ATOM_IFALIGN_PAIR,
+    memopHex: `0x${(MO_32 | MO_ATOM_IFALIGN_PAIR).toString(16)}`,
+  },
+  {
+    name: "r4s7-within16-rejects-before-inline-ram",
+    reason: "selected-body-memop-unsupported-atomic",
+    memop: MO_32 | MO_ATOM_WITHIN16,
+    memopHex: `0x${(MO_32 | MO_ATOM_WITHIN16).toString(16)}`,
+  },
+  {
+    name: "r4s7-subalign-rejects-before-inline-ram",
+    reason: "selected-body-memop-unsupported-atomic",
+    memop: MO_32 | MO_ATOM_SUBALIGN,
+    memopHex: `0x${(MO_32 | MO_ATOM_SUBALIGN).toString(16)}`,
+  },
+]);
 
 function simulateR7AvailableGeneratedOutputExec({
   name,
@@ -6640,6 +6746,7 @@ console.log(JSON.stringify({
   r4mLiveGeneratedExec: {
     fixtureCount: r4mLiveGeneratedExecCases.length,
     fixtures: r4mLiveGeneratedExecCases,
+    memopRejectAttribution: r4s7MemopRejectAttribution,
     generatedFixtures: r4mLiveGeneratedExecCases.filter((entry) =>
       entry.path === "generated").length,
     failClosedFixtures: r4mLiveGeneratedExecCases.filter((entry) =>

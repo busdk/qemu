@@ -465,9 +465,12 @@ for (const [name, value, isBigInt] of [
 assert.match(liveGeneratedExecJs, /i64Const\(memOpIdxShift\)/);
 assert.match(liveGeneratedExecJs, /i64Const\(memOpIdxMmuMask\)/);
 for (const [name, value] of [
+  ["sizeMask", headerDefine("TCG_WASM64_MEMOP_SIZE")],
   ["byte", headerDefine("TCG_WASM64_MEMOP_8")],
   ["word", headerDefine("TCG_WASM64_MEMOP_32")],
   ["quad", headerDefine("TCG_WASM64_MEMOP_64")],
+  ["atomNone", headerDefine("TCG_WASM64_MEMOP_ATOM_NONE")],
+  ["atomMask", headerDefine("TCG_WASM64_MEMOP_ATOM_MASK")],
 ]) {
   assert.match(
     liveGeneratedExecJs,
@@ -628,6 +631,7 @@ assert.match(runtime, /INDEX_op_tci_qemu_st_rrr/);
 assert.match(runtime, /MO_SIGN/);
 assert.match(runtime, /MO_BSWAP/);
 assert.match(runtime, /MO_AMASK \| MO_ALIGN_TLB_ONLY/);
+assert.match(runtime, /MO_ATOM_NONE/);
 assert.match(runtime, /MO_ATOM_MASK/);
 assert.match(runtime, /TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_CACHE_HIT/);
 assert.match(runtime, /tcg_wasm64_live_generated_exec_count_attempt/);
@@ -912,6 +916,7 @@ assert.match(generatedEquivalence, /WASMJIT_TLB_MIRROR/);
 assert.match(generatedEquivalence, /inlineTlbHitLoads/);
 assert.match(generatedEquivalence, /qemuLdCalls/);
 assert.match(generatedEquivalence, /metadata-output-tb-code-mismatch/);
+assert.match(generatedEquivalence, /memopRejectAttribution/);
 assert.match(generatedEquivalence, /generatedStatusToRunExitReason/);
 assert.match(generatedEquivalence, /generatedStatusForRunExitReason/);
 assert.match(generatedEquivalence, /liveGeneratedStatusNamespace/);
@@ -921,6 +926,8 @@ assert.match(generatedEquivalence, /STATUS_INVALIDATED = 0x26n/);
 assert.match(generatedEquivalence, /run-exit mmio value is not a generated status/);
 assert.match(generatedEquivalence, /r4s5c-valid-load-enters-generic-softmmu-lowering/);
 assert.match(generatedEquivalence, /r4s5c-valid-store-enters-generic-softmmu-lowering/);
+assert.match(generatedEquivalence, /r4s7-atom-none-load-admitted-ram-hit/);
+assert.match(generatedEquivalence, /r4s7-atom-none-store-admitted-ram-hit/);
 assert.match(generatedEquivalence, /r4s5c-multiple-memops-reject-before-partial-store/);
 assert.match(generatedEquivalence, /r4s5b-unproven-oi-rejects-before-inline-ram/);
 assert.match(generatedEquivalence, /r4s5b-movl-oi-rejects-before-inline-ram/);
@@ -928,7 +935,10 @@ assert.match(generatedEquivalence, /r4s5b-unsupported-size-rejects-before-inline
 assert.match(generatedEquivalence, /r4s5b-sign-flag-rejects-before-inline-ram/);
 assert.match(generatedEquivalence, /r4s5b-endian-flag-rejects-before-inline-ram/);
 assert.match(generatedEquivalence, /r4s5b-alignment-flag-rejects-before-inline-ram/);
-assert.match(generatedEquivalence, /r4s5b-atomic-flag-rejects-before-inline-ram/);
+assert.match(generatedEquivalence, /r4s7-default-atomic-mode-rejects-before-inline-ram/);
+assert.match(generatedEquivalence, /r4s7-ifalign-pair-rejects-before-inline-ram/);
+assert.match(generatedEquivalence, /r4s7-within16-rejects-before-inline-ram/);
+assert.match(generatedEquivalence, /r4s7-subalign-rejects-before-inline-ram/);
 assert.match(generatedEquivalence, /r4s5b-high-flag-rejects-before-inline-ram/);
 assert.match(generatedEquivalence, /r4s5b-unexpected-mmu-idx-rejects-before-inline-ram/);
 assert.match(generatedEquivalence, /selected-body-softmmu-multi-access-unsupported/);

@@ -2363,7 +2363,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     remains blocked, and the next x86 implementation item must address the
     measured live-body MemOp rejection and metadata-output mismatch before
     another browser speed run.
-  - [ ] R4s7 - Admit safe MemOp atomicity metadata for ordinary x86 live
+  - [x] R4s7 - Admit safe MemOp atomicity metadata for ordinary x86 live
     qemu load/store bodies. DoD: using the R4s6 preflight histogram, add
     deterministic attribution for the exact `MemOp` values behind
     `selected-body-memop-unsupported-atomic`,
@@ -2387,6 +2387,41 @@ run that reaches a weaker marker than normal multi-user readiness.
     generated guest instructions; the next bounded preflight must report
     whether generated execution moved above zero and how the reject histogram
     changed.
+    Accepted deterministic slice 2026-07-04: `tcg/wasm64.c` now treats
+    QEMU's explicit `MO_ATOM_NONE` MemOp access-mode metadata as the only
+    admitted ordinary qemu ld/st atomicity mode for selected single-access
+    `tci_qemu_ld_rrr` / `tci_qemu_st_rrr` bodies, while bare/default
+    atomicity, IFALIGN_PAIR, WITHIN16, SUBALIGN, unsupported sizes,
+    alignment, sign/endian/high flags, MMIO, TLB miss/fault, page crossing,
+    slow flags, unmirrored state, stale output, and multi-access bodies still
+    fail closed. The live JS lowering now validates the allowed MemOp flag
+    subset, requires `(memop & MO_ATOM_MASK) == MO_ATOM_NONE`, and masks
+    width with `MO_SIZE` for byte/32-bit/64-bit RAM-hit loads/stores. The
+    live summary now emits `reject_memops` attribution with exact decimal and
+    hex MemOp values for unsupported-size, unsupported-alignment, and
+    unsupported-atomic selected-body rejections. Deterministic equivalence
+    coverage adds `r4s7-atom-none-load-admitted-ram-hit` and
+    `r4s7-atom-none-store-admitted-ram-hit`; each retires
+    `generatedGuestInstructions=1`, increments one inline TLB-hit load or
+    store, and keeps helper, `qemu_ld`, and `qemu_st` calls at zero under
+    safe `MO_32 | MO_ATOM_NONE` metadata. Negative attribution fixtures
+    report exact rejected MemOps `0xa01` for unsupported size, `0xa42` for
+    unsupported alignment, and `0x2`, `0x202`, `0x402`, and `0x802` for
+    unproven atomic modes. Checks: `git diff --check`, `node --check
+    scripts/ci/wasm64-translate-metadata-test.mjs`, `node --check
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node --check
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, `node
+    scripts/ci/wasm64-translate-metadata-test.mjs`, `node
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, and `node
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs` passed. No
+    Chromium/browser run, artifact build, R4l speed claim, Bus Engine OS
+    proof, or Bus-specific shortcut was run; R4l remains blocked until a
+    bounded x86 preflight reports nonzero generated execution and the updated
+    reject histogram. Supervisor rerun saved the deterministic equivalence
+    JSON at
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s7-generated-output-equivalence.json`
+    with SHA256
+    `3d48b3182b618c7e2e0032f016eb4210d83ce6510e6596deed1e26a5748edd93`.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
