@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shlex
@@ -18,6 +19,9 @@ import re
 
 
 DEFAULT_IMAGE = "qemu/emsdk-wasm64-cross:latest"
+DEFAULT_BUILD_DIR = Path("tmp") / "qemu-wasm-build"
+DEFAULT_CCACHE_DIR = Path.home() / ".cache" / "qemu-wasm-ccache"
+DEFAULT_EM_CACHE_DIR = Path.home() / ".cache" / "qemu-wasm-emcache"
 DEFAULT_TARGET = "x86_64"
 DEFAULT_CONFIGURE_ARGS = [
     "--disable-docs",
@@ -43,6 +47,39 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     parser.add_argument("--docker", default="docker")
     parser.add_argument("--jobs", default="auto")
+    parser.add_argument(
+        "--build-dir",
+        type=Path,
+        default=None,
+        help="persistent host build directory root mounted at /tmp/build; defaults to SOURCE_ROOT/tmp/qemu-wasm-build",
+    )
+    parser.add_argument(
+        "--no-incremental",
+        action="store_true",
+        help="disable the persistent build directory and use a throwaway container build directory",
+    )
+    parser.add_argument(
+        "--ccache-dir",
+        type=Path,
+        default=DEFAULT_CCACHE_DIR,
+        help="persistent host ccache directory mounted at /ccache in the container",
+    )
+    parser.add_argument(
+        "--no-ccache",
+        action="store_true",
+        help="disable the persistent ccache mount and compiler launcher",
+    )
+    parser.add_argument(
+        "--em-cache-dir",
+        type=Path,
+        default=DEFAULT_EM_CACHE_DIR,
+        help="persistent host Emscripten cache directory mounted at /emcache in the container",
+    )
+    parser.add_argument(
+        "--no-em-cache",
+        action="store_true",
+        help="disable the persistent Emscripten cache mount",
+    )
     parser.add_argument(
         "--tcg-wasm64-backend",
         action="store_true",
@@ -73,8 +110,34 @@ def image_build_command(docker: str) -> list[str]:
     return ["make", "-f", "Makefile", "docker-image-emsdk-wasm64-cross", f"RUNC={docker}", "V=1"]
 
 
-def shell_script(configure_args: list[str], jobs: str, clean: bool, target: str) -> str:
+def build_dir_root(args: argparse.Namespace) -> Path:
+    if args.build_dir is not None:
+        return args.build_dir.expanduser().resolve()
+    return (args.source_root.resolve() / DEFAULT_BUILD_DIR).resolve()
+
+
+def build_dir_name(args: argparse.Namespace) -> str:
+    backend = "wasm64-tcg" if args.tcg_wasm64_backend else "tci"
+    compiler_cache = "ccache" if not args.no_ccache else "no-ccache"
+    return f"{args.target}-{backend}-{compiler_cache}"
+
+
+def configure_fingerprint(configure_args: list[str]) -> str:
+    payload = json.dumps(configure_args, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def shell_script(
+    configure_args: list[str],
+    jobs: str,
+    clean: bool,
+    target: str,
+    incremental: bool,
+    ccache: bool,
+    em_cache: bool,
+) -> str:
     quoted_configure = " ".join(shlex.quote(arg) for arg in configure_args)
+    configure_hash = configure_fingerprint(configure_args)
     clean_line = 'rm -f /host-out/*' if clean else 'true'
     if jobs == "auto":
         make_jobs = '$(nproc)'
@@ -82,13 +145,47 @@ def shell_script(configure_args: list[str], jobs: str, clean: bool, target: str)
         make_jobs = shlex.quote(jobs)
     artifact_js = f"qemu-system-{target}.js"
     artifact_wasm = f"qemu-system-{target}.wasm"
+    ccache_setup = "true"
+    ccache_stats = "true"
+    em_cache_setup = "true"
+    tree_reset = "true" if incremental else "rm -rf /tmp/src /tmp/build"
+    if incremental:
+        source_sync = """find /tmp/src -mindepth 1 -maxdepth 1 ! -name subprojects -exec rm -rf {} +
+tar -C /host-src --exclude=.git --exclude=build --exclude=build-wasm64-tci --exclude=tmp -cf - . | tar -C /tmp/src -xf -"""
+        configure_step = f"""configure_stamp=/tmp/build/qemu-wasm-configure.sha256
+configure_hash={shlex.quote(configure_hash)}
+if [ -f "$configure_stamp" ] && [ "$(cat "$configure_stamp")" = "$configure_hash" ]; then
+    echo "reusing QEMU wasm configure $configure_hash"
+else
+    emconfigure /tmp/src/configure {quoted_configure}
+    printf '%s\\n' "$configure_hash" > "$configure_stamp"
+fi"""
+    else:
+        source_sync = """tar -C /host-src --exclude=.git --exclude=build --exclude=build-wasm64-tci --exclude=tmp -cf - . | tar -C /tmp/src -xf -"""
+        configure_step = f"emconfigure /tmp/src/configure {quoted_configure}"
+    if ccache:
+        ccache_setup = """if ! command -v ccache >/dev/null; then
+    echo "ccache is missing from the emsdk image; rebuild it with --build-image" >&2
+    exit 1
+fi
+mkdir -p /ccache
+export CCACHE_DIR=/ccache
+export CCACHE_BASEDIR=/tmp/src
+export CCACHE_COMPILERCHECK=content
+export CCACHE_NOHASHDIR=true"""
+        ccache_stats = "ccache --show-stats || true"
+    if em_cache:
+        em_cache_setup = """mkdir -p /emcache
+export EM_CACHE=/emcache"""
     return f"""set -euo pipefail
-rm -rf /tmp/src /tmp/build
+{tree_reset}
 mkdir -p /tmp/src /tmp/build /host-out
+{ccache_setup}
+{em_cache_setup}
 {clean_line}
-tar -C /host-src --exclude=.git --exclude=build --exclude=build-wasm64-tci -cf - . | tar -C /tmp/src -xf -
+{source_sync}
 cd /tmp/build
-emconfigure /tmp/src/configure {quoted_configure}
+{configure_step}
 make -j{make_jobs}
 cp -v {shlex.quote(artifact_js)} {shlex.quote(artifact_wasm)} /host-out/
 cd /host-out
@@ -96,18 +193,28 @@ python3 /tmp/src/scripts/ci/wasm-artifact-manifest.py --root . --output qemu-sys
 python3 /tmp/src/scripts/ci/wasm-artifact-manifest-check.py --manifest qemu-system-wasm-artifacts.json --target {shlex.quote(target)}
 sha256sum {shlex.quote(artifact_js)} {shlex.quote(artifact_wasm)} qemu-system-wasm-artifacts.json > SHA256SUMS
 ls -lh
+{ccache_stats}
 """
 
 
 def docker_run_command(args: argparse.Namespace) -> list[str]:
     source_root = args.source_root.resolve()
     out = args.out.resolve()
+    build_dir = build_dir_root(args) / build_dir_name(args)
+    ccache_dir = args.ccache_dir.expanduser().resolve()
+    em_cache_dir = args.em_cache_dir.expanduser().resolve()
     tcg_backend_args = WASM64_TCG_BACKEND_ARGS if args.tcg_wasm64_backend else DEFAULT_TCG_BACKEND_ARGS
-    configure_args = DEFAULT_CONFIGURE_ARGS + [
+    ccache_configure_args = [] if args.no_ccache else [
+        "--cc=ccache emcc",
+        "--cxx=ccache em++",
+    ]
+    configure_args = [
+        *ccache_configure_args,
+        *DEFAULT_CONFIGURE_ARGS,
         *tcg_backend_args,
         f"--target-list={args.target}-softmmu",
     ] + list(args.configure_arg)
-    return [
+    command = [
         args.docker,
         "run",
         "--rm",
@@ -115,13 +222,35 @@ def docker_run_command(args: argparse.Namespace) -> list[str]:
         f"{source_root}:/host-src:ro",
         "-v",
         f"{out}:/host-out",
+    ]
+    if not args.no_incremental:
+        command += [
+            "-v",
+            f"{build_dir / 'src'}:/tmp/src",
+            "-v",
+            f"{build_dir / 'build'}:/tmp/build",
+        ]
+    if not args.no_ccache:
+        command += ["-v", f"{ccache_dir}:/ccache"]
+    if not args.no_em_cache:
+        command += ["-v", f"{em_cache_dir}:/emcache"]
+    command += [
         "-w",
         "/tmp",
         args.image,
         "bash",
         "-lc",
-        shell_script(configure_args, args.jobs, not args.no_clean, args.target),
+        shell_script(
+            configure_args,
+            args.jobs,
+            not args.no_clean,
+            args.target,
+            not args.no_incremental,
+            not args.no_ccache,
+            not args.no_em_cache,
+        ),
     ]
+    return command
 
 
 def validate_inputs(args: argparse.Namespace) -> None:
@@ -135,6 +264,19 @@ def validate_inputs(args: argparse.Namespace) -> None:
     if shutil.which(args.docker) is None:
         raise SystemExit(f"Docker command not found: {args.docker}")
     args.out.mkdir(parents=True, exist_ok=True)
+    if not args.no_incremental:
+        build_dir = build_dir_root(args) / build_dir_name(args)
+        if not args.dry_run:
+            (build_dir / "src").mkdir(parents=True, exist_ok=True)
+            (build_dir / "build").mkdir(parents=True, exist_ok=True)
+    if not args.no_ccache:
+        args.ccache_dir = args.ccache_dir.expanduser()
+        if not args.dry_run:
+            args.ccache_dir.mkdir(parents=True, exist_ok=True)
+    if not args.no_em_cache:
+        args.em_cache_dir = args.em_cache_dir.expanduser()
+        if not args.dry_run:
+            args.em_cache_dir.mkdir(parents=True, exist_ok=True)
 
 
 def run_command(command: list[str], cwd: Path, env=None) -> None:

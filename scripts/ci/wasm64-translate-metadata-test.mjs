@@ -444,7 +444,9 @@ assert.match(liveGeneratedExecJs, /unsupported live generated-output multi-acces
 assert.match(liveGeneratedExecJs, /runCounters\.inlineTlbHitLoads/);
 assert.match(liveGeneratedExecJs, /runCounters\.inlineTlbHitStores/);
 assert.match(liveGeneratedExecJs, /x86EnvDirectFieldsEnabled/);
-assert.match(liveGeneratedExecJs, /TARGET_X86_64/);
+assert.match(liveGeneratedExecJs, /x86_env_direct_fields_enabled_arg !== 0/);
+assert.match(runtime, /target_arch\(\) == SYS_EMU_TARGET_X86_64/);
+assert.doesNotMatch(liveGeneratedExecJs, /TARGET_X86_64/);
 assert.match(liveGeneratedExecJs, /x86EnvDirectCcOpOffset\s*=\s*0x128/);
 assert.match(liveGeneratedExecJs, /x86EnvDirectHflagsOffset\s*=\s*0x130/);
 assert.match(liveGeneratedExecJs, /x86EnvDirectDsSelectorOffset\s*=\s*0x180/);
@@ -909,9 +911,23 @@ assert.match(generatedEquivalence, /helperVisibleStateMatched/);
 assert.match(generatedEquivalence, /SHARED_SOFTMMU_LOWERING_NAME/);
 assert.match(generatedEquivalence, /generic-softmmu-tlb-contract-lowering/);
 assert.match(generatedEquivalence, /compileSharedSoftmmuAccessOp/);
-assert.match(
-  generatedEquivalence,
-  /function compileSharedGeneratedOutputOp\(\s*op,\s*diagnostics = null,\s*options = \{\},\s*\)/,
+const compileSharedGeneratedOutputOpMatch = generatedEquivalence.match(
+  /function\s+compileSharedGeneratedOutputOp\s*\(([^)]*)\)/s,
+);
+assert.ok(
+  compileSharedGeneratedOutputOpMatch,
+  "compileSharedGeneratedOutputOp must exist",
+);
+const compileSharedGeneratedOutputOpParams =
+  compileSharedGeneratedOutputOpMatch[1]
+    .split(",")
+    .map((param) => param.trim())
+    .filter((param) => param.length > 0);
+assert.equal(compileSharedGeneratedOutputOpParams[0], "op");
+assert.ok(
+  compileSharedGeneratedOutputOpParams.some((param) =>
+    /^diagnostics(?:\s*=|$)/.test(param)),
+  "compileSharedGeneratedOutputOp must accept a diagnostics argument",
 );
 assert.match(generatedEquivalence, /op, diagnostics, options\)/);
 assert.match(generatedEquivalence, /emitPerTBFunctionBody\(fixture\.words/);

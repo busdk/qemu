@@ -30,6 +30,18 @@ def test_default_docker_command():
         joined = "\n".join(command)
         for want in [
             "qemu/emsdk-wasm64-cross:latest",
+            f"{source / 'tmp' / 'qemu-wasm-build' / 'x86_64-tci-ccache' / 'src'}:/tmp/src",
+            f"{source / 'tmp' / 'qemu-wasm-build' / 'x86_64-tci-ccache' / 'build'}:/tmp/build",
+            f"{Path.home() / '.cache' / 'qemu-wasm-ccache'}:/ccache",
+            f"{Path.home() / '.cache' / 'qemu-wasm-emcache'}:/emcache",
+            "CCACHE_DIR=/ccache",
+            "EM_CACHE=/emcache",
+            "CCACHE_BASEDIR=/tmp/src",
+            "CCACHE_COMPILERCHECK=content",
+            "CCACHE_NOHASHDIR=true",
+            "ccache --show-stats",
+            "'--cc=ccache emcc'",
+            "'--cxx=ccache em++'",
             "--target-list=x86_64-softmmu",
             "--cpu=wasm64",
             "--enable-tcg-interpreter",
@@ -41,6 +53,61 @@ def test_default_docker_command():
             "wasm-artifact-manifest-check.py --manifest qemu-system-wasm-artifacts.json --target x86_64",
         ]:
             assert want in joined, joined
+        assert "rm -rf /tmp/src /tmp/build" not in joined, joined
+        assert "find /tmp/src -mindepth 1 -maxdepth 1 ! -name subprojects" in joined, joined
+        assert "--exclude=tmp" in joined, joined
+        assert "qemu-wasm-configure.sha256" in joined, joined
+        assert "reusing QEMU wasm configure" in joined, joined
+
+
+def test_no_ccache_docker_command():
+    module = load_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / "src"
+        out = Path(tmp) / "out"
+        (source / "scripts" / "ci").mkdir(parents=True)
+        (source / "configure").write_text("#!/bin/sh\n", encoding="utf-8")
+        (source / "scripts" / "ci" / "wasm-artifact-manifest.py").write_text("", encoding="utf-8")
+        args = module.parse_args(["--source-root", str(source), "--out", str(out), "--no-ccache"])
+        command = module.docker_run_command(args)
+        joined = "\n".join(command)
+        assert ":/ccache" not in joined, joined
+        assert "CCACHE_DIR=/ccache" not in joined, joined
+        assert "ccache --show-stats" not in joined, joined
+        assert "'--cc=ccache emcc'" not in joined, joined
+
+
+def test_no_incremental_docker_command():
+    module = load_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / "src"
+        out = Path(tmp) / "out"
+        (source / "scripts" / "ci").mkdir(parents=True)
+        (source / "configure").write_text("#!/bin/sh\n", encoding="utf-8")
+        (source / "scripts" / "ci" / "wasm-artifact-manifest.py").write_text("", encoding="utf-8")
+        args = module.parse_args(["--source-root", str(source), "--out", str(out), "--no-incremental"])
+        command = module.docker_run_command(args)
+        joined = "\n".join(command)
+        assert ":/tmp/build" not in joined, joined
+        assert ":/tmp/src" not in joined, joined
+        assert "rm -rf /tmp/src /tmp/build" in joined, joined
+        assert "qemu-wasm-configure.sha256" not in joined, joined
+
+
+def test_no_em_cache_docker_command():
+    module = load_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / "src"
+        out = Path(tmp) / "out"
+        (source / "scripts" / "ci").mkdir(parents=True)
+        (source / "configure").write_text("#!/bin/sh\n", encoding="utf-8")
+        (source / "scripts" / "ci" / "wasm-artifact-manifest.py").write_text("", encoding="utf-8")
+        args = module.parse_args(["--source-root", str(source), "--out", str(out), "--no-em-cache"])
+        command = module.docker_run_command(args)
+        joined = "\n".join(command)
+        assert ":/emcache" not in joined, joined
+        assert "EM_CACHE=/emcache" not in joined, joined
+        assert ":/ccache" in joined, joined
 
 
 def test_riscv64_docker_command():
@@ -83,6 +150,7 @@ def test_tcg_wasm64_backend_command_replaces_interpreter():
         assert "-Dtcg_wasm64_backend=true" in joined, joined
         assert "--enable-tcg-interpreter" not in joined, joined
         assert "--target-list=riscv64-softmmu" in joined, joined
+        assert f"{source / 'tmp' / 'qemu-wasm-build' / 'riscv64-wasm64-tcg-ccache' / 'build'}:/tmp/build" in joined, joined
 
 
 def test_dry_run_includes_image_build():
@@ -104,6 +172,9 @@ def test_dry_run_includes_image_build():
 
 if __name__ == "__main__":
     test_default_docker_command()
+    test_no_ccache_docker_command()
+    test_no_incremental_docker_command()
+    test_no_em_cache_docker_command()
     test_riscv64_docker_command()
     test_tcg_wasm64_backend_command_replaces_interpreter()
     test_dry_run_includes_image_build()

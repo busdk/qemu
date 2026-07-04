@@ -155,6 +155,7 @@ ARG NODE_LINUX_X64_SHA256
 COPY --from=glib-dev /builddeps/ /builddeps/
 COPY --from=pixman-dev /builddeps/ /builddeps/
 RUN apt-get update && apt-get install -y \
+    ccache \
     xz-utils \
     zstd && \
     rm -rf /var/lib/apt/lists/*

@@ -19,6 +19,7 @@
 #include "exec/tlb-flags.h"
 #include "exec/translation-block.h"
 #include "accel/tcg/cpu-mmu-index.h"
+#include "qemu/target-info-qapi.h"
 #include "tcg/tcg.h"
 #include "tcg/wasm64.h"
 
@@ -2732,7 +2733,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
        uintptr_t exit_arg, uintptr_t result_arg, uintptr_t tb_arg,
        uintptr_t env_arg, uint64_t guest_insns_arg,
        uintptr_t generated_output_arg, uint32_t generated_output_size_arg,
-       uint32_t tb_code_size_arg), {
+       uint32_t tb_code_size_arg, int x86_env_direct_fields_enabled_arg), {
     if (typeof wasmMemory === "undefined" || !wasmMemory) {
         return 1;
     }
@@ -2770,11 +2771,8 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
     const envRelativeBaseReg = 14;
     const envRelativeMinOffset = -16;
     const envRelativeMaxExclusive = 0x120;
-#if defined(TARGET_X86_64)
-    const x86EnvDirectFieldsEnabled = true;
-#else
-    const x86EnvDirectFieldsEnabled = false;
-#endif
+    const x86EnvDirectFieldsEnabled =
+        x86_env_direct_fields_enabled_arg !== 0;
     const x86EnvDirectCcOpOffset = 0x128;
     const x86EnvDirectHflagsOffset = 0x130;
     const x86EnvDirectDsSelectorOffset = 0x180;
@@ -7538,23 +7536,20 @@ static bool tcg_wasm64_live_generated_exec_direct_memory_is_store(TCGOpcode op)
 static bool tcg_wasm64_live_generated_exec_x86_env_field_supported(
     TCGOpcode op, int32_t offset, int32_t size)
 {
-#if defined(TARGET_X86_64)
-    const int32_t cc_op_offset = offsetof(CPUArchState, cc_op);
-    const int32_t hflags_offset = offsetof(CPUArchState, hflags);
-    const int32_t ds_selector_offset =
-        offsetof(CPUArchState, segs[R_DS].selector);
+    const int32_t x86_cc_op_offset = 0x128;
+    const int32_t x86_hflags_offset = 0x130;
+    const int32_t x86_ds_selector_offset = 0x180;
 
-    QEMU_BUILD_BUG_ON(offsetof(CPUArchState, cc_op) != 0x128);
-    QEMU_BUILD_BUG_ON(offsetof(CPUArchState, hflags) != 0x130);
-    QEMU_BUILD_BUG_ON(offsetof(CPUArchState, segs[R_DS].selector) != 0x180);
+    if (target_arch() != SYS_EMU_TARGET_X86_64) {
+        return false;
+    }
 
-    return (op == INDEX_op_st32 && size == 4 && offset == cc_op_offset) ||
-           (op == INDEX_op_ld32u && size == 4 && offset == hflags_offset) ||
+    return (op == INDEX_op_st32 && size == 4 &&
+            offset == x86_cc_op_offset) ||
+           (op == INDEX_op_ld32u && size == 4 &&
+            offset == x86_hflags_offset) ||
            (op == INDEX_op_st32 && size == 4 &&
-            offset == ds_selector_offset);
-#else
-    return false;
-#endif
+            offset == x86_ds_selector_offset);
 }
 
 static bool tcg_wasm64_live_generated_exec_direct_memory_supported(
@@ -8763,7 +8758,8 @@ static bool tcg_wasm64_live_generated_exec_run_one(
             (uintptr_t)run_counters, (uintptr_t)exit, (uintptr_t)result,
             (uintptr_t)tb_ptr, (uintptr_t)env, guest_insns,
             (uintptr_t)metadata->generated_output,
-            metadata->generated_output_size, tb_code_size);
+            metadata->generated_output_size, tb_code_size,
+            target_arch() == SYS_EMU_TARGET_X86_64);
 
         result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] = js_status;
     }

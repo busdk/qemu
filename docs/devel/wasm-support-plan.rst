@@ -8480,3 +8480,105 @@ measured QEMU load/store helper shapes, using the R4k inline SoftMMU/TLB-hit
 guard on clean RAM hits and synthetic exits for miss/fault, MMIO,
 page-crossing, slow flags, unmirrored state, unsupported ``MemOp``, or
 helper-sensitive cases.
+
+Local wasm64 artifact builder ccache proof - 2026-07-04
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This is upstream QEMU build-loop evidence only.  No browser guest run was
+performed, so browser version, boot marker, timeout, final serial state, and
+generated-execution coverage are not applicable.
+
+The local emsdk image was rebuilt with::
+
+  make -f Makefile docker-image-emsdk-wasm64-cross RUNC=docker V=1
+
+The rebuilt image was ``qemu/emsdk-wasm64-cross:latest`` with image ID
+``sha256:bfb15801e56177f978cee44633fe50ac4f18042c3678448925ef34169bcf607c``.
+The runtime tools in that image were ``ccache`` 4.5.1, Emscripten 4.0.10,
+Node.js v22.16.0, and Binaryen ``wasm-opt`` 123.
+
+The cold ccache build used a persistent ccache directory and persistent
+Emscripten cache directory under the workspace ``tmp`` area::
+
+  /usr/bin/time -p python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out ./tmp/qemu-riscv64-ccache-cold-b \
+    --target riscv64 \
+    --tcg-wasm64-backend \
+    --ccache-dir ./tmp/qemu-wasm-ccache-20260704b \
+    --em-cache-dir ./tmp/qemu-wasm-emcache-20260704b \
+    --jobs 6
+
+It completed in ``1778.98`` s and populated the cache with ``0 / 1319``
+ccache hits and ``1319`` misses.  The artifact manifest check reported
+``verified QEMU WebAssembly target riscv64``.  The artifacts were:
+
+* ``qemu-system-riscv64.js`` =
+  ``888d4dbd6ea0b56f821d030aa4190a345c823a49b5f257f3702943988420878d``;
+* ``qemu-system-riscv64.wasm`` =
+  ``44fc2cb8a3a78bc4142b2a2559d3b41f4bd20a6861164d548db153b00d0515ab``;
+* manifest =
+  ``353bc2e29dad7dd18d12c467bcdeb8e7674660492384110cde13ab5f5d18d9f7``.
+
+After a whitespace-only edit to ``tcg/wasm64.c``, the warm rebuild used the
+same cache directories::
+
+  /usr/bin/time -p python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out ./tmp/qemu-riscv64-ccache-warm-b \
+    --target riscv64 \
+    --tcg-wasm64-backend \
+    --ccache-dir ./tmp/qemu-wasm-ccache-20260704b \
+    --em-cache-dir ./tmp/qemu-wasm-emcache-20260704b \
+    --jobs 6
+
+It completed in ``273.22`` s.  Cumulative ccache stats were ``1318 / 2638``
+hits, all direct hits, with ``1320`` total misses.  That is the expected
+single extra miss after the one-file edit.  The artifact manifest check again
+reported ``verified QEMU WebAssembly target riscv64``.  The artifacts were:
+
+* ``qemu-system-riscv64.js`` =
+  ``888d4dbd6ea0b56f821d030aa4190a345c823a49b5f257f3702943988420878d``;
+* ``qemu-system-riscv64.wasm`` =
+  ``0b79ce8182821bc855d5dbe41193b1019cd597e9f60e06d3de884c6a64479d4a``;
+* manifest =
+  ``47b7ef7a3d84345c79b40f214394175b89bfec3676944264108793ecc18b813a``.
+
+After reverting the whitespace-only edit, a clean no-ccache comparison used
+the same Emscripten cache but disabled ccache::
+
+  /usr/bin/time -p python3 scripts/ci/wasm-build-artifacts-local.py \
+    --out ./tmp/qemu-riscv64-no-ccache-clean-b \
+    --target riscv64 \
+    --tcg-wasm64-backend \
+    --no-ccache \
+    --em-cache-dir ./tmp/qemu-wasm-emcache-20260704b \
+    --jobs 6
+
+It completed in ``775.82`` s.  The artifact manifest check reported
+``verified QEMU WebAssembly target riscv64``.  The artifacts were:
+
+* ``qemu-system-riscv64.js`` =
+  ``c765a3fd1ea87868d7c1498794df5a6a4907aa5be8fe3905ac1b545d6e3d6d71``;
+* ``qemu-system-riscv64.wasm`` =
+  ``df451c60116d10a0f36da9126c762410ced838a74b634990b6a785b56b3d0810``;
+* manifest =
+  ``b8d5570e73ac1a33f5189382d233550e13f135106a6b6fddd49ad74d5eeb2997``.
+
+The ccache and clean no-ccache artifacts were not byte-identical, so this
+records functional artifact equivalence rather than byte identity.  Binaryen
+accepted all three WebAssembly modules with::
+
+  wasm-opt --all-features qemu-system-riscv64.wasm -o validated.wasm
+
+The validated module hashes were:
+
+* cold ccache =
+  ``7610069dbed4b05dda22e49487213a7d2ee90afb328648b3e58522a681d67efc``;
+* warm ccache after the one-file whitespace edit =
+  ``71e954fc558a4cbdaf50be522207b202d0d89e12855c1450fe1d49669c641680``;
+* clean no-ccache =
+  ``b4e7b36198842bbd3c9df04298609191cba591ca311630a1601493923e1a0d16``.
+
+As an additional startup check, all three artifact directories exited 0 from
+``node --experimental-wasm-memory64 qemu-system-riscv64.js --version`` inside
+the emsdk image.  The generated launcher did not print version text on
+stdout in that mode.

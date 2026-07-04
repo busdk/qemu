@@ -53,7 +53,13 @@ for (const field of [
 assert.match(runtime, /generated_guest_instructions_per_entry/);
 assert.match(runtime, /TCG_WASM64_LIVE_GENERATED_EXEC_CHAIN_BUDGET_ENV/);
 assert.match(runtime, /live_generated_exec_chain_budget/);
-assert.match(runtime, /\*ret & ~\(uintptr_t\)TB_EXIT_MASK/);
+assert.match(runtime, /tcg_wasm64_live_generated_exec_read_dispatch/);
+assert.match(
+  runtime,
+  /\*source_exit = \(uintptr_t\)tcg_splitwx_to_rx\(\(void \*\)tb\) \+\s*exit_index;/,
+);
+assert.match(runtime, /chain_stop_ret = source_exit;/);
+assert.match(runtime, /\*ret = chain_stop_ret;/);
 assert.match(header, /typedef enum TCGWasm64RunExitReason/);
 for (const name of [
   "TCG_WASM64_RUN_EXIT_BUDGET",

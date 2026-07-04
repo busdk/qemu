@@ -4967,6 +4967,51 @@ Engineering rules for this goal:
   budget exit. This accepts the actual Emscripten/QEMU runtime ABI smoke only;
   R4b remains open because it must add the same-artifact C/TCI-like comparison
   and ratios before the generic speed gate.
+- [x] W2q - Add persistent ccache to the local QEMU/WASM artifact builder so
+  accelerator development does not pay a full Emscripten rebuild for every
+  one-file change. DoD: `scripts/ci/wasm-build-artifacts-local.py` mounts a
+  stable host cache directory into the emsdk container, uses `ccache` for
+  `emcc`/`em++` by default, also preserves Emscripten's generated sysroot
+  cache across disposable containers, keeps opt-out paths for clean
+  comparisons, installs `ccache` in the local emsdk image definition, tests
+  the generated Docker command shape, and records cold/warm
+  `riscv64-softmmu` artifact build times plus WASM validity and clean-build
+  equivalence. Accepted 2026-07-04: the local builder now defaults to
+  `~/.cache/qemu-wasm-ccache` mounted at `/ccache`, sets
+  `CCACHE_DIR=/ccache`, `CCACHE_BASEDIR=/tmp/src`,
+  `CCACHE_COMPILERCHECK=content`, and `CCACHE_NOHASHDIR=true`, configures
+  QEMU with `--cc=ccache emcc` and `--cxx=ccache em++`, and keeps
+  `--no-ccache` for clean comparisons. It also defaults to
+  `~/.cache/qemu-wasm-emcache` mounted at `/emcache` as `EM_CACHE`, with
+  `--no-em-cache` for cold Emscripten-cache comparisons, because the
+  disposable container otherwise rebuilds Emscripten's generated sysroot on
+  every run. The emsdk image definition installs `ccache`; rebuilt local
+  image `qemu/emsdk-wasm64-cross:latest` was
+  `sha256:bfb15801e56177f978cee44633fe50ac4f18042c3678448925ef34169bcf607c`
+  with `ccache` 4.5.1, Emscripten 4.0.10, Node v22.16.0, and Binaryen
+  `wasm-opt` 123.
+
+  Evidence used `--target riscv64 --tcg-wasm64-backend --jobs 6`,
+  workspace cache dirs `./tmp/qemu-wasm-ccache-20260704b` and
+  `./tmp/qemu-wasm-emcache-20260704b`, and output dirs
+  `./tmp/qemu-riscv64-ccache-cold-b`,
+  `./tmp/qemu-riscv64-ccache-warm-b`, and
+  `./tmp/qemu-riscv64-no-ccache-clean-b`. Cold ccache build time was
+  `1778.98` s with `0 / 1319` ccache hits. After a whitespace-only touch to
+  `tcg/wasm64.c`, the warm ccache build time was `273.22` s with
+  `1318 / 2638` cumulative hits, all direct, and one additional source miss.
+  A clean no-ccache comparison with the same warmed Emscripten cache took
+  `775.82` s. Artifact manifest checks passed for all three outputs.
+  `wasm-opt --all-features` validated all three `.wasm` files, and
+  `node --experimental-wasm-memory64 qemu-system-riscv64.js --version`
+  exited 0 for all three artifact dirs. The ccache and no-ccache clean
+  outputs were not byte-identical, so the accepted equivalence is functional
+  artifact validity rather than byte identity: cold ccache WASM
+  `44fc2cb8a3a78bc4142b2a2559d3b41f4bd20a6861164d548db153b00d0515ab`,
+  warm-after-touch WASM
+  `0b79ce8182821bc855d5dbe41193b1019cd597e9f60e06d3de884c6a64479d4a`,
+  and clean no-ccache WASM
+  `df451c60116d10a0f36da9126c762410ced838a74b634990b6a785b56b3d0810`.
 - [ ] W3 - Pass the generic speed gate before any long Bus Engine OS proof.
   DoD: same-commit default-TCI artifact and backend artifact run the
   identical generic Chromium smoke back to back on the same host and
