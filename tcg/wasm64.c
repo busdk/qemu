@@ -2770,6 +2770,14 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
     const envRelativeBaseReg = 14;
     const envRelativeMinOffset = -16;
     const envRelativeMaxExclusive = 0x120;
+#if defined(TARGET_X86_64)
+    const x86EnvDirectFieldsEnabled = true;
+#else
+    const x86EnvDirectFieldsEnabled = false;
+#endif
+    const x86EnvDirectCcOpOffset = 0x128;
+    const x86EnvDirectHflagsOffset = 0x130;
+    const x86EnvDirectDsSelectorOffset = 0x180;
     const tlbMirror = {
         mask: 0,
         table: 8,
@@ -3174,11 +3182,30 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         return hash >>> 0;
     }
 
+    function x86EnvDirectFieldSupported(insn, offset, size) {
+        const opc = bits(insn >>> 0, 0, 8);
+
+        return x86EnvDirectFieldsEnabled &&
+               ((opc === ops.st32 && size === 4 &&
+                 offset === x86EnvDirectCcOpOffset) ||
+                (opc === ops.ld32u && size === 4 &&
+                 offset === x86EnvDirectHflagsOffset) ||
+                (opc === ops.st32 && size === 4 &&
+                 offset === x86EnvDirectDsSelectorOffset));
+    }
+
+    function envRelativeMemorySupported(insn, r1, size) {
+        const offset = sextract(insn, 16, 16);
+
+        return r1 === envRelativeBaseReg &&
+               ((offset >= envRelativeMinOffset &&
+                 offset + size <= envRelativeMaxExclusive) ||
+                x86EnvDirectFieldSupported(insn, offset, size));
+    }
+
     function envRelativeOffset(insn, r1, size) {
         const offset = sextract(insn, 16, 16);
-        if (r1 !== envRelativeBaseReg ||
-            offset < envRelativeMinOffset ||
-            offset + size > envRelativeMaxExclusive) {
+        if (!envRelativeMemorySupported(insn, r1, size)) {
             throw new Error("unsupported live generated env-relative memory");
         }
         return BigInt(offset);
@@ -3348,9 +3375,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
             const r1 = bits(insn >>> 0, 12, 4);
 
             return range === null ||
-                   (r1 === envRelativeBaseReg &&
-                    range.offset >= envRelativeMinOffset &&
-                    range.offset + range.size <= envRelativeMaxExclusive);
+                   envRelativeMemorySupported(insn, r1, range.size);
         }
 
         function incrementRunCounter(offset) {

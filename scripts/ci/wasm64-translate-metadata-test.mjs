@@ -443,6 +443,17 @@ assert.match(liveGeneratedExecJs, /i64LoadAtPtr\(0, runCtxTlbOffset\)/);
 assert.match(liveGeneratedExecJs, /unsupported live generated-output multi-access shape/);
 assert.match(liveGeneratedExecJs, /runCounters\.inlineTlbHitLoads/);
 assert.match(liveGeneratedExecJs, /runCounters\.inlineTlbHitStores/);
+assert.match(liveGeneratedExecJs, /x86EnvDirectFieldsEnabled/);
+assert.match(liveGeneratedExecJs, /TARGET_X86_64/);
+assert.match(liveGeneratedExecJs, /x86EnvDirectCcOpOffset\s*=\s*0x128/);
+assert.match(liveGeneratedExecJs, /x86EnvDirectHflagsOffset\s*=\s*0x130/);
+assert.match(liveGeneratedExecJs, /x86EnvDirectDsSelectorOffset\s*=\s*0x180/);
+assert.match(liveGeneratedExecJs, /function x86EnvDirectFieldSupported/);
+assert.match(liveGeneratedExecJs, /opc === ops\.st32 && size === 4 &&\s+offset === x86EnvDirectCcOpOffset/);
+assert.match(liveGeneratedExecJs, /opc === ops\.ld32u && size === 4 &&\s+offset === x86EnvDirectHflagsOffset/);
+assert.match(liveGeneratedExecJs, /opc === ops\.st32 && size === 4 &&\s+offset === x86EnvDirectDsSelectorOffset/);
+assert.match(liveGeneratedExecJs, /function envRelativeMemorySupported/);
+assert.match(liveGeneratedExecJs, /x86EnvDirectFieldSupported\(insn, offset, size\)/);
 for (const [name, value, isBigInt] of [
   ["runCtxTlbOffset", headerDefine("TCG_WASM64_RUN_CTX_TLB_OFFSET"), false],
   ["targetPageBits", headerDefine("TCG_WASM64_TARGET_PAGE_BITS"), false],

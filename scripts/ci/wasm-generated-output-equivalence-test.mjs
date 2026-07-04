@@ -199,6 +199,9 @@ const RV64_ENV_RELATIVE_MAX_EXCLUSIVE = 0x120;
 const X86_ENV_DIRECT_CC_OP_OFFSET = 0x128;
 const X86_ENV_DIRECT_HFLAGS_OFFSET = 0x130;
 const X86_ENV_DIRECT_DS_SELECTOR_OFFSET = 0x180;
+const X86_ENV_DIRECT_INITIAL_CC_OP = 0x1128128;
+const X86_ENV_DIRECT_INITIAL_HFLAGS = 0x1130130;
+const X86_ENV_DIRECT_INITIAL_DS_SELECTOR = 0x1180180;
 const MO_8 = 0;
 const MO_16 = 1;
 const MO_32 = 2;
@@ -2797,6 +2800,21 @@ function createState(relativeBase, words, seed) {
   view.setBigUint64(dataBase + 0x100, BigInt(0x100000000 + seed), true);
   view.setBigUint64(dataBase + 0x110, BigInt(0x200000000 + seed), true);
   view.setBigUint64(dataBase + 0x118, BigInt(0x300000000 + seed), true);
+  view.setUint32(
+    dataBase + 16 + X86_ENV_DIRECT_CC_OP_OFFSET,
+    X86_ENV_DIRECT_INITIAL_CC_OP,
+    true,
+  );
+  view.setUint32(
+    dataBase + 16 + X86_ENV_DIRECT_HFLAGS_OFFSET,
+    X86_ENV_DIRECT_INITIAL_HFLAGS,
+    true,
+  );
+  view.setUint32(
+    dataBase + 16 + X86_ENV_DIRECT_DS_SELECTOR_OFFSET,
+    X86_ENV_DIRECT_INITIAL_DS_SELECTOR,
+    true,
+  );
   for (let index = 0; index < words.length; index++) {
     const insn = words[index] >>> 0;
     const opc = bits(insn, 0, 8);
@@ -2825,6 +2843,8 @@ function createState(relativeBase, words, seed) {
 }
 
 function captureState(view, regsPtr, retPtr, dataBase, helpers) {
+  const envBase = dataBase + 16;
+
   return {
     regs: Array.from({ length: 16 }, (_, reg) =>
       view.getBigUint64(regsPtr + reg * 8, true).toString()),
@@ -2837,6 +2857,12 @@ function captureState(view, regsPtr, retPtr, dataBase, helpers) {
       view.getBigUint64(dataBase + 0x110, true).toString(),
       view.getBigUint64(dataBase + 0x118, true).toString(),
     ],
+    x86EnvDirectFields: {
+      ccOp: view.getUint32(envBase + X86_ENV_DIRECT_CC_OP_OFFSET, true),
+      hflags: view.getUint32(envBase + X86_ENV_DIRECT_HFLAGS_OFFSET, true),
+      dsSelector:
+        view.getUint32(envBase + X86_ENV_DIRECT_DS_SELECTOR_OFFSET, true),
+    },
     helpers: {
       calls: helpers.calls,
       loads: helpers.calls.filter((call) => call.kind === "ld").length,
@@ -3019,6 +3045,8 @@ async function runFixture(fixture, seed) {
     inlineTlbHitLoads: expected.memoryLoads,
     inlineTlbHitStores: expected.memoryWrites,
     memoryWrites: expected.memoryWrites,
+    x86EnvDirectFields: generatedState.x86EnvDirectFields,
+    x86EnvDirectReadReg4: generatedState.regs[4],
     emitter: emission.emitter,
     moduleValid: emission.moduleValid,
     moduleByteLength: emission.moduleByteLength,
@@ -6147,6 +6175,24 @@ assert.deepEqual(
   ],
 );
 assert.deepEqual(
+  r4s21bX86EnvDirectResults.map((entry) => [
+    entry.name,
+    entry.x86EnvDirectReadReg4,
+    entry.x86EnvDirectFields,
+  ]),
+  [
+    [
+      "r4s21b-x86-env-direct-fields-with-qemu-load-store-all-or-nothing",
+      BigInt(X86_ENV_DIRECT_INITIAL_HFLAGS).toString(),
+      {
+        ccOp: 0x55,
+        hflags: X86_ENV_DIRECT_INITIAL_HFLAGS,
+        dsSelector: 0x66,
+      },
+    ],
+  ],
+);
+assert.deepEqual(
   r4s21bX86EnvDirectAddressCaptureResults.map((entry) => [
     entry.name,
     entry.inlineTlbHitLoads,
@@ -6167,6 +6213,22 @@ assert.deepEqual(
       0,
       true,
       true,
+    ],
+  ],
+);
+assert.deepEqual(
+  r4s21bX86EnvDirectAddressCaptureResults.map((entry) => [
+    entry.name,
+    entry.x86EnvDirectFields,
+  ]),
+  [
+    [
+      "r4s21b-x86-env-direct-store-address-captured-before-r14-clobber",
+      {
+        ccOp: X86_ENV_DIRECT_INITIAL_CC_OP,
+        hflags: X86_ENV_DIRECT_INITIAL_HFLAGS,
+        dsSelector: 0x66,
+      },
     ],
   ],
 );

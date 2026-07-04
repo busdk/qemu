@@ -3706,6 +3706,19 @@ run that reaches a weaker marker than normal multi-user readiness.
     `node --check scripts/ci/wasm64-translate-metadata-test.mjs`; and
     `node scripts/ci/wasm64-translate-metadata-test.mjs`. No Chromium,
     R4l, or Bus Engine OS proof was run for this deterministic slice.
+
+    Follow-up fix 2026-07-04: the original R4s21b deterministic slice was
+    incomplete because the C preflight accepted the exact x86 env-direct
+    offsets while the embedded live-generated-exec JavaScript still enforced
+    only the lower `-16..0x120` window during module emission. The embedded
+    JS now uses the same `TARGET_X86_64`-scoped exact field predicate for
+    both support checks and address lowering. The deterministic fixtures also
+    seed and capture explicit env-field sentinels, proving
+    `ld32u [r14+0x130]` reads `hflags` into the expected register and
+    `st32 [r14+0x128]` / `st32 [r14+0x180]` commit `cc_op` and
+    `segs[R_DS].selector` only after all guards pass. The no-commit after a
+    later SoftMMU guard exit remains covered. Required deterministic checks
+    passed again; no Chromium, R4l, or Bus Engine OS proof was run.
   - [ ] R4s22 - Expand supported x86 live SoftMMU MemOp families only after
     R4s19/R4s20 identify memory rejects as a remaining dominant blocker.
     DoD: admit alignment flags only with explicit QEMU-equivalent alignment
