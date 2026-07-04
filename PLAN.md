@@ -2262,6 +2262,16 @@ run that reaches a weaker marker than normal multi-user readiness.
       `qemu/emsdk-wasm64-cross:latest` image, so R4s6 remains the next item
       after restoring or rebuilding that build image.
 
+      Follow-up 2026-07-04: the Docker build image was rebuilt successfully.
+      The first R4s6 artifact build then exposed a compile-only generic-QEMU
+      issue in this slice: `TARGET_PAGE_BITS` is a runtime `target_page.bits`
+      value when `tcg/wasm64.c` is compiled as generic system code, so it
+      cannot be guarded by `QEMU_BUILD_BUG_ON()`. The source now keeps the
+      runtime TLB-mirror page-size guard and removes the invalid compile-time
+      assertion. This is a buildability repair only; it does not widen the
+      generated path, change the accelerator admission policy, or make a
+      performance claim.
+
       Original DoD:
       `tcg_wasm64_live_generated_exec_js()` recognizes
       `tci_qemu_ld_rrr` and `tci_qemu_st_rrr`, lowers supported single
@@ -2292,6 +2302,20 @@ run that reaches a weaker marker than normal multi-user readiness.
     generated guest-instruction retirement remains zero, R4l stays blocked and
     the next implementation item must name the measured blocker before more
     code changes.
+
+    Artifact build preparation 2026-07-04: after rebuilding
+    `qemu/emsdk-wasm64-cross:latest`, the x86_64 backend artifact build passed
+    with command `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s6-x86-backend-artifacts
+    --target x86_64 --tcg-wasm64-backend`. Artifacts:
+    `qemu-system-x86_64.js`
+    `c2a8ec8bbd2ccacdf51cf9d0167397073395d59d1956e24b68c89c194fb4bcfb`,
+    `qemu-system-x86_64.wasm`
+    `1b913d3ce5d19eda0cec3eecfdefcb04a5e0af8085dd4692bd9a399f100664d5`,
+    manifest
+    `608fa44bd53438b483410135ad944819d686fff194572468b45046a7d1761a27`.
+    The bounded Chromium preflight has not run yet, so R4s6 remains open and
+    R4l remains blocked.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline

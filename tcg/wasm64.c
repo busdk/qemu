@@ -273,7 +273,12 @@ QEMU_BUILD_BUG_ON(sizeof(CPUTLBEntryFull) !=
                   TCG_WASM64_CPUTLB_ENTRY_FULL_SIZE);
 QEMU_BUILD_BUG_ON(MMU_DATA_LOAD != TCG_WASM64_MMU_DATA_LOAD);
 QEMU_BUILD_BUG_ON(MMU_DATA_STORE != TCG_WASM64_MMU_DATA_STORE);
-QEMU_BUILD_BUG_ON(TARGET_PAGE_BITS != TCG_WASM64_TARGET_PAGE_BITS);
+/*
+ * TARGET_PAGE_BITS is a runtime target_page.bits value when this file is
+ * compiled as generic system code.  The TLB mirror stores the actual runtime
+ * value, and generated SoftMMU paths fail closed unless it matches the
+ * WebAssembly lowering contract.
+ */
 QEMU_BUILD_BUG_ON(MO_8 != TCG_WASM64_MEMOP_8);
 QEMU_BUILD_BUG_ON(MO_16 != TCG_WASM64_MEMOP_16);
 QEMU_BUILD_BUG_ON(MO_32 != TCG_WASM64_MEMOP_32);
