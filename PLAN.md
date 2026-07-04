@@ -2587,6 +2587,37 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-generated-output-equivalence-test.mjs`, and `node
     scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. No browser
     speed gate or Bus Engine OS proof was run in this slice.
+  - [ ] R4s10 - Attribute the next post-R4s9 x86 preflight blockers before
+    widening execution again. DoD: using QEMU commit `b6b2d886c7` artifacts
+    (`qemu-system-x86_64.js`
+    `0c98c41b6ed8f7db55ce0896467ad78a0dcef1a65c5af9f3b660a89d23cde22f`,
+    `qemu-system-x86_64.wasm`
+    `9b69dede57c1b44079db8393aae9d3e98166ade56a36fbd392ce43f243e892dd`,
+    manifest
+    `ed55cfa2e4096111cc051ad5dcbc24fd73d5025845a3370ab09d7f08dc428854`),
+    explain the bounded Chromium `149.0.7827.55` preflight at
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s9-x86-preflight-b6b2d88/wasm-browser-smoke-result.json`.
+    The run used the pinned x86_64 TuxBoot guest manifest from
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4s8-guest-current/tuxboot-browser-smoke-guest.json`
+    and failed with `reason=preflight-zero-generated-exec`,
+    `attempts=100`, `successes=0`, `rejects=100`, `skips=82`,
+    `generated_guest_instructions=0`, `generated_run_entries=0`,
+    `generated_coverage_denominator=1120`, `selected_body_helper_exit_skips=82`,
+    `hotset_target_metadata_hits=14`, `hotset_target_output_hits=14`,
+    and `hotset_target_stale=84`. R4s9 cleared the prior branch-label
+    relocation bucket (`js-status-metadata-output-branch-label-relocation=0`).
+    Remaining nonzero buckets were `js-status-module-emission-failed=24`,
+    `js-status-metadata-output-pool-relocation=4`,
+    `selected-body-softmmu-multi-access-unsupported=61`,
+    `selected-body-memop-unsupported-size=5`, and
+    `selected-body-memop-unsupported-alignment=6`; first mismatch was
+    `js-status-metadata-output-pool-relocation` at index `12`, op
+    `tci_movl`, metadata word `0x0000057e`, live word `0x0007457e`.
+    Add attribution precise enough to identify which op/shape caused module
+    emission failure and which deterministic fixture should reproduce it.
+    This item is attribution/planning unless the fix is deterministic and
+    small; no R4l speed gate or Bus Engine OS browser proof may run until a
+    bounded preflight reports nonzero generated guest-instruction retirement.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
