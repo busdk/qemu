@@ -2152,6 +2152,30 @@ run that reaches a weaker marker than normal multi-user readiness.
       generated-output emitter/layout contract so qemu ld/st SoftMMU lowering
       is a backend capability, not a special path for the currently measured
       x86 body.
+      - [ ] R4s5c1 - Define the generic generated-output SoftMMU lowering
+        contract before live execution wiring. DoD: the deterministic emitter
+        model names one reusable lowering entrypoint for
+        `tci_qemu_ld_rrr`/`tci_qemu_st_rrr`, derives or validates every
+        run-context, TLB mirror, TLB entry, run-exit, and counter offset from
+        `tcg/wasm64.h` or C-side `QEMU_BUILD_BUG_ON()` contracts, and has a
+        drift test that fails if the JavaScript model carries a magic layout
+        constant that no longer matches the exported C/header contract. This
+        item is not accepted by adding a measured-shape-only branch in
+        `tcg_wasm64_live_generated_exec_js()`.
+      - [ ] R4s5c2 - Wire the C-side TLB mirror into live execution through
+        the generic lowering contract. DoD:
+        `tcg_wasm64_live_generated_exec_try()` zero-initializes a local
+        `TCGWasm64TLBMirror`, refreshes it only after R4s5b proves the
+        memory operation and `mmu_idx`, assigns `context.tlb`, and preserves
+        precise fail-closed reasons for missing, invalid, stale, MMIO,
+        slow-flag, page-crossing, permission, and TLB-miss/fault cases.
+      - [ ] R4s5c3 - Prove live qemu ld/st lowering without helper calls in
+        deterministic tests. DoD: clean RAM-hit load and store fixtures report
+        nonzero inline TLB-hit counters, zero helper/`qemu_ld`/`qemu_st`
+        calls, and generated guest-instruction retirement through the generic
+        emitter path; negative fixtures cover the same fail-closed cases as
+        R4s5c2. No browser preflight or R4l speed gate may run until these
+        checks pass.
 - [x] R7 - Dispatch available RISC-V generated output from the live wasm64
   run loop before TCI fallback. DoD: when live TB metadata reports
   `tcg_wasm64_translate_generated_output_available()` and the RV64
