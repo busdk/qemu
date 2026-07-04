@@ -2658,7 +2658,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `selected-body-softmmu-multi-access-unsupported=61`, and the same
     module-emission/pool-relocation/memop blockers. It is not accepted
     performance work.
-  - [ ] R4s11 - Make the R4s10 x86 live body-build failure reproducible and
+  - [x] R4s11 - Make the R4s10 x86 live body-build failure reproducible and
     either fix it generically or classify the exact unsupported mechanism.
     DoD: add a deterministic fixture for the live R4s10 shape
     `ld32u,tci_movi,tci_setcond32,brcond,tci_movi,st8,ld,tci_movi,add,st,goto_tb,exit_tb,exit_tb`
@@ -2673,6 +2673,47 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, and then one
     bounded x86 Chromium preflight only if deterministic checks predict
     nonzero generated retirement or materially sharper attribution. R4l speed
+    gate remains blocked until bounded preflight reports nonzero generated
+    guest-instruction retirement.
+    Accepted 2026-07-04: QEMU commit `73ab9fdfee21` adds deterministic
+    coverage for the R4s10 live 13-op shape using the live memory import
+    descriptor and classifies it as `module-validation-failed` at
+    `module-validate` instead of generic `body-build`. The deterministic
+    fixture `r4s11-live-r4s10-body-shape-live-memory-classified` keeps
+    generated guest instructions at `0`, reports first op `ld32u`, terminal
+    op `goto_tb`, shape
+    `ld32u,tci_movi,tci_setcond32,brcond,tci_movi,st8,ld,tci_movi,add,st,goto_tb,exit_tb,exit_tb`,
+    and preserves the live memory descriptor: kind `0x02`, limits flags
+    `0x07`, initial pages `0`, maximum pages `0x40000`, shared `true`,
+    memory64 `true`. Checks passed under supervisor review: `git diff
+    --check 73ab9fdfee21^..73ab9fdfee21`, `node --check
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, and `node
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. No browser
+    run was accepted for this item because deterministic evidence still
+    predicts zero generated retirement. Separately, read-only review of the
+    remaining `tci_movl` pool relocation concluded that bits `12..31` are a
+    signed 20-bit displacement; normalization is unsafe unless both metadata
+    and live displacement targets are valid and the loaded
+    `tcg_target_ulong` bytes are identical. Pool relocation stays fail-closed
+    until that value-equality invariant is captured.
+  - [ ] R4s12 - Explain or fix the R4s11 module validation failure. DoD:
+    extend deterministic and live attribution so the 13-op R4s10 shape reports
+    the exact validation/compile error from the WebAssembly engine, or fix the
+    emitter generically if the invalid construct is clear and the fix
+    preserves fail-closed behavior. Required behavior: no hardcoded PCs, no
+    TuxBoot-specific matching, no Bus Engine OS special case, and no admission
+    of unsafe direct memory, stale metadata, unproven pool relocation,
+    unsupported branches, unsupported memops, or unsupported CPU state. If
+    fixed, the deterministic fixture must retire generated guest instructions
+    for the 13-op shape and retain the live memory descriptor. If not fixed,
+    the live summary must report a reason more specific than
+    `module-validation-failed`. Required checks: `git diff --check`, `node
+    --check scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, and `node
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. Run a bounded
+    x86 Chromium preflight only when deterministic evidence predicts nonzero
+    generated retirement or materially sharper live attribution. R4l speed
     gate remains blocked until bounded preflight reports nonzero generated
     guest-instruction retirement.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
