@@ -51,6 +51,16 @@ and remaining gap here. Such wins do not satisfy the final proof until the
 accepted Bus Engine OS image reaches normal multi-user readiness within
 `300000` ms.
 
+Bus Engine OS is the downstream acceptance workload, not a hard-coding target.
+Boot traces from Bus Engine OS or generic Linux may select which translated
+blocks, operations, and memory paths to implement first, but accepted QEMU
+accelerator code must be reusable for supported `x86_64-softmmu` guest code in
+general. Do not accept product-specific logic, fixed guest PCs, fixed boot
+stage checks, measured-shape-only live JavaScript branches, or one-off
+shortcuts whose correctness depends on the Bus Engine OS image rather than on
+generic translated operations, generic SoftMMU/TLB state, and documented
+synthetic exits/fallback.
+
 ## Exact Definition of Done
 
 The current executor lane is done only when all of the following are true for

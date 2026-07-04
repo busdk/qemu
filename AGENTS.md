@@ -38,6 +38,15 @@ Bus Engine OS is the downstream proof guest. Do not add Bus Engine product
 logic, branding, release policy, package selection, or website UI to upstream
 QEMU code.
 
+Do not hard-code the accelerator for Bus Engine OS boot. Real Bus Engine OS
+and generic Linux traces may prioritize the next translated-block shapes to
+support, but the accepted implementation must be generic QEMU accelerator
+machinery: reusable lowering for supported x86_64 TCG/TCI operations,
+generic SoftMMU/TLB state, documented synthetic exits, and metrics that apply
+to arbitrary guests using those supported operations. Reject fixed guest PCs,
+fixed boot-stage checks, product-profile branches, and measured-shape-only
+live JavaScript paths as performance solutions.
+
 ## Boundary
 
 QEMU changes may provide generic build support, browser smoke harnesses,
