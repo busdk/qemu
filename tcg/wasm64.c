@@ -339,6 +339,9 @@ static __thread uint64_t live_generated_exec_hotset_target_slots_unsafe;
 static __thread uint64_t live_generated_exec_hotset_target_metadata_hits;
 static __thread uint64_t live_generated_exec_hotset_target_output_hits;
 static __thread uint64_t live_generated_exec_hotset_target_stale;
+static __thread uint64_t live_generated_exec_selected_body_unsupported_ops[
+    NB_OPS];
+static __thread uint64_t live_generated_exec_selected_body_no_terminal;
 static __thread uint64_t live_generated_exec_reject_reasons[
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT__MAX];
 static __thread bool live_tb_coverage_checked;
@@ -4726,8 +4729,16 @@ static bool tcg_wasm64_live_generated_exec_op_supported(uint32_t op)
     }
 }
 
-static bool tcg_wasm64_live_generated_exec_shape_supported(
-    const TCGWasm64TBMetadata *metadata)
+static void tcg_wasm64_live_generated_exec_count_selected_unsupported_op(
+    uint32_t op)
+{
+    if (op < NB_OPS) {
+        live_generated_exec_selected_body_unsupported_ops[op]++;
+    }
+}
+
+static bool tcg_wasm64_live_generated_exec_shape_supported_record(
+    const TCGWasm64TBMetadata *metadata, bool record)
 {
     const uint32_t *words;
 
@@ -4740,11 +4751,18 @@ static bool tcg_wasm64_live_generated_exec_shape_supported(
         TCGOpcode op = (TCGOpcode)tcg_wasm64_tci_word_op(words[i]);
 
         if (!tcg_wasm64_live_generated_exec_op_supported(op)) {
+            if (record) {
+                tcg_wasm64_live_generated_exec_count_selected_unsupported_op(
+                    op);
+            }
             return false;
         }
         if (op == INDEX_op_goto_tb || op == INDEX_op_exit_tb) {
             return true;
         }
+    }
+    if (record) {
+        live_generated_exec_selected_body_no_terminal++;
     }
     return false;
 }
@@ -5594,6 +5612,42 @@ static void tcg_wasm64_print_live_generated_exec_reject_reasons(void)
     }
 }
 
+static void tcg_wasm64_print_live_generated_exec_selected_unsupported_top(void)
+{
+    uint32_t top_ops[8] = { 0 };
+
+    for (uint32_t op = 0; op < NB_OPS; op++) {
+        uint64_t count =
+            live_generated_exec_selected_body_unsupported_ops[op];
+
+        if (count == 0) {
+            continue;
+        }
+        for (size_t i = 0; i < ARRAY_SIZE(top_ops); i++) {
+            if (live_generated_exec_selected_body_unsupported_ops[
+                    top_ops[i]] < count) {
+                memmove(&top_ops[i + 1], &top_ops[i],
+                        (ARRAY_SIZE(top_ops) - i - 1) *
+                        sizeof(top_ops[0]));
+                top_ops[i] = op;
+                break;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < ARRAY_SIZE(top_ops); i++) {
+        uint32_t op = top_ops[i];
+        uint64_t count =
+            live_generated_exec_selected_body_unsupported_ops[op];
+
+        if (count == 0) {
+            break;
+        }
+        fprintf(stderr, "%s{\"op\":%u,\"name\":\"%s\",\"count\":%" PRIu64 "}",
+                i == 0 ? "" : ",", op, tcg_wasm64_op_name(op), count);
+    }
+}
+
 static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
 {
     bool preflight = tcg_wasm64_live_generated_exec_preflight();
@@ -5631,7 +5685,8 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             "\"hotset_target_metadata_hits\":%" PRIu64 ","
             "\"hotset_target_output_hits\":%" PRIu64 ","
             "\"hotset_target_stale\":%" PRIu64 ","
-            "\"reject_reasons\":[",
+            "\"selected_body_no_terminal\":%" PRIu64 ","
+            "\"selected_body_unsupported_ops\":[",
             reason ? reason : "unknown",
             (tcg_wasm64_live_generated_exec_reject_total() != 0 &&
              !live_generated_exec_no_fallback) ? "true" : "false",
@@ -5651,7 +5706,11 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             live_generated_exec_hotset_target_slots_unsafe,
             live_generated_exec_hotset_target_metadata_hits,
             live_generated_exec_hotset_target_output_hits,
-            live_generated_exec_hotset_target_stale);
+            live_generated_exec_hotset_target_stale,
+            live_generated_exec_selected_body_no_terminal);
+    tcg_wasm64_print_live_generated_exec_selected_unsupported_top();
+    fprintf(stderr, "],"
+            "\"reject_reasons\":[");
     tcg_wasm64_print_live_generated_exec_reject_reasons();
     fprintf(stderr, "]}\n");
 }
@@ -5735,7 +5794,8 @@ static bool tcg_wasm64_live_generated_exec_try(
     }
     tb = tcg_tb_lookup((uintptr_t)tb_ptr);
     tcg_wasm64_live_generated_exec_probe_hotset_target(tb_ptr, metadata, tb);
-    if (!tcg_wasm64_live_generated_exec_shape_supported(metadata)) {
+    if (!tcg_wasm64_live_generated_exec_shape_supported_record(
+            metadata, true)) {
         return tcg_wasm64_live_generated_exec_reject(
             "selected-body-shape-unsupported", tb_ptr, metadata, NULL,
             TCG_WASM64_RUN_EXIT_UNSUPPORTED, counters, no_fallback);
