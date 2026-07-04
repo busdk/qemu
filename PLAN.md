@@ -3719,6 +3719,28 @@ run that reaches a weaker marker than normal multi-user readiness.
     `segs[R_DS].selector` only after all guards pass. The no-commit after a
     later SoftMMU guard exit remains covered. Required deterministic checks
     passed again; no Chromium, R4l, or Bus Engine OS proof was run.
+  - [ ] R4s21c - Re-measure the x86 live blocker distribution after the next
+    promoted env-relative direct-memory implementation. DoD: after the
+    external x86 env-relative memory fix lands on QEMU `develop`, fetch and
+    fast-forward to that commit, build fresh `x86_64-softmmu` backend
+    artifacts with `--tcg-wasm64-backend`, and run only the bounded generic
+    Chromium TuxBoot preflight with `--wasm64-live-generated-exec`,
+    `--wasm64-live-generated-exec-preflight`, bounded preflight limit, and
+    wasm64 TCG summary enabled. Record the exact QEMU commit, commands,
+    artifact SHA-256 hashes, Chromium version, result JSON path and SHA-256,
+    screenshot path and SHA-256, marker or timeout, generated/fallback guest
+    instruction counters, generated coverage numerator/denominator, generated
+    attempts/successes/rejects, inline TLB-hit load/store counters,
+    helper/`qemu_ld`/`qemu_st` counts, module emission/validation failures,
+    direct-memory attribution, and the top remaining reject or synthetic-exit
+    reasons. This item is measurement only: it must not claim an R4l speed
+    pass, must not run Bus Engine OS, and must not use RISC-V results as x86
+    evidence. If generated guest-instruction retirement remains too low or
+    rejects stay dominated by direct-memory/env-relative shapes, the next
+    implementation item must name that measured blocker before any generic
+    speed gate. If the blocker distribution moves to MemOp alignment, size,
+    sign, or multi-access shapes, use this evidence to decide whether R4s22
+    becomes the next x86 implementation item.
   - [ ] R4s22 - Expand supported x86 live SoftMMU MemOp families only after
     R4s19/R4s20 identify memory rejects as a remaining dominant blocker.
     DoD: admit alignment flags only with explicit QEMU-equivalent alignment
