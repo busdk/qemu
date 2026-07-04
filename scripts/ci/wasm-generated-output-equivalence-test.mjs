@@ -2720,9 +2720,15 @@ function simulateR7LongRunningGeneratedExec({
 }) {
   const generated = createChainedState(sourceFixture, targetTbPtr, seed);
   const reference = createChainedState(sourceFixture, targetTbPtr, seed);
+  const sourceTerminal = splitGeneratedOutput(
+    sourceFixture.words, sourceFixture.relativeBase).terminal;
+  const sourceCanonicalExit = BigInt(
+    sourceFixture.sourceTbExitBase ?? sourceFixture.relativeBase) +
+    BigInt(sourceFixture.gotoTbIndex ?? 0);
   const generatedSource = runInterpreterTB(generated, sourceFixture);
   const referenceSource = runInterpreterTB(reference, sourceFixture);
 
+  assert.equal(sourceTerminal.kind, "goto_tb");
   assert.equal(generatedSource.status, STATUS_DISPATCH);
   assert.equal(referenceSource.status, STATUS_DISPATCH);
   assert.equal(generatedSource.ret, BigInt(targetTbPtr));
@@ -2768,12 +2774,15 @@ function simulateR7LongRunningGeneratedExec({
     generatedCoverageNumerator: generatedGuestInstructions,
     generatedExecuted: generatedChainLength,
     sourceStatus: generatedSource.status.toString(),
+    sourceSlotByteOffset: sourceTerminal.ret,
+    sourceSlotContents: generatedSource.ret.toString(),
+    sourceCanonicalExit: sourceCanonicalExit.toString(),
     targetStatus: generatedTarget ? generatedTarget.status.toString() : null,
     targetExecuted: generatedTarget !== null,
     finalStatus: generatedTarget ? generatedTarget.status.toString()
                                  : generatedSource.status.toString(),
     finalRet: generatedTarget ? generatedTarget.ret.toString()
-                              : generatedSource.ret.toString(),
+                              : sourceCanonicalExit.toString(),
     guestStateCommit: true,
     chainTargetExit: stopReason === "chain-target-unsupported",
     tciCorrectnessFallback: false,
@@ -6757,10 +6766,54 @@ assert.equal(r4s16ChainTargetStop.tciCorrectnessFallback, false);
 assert.equal(r4s16ChainTargetStop.targetExecuted, false);
 assert.equal(r4s16ChainTargetStop.targetStatus, null);
 assert.equal(r4s16ChainTargetStop.finalRet,
-             R4S16_MISSING_CHAIN_TARGET.toString());
+             r4s16ChainTargetStop.sourceCanonicalExit);
+assert.notEqual(r4s16ChainTargetStop.finalRet,
+                R4S16_MISSING_CHAIN_TARGET.toString());
 assert.equal(r4s16ChainTargetStop.registerStateMatched, true);
 assert.equal(r4s16ChainTargetStop.memoryStateMatched, true);
 assert.equal(r4s16ChainTargetStop.helperCalls, 0);
+const R4S18_UNLINKED_RESET_SLOT_CONTENTS = 0x7777004n;
+const R4S18_SOURCE_TB_EXIT_BASE = 0x8888000n;
+const r4s18NormalChainTargetStop = simulateR7LongRunningGeneratedExec({
+  sourceFixture: {
+    ...liveX86Fixture,
+    relativeBase: liveX86Fixture.relativeBase + 4,
+    words: r4s13LiveBodyBuildWords,
+    guestInstructions: 1,
+    sourceTbExitBase: R4S18_SOURCE_TB_EXIT_BASE,
+    gotoTbIndex: 0,
+  },
+  targetFixture: null,
+  targetTbPtr: R4S18_UNLINKED_RESET_SLOT_CONTENTS,
+  sourceGuestInstructions: 1,
+  targetGuestInstructions: 1,
+  budget: 64,
+  seed: 1,
+  noFallback: false,
+});
+assert.equal(r4s18NormalChainTargetStop.path,
+             "generated-chain-target-exit");
+assert.equal(r4s18NormalChainTargetStop.stopReason,
+             "chain-target-unsupported");
+assert.equal(r4s18NormalChainTargetStop.noSilentFallback, false);
+assert.equal(r4s18NormalChainTargetStop.failedClosed, false);
+assert.equal(r4s18NormalChainTargetStop.generatedGuestInstructions, 1);
+assert.equal(r4s18NormalChainTargetStop.generatedRunEntries, 1);
+assert.equal(r4s18NormalChainTargetStop.generatedChainLength, 1);
+assert.equal(r4s18NormalChainTargetStop.targetExecuted, false);
+assert.equal(r4s18NormalChainTargetStop.chainTargetExit, true);
+assert.equal(r4s18NormalChainTargetStop.sourceSlotByteOffset % 8, 4);
+assert.equal(r4s18NormalChainTargetStop.sourceSlotContents,
+             R4S18_UNLINKED_RESET_SLOT_CONTENTS.toString());
+assert.equal(r4s18NormalChainTargetStop.finalRet,
+             R4S18_SOURCE_TB_EXIT_BASE.toString());
+assert.equal(r4s18NormalChainTargetStop.finalRet,
+             r4s18NormalChainTargetStop.sourceCanonicalExit);
+assert.notEqual(r4s18NormalChainTargetStop.finalRet,
+                r4s18NormalChainTargetStop.sourceSlotContents);
+assert.equal(r4s18NormalChainTargetStop.registerStateMatched, true);
+assert.equal(r4s18NormalChainTargetStop.memoryStateMatched, true);
+assert.equal(r4s18NormalChainTargetStop.helperCalls, 0);
 assert.deepEqual(
   memoryImportTypeBytes(DETERMINISTIC_MEMORY_IMPORT_DESCRIPTOR),
   [...name("env"), ...name("memory"), 0x02, 0x00, 0x01],
@@ -7832,6 +7885,7 @@ console.log(JSON.stringify({
     fixtures: r4mLiveGeneratedExecCases,
     memopRejectAttribution: r4s7MemopRejectAttribution,
     r4s16ChainTargetStop,
+    r4s18NormalChainTargetStop,
     generatedFixtures: r4mLiveGeneratedExecCases.filter((entry) =>
       entry.path === "generated").length,
     failClosedFixtures: r4mLiveGeneratedExecCases.filter((entry) =>

@@ -310,17 +310,54 @@ const liveGeneratedExecSummaryZeroResult = {
       {
         event: "live-generated-exec-summary",
         reason: "preflight-zero-generated-exec",
+        chain_exit_reason: "none",
         compat_fallback: true,
         preflight: true,
         preflight_limit: 10000,
+        chain_budget: 64,
         preflight_ready: false,
         no_silent_fallback: false,
         attempts: 10000,
         successes: 0,
         rejects: 10000,
+        skips: 0,
         generated_guest_instructions: 0,
+        fallback_guest_instructions: 0,
+        generated_body_time_ns: 0,
+        tci_dispatch_time_ns: 0,
+        tb_lookup_time_ns: 0,
+        helper_call_time_ns: 0,
+        qemu_ld_time_ns: 0,
+        qemu_st_time_ns: 0,
+        compile_time_ns: 0,
+        instantiate_time_ns: 0,
+        generated_run_entries: 0,
+        generated_chain_length: 0,
+        generated_guest_instructions_per_entry: 0,
         generated_coverage_numerator: 0,
         generated_coverage_denominator: 10000,
+        inline_tlb_hit_loads: 0,
+        inline_tlb_hit_stores: 0,
+        helper_calls: 0,
+        qemu_ld_calls: 0,
+        qemu_st_calls: 0,
+        exits_budget: 0,
+        exits_mmio: 0,
+        exits_tlb_miss_or_fault: 0,
+        exits_interrupt: 0,
+        exits_helper: 0,
+        exits_unsupported: 0,
+        exits_hlt: 0,
+        exits_invalidated: 0,
+        hotset_probe_attempts: 10000,
+        hotset_goto_sources: 0,
+        hotset_target_slots_read: 0,
+        hotset_target_slots_unsafe: 0,
+        hotset_target_metadata_hits: 0,
+        hotset_target_output_hits: 0,
+        hotset_target_stale: 0,
+        selected_body_helper_exit_skips: 0,
+        selected_body_no_terminal: 0,
         reject_reasons: [
           { reason: "metadata-missing", count: 2 },
           { reason: "generated-output-unavailable", count: 3 },
@@ -342,15 +379,27 @@ const liveGeneratedExecSummaryReadyResult = JSON.parse(
 {
   const summary = liveGeneratedExecSummaryReadyResult.wasm64Runloop.summaries[0];
 
-  summary.reason = "generated-exec-dispatch";
+  summary.reason = "chain-target-unsupported";
+  summary.chain_exit_reason = "chain-target-unsupported";
   summary.compat_fallback = false;
   summary.preflight_ready = true;
   summary.attempts = 1;
   summary.successes = 1;
   summary.rejects = 0;
   summary.generated_guest_instructions = 1;
+  summary.generated_body_time_ns = 1000;
+  summary.compile_time_ns = 100;
+  summary.instantiate_time_ns = 200;
+  summary.generated_run_entries = 1;
+  summary.generated_chain_length = 1;
+  summary.generated_guest_instructions_per_entry = 1;
   summary.generated_coverage_numerator = 1;
   summary.generated_coverage_denominator = 1;
+  summary.hotset_probe_attempts = 1;
+  summary.hotset_goto_sources = 1;
+  summary.hotset_target_slots_read = 1;
+  summary.hotset_target_stale = 1;
+  summary.exits_unsupported = 1;
   for (const reason of summary.reject_reasons) {
     reason.count = 0;
   }
@@ -673,9 +722,13 @@ for (const field of [
   assert.equal(gate.runloop.ok, true);
   assert.equal(gate.runloop.acceptanceAllowed, true);
   assert.equal(gate.runloop.lastSummary.event, "live-generated-exec-summary");
-  assert.equal(gate.runloop.lastSummary.reason, "generated-exec-dispatch");
+  assert.equal(gate.runloop.lastSummary.reason, "chain-target-unsupported");
+  assert.equal(gate.runloop.lastSummary.chain_exit_reason,
+    "chain-target-unsupported");
   assert.equal(gate.runloop.lastSummary.preflight_ready, true);
   assert.equal(gate.runloop.lastSummary.generated_guest_instructions, 1);
+  assert.equal(gate.runloop.lastSummary.generated_body_time_ns, 1000);
+  assert.equal(gate.runloop.lastSummary.exits_unsupported, 1);
   assert.equal(gate.runloop.lastSummary.reject_reason_total, 0);
   assert.equal(gate.runloop.lastSummary.reject_reason_total_matches, true);
 }

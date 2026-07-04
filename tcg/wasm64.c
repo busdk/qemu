@@ -466,6 +466,7 @@ typedef struct TCGWasm64TranslateEntry {
 
 static __thread TCGWasm64Counters *active_counters;
 static __thread TCGWasm64Counters translated_counters;
+static __thread TCGWasm64RunCounters live_generated_exec_run_counters;
 static __thread uint64_t translated_generated_first_unsupported_ops[NB_OPS];
 static __thread GHashTable *translate_cache;
 static __thread TCGWasm64TranslateEntry *active_translate_entry;
@@ -3794,7 +3795,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         emitted.push(...i64StoreAtPtr(
             exitPtr, 32,
             terminal.kind === ops.goto_tb
-                ? i64Load(i64Const(BigInt(tbPtr + terminal.ptrOffset)))
+                ? i64Const(BigInt(tbPtr))
                 : i64Const(BigInt(tbPtr + terminal.ptrOffset))));
         emitted.push(...incrementCounter(countersPtr, 0, guestInsns));
         emitted.push(...incrementCounter(countersPtr, 80, 1));
@@ -6007,13 +6008,79 @@ static bool tcg_wasm64_generated_terminal_parse(
     return false;
 }
 
+static bool tcg_wasm64_generated_terminal_slot_addr(
+    const void *tb_ptr, const TranslationBlock *tb,
+    const TCGWasm64GeneratedTerminal *terminal, uintptr_t *slot_addr)
+{
+    intptr_t min_offset = -(intptr_t)TCG_WASM64_LIVE_HOTSET_SLOT_BACKSCAN;
+    intptr_t max_offset;
+
+    *slot_addr = 0;
+    if (!terminal->found || terminal->op != INDEX_op_goto_tb) {
+        return false;
+    }
+    if (!tb || tb->tc.ptr != tb_ptr ||
+        tb->tc.size < sizeof(uintptr_t)) {
+        return false;
+    }
+
+    max_offset = (intptr_t)tb->tc.size - (intptr_t)sizeof(uintptr_t);
+    if (terminal->slot_offset < min_offset ||
+        terminal->slot_offset > max_offset) {
+        return false;
+    }
+
+    *slot_addr = (uintptr_t)((const uint8_t *)tb_ptr +
+                             terminal->slot_offset);
+    return true;
+}
+
+static bool tcg_wasm64_generated_terminal_exit_index(
+    const TranslationBlock *tb, uintptr_t slot_addr, unsigned *exit_index)
+{
+    for (unsigned i = 0; i <= TB_EXIT_IDXMAX; i++) {
+        uintptr_t expected =
+            (uintptr_t)tcg_splitwx_to_rx(
+                (void *)&tb->jmp_target_addr[i]);
+
+        if (slot_addr == expected) {
+            *exit_index = i;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool tcg_wasm64_live_generated_exec_read_dispatch(
+    const void *tb_ptr, const TCGWasm64TBMetadata *metadata,
+    const TranslationBlock *tb, uintptr_t *target, uintptr_t *source_exit)
+{
+    TCGWasm64GeneratedTerminal terminal;
+    uintptr_t slot_addr;
+    unsigned exit_index;
+
+    *target = 0;
+    *source_exit = 0;
+    if (!tcg_wasm64_generated_terminal_parse(metadata, &terminal) ||
+        !tcg_wasm64_generated_terminal_slot_addr(tb_ptr, tb, &terminal,
+                                                 &slot_addr) ||
+        !tcg_wasm64_generated_terminal_exit_index(tb, slot_addr,
+                                                  &exit_index)) {
+        return false;
+    }
+
+    memcpy(target, (const void *)slot_addr, sizeof(*target));
+    *source_exit = (uintptr_t)tcg_splitwx_to_rx((void *)tb) + exit_index;
+    return *target != 0;
+}
+
 static void tcg_wasm64_live_generated_exec_probe_hotset_target(
     const void *tb_ptr, const TCGWasm64TBMetadata *metadata,
     const TranslationBlock *tb)
 {
     TCGWasm64GeneratedTerminal terminal;
-    intptr_t min_offset = -(intptr_t)TCG_WASM64_LIVE_HOTSET_SLOT_BACKSCAN;
-    intptr_t max_offset;
+    uintptr_t slot_addr;
     uintptr_t target = 0;
     const TCGWasm64TBMetadata *target_metadata;
 
@@ -6026,21 +6093,13 @@ static void tcg_wasm64_live_generated_exec_probe_hotset_target(
     }
 
     live_generated_exec_hotset_goto_sources++;
-    if (!tb || tb->tc.ptr != tb_ptr ||
-        tb->tc.size < sizeof(uintptr_t)) {
+    if (!tcg_wasm64_generated_terminal_slot_addr(tb_ptr, tb, &terminal,
+                                                 &slot_addr)) {
         live_generated_exec_hotset_target_slots_unsafe++;
         return;
     }
 
-    max_offset = (intptr_t)tb->tc.size - (intptr_t)sizeof(uintptr_t);
-    if (terminal.slot_offset < min_offset ||
-        terminal.slot_offset > max_offset) {
-        live_generated_exec_hotset_target_slots_unsafe++;
-        return;
-    }
-
-    memcpy(&target, (const uint8_t *)tb_ptr + terminal.slot_offset,
-           sizeof(target));
+    memcpy(&target, (const void *)slot_addr, sizeof(target));
     if (target == 0) {
         live_generated_exec_hotset_target_stale++;
         return;
@@ -6801,13 +6860,16 @@ tcg_wasm64_live_generated_exec_summary_exit_reason(
 }
 
 static void tcg_wasm64_live_generated_exec_fail_closed(
-    const char *reason, bool no_fallback)
+    const char *reason, bool fail_closed)
 {
-    if (!no_fallback) {
+    if (!fail_closed) {
         return;
     }
-    g_error("qemu-wasm64-live-generated-exec: no-silent-fallback: %s",
-            reason);
+    if (tcg_wasm64_live_generated_exec_no_fallback()) {
+        g_error("qemu-wasm64-live-generated-exec: no-silent-fallback: %s",
+                reason);
+    }
+    g_error("qemu-wasm64-live-generated-exec: fail-closed: %s", reason);
 }
 
 static void tcg_wasm64_live_generated_exec_count_attempt(void)
@@ -7548,6 +7610,7 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
 {
     bool preflight = tcg_wasm64_live_generated_exec_preflight();
     uint64_t generated_guest_instructions_per_entry = 0;
+    const char *chain_exit_reason = "none";
 
     if (!live_generated_exec_enabled || live_generated_exec_attempted == 0) {
         return;
@@ -7568,11 +7631,17 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             translated_counters.generated_guest_instructions /
             translated_counters.generated_run_entries;
     }
+    if (g_strcmp0(reason, "chain-target-unsupported") == 0 ||
+        g_strcmp0(reason, "chain-budget") == 0 ||
+        g_strcmp0(reason, "chain-interrupted") == 0) {
+        chain_exit_reason = reason;
+    }
 
     fprintf(stderr,
             "qemu-wasm64-runloop: {\"format\":1,"
             "\"event\":\"live-generated-exec-summary\","
             "\"reason\":\"%s\","
+            "\"chain_exit_reason\":\"%s\","
             "\"compat_fallback\":%s,"
             "\"preflight\":%s,"
             "\"preflight_limit\":%" PRIu64 ","
@@ -7584,11 +7653,33 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             "\"rejects\":%" PRIu64 ","
             "\"skips\":%" PRIu64 ","
             "\"generated_guest_instructions\":%" PRIu64 ","
+            "\"fallback_guest_instructions\":%" PRIu64 ","
+            "\"generated_body_time_ns\":%" PRIu64 ","
+            "\"tci_dispatch_time_ns\":%" PRIu64 ","
+            "\"tb_lookup_time_ns\":%" PRIu64 ","
+            "\"helper_call_time_ns\":%" PRIu64 ","
+            "\"qemu_ld_time_ns\":%" PRIu64 ","
+            "\"qemu_st_time_ns\":%" PRIu64 ","
+            "\"compile_time_ns\":%" PRIu64 ","
+            "\"instantiate_time_ns\":%" PRIu64 ","
             "\"generated_run_entries\":%" PRIu64 ","
             "\"generated_chain_length\":%" PRIu64 ","
             "\"generated_guest_instructions_per_entry\":%" PRIu64 ","
             "\"generated_coverage_numerator\":%" PRIu64 ","
             "\"generated_coverage_denominator\":%" PRIu64 ","
+            "\"inline_tlb_hit_loads\":%" PRIu64 ","
+            "\"inline_tlb_hit_stores\":%" PRIu64 ","
+            "\"helper_calls\":%" PRIu64 ","
+            "\"qemu_ld_calls\":%" PRIu64 ","
+            "\"qemu_st_calls\":%" PRIu64 ","
+            "\"exits_budget\":%" PRIu64 ","
+            "\"exits_mmio\":%" PRIu64 ","
+            "\"exits_tlb_miss_or_fault\":%" PRIu64 ","
+            "\"exits_interrupt\":%" PRIu64 ","
+            "\"exits_helper\":%" PRIu64 ","
+            "\"exits_unsupported\":%" PRIu64 ","
+            "\"exits_hlt\":%" PRIu64 ","
+            "\"exits_invalidated\":%" PRIu64 ","
             "\"hotset_probe_attempts\":%" PRIu64 ","
             "\"hotset_goto_sources\":%" PRIu64 ","
             "\"hotset_target_slots_read\":%" PRIu64 ","
@@ -7600,6 +7691,7 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             "\"selected_body_no_terminal\":%" PRIu64 ","
             "\"metadata_output_mismatch\":",
             reason ? reason : "unknown",
+            chain_exit_reason,
             ((tcg_wasm64_live_generated_exec_reject_total() != 0 ||
               live_generated_exec_selected_body_helper_exit_skips != 0) &&
              !live_generated_exec_no_fallback) ? "true" : "false",
@@ -7613,11 +7705,33 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             tcg_wasm64_live_generated_exec_reject_total(),
             live_generated_exec_selected_body_helper_exit_skips,
             translated_counters.generated_guest_instructions,
+            live_generated_exec_run_counters.fallback_guest_instructions,
+            live_generated_exec_run_counters.generated_body_time_ns,
+            live_generated_exec_run_counters.tci_dispatch_time_ns,
+            live_generated_exec_run_counters.tb_lookup_time_ns,
+            live_generated_exec_run_counters.helper_call_time_ns,
+            live_generated_exec_run_counters.qemu_ld_time_ns,
+            live_generated_exec_run_counters.qemu_st_time_ns,
+            live_generated_exec_run_counters.compile_time_ns,
+            live_generated_exec_run_counters.instantiate_time_ns,
             translated_counters.generated_run_entries,
             translated_counters.generated_chain_length,
             generated_guest_instructions_per_entry,
             translated_counters.generated_coverage_numerator,
             translated_counters.generated_coverage_denominator,
+            live_generated_exec_run_counters.inline_tlb_hit_loads,
+            live_generated_exec_run_counters.inline_tlb_hit_stores,
+            live_generated_exec_run_counters.helper_calls,
+            live_generated_exec_run_counters.qemu_ld_calls,
+            live_generated_exec_run_counters.qemu_st_calls,
+            live_generated_exec_run_counters.exits_budget,
+            live_generated_exec_run_counters.exits_mmio,
+            live_generated_exec_run_counters.exits_tlb_miss_or_fault,
+            live_generated_exec_run_counters.exits_interrupt,
+            live_generated_exec_run_counters.exits_helper,
+            live_generated_exec_run_counters.exits_unsupported,
+            live_generated_exec_run_counters.exits_hlt,
+            live_generated_exec_run_counters.exits_invalidated,
             live_generated_exec_hotset_probe_attempts,
             live_generated_exec_hotset_goto_sources,
             live_generated_exec_hotset_target_slots_read,
@@ -8046,6 +8160,8 @@ static void tcg_wasm64_live_generated_exec_record_chain_exit(
     tcg_wasm64_count_exit(
         &translated_counters,
         tcg_wasm64_live_generated_exec_summary_exit_reason(exit_reason));
+    tcg_wasm64_run_count_exit(&live_generated_exec_run_counters,
+                              exit_reason);
 }
 
 static void tcg_wasm64_live_generated_exec_commit_chain(
@@ -8060,6 +8176,8 @@ static void tcg_wasm64_live_generated_exec_commit_chain(
     translated_counters.generated_run_entries++;
     translated_counters.generated_chain_length +=
         chain_counters->generated_chain_length;
+    tcg_wasm64_run_counters_add(&live_generated_exec_run_counters,
+                                 chain_counters);
     live_generated_exec_successes++;
 }
 
@@ -8167,6 +8285,7 @@ static bool tcg_wasm64_live_generated_exec_try(
     bool first_tb = true;
     bool chain_exit_valid = false;
     bool fail_closed_after_commit = false;
+    uintptr_t chain_stop_ret = 0;
     TCGWasm64RunExitReason chain_exit_reason =
         TCG_WASM64_RUN_EXIT_UNSUPPORTED;
     const char *summary_reason = "generated-exec-dispatch";
@@ -8209,8 +8328,10 @@ static bool tcg_wasm64_live_generated_exec_try(
             summary_reason = "chain-target-unsupported";
             chain_exit_reason = reject_exit;
             chain_exit_valid = true;
-            fail_closed_after_commit = no_fallback;
-            *ret = (uintptr_t)current_tb_ptr;
+            fail_closed_after_commit = no_fallback || chain_stop_ret == 0;
+            if (chain_stop_ret != 0) {
+                *ret = chain_stop_ret;
+            }
             break;
         }
 
@@ -8229,8 +8350,11 @@ static bool tcg_wasm64_live_generated_exec_try(
                 summary_reason = "chain-target-unsupported";
                 chain_exit_reason = reject_exit;
                 chain_exit_valid = true;
-                fail_closed_after_commit = no_fallback;
-                *ret = (uintptr_t)current_tb_ptr;
+                fail_closed_after_commit = no_fallback ||
+                                           chain_stop_ret == 0;
+                if (chain_stop_ret != 0) {
+                    *ret = chain_stop_ret;
+                }
                 break;
             }
             tlb = &tlb_mirror;
@@ -8245,8 +8369,10 @@ static bool tcg_wasm64_live_generated_exec_try(
             summary_reason = "chain-budget";
             chain_exit_reason = TCG_WASM64_RUN_EXIT_BUDGET;
             chain_exit_valid = true;
-            fail_closed_after_commit = no_fallback;
-            *ret = (uintptr_t)current_tb_ptr;
+            fail_closed_after_commit = no_fallback || chain_stop_ret == 0;
+            if (chain_stop_ret != 0) {
+                *ret = chain_stop_ret;
+            }
             break;
         }
 
@@ -8281,8 +8407,10 @@ static bool tcg_wasm64_live_generated_exec_try(
             summary_reason = failed_name;
             chain_exit_reason = failed_reason;
             chain_exit_valid = true;
-            fail_closed_after_commit = no_fallback;
-            *ret = (uintptr_t)current_tb_ptr;
+            fail_closed_after_commit = no_fallback || chain_stop_ret == 0;
+            if (chain_stop_ret != 0) {
+                *ret = chain_stop_ret;
+            }
             break;
         }
 
@@ -8295,30 +8423,51 @@ static bool tcg_wasm64_live_generated_exec_try(
         tcg_wasm64_run_counters_add(&chain_counters, &step_counters);
         remaining_budget -= guest_insns;
         chained = true;
-        *ret = result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_RET];
 
         if (result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS] ==
             TCG_WASM64_LIVE_TB_STATUS_EXIT) {
+            *ret = result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_RET];
             summary_reason = "generated-exec-exit";
             break;
+        }
+
+        {
+            uintptr_t dispatch_target = 0;
+            uintptr_t source_exit = 0;
+
+            if (!tcg_wasm64_live_generated_exec_read_dispatch(
+                    current_tb_ptr, current_metadata, tb, &dispatch_target,
+                    &source_exit)) {
+                summary_reason = "chain-target-unsupported";
+                chain_exit_reason = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+                chain_exit_valid = true;
+                fail_closed_after_commit = no_fallback || source_exit == 0;
+                if (source_exit != 0) {
+                    chain_stop_ret = source_exit;
+                    *ret = chain_stop_ret;
+                }
+                break;
+            }
+            chain_stop_ret = source_exit;
+            *ret = chain_stop_ret;
+            current_tb_ptr = (const void *)dispatch_target;
         }
 
         if (remaining_budget == 0) {
             summary_reason = "chain-budget";
             chain_exit_reason = TCG_WASM64_RUN_EXIT_BUDGET;
             chain_exit_valid = true;
-            fail_closed_after_commit = no_fallback;
+            fail_closed_after_commit = no_fallback || chain_stop_ret == 0;
             break;
         }
         if (tcg_wasm64_live_generated_exec_main_loop_exit_pending(env)) {
             summary_reason = "chain-interrupted";
             chain_exit_reason = TCG_WASM64_RUN_EXIT_INTERRUPT;
             chain_exit_valid = true;
-            fail_closed_after_commit = no_fallback;
+            fail_closed_after_commit = no_fallback || chain_stop_ret == 0;
             break;
         }
 
-        current_tb_ptr = (const void *)(*ret & ~(uintptr_t)TB_EXIT_MASK);
         current_metadata = tcg_wasm64_translate_lookup_mutable(current_tb_ptr);
         first_tb = false;
     }
@@ -8976,6 +9125,8 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
     TCGWasm64TBMetadata *metadata;
     uintptr_t ret;
     uint64_t fallback_guest_insns = 0;
+    uint64_t tci_dispatch_start_ns = 0;
+    bool live_exec_enabled;
     TCGWasm64Context ctx = {
         .tb_ptr = (void *)tb_ptr,
         .env = env,
@@ -9025,12 +9176,22 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
             return ret;
         }
     }
-    if (tcg_wasm64_summary_enabled()) {
+    live_exec_enabled = tcg_wasm64_live_generated_exec_enabled();
+    if (tcg_wasm64_summary_enabled() || live_exec_enabled) {
         fallback_guest_insns = tcg_wasm64_live_tb_guest_instructions(tb_ptr);
+    }
+    if (live_exec_enabled) {
+        live_generated_exec_run_counters.fallback_guest_instructions +=
+            fallback_guest_insns;
+        tci_dispatch_start_ns = tcg_wasm64_runloop_smoke_time_ns();
     }
     active_counters = counters;
     ret = tcg_tci_qemu_tb_exec(env, tb_ptr);
     active_counters = previous_counters;
+    if (live_exec_enabled) {
+        live_generated_exec_run_counters.tci_dispatch_time_ns +=
+            tcg_wasm64_runloop_smoke_time_ns() - tci_dispatch_start_ns;
+    }
     tcg_wasm64_record_tci_fallback_guest_instructions(fallback_guest_insns);
     tcg_wasm64_summary_maybe_report();
     return ret;

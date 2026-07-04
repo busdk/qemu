@@ -232,6 +232,72 @@ another x86 browser speed run, the accelerator path must use aggregate metrics
 or a preflight and must prove a supported live generated body will execute
 useful guest work.
 
+R4s18 x86_64 normal-mode crash gate
+-----------------------------------
+
+On 2026-07-04, QEMU commit ``7ee46156386568accc936b976ab83e66bc61b5df`` was
+tested with a worker change that fixes the normal-mode
+``--wasm64-live-generated-exec`` unaligned-access trap seen in the failed R4l
+speed gate.  The root cause was not guest-specific: generated ``goto_tb``
+dispatch could allow raw jump-slot contents to escape as the TB-exec return.
+The generated path now treats a jump slot only as the next dispatch lookup
+candidate.  When a committed generated source TB stops because the chain
+target is unsupported or stale, it returns the canonical source-TB exit value
+``tcg_splitwx_to_rx(source_tb) + slot_index``.  If the source slot index cannot
+be proven, normal mode fails closed instead of returning a raw code pointer.
+
+Focused deterministic checks passed:
+
+* ``git diff --check``
+* ``node --check scripts/ci/wasm-generated-output-equivalence-test.mjs``
+* ``node scripts/ci/wasm-generated-output-equivalence-test.mjs``
+* ``node --check scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs``
+* ``node scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs``
+
+Build command::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s18-x86-accelerator-artifacts-7ee4615 \
+      --target x86_64 --tcg-wasm64-backend --jobs 10 --build-image
+
+Artifact hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``4c1a139b5d065bad30eab41bfb194a692d09711082455504f6c88106df977ec5``
+* ``qemu-system-x86_64.wasm`` =
+  ``90b2647151dcc97a30893168cbf02a948e6fdd33e87c70b4016b0176ecfa0cdd``
+* manifest =
+  ``5312072805d1eb4342aa2948ff9f3b19e45e16eab0e9937d5a5bc6a83f91abbb``
+* ``SHA256SUMS`` =
+  ``1c5b88cdc65047529ffe14854d7482b6eb373d07601f78d0650e230855053424``
+
+The bounded Chromium ``149.0.7827.55`` run used
+``--wasm64-live-generated-exec`` and ``--wasm64-tcg-summary`` without
+no-silent-fallback or preflight mode.  It timed out at ``60213`` ms waiting
+for ``QEMU_WASM_LINUX_BOOT_OK``, as expected for this bounded crash check,
+but it did not report a page error or ``RuntimeError: operation does not
+support unaligned accesses``.  The Linux kernel-version milestone was printed
+at ``36632`` ms.  Result JSON:
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s18-x86-normal-7ee4615/wasm-browser-smoke-result.json``,
+SHA-256
+``ea8aa9ff3a8d89779ead7085ccae33179941f8982890adf14f8f65164340bf59``.
+The screenshot SHA-256 was
+``de84e8d49bfef3bbd8a697c6ee6ea2ecaf6c0c675a049b6e9be5e49d2ebdf788``.
+
+The final live run-loop summary reported ``attempts=58049``,
+``successes=677``, ``rejects=57372``, generated guest instructions ``995``,
+fallback guest instructions ``498891``, generated body time ``30670000`` ns,
+TCI dispatch time ``47511123000`` ns, generated coverage ``995 / 500082``,
+zero helper, ``qemu_ld``, and ``qemu_st`` calls, inline TLB-hit
+loads/stores ``1738 / 2065``, and no unsafe hotset slots.  The x86 metrics
+gate accepted this result as a crash-gate pass.
+
+This is not a speed claim and does not permit a Bus Engine OS proof.  The next
+performance blocker is low generated coverage, dominated in this run by
+``js-status-metadata-output-pool-relocation``, selected-body memory
+alignment/multi-access rejects, module emission/validation failures, and
+unsupported ``movcond``.
+
 Pre-R4i x86_64 one-TB fixture scaffold
 --------------------------------------
 

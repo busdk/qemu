@@ -3216,7 +3216,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     generated-retirement preflight acceptance, unlocks the next R4l
     same-commit generic Chromium speed gate, makes no speed claim by itself,
     and no Bus Engine OS browser proof was run.
-  - [ ] R4s18 - Repair the normal-mode x86 live-generated-exec
+  - [x] R4s18 - Repair the normal-mode x86 live-generated-exec
     unaligned-access crash before another R4l speed gate. DoD: using fresh
     `x86_64-softmmu` backend artifacts from QEMU `develop`, a bounded generic
     x86 Chromium run with `--wasm64-live-generated-exec` and
@@ -3230,6 +3230,78 @@ run that reaches a weaker marker than normal multi-user readiness.
     time, helper/`qemu_ld`/`qemu_st` counts, hotset residency, coverage, and
     synthetic exit/reject reasons. No further full x86 R4l browser speed gate
     or Bus Engine OS proof may run until this bounded normal-mode gate passes.
+    Accepted 2026-07-04: QEMU commit
+    `7ee46156386568accc936b976ab83e66bc61b5df` plus this worker change
+    fixes the normal-mode crash mechanism: committed generated `goto_tb`
+    dispatch now treats the jump-slot contents only as the next lookup
+    candidate and returns the canonical source-TB exit value
+    `tcg_splitwx_to_rx(source_tb) + slot_index` when the chain target is
+    unsupported or stale. If the source slot index cannot be proven, normal
+    mode fails closed before returning a raw code pointer. Deterministic
+    coverage in `scripts/ci/wasm-generated-output-equivalence-test.mjs`
+    now models an unlinked reset slot containing a raw interior code pointer
+    at an unaligned offset, asserts the generated source retires exactly one
+    guest instruction, asserts the target does not execute, and asserts the
+    final return is the source canonical exit rather than the raw slot
+    contents. The x86 metrics gate now requires the live normal-mode summary
+    fields needed for the next R4l report: chain exit reason,
+    generated/fallback instruction counts, generated body and TCI dispatch
+    time, helper/`qemu_ld`/`qemu_st` counts, hotset residency, coverage, and
+    exit/reject reasons.
+
+    Fresh x86 accelerator artifact build command:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s18-x86-accelerator-artifacts-7ee4615
+    --target x86_64 --tcg-wasm64-backend --jobs 10 --build-image`.
+    Artifact hashes: `qemu-system-x86_64.js`
+    `4c1a139b5d065bad30eab41bfb194a692d09711082455504f6c88106df977ec5`,
+    `qemu-system-x86_64.wasm`
+    `90b2647151dcc97a30893168cbf02a948e6fdd33e87c70b4016b0176ecfa0cdd`,
+    manifest
+    `5312072805d1eb4342aa2948ff9f3b19e45e16eab0e9937d5a5bc6a83f91abbb`,
+    and `SHA256SUMS`
+    `1c5b88cdc65047529ffe14854d7482b6eb373d07601f78d0650e230855053424`.
+    Bounded normal-mode Chromium `149.0.7827.55` command:
+    `npm exec --yes --package=playwright -- node
+    scripts/ci/wasm-browser-smoke-runner.mjs --browser chromium
+    --artifact-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s18-x86-accelerator-artifacts-7ee4615
+    --firmware-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/projects/qemu/pc-bios
+    --guest-manifest
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4s8-guest-current/tuxboot-browser-smoke-guest.json
+    --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s18-x86-normal-7ee4615/wasm-browser-smoke-result.json
+    --screenshot
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s18-x86-normal-7ee4615/wasm-browser-smoke.png
+    --port 8228 --timeout-ms 60000 --max-output-bytes 100000
+    --page-text-tail-bytes 100000 --wasm64-live-generated-exec
+    --wasm64-tcg-summary --wasm64-tcg-summary-interval 1000`. The run
+    timed out on the generic marker as expected for this bounded crash check
+    (`markerSeen=false`, phase `timeout`, elapsed `60213` ms) but did not
+    report any page error or `RuntimeError: operation does not support
+    unaligned accesses`; it reached the Linux kernel-version milestone at
+    `36632` ms. Result JSON SHA-256:
+    `ea8aa9ff3a8d89779ead7085ccae33179941f8982890adf14f8f65164340bf59`;
+    screenshot SHA-256:
+    `de84e8d49bfef3bbd8a697c6ee6ea2ecaf6c0c675a049b6e9be5e49d2ebdf788`.
+    `node scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs --result
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s18-x86-normal-7ee4615/wasm-browser-smoke-result.json
+    --json` passed. Its final live runloop summary reported attempts
+    `58049`, successes `677`, rejects `57372`, generated guest instructions
+    `995`, fallback guest instructions `498891`, generated body time
+    `30670000` ns, TCI dispatch time `47511123000` ns, generated coverage
+    `995 / 500082`, helper/`qemu_ld`/`qemu_st` calls all `0`, inline TLB-hit
+    loads/stores `1738 / 2065`, hotset goto sources `14249`, target metadata
+    hits `6371`, target output hits `6353`, target stale `7878`, unsupported
+    exits `298`, interrupt exits `77`, invalidated exits `50`, and no unsafe
+    hotset slots. The final TCG summary was also present with generated
+    coverage `414 / 95520` (`4334` ppm). This passes the R4s18 crash gate and
+    lifts the unaligned-access prohibition on another R4l speed gate, but it
+    is not a speed claim; the next performance blocker remains low generated
+    coverage, dominated in this run by `js-status-metadata-output-pool-relocation`
+    (`46931` rejects), selected-body memory alignment/multi-access rejects,
+    module emission/validation failures, and unsupported `movcond`.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
