@@ -3472,7 +3472,78 @@ run that reaches a weaker marker than normal multi-user readiness.
     `node scripts/ci/wasm64-translate-metadata-test.mjs`. No browser
     preflight, fresh artifact build, full R4l speed gate, or Bus Engine OS
     proof was run for this item.
-  - [ ] R4s21 - Expand supported x86 live SoftMMU MemOp families only after
+  - [x] R4s20a - Re-measure current x86 live blocker attribution after R4s20
+    before continuing the next implementation slice. DoD: build fresh current
+    `x86_64-softmmu` backend artifacts from QEMU `develop`, run only a
+    bounded generic Chromium preflight against the pinned x86 TuxBoot guest,
+    record artifact hashes, browser version, result JSON, generated/fallback
+    instruction counters, inline TLB-hit counters, helper counts, module
+    emission/validation reject counts, and the top remaining reject reasons.
+    This item is measurement only; it must not claim a speed pass or run a
+    Bus Engine OS proof.
+
+    Accepted measurement 2026-07-04: QEMU commit
+    `e6acacbec8beec8535676a16cd27d482f9550b5b` matched
+    `origin/develop`. Artifact build command:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s20-current-x86-artifacts
+    --target x86_64 --tcg-wasm64-backend --jobs 10 --build-image`.
+    Artifact hashes: `qemu-system-x86_64.js`
+    `030a3b33cf4f0b74c83029a755a1ccf3d2df18763b34736dc00d9a436f9d6908`,
+    `qemu-system-x86_64.wasm`
+    `e0b6aad5c2c0e83e0204855335b2b044c92258488a033f975e0da19cce6077e2`,
+    manifest
+    `4194c6bdc7790af4a793cbb71a7800ebb820baf5c1f208bc2994a655d7665703`,
+    and `SHA256SUMS`
+    `d0cd67e4c19648263a8bed4fa646701bcce75b6768d3c64d2d2c01d2051a2b2e`.
+    Bounded Chromium `149.0.7827.55` preflight wrote result JSON
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s20-current-x86-normal/wasm-browser-smoke-result.json`
+    (SHA-256
+    `9bb1482f6d73baf95130ff0c29625b50ea0a7a25083902bbb509fa3a3d6346ac`)
+    and screenshot
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s20-current-x86-normal/wasm-browser-smoke.png`
+    (SHA-256
+    `ba8e83d0bf4614d40fd64c3ec1a903daf5bb31f9d8e62d41df0df93f4f7b2f45`).
+    The run timed out as expected for a 60 second blocker preflight
+    (`markerSeen=false`, elapsed `60210` ms) but had no page errors,
+    unaligned-access `RuntimeError`, module emission rejects, or module
+    validation rejects. The final live summary reported attempts `46201`,
+    successes `1312`, rejects `44889`, generated/fallback guest instructions
+    `2558 / 394952`, generated coverage `2558 / 397510`, inline TLB-hit
+    loads/stores `4530 / 5808`, helper/`qemu_ld`/`qemu_st` calls
+    `0 / 0 / 0`, module emission/validation rejects `0 / 0`, and
+    pool-relocation rejects `0`. The top remaining live reject reasons were
+    `selected-body-direct-memory-unsupported` (`36313`),
+    `mmio-exit` (`4433`),
+    `selected-body-memop-unsupported-alignment` (`2425`),
+    `selected-body-softmmu-multi-access-unsupported` (`551`),
+    `generated-output-unavailable` (`458`),
+    `selected-body-shape-unsupported`/`movcond` (`376`),
+    `selected-body-memop-unsupported-size` (`223`),
+    `unsupported-body-state` (`52`), and
+    `selected-body-memop-unsupported-sign` (`51`). The final TCG summary
+    reported generated coverage `1052 / 96260` (`10928` ppm). This accepts
+    R4s20a as current blocker attribution only: direct-memory support is now
+    the top generic x86 coverage blocker, while R4s21-style MemOp-family work
+    remains useful but secondary. No R4l speed gate or Bus Engine OS proof
+    was run.
+  - [ ] R4s21 - Classify and implement the dominant generic x86
+    direct-memory blocker family before widening secondary MemOp flags. DoD:
+    inspect the current R4s20a result and live generated-output metadata to
+    identify the high-frequency `selected-body-direct-memory-unsupported`
+    shapes by generic operation pattern, not by fixed guest PC or Bus Engine
+    boot stage; add deterministic fixtures for the first supported family;
+    lower only QEMU-equivalent direct memory operations whose address source,
+    size, signedness, ordering, and commit point are proven generic; preserve
+    fail-closed synthetic exits/fallback for unsupported direct-memory,
+    page-crossing, unmirrored state, MMIO, TLB miss/fault, unsupported helper,
+    control-flow, and guard-after-commit cases; and rerun the deterministic
+    generated-output and metadata tests. The expected gate effect is a
+    material increase in generated coverage because R4s20a showed this single
+    reject family accounts for about `36313 / 44889` live rejects. This item
+    is not accepted if it hard-codes Bus Engine OS, fixed PCs, fixed boot
+    phases, or one measured trace shape without a reusable lowering rule.
+  - [ ] R4s22 - Expand supported x86 live SoftMMU MemOp families only after
     R4s19/R4s20 identify memory rejects as a remaining dominant blocker.
     DoD: admit alignment flags only with explicit QEMU-equivalent alignment
     checks, add generic `MO_16` load/store lowering, add signed-load
@@ -3486,7 +3557,11 @@ run that reaches a weaker marker than normal multi-user readiness.
     but not dominant (`selected-body-memop-unsupported-alignment=2436`,
     `selected-body-softmmu-multi-access-unsupported=2223`, size `256`,
     sign `126`), so this item is not the next speed-gate driver unless new
-    evidence changes that ordering.
+    evidence changes that ordering. Fresh R4s20a evidence shows
+    `selected-body-memop-unsupported-alignment=2425`, size `223`, and sign
+    `51`, but `selected-body-direct-memory-unsupported=36313`; therefore this
+    item remains secondary until the dominant direct-memory blocker is
+    reduced or a new measurement changes the ordering.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
