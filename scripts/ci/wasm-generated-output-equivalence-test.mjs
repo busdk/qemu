@@ -253,6 +253,9 @@ const R7_RV64_HELPER_PREFIX_WORDS = [
   opReg(OPS.mov, 9, 8),
   opCall(1),
 ];
+const R4S4_X86_CALL_FRONTED_HELPER_EXIT_WORDS = [
+  opCall(0, 0),
+];
 
 function vector(items) {
   return [...encodeU32(items.length), ...items.flat()];
@@ -4156,7 +4159,45 @@ function simulateR4mLiveGeneratedExec({
       compatFallback: false,
       noSilentFallback: noFallback,
       failedClosed: false,
+      attempts: 0,
+      rejects: 0,
+      skips: 0,
       exits: { unsupported: 0, invalidated: 0 },
+    };
+  }
+
+  const helperExitGeneratedOutput =
+    metadata?.generatedHelperExitOpCount > 0 &&
+    metadata?.generatedOutputAvailable &&
+    metadata?.generatedOutputSize > 0 &&
+    metadata.generatedOutputSize % 4 === 0;
+  if (helperExitGeneratedOutput) {
+    return {
+      name,
+      enabled,
+      ok: false,
+      path: noFallback ? "fail-closed" : "tci-fallback",
+      reason: noFallback
+        ? "selected-body-helper-exit-unsupported"
+        : "selected-body-helper-exit-skipped",
+      generatedGuestInstructions: 0,
+      generatedBodyTimeNs: 0,
+      generatedChainLength: 0,
+      inlineTlbHitLoads: 0,
+      inlineTlbHitStores: 0,
+      helperCalls: 0,
+      qemuLdCalls: 0,
+      qemuStCalls: 0,
+      compatFallback: !noFallback,
+      noSilentFallback: noFallback,
+      failedClosed: noFallback,
+      attempts: noFallback ? 1 : 0,
+      rejects: noFallback ? 1 : 0,
+      skips: noFallback ? 0 : 1,
+      exits: {
+        unsupported: noFallback ? 1 : 0,
+        invalidated: 0,
+      },
     };
   }
 
@@ -4180,6 +4221,9 @@ function simulateR4mLiveGeneratedExec({
       compatFallback: !noFallback,
       noSilentFallback: noFallback,
       failedClosed: noFallback,
+      attempts: 1,
+      rejects: 1,
+      skips: 0,
       exits: {
         unsupported: invalidated ? 0 : 1,
         invalidated: invalidated ? 1 : 0,
@@ -4204,6 +4248,9 @@ function simulateR4mLiveGeneratedExec({
     compatFallback: false,
     noSilentFallback: noFallback,
     failedClosed: false,
+    attempts: 1,
+    rejects: 0,
+    skips: 0,
     exits: { unsupported: 0, invalidated: 0 },
   };
 }
@@ -4274,6 +4321,33 @@ const r4mLiveGeneratedExecCases = [
       guestInstructions: 1,
     },
   }),
+  simulateR4mLiveGeneratedExec({
+    name: "r4s4-call-fronted-helper-exit-compat-skips-preflight-budget",
+    enabled: true,
+    metadata: {
+      opCount: R4S4_X86_CALL_FRONTED_HELPER_EXIT_WORDS.length,
+      generatedOutputAvailable: true,
+      generatedOutputSize: R4S4_X86_CALL_FRONTED_HELPER_EXIT_WORDS.length * 4,
+      generatedHelperExitOpCount: 1,
+      words: R4S4_X86_CALL_FRONTED_HELPER_EXIT_WORDS,
+      relativeBase: 0x1000,
+      guestInstructions: 1,
+    },
+  }),
+  simulateR4mLiveGeneratedExec({
+    name: "r4s4-call-fronted-helper-exit-no-fallback-rejects",
+    enabled: true,
+    noFallback: true,
+    metadata: {
+      opCount: R4S4_X86_CALL_FRONTED_HELPER_EXIT_WORDS.length,
+      generatedOutputAvailable: true,
+      generatedOutputSize: R4S4_X86_CALL_FRONTED_HELPER_EXIT_WORDS.length * 4,
+      generatedHelperExitOpCount: 1,
+      words: R4S4_X86_CALL_FRONTED_HELPER_EXIT_WORDS,
+      relativeBase: 0x1000,
+      guestInstructions: 1,
+    },
+  }),
 ];
 assert.deepEqual(
   r4mLiveGeneratedExecCases.map((entry) => entry.path),
@@ -4284,6 +4358,8 @@ assert.deepEqual(
     "fail-closed",
     "tci-fallback",
     "tci-fallback",
+    "tci-fallback",
+    "fail-closed",
   ],
 );
 assert.equal(
@@ -4334,6 +4410,27 @@ assert.equal(
     .compatFallback,
   true,
 );
+const r4s4CompatHelperExitSkip = r4mLiveGeneratedExecCases.find((entry) =>
+  entry.name ===
+    "r4s4-call-fronted-helper-exit-compat-skips-preflight-budget");
+assert.equal(r4s4CompatHelperExitSkip.reason,
+  "selected-body-helper-exit-skipped");
+assert.equal(r4s4CompatHelperExitSkip.attempts, 0);
+assert.equal(r4s4CompatHelperExitSkip.rejects, 0);
+assert.equal(r4s4CompatHelperExitSkip.skips, 1);
+assert.equal(r4s4CompatHelperExitSkip.generatedGuestInstructions, 0);
+assert.equal(r4s4CompatHelperExitSkip.exits.unsupported, 0);
+assert.equal(r4s4CompatHelperExitSkip.failedClosed, false);
+const r4s4NoFallbackHelperExitReject = r4mLiveGeneratedExecCases.find((entry) =>
+  entry.name === "r4s4-call-fronted-helper-exit-no-fallback-rejects");
+assert.equal(r4s4NoFallbackHelperExitReject.reason,
+  "selected-body-helper-exit-unsupported");
+assert.equal(r4s4NoFallbackHelperExitReject.attempts, 1);
+assert.equal(r4s4NoFallbackHelperExitReject.rejects, 1);
+assert.equal(r4s4NoFallbackHelperExitReject.skips, 0);
+assert.equal(r4s4NoFallbackHelperExitReject.generatedGuestInstructions, 0);
+assert.equal(r4s4NoFallbackHelperExitReject.exits.unsupported, 1);
+assert.equal(r4s4NoFallbackHelperExitReject.failedClosed, true);
 
 function simulateR7AvailableGeneratedOutputExec({
   name,

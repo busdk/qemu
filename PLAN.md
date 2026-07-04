@@ -2045,7 +2045,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     run in this environment because `ninja` is not installed. No browser run,
     artifact build, speed claim, R4l unlock, or Bus Engine OS proof was run
     in this slice.
-  - [ ] R4s4 - Handle or intentionally bypass `call`-fronted selected x86
+  - [x] R4s4 - Handle or intentionally bypass `call`-fronted selected x86
     body shapes before rerunning the live preflight. DoD: the R4r-selected
     first-window shapes that currently report `call=44` either get a
     fail-closed helper-exit continuation that preserves temporary register
@@ -2053,6 +2053,25 @@ run that reaches a weaker marker than normal multi-user readiness.
     so a measured non-call memory-helper shape can be tested. This item must
     include deterministic coverage and must not silently fall back while
     reporting generated progress.
+    Accepted 2026-07-04: helper-exit generated-output shapes are now
+    detected before live generated-exec attempt accounting. In compatibility
+    and preflight mode, selected bodies with
+    `generated_helper_exit_op_count != 0` increment
+    `selected_body_helper_exit_skips`, report explicit `skips` and
+    `selected_body_helper_exit_skips` summary fields, return to TCI fallback,
+    and do not consume `live_generated_exec_attempted`,
+    `translated_counters.generated_attempts`, reject budget, or generated
+    guest-instruction counters. In no-silent-fallback mode, the same shape
+    counts as a real attempt and fails closed with
+    `selected-body-helper-exit-unsupported`. Checks: `node --check
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node --check
+    scripts/ci/wasm64-translate-metadata-test.mjs`, `node --check
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, `node
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+    scripts/ci/wasm64-translate-metadata-test.mjs`, `node
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, and
+    `git diff --check` passed. No browser run, artifact build, speed claim,
+    R4l unlock, or Bus Engine OS proof was run in this slice.
   - [ ] R4s5 - Rework the live x86 SoftMMU slice with fail-closed safety
     before another artifact build. DoD: the implementation zero-initializes
     the TLB mirror before refresh, rejects any `MemOpIdx` whose `MemOp`

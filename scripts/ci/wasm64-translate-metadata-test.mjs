@@ -360,10 +360,13 @@ assert.match(runtime, /\\"hotset_target_slots_unsafe\\":%" PRIu64/);
 assert.match(runtime, /\\"hotset_target_metadata_hits\\":%" PRIu64/);
 assert.match(runtime, /\\"hotset_target_output_hits\\":%" PRIu64/);
 assert.match(runtime, /\\"hotset_target_stale\\":%" PRIu64/);
+assert.match(runtime, /\\"skips\\":%" PRIu64/);
+assert.match(runtime, /\\"selected_body_helper_exit_skips\\":%" PRIu64/);
 assert.match(runtime, /"metadata-output-tb-code-mismatch"/);
 assert.match(runtime, /"metadata-missing"/);
 assert.match(runtime, /"generated-output-unavailable"/);
 assert.match(runtime, /"selected-body-shape-unsupported"/);
+assert.match(runtime, /"selected-body-helper-exit-unsupported"/);
 assert.match(runtime, /"tb-identity-missing-or-stale"/);
 assert.match(runtime, /tcg_wasm64_live_generated_exec_classify_reject/);
 assert.doesNotMatch(runtime, /"generated-exec-rejected"/);
@@ -397,7 +400,26 @@ for (const liveGeneratedExecRejectReason of [
   );
 }
 assert.match(runtime, /TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_CACHE_HIT/);
-assert.match(runtime, /translated_counters\.generated_attempts\+\+/);
+assert.match(runtime, /tcg_wasm64_live_generated_exec_count_attempt/);
+const liveGeneratedExecTryBody = runtime.match(
+  /static bool tcg_wasm64_live_generated_exec_try\([\s\S]*?\n\}\n\nstatic bool tcg_wasm64_translate_op_supported/,
+)?.[0] || "";
+assert.match(
+  liveGeneratedExecTryBody,
+  /tcg_wasm64_live_generated_exec_helper_exit_shape\(metadata\)/,
+);
+assert.match(
+  liveGeneratedExecTryBody,
+  /live_generated_exec_selected_body_helper_exit_skips\+\+/,
+);
+assert.match(
+  liveGeneratedExecTryBody,
+  /"selected-body-helper-exit-unsupported"/,
+);
+assert.match(
+  liveGeneratedExecTryBody,
+  /if \(tcg_wasm64_live_generated_exec_helper_exit_shape\(metadata\)\) \{\s+if \(!no_fallback\) \{\s+live_generated_exec_selected_body_helper_exit_skips\+\+;\s+return false;\s+\}\s+tcg_wasm64_live_generated_exec_count_attempt\(\);/,
+);
 assert.match(runtime, /translated_counters\.generated_executed\+\+/);
 assert.match(runtime, /translated_counters\.generated_cache_hits\+\+/);
 assert.match(runtime, /translated_counters\.generated_coverage_numerator \+= guest_insns/);
@@ -558,6 +580,8 @@ assert.match(generatedEquivalence, /r4m-supported-metadata-backed-live-tb-genera
 assert.match(generatedEquivalence, /r4m-unsupported-no-silent-fallback-fails-closed/);
 assert.match(generatedEquivalence, /r4m-stale-output-invalidates-zero-generated-work/);
 assert.match(generatedEquivalence, /r4m-compat-fallback-explicit-and-counted/);
+assert.match(generatedEquivalence, /r4s4-call-fronted-helper-exit-compat-skips-preflight-budget/);
+assert.match(generatedEquivalence, /r4s4-call-fronted-helper-exit-no-fallback-rejects/);
 assert.match(generatedEquivalence, /r7AvailableGeneratedOutputExec/);
 assert.match(generatedEquivalence, /r7-available-generated-output-executes/);
 assert.match(generatedEquivalence, /r7-rv64-helper-prefix-executes-and-counts-before-tci/);
