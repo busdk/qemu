@@ -2138,7 +2138,20 @@ run that reaches a weaker marker than normal multi-user readiness.
       `mmu_idx`, assigns `context.tlb`, and deterministic tests prove missing,
       invalid, stale, MMIO/slow-flag, page-crossing, permission, and
       TLB-miss/fault exits are classified precisely without `qemu_ld` /
-      `qemu_st` helper calls on clean RAM hits.
+      `qemu_st` helper calls on clean RAM hits. This must stay a generic
+      accelerator slice: do not accept hardcoded measured boot-shape handling,
+      Bus Engine OS specific logic, or a one-off JavaScript SoftMMU path whose
+      structure/layout constants are not tied back to the QEMU C/header
+      contract. Review note 2026-07-04: worker branch
+      `r4s5c-wasm-tlb-mirror` in
+      `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/worktrees/qemu-r4s5c-wasm-tlb-mirror`
+      passed deterministic checks and demonstrated the needed live-routing
+      mechanism, but was not promoted because it encoded too much
+      shape-specific live JS lowering and duplicated runtime constants. The
+      next accepted R4s5c attempt should reuse or extend the generic
+      generated-output emitter/layout contract so qemu ld/st SoftMMU lowering
+      is a backend capability, not a special path for the currently measured
+      x86 body.
 - [x] R7 - Dispatch available RISC-V generated output from the live wasm64
   run loop before TCI fallback. DoD: when live TB metadata reports
   `tcg_wasm64_translate_generated_output_available()` and the RV64
