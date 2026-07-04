@@ -7,7 +7,7 @@
 
 import fs from "node:fs";
 
-export const X86_BROWSER_SMOKE_METRICS_GATE_VERSION = 3;
+export const X86_BROWSER_SMOKE_METRICS_GATE_VERSION = 4;
 
 const RUNLOOP_RUNTIME_SMOKE_FIELDS = [
   ["event", (value) => value === "runtime-smoke"],
@@ -164,6 +164,9 @@ const TCG_SUMMARY_FIELDS = [
   ["generated_compiled", isInteger],
   ["generated_executed", isInteger],
   ["generated_cache_hits", isInteger],
+  ["generated_guest_instructions", isInteger],
+  ["fallback_guest_instructions", isInteger],
+  ["generated_body_time_ns", isInteger],
   ["generated_coverage_numerator", isInteger],
   ["generated_coverage_denominator", isInteger],
   ["generated_coverage_ppm", isInteger],

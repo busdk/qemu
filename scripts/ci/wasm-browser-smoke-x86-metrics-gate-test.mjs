@@ -204,6 +204,9 @@ const runtimeSmokeResult = {
         generated_compiled: 3,
         generated_executed: 12,
         generated_cache_hits: 9,
+        generated_guest_instructions: 1440,
+        fallback_guest_instructions: 720,
+        generated_body_time_ns: 123456,
         generated_coverage_numerator: 21,
         generated_coverage_denominator: 1000,
         generated_coverage_ppm: 21000,
@@ -250,6 +253,9 @@ const runtimeSmokeResult = {
       generated_compiled: 3,
       generated_executed: 12,
       generated_cache_hits: 9,
+      generated_guest_instructions: 1440,
+      fallback_guest_instructions: 720,
+      generated_body_time_ns: 123456,
       generated_coverage_numerator: 21,
       generated_coverage_denominator: 1000,
       generated_coverage_ppm: 21000,
@@ -598,7 +604,7 @@ const liveInlineMemoryOneTbDifferentialResult = JSON.parse(
   };
 }
 
-assert.equal(X86_BROWSER_SMOKE_METRICS_GATE_VERSION, 3);
+assert.equal(X86_BROWSER_SMOKE_METRICS_GATE_VERSION, 4);
 
 {
   const gate = x86BrowserSmokeMetricsGate(runtimeSmokeResult);
@@ -620,7 +626,25 @@ assert.equal(X86_BROWSER_SMOKE_METRICS_GATE_VERSION, 3);
   assert.equal(gate.tcg.lastSummary.generated_coverage_share, 0.021);
   assert.equal(gate.tcg.lastSummary.generated_coverage_ppm_computed, 21000);
   assert.equal(gate.tcg.lastSummary.generated_coverage_ppm_matches, true);
+  assert.equal(gate.tcg.lastSummary.generated_guest_instructions, 1440);
+  assert.equal(gate.tcg.lastSummary.fallback_guest_instructions, 720);
+  assert.equal(gate.tcg.lastSummary.generated_body_time_ns, 123456);
   assert.deepEqual(gate.tcg.lastSummary.generated_exits.missingFields, []);
+}
+
+for (const field of [
+  "generated_guest_instructions",
+  "fallback_guest_instructions",
+  "generated_body_time_ns",
+]) {
+  const broken = JSON.parse(JSON.stringify(runtimeSmokeResult));
+  delete broken.wasm64Tcg.summaries[0][field];
+  delete broken.wasm64Tcg.lastSummary[field];
+  const gate = x86BrowserSmokeMetricsGate(broken);
+  assert.equal(gate.ok, false);
+  assert.equal(gate.tcg.ok, false);
+  assert.ok(gate.tcg.lastSummary.missingFields.includes(field));
+  assert.ok(gate.tcg.missingFields.includes(field));
 }
 
 {
