@@ -543,6 +543,21 @@ assert.match(runtime, /\\"hotset_target_stale\\":%" PRIu64/);
 assert.match(runtime, /\\"skips\\":%" PRIu64/);
 assert.match(runtime, /\\"selected_body_helper_exit_skips\\":%" PRIu64/);
 assert.match(runtime, /"metadata-output-tb-code-mismatch"/);
+assert.match(runtime, /"js-status-metadata-output-branch-label-relocation"/);
+assert.match(runtime, /"js-status-metadata-output-pool-relocation"/);
+assert.match(runtime, /"js-status-metadata-output-stale-tb-code"/);
+assert.match(runtime, /"js-status-metadata-output-unknown-mismatch"/);
+assert.match(runtime, /metadata_output_mismatch/);
+assert.match(runtime, /recordMetadataOutputMismatch/);
+assert.match(runtime, /TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MISMATCH_INDEX/);
+assert.match(runtime, /TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MISMATCH_OP/);
+assert.match(
+  runtime,
+  /TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MISMATCH_METADATA_WORD/,
+);
+assert.match(runtime, /TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MISMATCH_LIVE_WORD/);
+assert.match(runtime, /tcg_wasm64_live_generated_exec_metadata_output_mismatch_reason/);
+assert.match(runtime, /tcg_wasm64_live_generated_exec_record_metadata_output_mismatch/);
 assert.match(runtime, /"metadata-missing"/);
 assert.match(runtime, /"generated-output-unavailable"/);
 assert.match(runtime, /"selected-body-shape-unsupported"/);
@@ -585,6 +600,10 @@ assert.doesNotMatch(
 for (const liveGeneratedExecRejectReason of [
   "js-status-runtime-unavailable",
   "js-status-metadata-output-tb-code-mismatch",
+  "js-status-metadata-output-branch-label-relocation",
+  "js-status-metadata-output-pool-relocation",
+  "js-status-metadata-output-stale-tb-code",
+  "js-status-metadata-output-unknown-mismatch",
   "js-status-module-emission-failed",
   "generated-status-helper",
   "generated-status-unexpected",
@@ -928,6 +947,12 @@ assert.match(generatedEquivalence, /r4s5c-valid-load-enters-generic-softmmu-lowe
 assert.match(generatedEquivalence, /r4s5c-valid-store-enters-generic-softmmu-lowering/);
 assert.match(generatedEquivalence, /r4s7-atom-none-load-admitted-ram-hit/);
 assert.match(generatedEquivalence, /r4s7-atom-none-store-admitted-ram-hit/);
+assert.match(generatedEquivalence, /r4s8a-brcond-relocation-attribution/);
+assert.match(generatedEquivalence, /r4s8a-pool-relocation-attribution/);
+assert.match(generatedEquivalence, /r4s8a-stale-reused-tb-code-attribution/);
+assert.match(generatedEquivalence, /r4s8a-unknown-same-op-mismatch-attribution/);
+assert.match(generatedEquivalence, /metadataOutputMismatchReason/);
+assert.match(generatedEquivalence, /firstMetadataOutputMismatch/);
 assert.match(generatedEquivalence, /r4s5c-multiple-memops-reject-before-partial-store/);
 assert.match(generatedEquivalence, /r4s5b-unproven-oi-rejects-before-inline-ram/);
 assert.match(generatedEquivalence, /r4s5b-movl-oi-rejects-before-inline-ram/);

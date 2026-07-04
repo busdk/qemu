@@ -2479,7 +2479,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     generated guest-instruction retirement for at least one measured live x86
     multi-access body; the next bounded preflight must report whether
     generated execution moved above zero and how the reject histogram changed.
-  - [ ] R4s8a - Attribute live metadata/output TB-code mismatches before
+  - [x] R4s8a - Attribute live metadata/output TB-code mismatches before
     widening execution policy. DoD: split `js-status-metadata-output-tb-code-
     mismatch` into deterministic categories before treating it as generic
     invalidation: TCI branch/label relocation such as `brcond`, TCI pool
@@ -2494,6 +2494,25 @@ run that reaches a weaker marker than normal multi-user readiness.
     or whether some mismatches are real stale-code invalidations. R4s8
     multi-access support is mechanically independent, but may expose more of
     this mismatch once more bodies are admitted.
+    Accepted deterministic slice 2026-07-04: live generated exec still treats
+    JS status `3` as fail-closed invalidation, but the rejection is now
+    attributed deterministically as
+    `js-status-metadata-output-branch-label-relocation`,
+    `js-status-metadata-output-pool-relocation`,
+    `js-status-metadata-output-stale-tb-code`, or
+    `js-status-metadata-output-unknown-mismatch`. The first observed mismatch
+    is emitted in the live-generated-exec summary with index, decoded op name,
+    metadata word, and live TB word. Deterministic fixtures cover `brcond`
+    relocation, `tci_movl` pool relocation, stale/reused TB code, and unknown
+    same-op mismatch, while preserving zero generated work and invalidated
+    exit accounting. Checks: `git diff --check`, `node --check
+    scripts/ci/wasm64-translate-metadata-test.mjs`, `node --check
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+    scripts/ci/wasm64-translate-metadata-test.mjs`, `node
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, and `node
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs` passed. No
+    generated execution policy was widened; no Chromium/browser run, speed
+    claim, artifact build, or Bus Engine OS proof was performed.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline

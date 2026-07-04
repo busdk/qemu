@@ -1819,14 +1819,16 @@ function routeLiveGeneratedOutput(metadata) {
       shape,
     };
   }
-  if (metadata.tbWords &&
-      (metadata.tbWords.length !== metadata.words.length ||
-       metadata.tbWords.some((word, index) =>
-         (word >>> 0) !== (metadata.words[index] >>> 0)))) {
+  const metadataOutputMismatch =
+    firstMetadataOutputMismatch(metadata.words, metadata.tbWords);
+
+  if (metadataOutputMismatch) {
     return {
       ok: false,
       reason: "metadata-output-tb-code-mismatch",
       jsStatusName: "metadata-output-tb-code-mismatch",
+      jsStatusRejectReason: metadataOutputMismatch.reason,
+      metadataOutputMismatch,
       generatedGuestInstructions: 0,
       generatedChainLength: 0,
       generatedBodyTimeNs: 0,
@@ -2713,6 +2715,48 @@ function liveGeneratedExecJsStatusReason(status) {
   return "js-status-unknown";
 }
 
+function metadataOutputMismatchReason({ metadataWord = 0, liveWord = 0 } = {}) {
+  const op = bits(metadataWord >>> 0, 0, 8);
+  const liveOp = bits(liveWord >>> 0, 0, 8);
+
+  if (op !== liveOp) {
+    return "js-status-metadata-output-stale-tb-code";
+  }
+  if (op === OPS.brcond) {
+    return "js-status-metadata-output-branch-label-relocation";
+  }
+  if (op === OPS.tci_movl || op === OPS.call) {
+    return "js-status-metadata-output-pool-relocation";
+  }
+  return "js-status-metadata-output-unknown-mismatch";
+}
+
+function firstMetadataOutputMismatch(words, tbWords) {
+  if (!tbWords) {
+    return null;
+  }
+  const limit = Math.max(words.length, tbWords.length);
+
+  for (let index = 0; index < limit; index++) {
+    const metadataWord = words[index] >>> 0;
+    const liveWord = tbWords[index] >>> 0;
+
+    if (metadataWord !== liveWord) {
+      const op = bits(metadataWord, 0, 8);
+
+      return {
+        reason: metadataOutputMismatchReason({ metadataWord, liveWord }),
+        index,
+        op,
+        opName: OP_NAMES[op] ?? "unknown",
+        metadataWord,
+        liveWord,
+      };
+    }
+  }
+  return null;
+}
+
 function classifyLiveGeneratedExecReject({
   jsStatus = 0n,
   generatedStatus = STATUS_DISPATCH,
@@ -2723,6 +2767,7 @@ function classifyLiveGeneratedExecReject({
   metadataGeneratedOutputOpCount = 1n,
   guestInsns = 4n,
   counters = {},
+  metadataOutputMismatch = null,
 } = {}) {
   const runCounters = {
     generatedGuestInstructions: guestInsns,
@@ -2744,11 +2789,13 @@ function classifyLiveGeneratedExecReject({
   }
 
   if (jsStatus !== 0n) {
-    return rejected(
-      liveGeneratedExecJsStatusReason(jsStatus),
-      jsStatus === 3n ?
-        RUN_EXIT_REASON_INVALIDATED : RUN_EXIT_REASON_UNSUPPORTED,
-    );
+    if (jsStatus === 3n) {
+      return rejected(
+        metadataOutputMismatchReason(metadataOutputMismatch ?? {}),
+        RUN_EXIT_REASON_INVALIDATED,
+      );
+    }
+    return rejected(liveGeneratedExecJsStatusReason(jsStatus));
   }
   if (runCounters.exitsMmio !== 0n ||
       generatedExitReason === RUN_EXIT_REASON_MMIO) {
@@ -2814,10 +2861,52 @@ const liveGeneratedExecRejectClassificationCases = [
     },
   },
   {
-    name: "js status invalidation",
+    name: "js status metadata mismatch unknown invalidation",
     input: { jsStatus: 3n },
     expected: {
-      reason: "js-status-metadata-output-tb-code-mismatch",
+      reason: "js-status-metadata-output-unknown-mismatch",
+      exitReason: "invalidated",
+    },
+  },
+  {
+    name: "js status metadata mismatch branch relocation",
+    input: {
+      jsStatus: 3n,
+      metadataOutputMismatch: {
+        metadataWord: OPS.brcond | (1 << 8) | (4 << 12),
+        liveWord: (OPS.brcond | (1 << 8) | (5 << 12)) >>> 0,
+      },
+    },
+    expected: {
+      reason: "js-status-metadata-output-branch-label-relocation",
+      exitReason: "invalidated",
+    },
+  },
+  {
+    name: "js status metadata mismatch pool relocation",
+    input: {
+      jsStatus: 3n,
+      metadataOutputMismatch: {
+        metadataWord: OPS.tci_movl | (1 << 8) | (4 << 12),
+        liveWord: (OPS.tci_movl | (1 << 8) | (5 << 12)) >>> 0,
+      },
+    },
+    expected: {
+      reason: "js-status-metadata-output-pool-relocation",
+      exitReason: "invalidated",
+    },
+  },
+  {
+    name: "js status metadata mismatch stale code",
+    input: {
+      jsStatus: 3n,
+      metadataOutputMismatch: {
+        metadataWord: OPS.tci_movi | (1 << 8) | (4 << 12),
+        liveWord: OPS.mov | (1 << 8) | (2 << 12),
+      },
+    },
+    expected: {
+      reason: "js-status-metadata-output-stale-tb-code",
       exitReason: "invalidated",
     },
   },
@@ -5342,6 +5431,100 @@ assert.equal(r4kSoftmmuStaleOutputMismatch.qemuLdCalls, 0);
 assert.equal(r4kSoftmmuStaleOutputMismatch.qemuStCalls, 0);
 assert.equal(r4kSoftmmuStaleOutputMismatch.runExitReason, "invalidated");
 assert.equal(r4kSoftmmuStaleOutputMismatch.exitsInvalidated, 1);
+assert.deepEqual(r4kSoftmmuStaleOutputMismatch.metadataOutputMismatch, {
+  reason: "js-status-metadata-output-stale-tb-code",
+  index: 1,
+  op: OPS.tci_movi,
+  opName: "tci_movi",
+  metadataWord: r4iLiveX86Fixture.words[1] >>> 0,
+  liveWord: (r4iLiveX86Fixture.words[1] ^ 0x10) >>> 0,
+});
+
+const r4s8aMetadataOutputMismatchFixtures = [
+  {
+    name: "r4s8a-brcond-relocation-attribution",
+    words: r4iLiveX86Fixture.words,
+    tbWords: r4iLiveX86Fixture.words.map((word, index) =>
+      index === 3 ? (word ^ 0x1000) >>> 0 : word),
+    expected: {
+      reason: "js-status-metadata-output-branch-label-relocation",
+      index: 3,
+      op: OPS.brcond,
+      opName: "brcond",
+    },
+  },
+  {
+    name: "r4s8a-pool-relocation-attribution",
+    words: [
+      OPS.tci_movl | (2 << 8) | (4 << 12),
+      OPS.exit_tb,
+    ],
+    tbWords: [
+      (OPS.tci_movl | (2 << 8) | (5 << 12)) >>> 0,
+      OPS.exit_tb,
+    ],
+    expected: {
+      reason: "js-status-metadata-output-pool-relocation",
+      index: 0,
+      op: OPS.tci_movl,
+      opName: "tci_movl",
+    },
+  },
+  {
+    name: "r4s8a-stale-reused-tb-code-attribution",
+    words: r4iLiveX86Fixture.words,
+    tbWords: r4iLiveX86Fixture.words.map((word, index) =>
+      index === 1 ? (OPS.mov | (1 << 8) | (2 << 12)) >>> 0 : word),
+    expected: {
+      reason: "js-status-metadata-output-stale-tb-code",
+      index: 1,
+      op: OPS.tci_movi,
+      opName: "tci_movi",
+    },
+  },
+  {
+    name: "r4s8a-unknown-same-op-mismatch-attribution",
+    words: r4iLiveX86Fixture.words,
+    tbWords: r4iLiveX86Fixture.words.map((word, index) =>
+      index === 1 ? (word ^ 0x1000) >>> 0 : word),
+    expected: {
+      reason: "js-status-metadata-output-unknown-mismatch",
+      index: 1,
+      op: OPS.tci_movi,
+      opName: "tci_movi",
+    },
+  },
+];
+
+for (const fixture of r4s8aMetadataOutputMismatchFixtures) {
+  const route = routeLiveGeneratedOutput({
+    opCount: fixture.words.length,
+    generatedOutputAvailable: true,
+    generatedOutputSize: fixture.words.length * 4,
+    words: fixture.words,
+    tbWords: fixture.tbWords,
+    relativeBase: r4iLiveX86Fixture.relativeBase,
+    guestInstructions: 1,
+  });
+
+  assert.equal(route.reason, "metadata-output-tb-code-mismatch", fixture.name);
+  assert.equal(route.runExitReason, "invalidated", fixture.name);
+  assert.equal(route.generatedGuestInstructions, 0, fixture.name);
+  assert.equal(route.metadataOutputMismatch.reason,
+               fixture.expected.reason, fixture.name);
+  assert.equal(route.metadataOutputMismatch.index,
+               fixture.expected.index, fixture.name);
+  assert.equal(route.metadataOutputMismatch.op,
+               fixture.expected.op, fixture.name);
+  assert.equal(route.metadataOutputMismatch.opName,
+               fixture.expected.opName, fixture.name);
+  assert.equal(route.metadataOutputMismatch.metadataWord,
+               fixture.words[fixture.expected.index] >>> 0,
+               fixture.name);
+  assert.equal(route.metadataOutputMismatch.liveWord,
+               fixture.tbWords[fixture.expected.index] >>> 0,
+               fixture.name);
+}
 
 function r4s5bOpWritesR0(op) {
   return ![
