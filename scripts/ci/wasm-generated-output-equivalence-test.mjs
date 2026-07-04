@@ -196,6 +196,9 @@ const R4K_INVALIDATION_TLB_MIRROR_GENERATION = 13n;
 const RV64_ENV_RELATIVE_BASE_REG = 14;
 const RV64_ENV_RELATIVE_MIN_OFFSET = -16;
 const RV64_ENV_RELATIVE_MAX_EXCLUSIVE = 0x120;
+const X86_ENV_DIRECT_CC_OP_OFFSET = 0x128;
+const X86_ENV_DIRECT_HFLAGS_OFFSET = 0x130;
+const X86_ENV_DIRECT_DS_SELECTOR_OFFSET = 0x180;
 const MO_8 = 0;
 const MO_16 = 1;
 const MO_32 = 2;
@@ -873,9 +876,19 @@ function memoryAddressFromI64(expr, memory64 = false) {
 function envRelativeAccessSupported(op, size) {
   const offset = sextract(op.insn, 16, 16);
 
-  return op.r1 === RV64_ENV_RELATIVE_BASE_REG &&
-         offset >= RV64_ENV_RELATIVE_MIN_OFFSET &&
-         offset + size <= RV64_ENV_RELATIVE_MAX_EXCLUSIVE;
+  if (op.r1 !== RV64_ENV_RELATIVE_BASE_REG) {
+    return false;
+  }
+  if (offset >= RV64_ENV_RELATIVE_MIN_OFFSET &&
+      offset + size <= RV64_ENV_RELATIVE_MAX_EXCLUSIVE) {
+    return true;
+  }
+  return (op.opc === OPS.st32 && size === 4 &&
+          offset === X86_ENV_DIRECT_CC_OP_OFFSET) ||
+         (op.opc === OPS.ld32u && size === 4 &&
+          offset === X86_ENV_DIRECT_HFLAGS_OFFSET) ||
+         (op.opc === OPS.st32 && size === 4 &&
+          offset === X86_ENV_DIRECT_DS_SELECTOR_OFFSET);
 }
 
 function envRelativeMemoryAddress(op, size, memory64 = false) {
@@ -3124,6 +3137,94 @@ async function runR4s8LaterAccessFailsFixture() {
   };
 }
 
+async function runR4s21bLaterAccessFailsFixture() {
+  const fixture = {
+    name: "r4s21b-x86-env-direct-store-later-softmmu-guard-fails-no-commit",
+    relativeBase: 0x60c0,
+    words: [
+      opImm20(OPS.tci_movi, 5, 0x66),
+      opMem(OPS.st32, 5, RV64_ENV_RELATIVE_BASE_REG,
+            X86_ENV_DIRECT_DS_SELECTOR_OFFSET),
+      opReg(OPS.tci_qemu_st_rrr, 0, 14, 13),
+      opReg(OPS.tci_qemu_st_rrr, 6, 12, 13),
+      OPS.exit_tb,
+    ],
+  };
+  const generated = createState(fixture.relativeBase, fixture.words, 1);
+  const failingStoreAddress =
+    BigInt(generated.dataBase + 0x10) +
+    (1n << BigInt(WASMJIT_TLB_CONSTANTS.targetPageBits));
+  const envBase = Number(
+    generated.view.getBigUint64(
+      generated.regsPtr + RV64_ENV_RELATIVE_BASE_REG * 8, true));
+  const envFieldAddress = envBase + X86_ENV_DIRECT_DS_SELECTOR_OFFSET;
+
+  generated.view.setBigUint64(generated.regsPtr + 12 * 8,
+                              failingStoreAddress, true);
+  const beforeRam64 =
+    generated.view.getBigUint64(generated.dataBase + 0x10, true);
+  const beforeEnv32 = generated.view.getUint32(envFieldAddress, true);
+  const beforeRegs = Array.from({ length: 16 }, (_, reg) =>
+    generated.view.getBigUint64(generated.regsPtr + reg * 8, true));
+  const emission = emitPerTBFunctionBody(fixture.words, fixture.relativeBase);
+
+  assert.equal(emission.ok, true, `${fixture.name} emitter failed closed`);
+  assert.equal(emission.softmmuLowering, SHARED_SOFTMMU_LOWERING_NAME);
+  assert.equal(emission.softmmuLoweredOps, 2);
+
+  const compiled = await WebAssembly.compile(emission.moduleBytes);
+  const instance = await WebAssembly.instantiate(compiled, {
+    env: {
+      memory: generated.memory,
+      qemu_ld_rrr: generated.helpers.qemuLd,
+      qemu_st_rrr: generated.helpers.qemuSt,
+    },
+  });
+  const status = instance.exports.run(generated.ctxPtr);
+  const counters = softmmuCounterSnapshot(
+    generated.view, generated.countersPtr);
+  const exit = readSoftmmuExit(generated.view, generated.retPtr);
+  const afterRam64 =
+    generated.view.getBigUint64(generated.dataBase + 0x10, true);
+  const afterEnv32 = generated.view.getUint32(envFieldAddress, true);
+  const afterRegs = Array.from({ length: 16 }, (_, reg) =>
+    generated.view.getBigUint64(generated.regsPtr + reg * 8, true));
+
+  assert.equal(status, STATUS_TLB_MISS_OR_FAULT);
+  assert.equal(exit.reasonName, "tlb-miss-or-fault");
+  assert.equal(afterRam64, beforeRam64);
+  assert.equal(afterEnv32, beforeEnv32);
+  assert.deepEqual(afterRegs, beforeRegs);
+  assert.equal(counters.generatedGuestInstructions, 0n);
+  assert.equal(counters.inlineTlbHitLoads, 0n);
+  assert.equal(counters.inlineTlbHitStores, 0n);
+  assert.equal(counters.helperCalls, 0n);
+  assert.equal(counters.qemuLdCalls, 0n);
+  assert.equal(counters.qemuStCalls, 0n);
+  assert.equal(counters.exitsTlbMissOrFault, 1n);
+
+  return {
+    name: fixture.name,
+    status: status.toString(),
+    runExitReason: exit.reasonName,
+    directStoreCommitted: false,
+    partialStoreCommitted: false,
+    registerFlushCommitted: false,
+    dispatchTargetCommitted: false,
+    generatedGuestInstructions: counters.generatedGuestInstructions.toString(),
+    inlineTlbHitLoads: counters.inlineTlbHitLoads.toString(),
+    inlineTlbHitStores: counters.inlineTlbHitStores.toString(),
+    helperCalls: counters.helperCalls.toString(),
+    qemuLdCalls: counters.qemuLdCalls.toString(),
+    qemuStCalls: counters.qemuStCalls.toString(),
+    exitsTlbMissOrFault: counters.exitsTlbMissOrFault.toString(),
+    envFieldBefore: beforeEnv32.toString(),
+    envFieldAfter: afterEnv32.toString(),
+    ramBefore: beforeRam64.toString(),
+    ramAfter: afterRam64.toString(),
+  };
+}
+
 function runExitReasonName(reason) {
   if (reason === RUN_EXIT_REASON_NONE) {
     return "none";
@@ -5044,6 +5145,43 @@ const fixtures = [
     ],
   },
   {
+    name: "r4s21b-x86-env-direct-fields-with-qemu-load-store-all-or-nothing",
+    terminal: "exit_tb",
+    relativeBase: 0x6060,
+    seeds: [1],
+    guestInstructions: 1,
+    words: [
+      opMem(OPS.ld32u, 4, RV64_ENV_RELATIVE_BASE_REG,
+            X86_ENV_DIRECT_HFLAGS_OFFSET),
+      opReg(OPS.tci_qemu_ld_rrr, 3, 14, 13),
+      opImm20(OPS.tci_movi, 5, 0x55),
+      opMem(OPS.st32, 5, RV64_ENV_RELATIVE_BASE_REG,
+            X86_ENV_DIRECT_CC_OP_OFFSET),
+      opReg(OPS.tci_qemu_st_rrr, 3, 14, 13),
+      opImm20(OPS.tci_movi, 6, 0x66),
+      opMem(OPS.st32, 6, RV64_ENV_RELATIVE_BASE_REG,
+            X86_ENV_DIRECT_DS_SELECTOR_OFFSET),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4s21b-x86-env-direct-store-address-captured-before-r14-clobber",
+    terminal: "exit_tb",
+    relativeBase: 0x6080,
+    seeds: [1],
+    guestInstructions: 1,
+    words: [
+      opImm20(OPS.tci_movi, 5, 0x66),
+      opMem(OPS.st32, 5, RV64_ENV_RELATIVE_BASE_REG,
+            X86_ENV_DIRECT_DS_SELECTOR_OFFSET),
+      opImm20(OPS.tci_movi, RV64_ENV_RELATIVE_BASE_REG, 0x20),
+      opImm20(OPS.tci_movi, 7, 0x3110),
+      opReg(OPS.tci_qemu_ld_rrr, 3, 7, 13),
+      opReg(OPS.tci_qemu_st_rrr, 3, 7, 13),
+      OPS.exit_tb,
+    ],
+  },
+  {
     name: "rv64-call-exit-prefix-family",
     terminal: "helper",
     relativeBase: 0x5e00,
@@ -5708,6 +5846,33 @@ const unsupportedFixtures = [
     ],
   },
   {
+    name: "r4s21b-x86-env-direct-padding-offset-fails-closed",
+    relativeBase: 0x6090,
+    words: [
+      opMem(OPS.ld32u, 4, RV64_ENV_RELATIVE_BASE_REG,
+            X86_ENV_DIRECT_CC_OP_OFFSET + 4),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4s21b-x86-env-direct-wrong-size-fails-closed",
+    relativeBase: 0x60a0,
+    words: [
+      opMem(OPS.st, 5, RV64_ENV_RELATIVE_BASE_REG,
+            X86_ENV_DIRECT_DS_SELECTOR_OFFSET),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4s21b-x86-env-direct-wrong-access-fails-closed",
+    relativeBase: 0x60b0,
+    words: [
+      opMem(OPS.ld32u, 4, RV64_ENV_RELATIVE_BASE_REG,
+            X86_ENV_DIRECT_CC_OP_OFFSET),
+      OPS.exit_tb,
+    ],
+  },
+  {
     name: "rv64-call-exit-int128-return-fails-closed",
     relativeBase: 0x5f00,
     words: [
@@ -5818,10 +5983,11 @@ for (const fixture of r6Rv64SoftmmuFixtures) {
 }
 
 const r4s8LaterAccessFails = await runR4s8LaterAccessFailsFixture();
+const r4s21bLaterAccessFails = await runR4s21bLaterAccessFailsFixture();
 
-assert.equal(results.length, 24);
+assert.equal(results.length, 26);
 assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 8);
-assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 14);
+assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 16);
 assert.equal(results.filter((entry) => entry.terminal === "helper").length, 2);
 const helperBoundaryResults = results.filter((entry) =>
   entry.helpers.loads > 0 || entry.helpers.stores > 0);
@@ -5844,6 +6010,11 @@ const r4s21DirectMemoryResults = results.filter((entry) =>
 const r4s21DirectMemoryAddressCaptureResults = results.filter((entry) =>
   entry.name ===
     "r4s21-direct-memory-store-address-captured-before-r14-clobber");
+const r4s21bX86EnvDirectResults = results.filter((entry) =>
+  entry.name.startsWith("r4s21b-x86-env-direct-fields-with-qemu-"));
+const r4s21bX86EnvDirectAddressCaptureResults = results.filter((entry) =>
+  entry.name ===
+    "r4s21b-x86-env-direct-store-address-captured-before-r14-clobber");
 assert.equal(liveX86Results.length, 2);
 assert.equal(
   liveX86Results.filter((entry) =>
@@ -5951,6 +6122,54 @@ assert.deepEqual(
     ],
   ],
 );
+assert.deepEqual(
+  r4s21bX86EnvDirectResults.map((entry) => [
+    entry.name,
+    entry.inlineTlbHitLoads,
+    entry.inlineTlbHitStores,
+    entry.memoryWrites,
+    entry.helpers.loads,
+    entry.helpers.stores,
+    entry.registerStateMatched,
+    entry.memoryStateMatched,
+  ]),
+  [
+    [
+      "r4s21b-x86-env-direct-fields-with-qemu-load-store-all-or-nothing",
+      2,
+      3,
+      3,
+      0,
+      0,
+      true,
+      true,
+    ],
+  ],
+);
+assert.deepEqual(
+  r4s21bX86EnvDirectAddressCaptureResults.map((entry) => [
+    entry.name,
+    entry.inlineTlbHitLoads,
+    entry.inlineTlbHitStores,
+    entry.memoryWrites,
+    entry.helpers.loads,
+    entry.helpers.stores,
+    entry.registerStateMatched,
+    entry.memoryStateMatched,
+  ]),
+  [
+    [
+      "r4s21b-x86-env-direct-store-address-captured-before-r14-clobber",
+      1,
+      2,
+      2,
+      0,
+      0,
+      true,
+      true,
+    ],
+  ],
+);
 assert.equal(r4s8LaterAccessFails.runExitReason, "tlb-miss-or-fault");
 assert.equal(r4s8LaterAccessFails.partialStoreCommitted, false);
 assert.equal(r4s8LaterAccessFails.registerFlushCommitted, false);
@@ -5963,6 +6182,22 @@ assert.equal(r4s8LaterAccessFails.qemuLdCalls, "0");
 assert.equal(r4s8LaterAccessFails.qemuStCalls, "0");
 assert.equal(r4s8LaterAccessFails.exitsTlbMissOrFault, "1");
 assert.equal(r4s8LaterAccessFails.ramAfter, r4s8LaterAccessFails.ramBefore);
+assert.equal(r4s21bLaterAccessFails.runExitReason, "tlb-miss-or-fault");
+assert.equal(r4s21bLaterAccessFails.directStoreCommitted, false);
+assert.equal(r4s21bLaterAccessFails.partialStoreCommitted, false);
+assert.equal(r4s21bLaterAccessFails.registerFlushCommitted, false);
+assert.equal(r4s21bLaterAccessFails.dispatchTargetCommitted, false);
+assert.equal(r4s21bLaterAccessFails.generatedGuestInstructions, "0");
+assert.equal(r4s21bLaterAccessFails.inlineTlbHitLoads, "0");
+assert.equal(r4s21bLaterAccessFails.inlineTlbHitStores, "0");
+assert.equal(r4s21bLaterAccessFails.helperCalls, "0");
+assert.equal(r4s21bLaterAccessFails.qemuLdCalls, "0");
+assert.equal(r4s21bLaterAccessFails.qemuStCalls, "0");
+assert.equal(r4s21bLaterAccessFails.exitsTlbMissOrFault, "1");
+assert.equal(r4s21bLaterAccessFails.envFieldAfter,
+             r4s21bLaterAccessFails.envFieldBefore);
+assert.equal(r4s21bLaterAccessFails.ramAfter,
+             r4s21bLaterAccessFails.ramBefore);
 assert.equal(rv64BootPathResults.length, 4);
 assert.deepEqual(
   [...new Set(rv64BootPathResults.map((entry) => entry.name))],
@@ -6559,7 +6794,7 @@ function r4s20DirectMemorySupported(op, word, r1) {
   if (size === null) {
     return true;
   }
-  return envRelativeAccessSupported({ insn: word, r1 }, size);
+  return envRelativeAccessSupported({ insn: word, opc: op, r1 }, size);
 }
 
 function r4s20ControlFlowSupported(index, word) {
@@ -7604,6 +7839,52 @@ const r4s5bCases = [
     }),
   },
   {
+    name: "r4s21b-x86-env-direct-fields-multi-access-admitted",
+    expectedReason: null,
+    expectedPath: "generated",
+    expectedInlineTlbHitLoads: 1,
+    expectedInlineTlbHitStores: 1,
+    expectedSoftmmuLoweredOps: 2,
+    metadata: r4s8MultiMemoryMetadata(["load", "store"], {
+      prefixWords: [
+        opMem(OPS.ld32u, 4, RV64_ENV_RELATIVE_BASE_REG,
+              X86_ENV_DIRECT_HFLAGS_OFFSET),
+        opImm20(OPS.tci_movi, 5, 0x55),
+        opMem(OPS.st32, 5, RV64_ENV_RELATIVE_BASE_REG,
+              X86_ENV_DIRECT_CC_OP_OFFSET),
+        opMem(OPS.st32, 5, RV64_ENV_RELATIVE_BASE_REG,
+              X86_ENV_DIRECT_DS_SELECTOR_OFFSET),
+      ],
+    }),
+  },
+  {
+    name: "r4s21b-x86-env-direct-padding-offset-rejects",
+    expectedReason: "selected-body-direct-memory-unsupported",
+    metadata: r4s20GeneratedOutputMetadata([
+      opMem(OPS.ld32u, 4, RV64_ENV_RELATIVE_BASE_REG,
+            X86_ENV_DIRECT_CC_OP_OFFSET + 4),
+      OPS.exit_tb,
+    ]),
+  },
+  {
+    name: "r4s21b-x86-env-direct-wrong-size-rejects",
+    expectedReason: "selected-body-direct-memory-unsupported",
+    metadata: r4s20GeneratedOutputMetadata([
+      opMem(OPS.st, 5, RV64_ENV_RELATIVE_BASE_REG,
+            X86_ENV_DIRECT_DS_SELECTOR_OFFSET),
+      OPS.exit_tb,
+    ]),
+  },
+  {
+    name: "r4s21b-x86-env-direct-wrong-access-rejects",
+    expectedReason: "selected-body-direct-memory-unsupported",
+    metadata: r4s20GeneratedOutputMetadata([
+      opMem(OPS.ld32u, 4, RV64_ENV_RELATIVE_BASE_REG,
+            X86_ENV_DIRECT_CC_OP_OFFSET),
+      OPS.exit_tb,
+    ]),
+  },
+  {
     name: "r4s20-unsupported-direct-memory-pre-rejects",
     expectedReason: "selected-body-direct-memory-unsupported",
     metadata: r4s20GeneratedOutputMetadata([
@@ -8512,6 +8793,20 @@ console.log(JSON.stringify({
     executableFixtures: r4s8MultiAccessExecutableResults,
     laterAccessFailsNoPartialStore: r4s8LaterAccessFails,
     routingFixtures: r4s8MultiAccessRouteResults,
+  },
+  r4s21bX86EnvDirectFields: {
+    admittedFields: [
+      "CPUX86State.hflags ld32u offset 0x130",
+      "CPUX86State.cc_op st32 offset 0x128",
+      "CPUX86State.segs[R_DS].selector st32 offset 0x180",
+    ],
+    executableFixtures: [
+      ...r4s21bX86EnvDirectResults,
+      ...r4s21bX86EnvDirectAddressCaptureResults,
+    ],
+    failClosedFixtures: unsupportedResults.filter((name) =>
+      name.startsWith("r4s21b-x86-env-direct-")),
+    laterAccessFailsNoCommit: r4s21bLaterAccessFails,
   },
   r4mLiveGeneratedExec: {
     fixtureCount: r4mLiveGeneratedExecCases.length,

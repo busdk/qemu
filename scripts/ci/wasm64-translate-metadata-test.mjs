@@ -992,6 +992,16 @@ assert.match(generatedEquivalence, /r4s21-direct-memory-overlap-multi-access-rej
 assert.match(generatedEquivalence, /r4s21-direct-memory-with-qemu-load-store-all-or-nothing/);
 assert.match(generatedEquivalence, /r4s21-direct-memory-store-address-captured-before-r14-clobber/);
 assert.match(generatedEquivalence, /r4s21-direct-memory-overlap-with-qemu-guards-fails-closed/);
+assert.match(generatedEquivalence, /r4s21b-x86-env-direct-fields-with-qemu-load-store-all-or-nothing/);
+assert.match(generatedEquivalence, /r4s21b-x86-env-direct-store-address-captured-before-r14-clobber/);
+assert.match(generatedEquivalence, /r4s21b-x86-env-direct-fields-multi-access-admitted/);
+assert.match(generatedEquivalence, /r4s21b-x86-env-direct-padding-offset-fails-closed/);
+assert.match(generatedEquivalence, /r4s21b-x86-env-direct-wrong-size-fails-closed/);
+assert.match(generatedEquivalence, /r4s21b-x86-env-direct-wrong-access-fails-closed/);
+assert.match(generatedEquivalence, /r4s21b-x86-env-direct-padding-offset-rejects/);
+assert.match(generatedEquivalence, /r4s21b-x86-env-direct-wrong-size-rejects/);
+assert.match(generatedEquivalence, /r4s21b-x86-env-direct-wrong-access-rejects/);
+assert.match(generatedEquivalence, /r4s21b-x86-env-direct-store-later-softmmu-guard-fails-no-commit/);
 assert.match(generatedEquivalence, /r4s20-unsupported-direct-memory-pre-rejects/);
 assert.match(generatedEquivalence, /r4s20-unsupported-control-flow-pre-rejects/);
 assert.match(generatedEquivalence, /selected-body-direct-memory-unsupported/);

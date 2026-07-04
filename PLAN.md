@@ -3662,7 +3662,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `CPUX86State.hflags`, and `0x180` is
     `CPUX86State.segs[R_DS].selector`. This accepts R4s21a as blocker
     attribution only. It does not unlock R4l or any Bus Engine OS proof.
-  - [ ] R4s21b - Add an exact x86 env-direct field allowlist for measured
+  - [x] R4s21b - Add an exact x86 env-direct field allowlist for measured
     direct-memory state fields instead of widening the whole env-relative
     window. DoD: admit only `tcg_env + offsetof(CPUX86State, field)` direct
     memory forms for `cc_op` at `0x128`, `hflags` at `0x130`, and
@@ -3681,6 +3681,31 @@ run that reaches a weaker marker than normal multi-user readiness.
     contract tests. A bounded Chromium preflight may run only after the
     deterministic checks pass, and only to re-rank blockers; this item is not
     a speed gate or Bus Engine OS proof.
+
+    Accepted deterministic slice 2026-07-04: QEMU commit
+    `aa66da73133bad4e27aaf89e93b01550466f1ccb` gained an exact
+    `TARGET_X86_64` env-direct field allowlist for only
+    `st32 [r14+offsetof(CPUArchState, cc_op)]`,
+    `ld32u [r14+offsetof(CPUArchState, hflags)]`, and
+    `st32 [r14+offsetof(CPUArchState, segs[R_DS].selector)]`. The existing
+    lower env-relative window remains unchanged, and the new x86 field
+    offsets are protected by `QEMU_BUILD_BUG_ON` checks for `0x128`, `0x130`,
+    and `0x180`. Same-range padding, wrong access, wrong size, non-`r14`
+    base, `r14` clobber-before-use, direct-store/direct-load overlap, and
+    later SoftMMU guard failure remain fail-closed.
+
+    Deterministic coverage now includes positive guarded multi-SoftMMU
+    fixtures for `ld32u [r14+0x130]`, `st32 [r14+0x128]`, and
+    `st32 [r14+0x180]`; a deferred `st32 [r14+0x180]` address/value capture
+    before an `r14` clobber; fail-closed padding, wrong-size, and
+    wrong-access fixtures; a no-commit check after a later SoftMMU guard
+    exit; and the pre-existing overlapping direct-store/direct-load alias
+    rejection. Required checks passed: `git diff --check`;
+    `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`;
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`;
+    `node --check scripts/ci/wasm64-translate-metadata-test.mjs`; and
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`. No Chromium,
+    R4l, or Bus Engine OS proof was run for this deterministic slice.
   - [ ] R4s22 - Expand supported x86 live SoftMMU MemOp families only after
     R4s19/R4s20 identify memory rejects as a remaining dominant blocker.
     DoD: admit alignment flags only with explicit QEMU-equivalent alignment

@@ -7510,6 +7510,28 @@ static bool tcg_wasm64_live_generated_exec_direct_memory_is_store(TCGOpcode op)
     }
 }
 
+static bool tcg_wasm64_live_generated_exec_x86_env_field_supported(
+    TCGOpcode op, int32_t offset, int32_t size)
+{
+#if defined(TARGET_X86_64)
+    const int32_t cc_op_offset = offsetof(CPUArchState, cc_op);
+    const int32_t hflags_offset = offsetof(CPUArchState, hflags);
+    const int32_t ds_selector_offset =
+        offsetof(CPUArchState, segs[R_DS].selector);
+
+    QEMU_BUILD_BUG_ON(offsetof(CPUArchState, cc_op) != 0x128);
+    QEMU_BUILD_BUG_ON(offsetof(CPUArchState, hflags) != 0x130);
+    QEMU_BUILD_BUG_ON(offsetof(CPUArchState, segs[R_DS].selector) != 0x180);
+
+    return (op == INDEX_op_st32 && size == 4 && offset == cc_op_offset) ||
+           (op == INDEX_op_ld32u && size == 4 && offset == hflags_offset) ||
+           (op == INDEX_op_st32 && size == 4 &&
+            offset == ds_selector_offset);
+#else
+    return false;
+#endif
+}
+
 static bool tcg_wasm64_live_generated_exec_direct_memory_supported(
     uint32_t word, bool env_base_valid)
 {
@@ -7526,8 +7548,9 @@ static bool tcg_wasm64_live_generated_exec_direct_memory_supported(
            tcg_wasm64_tci_word_r1(word) == 14 &&
            (!tcg_wasm64_live_generated_exec_op_writes_r0(op) ||
             tcg_wasm64_tci_word_r0(word) != 14) &&
-           offset >= -16 &&
-           offset + size <= 0x120;
+           ((offset >= -16 && offset + size <= 0x120) ||
+            tcg_wasm64_live_generated_exec_x86_env_field_supported(
+                op, offset, size));
 }
 
 static bool tcg_wasm64_live_generated_exec_direct_memory_ranges_overlap(
