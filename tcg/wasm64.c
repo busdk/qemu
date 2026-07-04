@@ -3916,8 +3916,15 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                     ]),
                 ])),
             ]);
-            if (!WebAssembly.validate(bytes)) {
-                recordModuleFailure(moduleFailurePhaseValidate, 7n, words);
+            recordModuleFailure(moduleFailurePhaseValidate, 7n, words);
+            let moduleValid = false;
+            try {
+                moduleValid = WebAssembly.validate(bytes);
+            } catch (validateError) {
+                setResult(0, 7n);
+                return 7;
+            }
+            if (!moduleValid) {
                 setResult(0, 7n);
                 return 7;
             }

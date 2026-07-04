@@ -1865,7 +1865,34 @@ function emitPerTBFunctionBody(words, relativeBase, options = {}) {
   try {
     const moduleBytes = compileGeneratedOutputModule(words, relativeBase,
                                                      diagnostics, options);
-    const moduleValid = WebAssembly.validate(moduleBytes);
+    let moduleValid;
+
+    try {
+      moduleValid = WebAssembly.validate(moduleBytes);
+    } catch (error) {
+      return {
+        ok: false,
+        emitter: PER_TB_EMITTER_NAME,
+        reason: "module-validation-failed",
+        error: error instanceof Error ? error.message : String(error),
+        shape: decodedShape(words),
+        moduleFailureAttribution: moduleFailureAttribution({
+          reason: "module-validation-failed",
+          phase: "module-validate",
+          statusName: "module-validation-failed",
+          words,
+          memoryImportDescriptor:
+            diagnostics.memoryImportDescriptor || memoryImportDescriptor,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+        moduleBytes,
+        moduleValid: false,
+        runtimeUnsupportedGuards: diagnostics.runtimeUnsupportedGuards,
+        softmmuLowering: diagnostics.softmmuLowering,
+        softmmuLoweredOps: diagnostics.softmmuLoweredOps,
+        x86CpuStateContract: stateContract,
+      };
+    }
 
     if (!moduleValid) {
       return {
@@ -6447,6 +6474,22 @@ const r4mLiveGeneratedExecCases = [
       },
     },
   }),
+  simulateR4mLiveGeneratedExec({
+    name: "r4s11-live-r4s10-body-shape-live-memory-classified",
+    enabled: true,
+    noFallback: true,
+    metadata: {
+      opCount: PRE_R4I_LIVE_X86_SHAPE.length,
+      generatedOutputAvailable: true,
+      generatedOutputSize: liveX86Fixture.words.length * 4,
+      words: liveX86Fixture.words,
+      relativeBase: liveX86Fixture.relativeBase,
+      guestInstructions: 1,
+      emitOptions: {
+        memoryImportDescriptor: LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR,
+      },
+    },
+  }),
 ];
 assert.deepEqual(
   r4mLiveGeneratedExecCases.map((entry) => entry.path),
@@ -6458,6 +6501,7 @@ assert.deepEqual(
     "tci-fallback",
     "tci-fallback",
     "tci-fallback",
+    "fail-closed",
     "fail-closed",
     "fail-closed",
   ],
@@ -6547,6 +6591,44 @@ assert.deepEqual(r4mModuleEmissionFailure.moduleFailureAttribution, {
   terminalOp: "goto_tb",
   memoryImport: LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR,
 });
+const r4s11LiveR4s10BodyBuild = r4mLiveGeneratedExecCases.find((entry) =>
+  entry.name === "r4s11-live-r4s10-body-shape-live-memory-classified");
+assert.equal(r4s11LiveR4s10BodyBuild.reason, "module-validation-failed");
+assert.equal(r4s11LiveR4s10BodyBuild.failedClosed, true);
+assert.equal(r4s11LiveR4s10BodyBuild.generatedGuestInstructions, 0);
+assert.equal(
+  r4s11LiveR4s10BodyBuild.moduleFailureAttribution.reason,
+  "module-validation-failed",
+);
+assert.equal(
+  r4s11LiveR4s10BodyBuild.moduleFailureAttribution.phase,
+  "module-validate",
+);
+assert.equal(
+  r4s11LiveR4s10BodyBuild.moduleFailureAttribution.statusName,
+  "module-validation-failed",
+);
+assert.ok(
+  r4s11LiveR4s10BodyBuild.moduleFailureAttribution.error === null ||
+    typeof r4s11LiveR4s10BodyBuild.moduleFailureAttribution.error === "string",
+);
+assert.deepEqual(
+  r4s11LiveR4s10BodyBuild.moduleFailureAttribution.shape,
+  PRE_R4I_LIVE_X86_SHAPE,
+);
+assert.equal(
+  r4s11LiveR4s10BodyBuild.moduleFailureAttribution.shapeOpCount,
+  PRE_R4I_LIVE_X86_SHAPE.length,
+);
+assert.equal(r4s11LiveR4s10BodyBuild.moduleFailureAttribution.firstOp, "ld32u");
+assert.equal(
+  r4s11LiveR4s10BodyBuild.moduleFailureAttribution.terminalOp,
+  "goto_tb",
+);
+assert.deepEqual(
+  r4s11LiveR4s10BodyBuild.moduleFailureAttribution.memoryImport,
+  LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR,
+);
 assert.deepEqual(
   memoryImportTypeBytes(DETERMINISTIC_MEMORY_IMPORT_DESCRIPTOR),
   [...name("env"), ...name("memory"), 0x02, 0x00, 0x01],
