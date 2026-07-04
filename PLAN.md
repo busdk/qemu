@@ -2539,6 +2539,37 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs` passed. No
     generated execution policy was widened; no Chromium/browser run, speed
     claim, artifact build, or Bus Engine OS proof was performed.
+  - [ ] R4s9 - Make measured x86 branch-label relocation safe for live
+    generated execution, or keep it fail-closed with a narrower blocker. DoD:
+    using the fresh 2026-07-04 x86_64 artifact from QEMU commit
+    `c801a0e0f6` (`qemu-system-x86_64.js`
+    `97be2214a6c0e804bb865bc47817757839e2a775756117b17468dfeff7d1b46a`,
+    `qemu-system-x86_64.wasm`
+    `2f7d77f84a00f0afa5647836414d5f0b45e25cb54233bb4c4626c78a8367103d`,
+    manifest
+    `9fd83dcfc15c382c45c2ae02f91d7dc2b33c7ad270b5f16640f57878189b652a`),
+    fix or precisely narrow the live mismatch currently reported by the
+    bounded Chromium `149.0.7827.55` preflight at
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s8-x86-preflight-c801a0e/wasm-browser-smoke-result.json`.
+    That run failed with `reason=preflight-zero-generated-exec`,
+    `attempts=100`, `successes=0`, `rejects=100`, `skips=82`,
+    `generated_guest_instructions=0`, `generated_run_entries=0`,
+    `generated_coverage_denominator=1120`,
+    `selected_body_helper_exit_skips=82`,
+    `hotset_target_metadata_hits=14`, `hotset_target_output_hits=14`,
+    `hotset_target_stale=84`, and first metadata mismatch
+    `js-status-metadata-output-branch-label-relocation` at index `3`,
+    op `brcond`, metadata word `0x00000d04`, live word `0x00020d04`;
+    reject counts also included
+    `selected-body-softmmu-multi-access-unsupported=61`,
+    `selected-body-memop-unsupported-size=5`, and
+    `selected-body-memop-unsupported-alignment=6`. A fix must be generic to
+    x86_64 generated-output metadata and must not hardcode guest PCs, Bus
+    Engine OS, or one TuxBoot image. Deterministic tests must prove branch
+    relocation normalization or rebinding is safe while true stale/unknown
+    mismatches remain fail-closed. The next browser run remains bounded
+    preflight only; R4l stays blocked until the summary reports nonzero
+    generated guest-instruction retirement.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
