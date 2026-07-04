@@ -2539,7 +2539,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs` passed. No
     generated execution policy was widened; no Chromium/browser run, speed
     claim, artifact build, or Bus Engine OS proof was performed.
-  - [ ] R4s9 - Make measured x86 branch-label relocation safe for live
+  - [x] R4s9 - Make measured x86 branch-label relocation safe for live
     generated execution, or keep it fail-closed with a narrower blocker. DoD:
     using the fresh 2026-07-04 x86_64 artifact from QEMU commit
     `c801a0e0f6` (`qemu-system-x86_64.js`
@@ -2569,7 +2569,24 @@ run that reaches a weaker marker than normal multi-user readiness.
     relocation normalization or rebinding is safe while true stale/unknown
     mismatches remain fail-closed. The next browser run remains bounded
     preflight only; R4l stays blocked until the summary reports nonzero
-    generated guest-instruction retirement.
+    generated guest-instruction retirement. Accepted deterministic slice
+    2026-07-04: QEMU commit `24f1949177` normalizes only finalized live TB
+    `brcond` label relocation where `((metadata ^ live) & 0xfff) == 0`,
+    then uses the normalized live word stream for shape checks, cache
+    checksum/key, and WebAssembly emission. Pool relocations, opcode changes,
+    low-field/register changes, length mismatches, and non-branch same-op
+    mismatches remain fail-closed. Deterministic tests now cover a normal
+    branch-label relocation route, the observed x86 relocation word
+    `0x00000d04 -> 0x00020d04`, and rejection for pool relocation, stale
+    reused TB code, unknown same-op mismatch, brcond low-field mismatch, and
+    length mismatch. Supervisor review checks passed: `git diff --check
+    develop..worker/x86-branch-label-relocation`, `node --check
+    scripts/ci/wasm64-translate-metadata-test.mjs`, `node --check
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+    scripts/ci/wasm64-translate-metadata-test.mjs`, `node
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, and `node
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. No browser
+    speed gate or Bus Engine OS proof was run in this slice.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
