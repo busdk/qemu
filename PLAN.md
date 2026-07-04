@@ -2082,13 +2082,28 @@ run that reaches a weaker marker than normal multi-user readiness.
     precisely. This item must land before any new R4s browser preflight.
     This item is intentionally split into reviewable safety slices after a
     broad worker attempt did not produce a checkpoint:
-    - [ ] R4s5a - Separate the generated-status namespace from
+    - [x] R4s5a - Separate the generated-status namespace from
       `TCGWasm64RunExitReason`. DoD: live generated status constants use
       values that cannot alias run-exit reasons; a single explicit mapper
       converts generated statuses to run-exit reasons where needed;
       classification no longer relies on numeric coincidence for dispatch,
       exit, helper, unsupported, invalidated, MMIO, or TLB miss/fault; and
-      deterministic tests prove the namespace separation and mapper.
+      deterministic tests prove the namespace separation and mapper. Accepted
+      2026-07-04: live generated status constants now use the `0x20+`
+      namespace, `tcg_wasm64_live_tb_status_to_run_exit_reason()` is the
+      explicit generated-status to run-exit mapper, live exec success checks
+      use that mapper instead of raw numeric equality, and deterministic JS
+      fixtures prove namespace separation plus mapper behavior for dispatch,
+      exit, helper, unsupported, invalidated, MMIO, and TLB miss/fault. Checks:
+      `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+      `node --check scripts/ci/wasm64-translate-metadata-test.mjs`,
+      `node --check scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`,
+      `node scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+      scripts/ci/wasm64-translate-metadata-test.mjs`, `node
+      scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, and `git diff
+      --check` passed. No R4s5b/R4s5c MemOp/TLB mirror work, browser run,
+      artifact build, speed claim, or Bus Engine OS proof was done in this
+      slice.
     - [ ] R4s5b - Add C-side selected-body memory-operation validation before
       live x86 SoftMMU execution. DoD: the live path can identify the
       `MemOpIdx`/`MemOp`/`mmu_idx` for the selected generated-output memory

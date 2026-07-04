@@ -53,11 +53,13 @@
 #define TCG_WASM64_ONE_TB_GOTO_SLOT_DELTA (-0x60)
 #define TCG_WASM64_ONE_TB_DISPATCH_TARGET 0x5048u
 #define TCG_WASM64_ONE_TB_STATUS_DISPATCH 2u
-#define TCG_WASM64_LIVE_TB_STATUS_EXIT 1u
-#define TCG_WASM64_LIVE_TB_STATUS_DISPATCH 2u
-#define TCG_WASM64_LIVE_TB_STATUS_HELPER 5u
-#define TCG_WASM64_LIVE_TB_STATUS_UNSUPPORTED 6u
-#define TCG_WASM64_LIVE_TB_STATUS_INVALIDATED 8u
+#define TCG_WASM64_LIVE_TB_STATUS_EXIT 0x20u
+#define TCG_WASM64_LIVE_TB_STATUS_DISPATCH 0x21u
+#define TCG_WASM64_LIVE_TB_STATUS_HELPER 0x22u
+#define TCG_WASM64_LIVE_TB_STATUS_MMIO 0x23u
+#define TCG_WASM64_LIVE_TB_STATUS_TLB_MISS_OR_FAULT 0x24u
+#define TCG_WASM64_LIVE_TB_STATUS_UNSUPPORTED 0x25u
+#define TCG_WASM64_LIVE_TB_STATUS_INVALIDATED 0x26u
 #define TCG_WASM64_ONE_TB_EXECUTED_TCI_OP_EQUIVALENTS 11u
 #define TCG_WASM64_ONE_TB_MEMORY_LOADS 2u
 #define TCG_WASM64_ONE_TB_MEMORY_WRITES 2u
@@ -279,8 +281,22 @@ QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, size) !=
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunExit, flags) !=
                   TCG_WASM64_RUN_EXIT_FLAGS_OFFSET);
 QEMU_BUILD_BUG_ON(sizeof(TCGWasm64RunExit) != TCG_WASM64_RUN_EXIT_SIZE);
+QEMU_BUILD_BUG_ON(TCG_WASM64_LIVE_TB_STATUS_EXIT ==
+                  TCG_WASM64_RUN_EXIT_BUDGET);
+QEMU_BUILD_BUG_ON(TCG_WASM64_LIVE_TB_STATUS_DISPATCH ==
+                  TCG_WASM64_RUN_EXIT_MMIO);
+QEMU_BUILD_BUG_ON(TCG_WASM64_LIVE_TB_STATUS_HELPER ==
+                  TCG_WASM64_RUN_EXIT_HELPER);
+QEMU_BUILD_BUG_ON(TCG_WASM64_LIVE_TB_STATUS_MMIO ==
+                  TCG_WASM64_RUN_EXIT_MMIO);
+QEMU_BUILD_BUG_ON(TCG_WASM64_LIVE_TB_STATUS_TLB_MISS_OR_FAULT ==
+                  TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT);
+QEMU_BUILD_BUG_ON(TCG_WASM64_LIVE_TB_STATUS_UNSUPPORTED ==
+                  TCG_WASM64_RUN_EXIT_UNSUPPORTED);
+QEMU_BUILD_BUG_ON(TCG_WASM64_LIVE_TB_STATUS_INVALIDATED ==
+                  TCG_WASM64_RUN_EXIT_INVALIDATED);
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters,
-                  generated_guest_instructions) !=
+                           generated_guest_instructions) !=
                   TCG_WASM64_RUN_COUNTERS_GENERATED_GUEST_INSTRUCTIONS_OFFSET);
 QEMU_BUILD_BUG_ON(offsetof(TCGWasm64RunCounters,
                   fallback_guest_instructions) !=
@@ -689,6 +705,42 @@ const char *tcg_wasm64_run_exit_reason_name(TCGWasm64RunExitReason reason)
     default:
         return "unknown";
     }
+}
+
+static bool tcg_wasm64_live_tb_status_to_run_exit_reason(
+    uint64_t status, uint32_t *reason)
+{
+    switch (status) {
+    case TCG_WASM64_LIVE_TB_STATUS_EXIT:
+    case TCG_WASM64_LIVE_TB_STATUS_DISPATCH:
+        *reason = 0;
+        return true;
+    case TCG_WASM64_LIVE_TB_STATUS_HELPER:
+        *reason = TCG_WASM64_RUN_EXIT_HELPER;
+        return true;
+    case TCG_WASM64_LIVE_TB_STATUS_MMIO:
+        *reason = TCG_WASM64_RUN_EXIT_MMIO;
+        return true;
+    case TCG_WASM64_LIVE_TB_STATUS_TLB_MISS_OR_FAULT:
+        *reason = TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT;
+        return true;
+    case TCG_WASM64_LIVE_TB_STATUS_UNSUPPORTED:
+        *reason = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+        return true;
+    case TCG_WASM64_LIVE_TB_STATUS_INVALIDATED:
+        *reason = TCG_WASM64_RUN_EXIT_INVALIDATED;
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool tcg_wasm64_live_tb_status_is_success(uint64_t status)
+{
+    uint32_t reason;
+
+    return tcg_wasm64_live_tb_status_to_run_exit_reason(status, &reason) &&
+           reason == 0;
 }
 
 static uint64_t tcg_wasm64_next_generation(uint64_t generation)
@@ -2475,8 +2527,9 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
     const generatedOutputPtr = Number(generated_output_arg);
     const generatedOutputSize = Number(generated_output_size_arg);
     const stackPtr = scratch + 0x3000;
-    const statusExit = 1n;
-    const statusDispatch = 2n;
+    const statusExit = 0x20n;
+    const statusDispatch = 0x21n;
+    const runExitNone = 0;
     const valueI32 = 0x7f;
     const valueI64 = 0x7e;
     const envRelativeBaseReg = 14;
@@ -3014,10 +3067,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         }
         executedOps++;
 
-        emitted.push(...i32StoreAtPtr(
-            exitPtr, 0,
-            i32Const(Number(terminal.kind === ops.goto_tb
-                ? statusDispatch : statusExit))));
+        emitted.push(...i32StoreAtPtr(exitPtr, 0, i32Const(runExitNone)));
         emitted.push(...i64StoreAtPtr(
             exitPtr, 32,
             terminal.kind === ops.goto_tb
@@ -3182,11 +3232,19 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
     const guestInsns = BigInt(guest_insns_arg);
     const generatedOutputPtr = Number(generated_output_arg);
     const generatedOutputSize = Number(generated_output_size_arg);
-    const statusExit = 1n;
-    const statusDispatch = 2n;
-    const statusHelper = 5n;
-    const statusUnsupported = 6n;
-    const statusInvalidated = 8n;
+    const statusExit = 0x20n;
+    const statusDispatch = 0x21n;
+    const statusHelper = 0x22n;
+    const statusMmio = 0x23n;
+    const statusTlbMissOrFault = 0x24n;
+    const statusUnsupported = 0x25n;
+    const statusInvalidated = 0x26n;
+    const runExitNone = 0;
+    const runExitMmio = 2;
+    const runExitTlbMissOrFault = 3;
+    const runExitHelper = 5;
+    const runExitUnsupported = 6;
+    const runExitInvalidated = 8;
     const valueI32 = 0x7f;
     const valueI64 = 0x7e;
     const envRelativeBaseReg = 14;
@@ -3448,6 +3506,13 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
             return statusHelper;
         }
         return statusUnsupported;
+    }
+
+    function terminalRunExitReason(opc) {
+        if (opc === ops.call) {
+            return runExitHelper;
+        }
+        return runExitNone;
     }
 
     function readTerminalValue(opc, ptrOffset, index) {
@@ -3743,7 +3808,8 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
 
         function returnUnsupported() {
             return [
-                ...i32StoreAtPtr(2, 0, i32Const(Number(statusUnsupported))),
+                ...i32StoreAtPtr(2, 0, i32Const(runExitUnsupported)),
+                ...i32StoreAtPtr(2, 4, i32Const(Number(statusUnsupported))),
                 ...i64StoreAtPtr(2, 32, i64Const(0n)),
                 ...i64Const(0n),
                 0x0f,
@@ -4045,7 +4111,9 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
             ? i64Const(0n) : i64Const(guestInsns)));
         emitted.push(...i64StoreAtPtr(1, 80, i64Const(1n)));
         emitted.push(...i32StoreAtPtr(
-            2, 0, i32Const(Number(terminalStatus(terminal.opc)))));
+            2, 0, i32Const(terminalRunExitReason(terminal.opc))));
+        emitted.push(...i32StoreAtPtr(
+            2, 4, i32Const(Number(terminalStatus(terminal.opc)))));
         emitted.push(...i64StoreAtPtr(
             2, 32,
             terminal.opc === ops.goto_tb
@@ -4142,7 +4210,7 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
         HEAPU64[counters / 8 + 8] = compileNs;
         HEAPU64[counters / 8 + 9] = instantiateNs;
         setResult(0, 0n);
-        setResult(1, HEAPU32[exit / 4]);
+        setResult(1, HEAPU32[exit / 4 + 1]);
         setResult(2, reference.status);
         setResult(3, HEAPU64[exit / 8 + 4]);
         setResult(4, reference.value);
@@ -4153,7 +4221,7 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
         setResult(9, guestInsns);
         setResult(10, words.length);
 
-        return HEAPU32[exit / 4] === Number(reference.status) &&
+        return HEAPU32[exit / 4 + 1] === Number(reference.status) &&
                HEAPU64[exit / 8 + 4] === reference.value &&
                generatedChecksum === reference.checksum &&
                HEAPU64[exit / 8 + 5] === reference.executed &&
@@ -5831,6 +5899,10 @@ static const char *tcg_wasm64_live_generated_exec_classify_reject(
         result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS];
     uint64_t generated_status =
         result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS];
+    uint32_t generated_exit_reason = 0;
+    bool generated_status_known =
+        tcg_wasm64_live_tb_status_to_run_exit_reason(generated_status,
+                                                     &generated_exit_reason);
 
     *exit_reason = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
 
@@ -5842,38 +5914,42 @@ static const char *tcg_wasm64_live_generated_exec_classify_reject(
             js_status);
     }
 
-    if (run_counters->exits_mmio != 0) {
+    if (run_counters->exits_mmio != 0 ||
+        exit->reason == TCG_WASM64_RUN_EXIT_MMIO ||
+        generated_exit_reason == TCG_WASM64_RUN_EXIT_MMIO) {
         *exit_reason = TCG_WASM64_RUN_EXIT_MMIO;
         return tcg_wasm64_live_generated_exec_reject_reason_name(
             TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_MMIO_EXIT);
     }
-    if (run_counters->exits_tlb_miss_or_fault != 0) {
+    if (run_counters->exits_tlb_miss_or_fault != 0 ||
+        exit->reason == TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT ||
+        generated_exit_reason == TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT) {
         *exit_reason = TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT;
         return tcg_wasm64_live_generated_exec_reject_reason_name(
             TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_TLB_MISS_OR_FAULT_EXIT);
     }
     if (run_counters->exits_invalidated != 0 ||
         exit->reason == TCG_WASM64_RUN_EXIT_INVALIDATED ||
-        generated_status == TCG_WASM64_LIVE_TB_STATUS_INVALIDATED) {
+        generated_exit_reason == TCG_WASM64_RUN_EXIT_INVALIDATED) {
         *exit_reason = TCG_WASM64_RUN_EXIT_INVALIDATED;
         return tcg_wasm64_live_generated_exec_reject_reason_name(
             TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_INVALIDATED);
     }
     if (run_counters->exits_unsupported != 0 ||
         exit->reason == TCG_WASM64_RUN_EXIT_UNSUPPORTED ||
-        generated_status == TCG_WASM64_LIVE_TB_STATUS_UNSUPPORTED) {
+        generated_exit_reason == TCG_WASM64_RUN_EXIT_UNSUPPORTED) {
         return tcg_wasm64_live_generated_exec_reject_reason_name(
             TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_UNSUPPORTED_BODY_STATE);
     }
     if (run_counters->exits_helper != 0 ||
         exit->reason == TCG_WASM64_RUN_EXIT_HELPER ||
-        generated_status == TCG_WASM64_LIVE_TB_STATUS_HELPER) {
+        generated_exit_reason == TCG_WASM64_RUN_EXIT_HELPER) {
         *exit_reason = TCG_WASM64_RUN_EXIT_HELPER;
         return tcg_wasm64_live_generated_exec_reject_reason_name(
             TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_STATUS_HELPER);
     }
-    if (generated_status != TCG_WASM64_LIVE_TB_STATUS_DISPATCH &&
-        generated_status != TCG_WASM64_LIVE_TB_STATUS_EXIT) {
+    if (!generated_status_known ||
+        !tcg_wasm64_live_tb_status_is_success(generated_status)) {
         return tcg_wasm64_live_generated_exec_reject_reason_name(
             TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_STATUS_UNEXPECTED);
     }
@@ -6037,13 +6113,27 @@ static bool tcg_wasm64_live_generated_exec_try(
 #endif
 
     if (exit.reason == 0) {
-        exit.reason = (uint32_t)result[
-            TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS];
+        uint32_t mapped_reason = 0;
+
+        if (tcg_wasm64_live_tb_status_to_run_exit_reason(
+                result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS],
+                &mapped_reason)) {
+            exit.reason = mapped_reason;
+        }
     }
-    if (exit.reason == TCG_WASM64_LIVE_TB_STATUS_UNSUPPORTED) {
+    if (exit.reason == TCG_WASM64_RUN_EXIT_UNSUPPORTED) {
         tcg_wasm64_run_count_exit(&run_counters,
                                   TCG_WASM64_RUN_EXIT_UNSUPPORTED);
-    } else if (exit.reason == TCG_WASM64_LIVE_TB_STATUS_INVALIDATED ||
+    } else if (exit.reason == TCG_WASM64_RUN_EXIT_HELPER) {
+        tcg_wasm64_run_count_exit(&run_counters,
+                                  TCG_WASM64_RUN_EXIT_HELPER);
+    } else if (exit.reason == TCG_WASM64_RUN_EXIT_MMIO) {
+        tcg_wasm64_run_count_exit(&run_counters,
+                                  TCG_WASM64_RUN_EXIT_MMIO);
+    } else if (exit.reason == TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT) {
+        tcg_wasm64_run_count_exit(&run_counters,
+                                  TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT);
+    } else if (exit.reason == TCG_WASM64_RUN_EXIT_INVALIDATED ||
                result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] == 3) {
         exit.reason = TCG_WASM64_RUN_EXIT_INVALIDATED;
         tcg_wasm64_run_count_exit(&run_counters,
@@ -6051,10 +6141,8 @@ static bool tcg_wasm64_live_generated_exec_try(
     }
 
     ok = result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] == 0 &&
-         (result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS] ==
-              TCG_WASM64_LIVE_TB_STATUS_DISPATCH ||
-          result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS] ==
-              TCG_WASM64_LIVE_TB_STATUS_EXIT) &&
+         tcg_wasm64_live_tb_status_is_success(
+             result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS]) &&
          result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_RET] != 0 &&
          result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_GUEST_INSNS] ==
              guest_insns &&

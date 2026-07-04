@@ -139,10 +139,14 @@ const R7_RV64_HELPER_PREFIX_SHAPE = [
   "call",
 ];
 
-const STATUS_EXIT = 1n;
-const STATUS_DISPATCH = 2n;
-const STATUS_HELPER = 5n;
-const STATUS_UNSUPPORTED = 6n;
+const STATUS_EXIT = 0x20n;
+const STATUS_DISPATCH = 0x21n;
+const STATUS_HELPER = 0x22n;
+const STATUS_MMIO = 0x23n;
+const STATUS_TLB_MISS_OR_FAULT = 0x24n;
+const STATUS_UNSUPPORTED = 0x25n;
+const STATUS_INVALIDATED = 0x26n;
+const STATUS_BUDGET = 0x27n;
 const RUN_EXIT_REASON_NONE = 0;
 const RUN_EXIT_REASON_BUDGET = 1;
 const RUN_EXIT_REASON_MMIO = 2;
@@ -1872,6 +1876,53 @@ function runExitReasonName(reason) {
   return `unknown-${reason}`;
 }
 
+function generatedStatusToRunExitReason(status) {
+  if (status === STATUS_EXIT || status === STATUS_DISPATCH) {
+    return RUN_EXIT_REASON_NONE;
+  }
+  if (status === STATUS_BUDGET) {
+    return RUN_EXIT_REASON_BUDGET;
+  }
+  if (status === STATUS_MMIO) {
+    return RUN_EXIT_REASON_MMIO;
+  }
+  if (status === STATUS_TLB_MISS_OR_FAULT) {
+    return RUN_EXIT_REASON_TLB_MISS_OR_FAULT;
+  }
+  if (status === STATUS_HELPER) {
+    return RUN_EXIT_REASON_HELPER;
+  }
+  if (status === STATUS_UNSUPPORTED) {
+    return RUN_EXIT_REASON_UNSUPPORTED;
+  }
+  if (status === STATUS_INVALIDATED) {
+    return RUN_EXIT_REASON_INVALIDATED;
+  }
+  return null;
+}
+
+function generatedStatusForRunExitReason(reason) {
+  if (reason === RUN_EXIT_REASON_BUDGET) {
+    return STATUS_BUDGET;
+  }
+  if (reason === RUN_EXIT_REASON_MMIO) {
+    return STATUS_MMIO;
+  }
+  if (reason === RUN_EXIT_REASON_TLB_MISS_OR_FAULT) {
+    return STATUS_TLB_MISS_OR_FAULT;
+  }
+  if (reason === RUN_EXIT_REASON_HELPER) {
+    return STATUS_HELPER;
+  }
+  if (reason === RUN_EXIT_REASON_UNSUPPORTED) {
+    return STATUS_UNSUPPORTED;
+  }
+  if (reason === RUN_EXIT_REASON_INVALIDATED) {
+    return STATUS_INVALIDATED;
+  }
+  throw new Error(`no failure generated status for run-exit reason ${reason}`);
+}
+
 function liveGeneratedExecJsStatusReason(status) {
   if (status === 1n) {
     return "js-status-runtime-unavailable";
@@ -1921,6 +1972,7 @@ function classifyLiveGeneratedExecReject({
     exitsInvalidated: 0n,
     ...counters,
   };
+  const generatedExitReason = generatedStatusToRunExitReason(generatedStatus);
 
   function rejected(reason, exitReason = RUN_EXIT_REASON_UNSUPPORTED) {
     return { reason, exitReason: runExitReasonName(exitReason) };
@@ -1933,28 +1985,30 @@ function classifyLiveGeneratedExecReject({
         RUN_EXIT_REASON_INVALIDATED : RUN_EXIT_REASON_UNSUPPORTED,
     );
   }
-  if (runCounters.exitsMmio !== 0n) {
+  if (runCounters.exitsMmio !== 0n ||
+      generatedExitReason === RUN_EXIT_REASON_MMIO) {
     return rejected("mmio-exit", RUN_EXIT_REASON_MMIO);
   }
-  if (runCounters.exitsTlbMissOrFault !== 0n) {
+  if (runCounters.exitsTlbMissOrFault !== 0n ||
+      generatedExitReason === RUN_EXIT_REASON_TLB_MISS_OR_FAULT) {
     return rejected(
       "tlb-miss-or-fault-exit",
       RUN_EXIT_REASON_TLB_MISS_OR_FAULT,
     );
   }
   if (runCounters.exitsInvalidated !== 0n ||
-      generatedStatus === BigInt(RUN_EXIT_REASON_INVALIDATED)) {
+      generatedExitReason === RUN_EXIT_REASON_INVALIDATED) {
     return rejected("invalidated", RUN_EXIT_REASON_INVALIDATED);
   }
   if (runCounters.exitsUnsupported !== 0n ||
-      generatedStatus === STATUS_UNSUPPORTED) {
+      generatedExitReason === RUN_EXIT_REASON_UNSUPPORTED) {
     return rejected("unsupported-body-state");
   }
   if (runCounters.exitsHelper !== 0n ||
-      generatedStatus === STATUS_HELPER) {
+      generatedExitReason === RUN_EXIT_REASON_HELPER) {
     return rejected("generated-status-helper", RUN_EXIT_REASON_HELPER);
   }
-  if (generatedStatus !== STATUS_DISPATCH && generatedStatus !== STATUS_EXIT) {
+  if (generatedExitReason !== RUN_EXIT_REASON_NONE) {
     return rejected("generated-status-unexpected");
   }
   if (generatedRet === 0n) {
@@ -2006,6 +2060,19 @@ const liveGeneratedExecRejectClassificationCases = [
     name: "generated status helper",
     input: { generatedStatus: STATUS_HELPER },
     expected: { reason: "generated-status-helper", exitReason: "helper" },
+  },
+  {
+    name: "generated status mmio",
+    input: { generatedStatus: STATUS_MMIO },
+    expected: { reason: "mmio-exit", exitReason: "mmio" },
+  },
+  {
+    name: "generated status tlb miss or fault",
+    input: { generatedStatus: STATUS_TLB_MISS_OR_FAULT },
+    expected: {
+      reason: "tlb-miss-or-fault-exit",
+      exitReason: "tlb-miss-or-fault",
+    },
   },
   {
     name: "generated status unexpected",
@@ -2082,10 +2149,31 @@ const liveGeneratedExecRejectClassificationCases = [
     expected: { reason: "invalidated", exitReason: "invalidated" },
   },
   {
+    name: "generated status invalidated",
+    input: { generatedStatus: STATUS_INVALIDATED },
+    expected: { reason: "invalidated", exitReason: "invalidated" },
+  },
+  {
     name: "unsupported body state",
     input: { generatedStatus: STATUS_UNSUPPORTED },
     expected: {
       reason: "unsupported-body-state",
+      exitReason: "unsupported",
+    },
+  },
+  {
+    name: "run-exit mmio value is not a generated status",
+    input: { generatedStatus: BigInt(RUN_EXIT_REASON_MMIO) },
+    expected: {
+      reason: "generated-status-unexpected",
+      exitReason: "unsupported",
+    },
+  },
+  {
+    name: "run-exit invalidated value is not a generated status",
+    input: { generatedStatus: BigInt(RUN_EXIT_REASON_INVALIDATED) },
+    expected: {
+      reason: "generated-status-unexpected",
       exitReason: "unsupported",
     },
   },
@@ -2123,6 +2211,53 @@ for (const testCase of liveGeneratedExecRejectClassificationCases) {
   );
 }
 
+const liveGeneratedStatusNamespace = [
+  STATUS_EXIT,
+  STATUS_DISPATCH,
+  STATUS_HELPER,
+  STATUS_MMIO,
+  STATUS_TLB_MISS_OR_FAULT,
+  STATUS_UNSUPPORTED,
+  STATUS_INVALIDATED,
+  STATUS_BUDGET,
+];
+assert.equal(
+  new Set(liveGeneratedStatusNamespace.map((status) => status.toString())).size,
+  liveGeneratedStatusNamespace.length,
+  "live generated statuses must be distinct",
+);
+for (const generatedStatus of liveGeneratedStatusNamespace) {
+  for (const runExitReason of [
+    RUN_EXIT_REASON_BUDGET,
+    RUN_EXIT_REASON_MMIO,
+    RUN_EXIT_REASON_TLB_MISS_OR_FAULT,
+    RUN_EXIT_REASON_HELPER,
+    RUN_EXIT_REASON_UNSUPPORTED,
+    RUN_EXIT_REASON_INVALIDATED,
+  ]) {
+    assert.notEqual(
+      generatedStatus,
+      BigInt(runExitReason),
+      "live generated status must not alias a run-exit reason",
+    );
+  }
+}
+assert.deepEqual(
+  liveGeneratedStatusNamespace.map((status) =>
+    runExitReasonName(generatedStatusToRunExitReason(status))),
+  [
+    "none",
+    "none",
+    "helper",
+    "mmio",
+    "tlb-miss-or-fault",
+    "unsupported",
+    "invalidated",
+    "budget",
+  ],
+  "live generated status mapper must cover every generated status",
+);
+
 const HOTSET_LOCAL_COUNTERS_PTR = 19;
 const HOTSET_LOCAL_BUDGET = 20;
 const HOTSET_LOCAL_CHAIN_TARGET = 21;
@@ -2154,7 +2289,7 @@ function hotsetFailureReturn({ status, reason, tbId, value, counterOffset }) {
 
 function hotsetInvalidatedReturn(tbId, value = i64Const(0n)) {
   return hotsetFailureReturn({
-    status: BigInt(RUN_EXIT_REASON_INVALIDATED),
+    status: STATUS_INVALIDATED,
     reason: RUN_EXIT_REASON_INVALIDATED,
     tbId,
     value,
@@ -2275,7 +2410,7 @@ function emitTwoTBHotsetModule(fixture) {
     instructions.push(...ifBlock(
       [...localGet(HOTSET_LOCAL_BUDGET), ...i64Const(2n), 0x54],
       hotsetFailureReturn({
-        status: BigInt(RUN_EXIT_REASON_BUDGET),
+        status: STATUS_BUDGET,
         reason: RUN_EXIT_REASON_BUDGET,
         tbId: fixture.target.id,
         value: localGet(HOTSET_LOCAL_CHAIN_TARGET),
@@ -2556,7 +2691,7 @@ function softmmuFailureReturn({ reason, counterOffset, size, flags = 0 }) {
   return [
     ...softmmuStoreExit(reason, size, flags),
     ...softmmuIncrementCounter(counterOffset),
-    ...returnExpr(i64Const(BigInt(reason))),
+    ...returnExpr(i64Const(generatedStatusForRunExitReason(reason))),
   ];
 }
 
@@ -3394,7 +3529,7 @@ const r4kTwoTBHotsetFixtures = [
     slotTarget: R4K_TWO_TB_HOTSET_DISPATCH_TARGET,
     budget: 1,
     expectedSuccess: false,
-    expectedStatus: BigInt(RUN_EXIT_REASON_BUDGET),
+    expectedStatus: STATUS_BUDGET,
     expectedRunExitReason: "budget",
     expectedFallbackReason: "budget-before-second-tb",
     expectedTargetShapeSupported: true,
@@ -3414,7 +3549,7 @@ const r4kTwoTBHotsetFixtures = [
     slotTarget: R4K_TWO_TB_HOTSET_DISPATCH_TARGET,
     budget: 2,
     expectedSuccess: false,
-    expectedStatus: BigInt(RUN_EXIT_REASON_INVALIDATED),
+    expectedStatus: STATUS_INVALIDATED,
     expectedRunExitReason: "invalidated",
     expectedFallbackReason: "invalidated-chain-target",
     expectedTargetShapeSupported: true,
@@ -3464,7 +3599,7 @@ const r4kInvalidationFixtures = [
     name: "r4k-invalidation-tb-generation-mismatch",
     currentTbGeneration: R4K_INVALIDATION_TB_GENERATION + 1n,
     expectedSuccess: false,
-    expectedStatus: BigInt(RUN_EXIT_REASON_INVALIDATED),
+    expectedStatus: STATUS_INVALIDATED,
     expectedRunExitReason: "invalidated",
     expectedFallbackReason: "tb-generation-mismatch",
     expectedState: "initial",
@@ -3477,7 +3612,7 @@ const r4kInvalidationFixtures = [
     currentAddressSpaceGeneration:
       R4K_INVALIDATION_ADDRESS_SPACE_GENERATION + 1n,
     expectedSuccess: false,
-    expectedStatus: BigInt(RUN_EXIT_REASON_INVALIDATED),
+    expectedStatus: STATUS_INVALIDATED,
     expectedRunExitReason: "invalidated",
     expectedFallbackReason: "address-space-generation-mismatch",
     expectedState: "initial",
@@ -3490,7 +3625,7 @@ const r4kInvalidationFixtures = [
     currentTlbMirrorGeneration:
       R4K_INVALIDATION_TLB_MIRROR_GENERATION + 1n,
     expectedSuccess: false,
-    expectedStatus: BigInt(RUN_EXIT_REASON_INVALIDATED),
+    expectedStatus: STATUS_INVALIDATED,
     expectedRunExitReason: "invalidated",
     expectedFallbackReason: "tlb-mirror-generation-mismatch",
     expectedState: "initial",
@@ -3576,7 +3711,7 @@ const r4kSoftmmuFixtures = [
     generatedMemop: MO_32,
     comparator: 0x3000n,
     expectedSuccess: false,
-    expectedStatus: BigInt(RUN_EXIT_REASON_TLB_MISS_OR_FAULT),
+    expectedStatus: STATUS_TLB_MISS_OR_FAULT,
     expectedRunExitReason: "tlb-miss-or-fault",
     expectedExitsTlbMissOrFault: 1,
     words: [
@@ -3592,7 +3727,7 @@ const r4kSoftmmuFixtures = [
     comparatorFlags: Number(WASMJIT_TLB_CONSTANTS.forceSlow),
     slowFlags: WASMJIT_TLB_CONSTANTS.mmio,
     expectedSuccess: false,
-    expectedStatus: BigInt(RUN_EXIT_REASON_MMIO),
+    expectedStatus: STATUS_MMIO,
     expectedRunExitReason: "mmio",
     expectedExitsMmio: 1,
     words: [
@@ -3607,7 +3742,7 @@ const r4kSoftmmuFixtures = [
     generatedMemop: MO_32,
     comparatorFlags: Number(WASMJIT_TLB_CONSTANTS.invalidMask),
     expectedSuccess: false,
-    expectedStatus: BigInt(RUN_EXIT_REASON_TLB_MISS_OR_FAULT),
+    expectedStatus: STATUS_TLB_MISS_OR_FAULT,
     expectedRunExitReason: "tlb-miss-or-fault",
     expectedExitsTlbMissOrFault: 1,
     words: [
@@ -3622,7 +3757,7 @@ const r4kSoftmmuFixtures = [
     generatedMemop: MO_64,
     taddr: 0xffcn,
     expectedSuccess: false,
-    expectedStatus: BigInt(RUN_EXIT_REASON_TLB_MISS_OR_FAULT),
+    expectedStatus: STATUS_TLB_MISS_OR_FAULT,
     expectedRunExitReason: "tlb-miss-or-fault",
     expectedExitFlags: RUN_EXIT_FLAG_PAGE_CROSSING,
     expectedExitsTlbMissOrFault: 1,

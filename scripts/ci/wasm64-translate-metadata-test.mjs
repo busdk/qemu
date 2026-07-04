@@ -370,10 +370,35 @@ assert.match(runtime, /"selected-body-helper-exit-unsupported"/);
 assert.match(runtime, /"tb-identity-missing-or-stale"/);
 assert.match(runtime, /tcg_wasm64_live_generated_exec_classify_reject/);
 assert.doesNotMatch(runtime, /"generated-exec-rejected"/);
-assert.doesNotMatch(runtime, /exit->reason == TCG_WASM64_RUN_EXIT_MMIO/);
+assert.match(runtime, /TCG_WASM64_LIVE_TB_STATUS_EXIT 0x20u/);
+assert.match(runtime, /TCG_WASM64_LIVE_TB_STATUS_DISPATCH 0x21u/);
+assert.match(runtime, /TCG_WASM64_LIVE_TB_STATUS_HELPER 0x22u/);
+assert.match(runtime, /TCG_WASM64_LIVE_TB_STATUS_MMIO 0x23u/);
+assert.match(runtime, /TCG_WASM64_LIVE_TB_STATUS_TLB_MISS_OR_FAULT 0x24u/);
+assert.match(runtime, /TCG_WASM64_LIVE_TB_STATUS_UNSUPPORTED 0x25u/);
+assert.match(runtime, /TCG_WASM64_LIVE_TB_STATUS_INVALIDATED 0x26u/);
+assert.match(runtime, /tcg_wasm64_live_tb_status_to_run_exit_reason/);
+assert.match(runtime, /tcg_wasm64_live_tb_status_is_success/);
+assert.match(runtime, /generated_exit_reason == TCG_WASM64_RUN_EXIT_MMIO/);
+assert.match(
+  runtime,
+  /generated_exit_reason == TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT/,
+);
+assert.match(
+  runtime,
+  /generated_exit_reason == TCG_WASM64_RUN_EXIT_HELPER/,
+);
+assert.match(
+  runtime,
+  /generated_exit_reason == TCG_WASM64_RUN_EXIT_UNSUPPORTED/,
+);
+assert.match(
+  runtime,
+  /generated_exit_reason == TCG_WASM64_RUN_EXIT_INVALIDATED/,
+);
 assert.doesNotMatch(
   runtime,
-  /exit->reason == TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT/,
+  /exit\.reason = \(uint32_t\)result\[\s*TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS\s*\]/,
 );
 for (const liveGeneratedExecRejectReason of [
   "js-status-runtime-unavailable",
@@ -605,5 +630,12 @@ assert.match(generatedEquivalence, /WASMJIT_TLB_MIRROR/);
 assert.match(generatedEquivalence, /inlineTlbHitLoads/);
 assert.match(generatedEquivalence, /qemuLdCalls/);
 assert.match(generatedEquivalence, /metadata-output-tb-code-mismatch/);
+assert.match(generatedEquivalence, /generatedStatusToRunExitReason/);
+assert.match(generatedEquivalence, /generatedStatusForRunExitReason/);
+assert.match(generatedEquivalence, /liveGeneratedStatusNamespace/);
+assert.match(generatedEquivalence, /STATUS_MMIO = 0x23n/);
+assert.match(generatedEquivalence, /STATUS_TLB_MISS_OR_FAULT = 0x24n/);
+assert.match(generatedEquivalence, /STATUS_INVALIDATED = 0x26n/);
+assert.match(generatedEquivalence, /run-exit mmio value is not a generated status/);
 
 console.log("wasm64 translate metadata contract: ok");
