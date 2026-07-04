@@ -3239,6 +3239,17 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
             return incrementCounter(countersPtr, offset, 1);
         }
 
+        function returnUnsupported() {
+            return [
+                ...i32StoreAtPtr(exitPtr, runExit.reason,
+                                 i32Const(runExitUnsupported)),
+                ...i64StoreAtPtr(exitPtr, runExit.value, i64Const(0n)),
+                ...incrementRunCounter(runCounters.exitsUnsupported),
+                ...i64Const(statusUnsupported),
+                0x0f,
+            ];
+        }
+
         function softmmuStoreExit(reason, sizeExpr, flags) {
             return [
                 ...i32StoreAtPtr(exitPtr, runExit.reason,
@@ -3698,9 +3709,15 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                                          sextract(insn, 12, 20);
                     const targetIndex = targetOffset / 4;
                     if (targetOffset % 4 !== 0 ||
-                        targetIndex <= index ||
-                        targetIndex > end) {
+                        targetIndex <= index) {
                         return null;
+                    }
+                    if (targetIndex > end) {
+                        code.push(...ifBlock(
+                            truthy(localGet(regLocal(bits(insn, 8, 4)))),
+                            returnUnsupported()));
+                        index++;
+                        continue;
                     }
                     const body = compileRange(index + 1, targetIndex);
                     if (body === null) {

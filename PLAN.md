@@ -2818,7 +2818,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     such as order `SSSS` and `SL`. This does not accept R4s13, does not
     unlock R4l, makes no speed claim, and does not permit a Bus Engine OS
     browser proof.
-  - [ ] R4s14 - Reconcile the R4s12 deterministic memory64-generated fixture
+  - [x] R4s14 - Reconcile the R4s12 deterministic memory64-generated fixture
     with the live R4s13 `body-build` module-emission failure before any new
     browser preflight. DoD: add deterministic coverage that exercises the
     same live generated-output emission path and memory64/shared import
@@ -2835,6 +2835,30 @@ run that reaches a weaker marker than normal multi-user readiness.
     preflight, R4l speed gate, Bus Engine OS proof, or Bus-specific shortcut
     may run until deterministic checks predict nonzero generated retirement
     or materially sharper live attribution.
+    Accepted deterministic slice 2026-07-04: fixed the live x86 generated
+    body builder so an out-of-recorded-body `brcond` emits a runtime
+    unsupported synthetic return when taken instead of throwing during
+    `body-build`. This reconciles the R4s12 deterministic memory64 fixture
+    with the R4s13 live 13-op shape after branch relocation normalization:
+    `ld32u,tci_movi,tci_setcond32,brcond,tci_movi,st8,ld,tci_movi,add,st,goto_tb,exit_tb,exit_tb`.
+    The deterministic fixture
+    `r4s14-live-r4s13-body-shape-live-memory64-generated` uses the same live
+    shared memory64 import descriptor (`limits_flags=0x07`, initial pages `0`,
+    maximum pages `262144`, `shared=true`, `memory64=true`), normalizes the
+    observed branch word to `0x00020d04`, validates the module, reports
+    `generatedGuestInstructions=1`, `rejects=0`, `compatFallback=false`,
+    and zero helper/`qemu_ld`/`qemu_st` calls, while retaining the
+    `branch-target-outside-recorded-words` runtime unsupported guard for the
+    taken branch. Existing deterministic fixtures continue to cover
+    fail-closed stale TB code, unsafe pool relocation, unsupported direct
+    memory, unsupported MemOps, unsupported CPU state, and unsafe
+    multi-access store-before-guard shapes. Checks passed: `git diff
+    --check`, `node --check
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, and `node
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. No Chromium
+    preflight, R4l speed gate, Bus Engine OS proof, or Bus-specific shortcut
+    was run.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline

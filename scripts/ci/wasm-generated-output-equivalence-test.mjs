@@ -2114,6 +2114,7 @@ function routeLiveGeneratedOutput(metadata) {
     moduleValid: emission.moduleValid,
     moduleByteLength: emission.moduleByteLength,
     memoryImportDescriptor: emission.memoryImportDescriptor,
+    runtimeUnsupportedGuards: emission.runtimeUnsupportedGuards,
     softmmuLowering: emission.softmmuLowering,
     softmmuLoweredOps: emission.softmmuLoweredOps,
     inlineTlbHitLoads: shape.filter((op) => op === "tci_qemu_ld_rrr").length,
@@ -4787,6 +4788,13 @@ assert.deepEqual(
   PRE_R4I_LIVE_X86_SHAPE,
   "pre-R4i live x86 fixture shape drifted",
 );
+const r4s13LiveBodyBuildWords = liveX86Fixture.words.map((word, index) =>
+  index === 3 ? 0x00020d04 : word);
+assert.deepEqual(
+  decodedShape(r4s13LiveBodyBuildWords),
+  PRE_R4I_LIVE_X86_SHAPE,
+  "R4s13 live body-build fixture shape drifted",
+);
 const r4iLiveX86Fixture = fixtures.find((fixture) =>
   fixture.name === "live-x86-r4i-ld32u-goto-tb-11");
 assert.deepEqual(
@@ -6407,6 +6415,10 @@ function simulateR4mLiveGeneratedExec({
     multiAccessAttribution: memopValidation.multiAccessAttribution || null,
     tlbMirrorRefreshed: memopValidation.tlbMirrorRefreshed || false,
     tlbMirrorValidated: memopValidation.tlbMirrorValidated || false,
+    normalizedBranchLabelRelocations:
+      route.normalizedBranchLabelRelocations || 0,
+    normalizedWords: route.normalizedWords || null,
+    runtimeUnsupportedGuards: route.runtimeUnsupportedGuards || [],
   };
 }
 
@@ -6536,6 +6548,23 @@ const r4mLiveGeneratedExecCases = [
       },
     },
   }),
+  simulateR4mLiveGeneratedExec({
+    name: "r4s14-live-r4s13-body-shape-live-memory64-generated",
+    enabled: true,
+    noFallback: true,
+    metadata: {
+      opCount: PRE_R4I_LIVE_X86_SHAPE.length,
+      generatedOutputAvailable: true,
+      generatedOutputSize: liveX86Fixture.words.length * 4,
+      words: liveX86Fixture.words,
+      tbWords: r4s13LiveBodyBuildWords,
+      relativeBase: liveX86Fixture.relativeBase,
+      guestInstructions: 1,
+      emitOptions: {
+        memoryImportDescriptor: LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR,
+      },
+    },
+  }),
 ];
 assert.deepEqual(
   r4mLiveGeneratedExecCases.map((entry) => entry.path),
@@ -6549,6 +6578,7 @@ assert.deepEqual(
     "tci-fallback",
     "fail-closed",
     "fail-closed",
+    "generated",
     "generated",
   ],
 );
@@ -6653,6 +6683,34 @@ assert.deepEqual(
 assert.deepEqual(
   r4s12LiveR4s10Generated.memoryImportDescriptor,
   LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR,
+);
+const r4s14LiveR4s13Generated = r4mLiveGeneratedExecCases.find((entry) =>
+  entry.name === "r4s14-live-r4s13-body-shape-live-memory64-generated");
+assert.equal(r4s14LiveR4s13Generated.ok, true);
+assert.equal(r4s14LiveR4s13Generated.path, "generated");
+assert.equal(r4s14LiveR4s13Generated.reason, null);
+assert.equal(r4s14LiveR4s13Generated.moduleValid, true);
+assert.equal(r4s14LiveR4s13Generated.failedClosed, false);
+assert.equal(r4s14LiveR4s13Generated.compatFallback, false);
+assert.equal(r4s14LiveR4s13Generated.generatedGuestInstructions, 1);
+assert.equal(r4s14LiveR4s13Generated.rejects, 0);
+assert.equal(r4s14LiveR4s13Generated.helperCalls, 0);
+assert.equal(r4s14LiveR4s13Generated.qemuLdCalls, 0);
+assert.equal(r4s14LiveR4s13Generated.qemuStCalls, 0);
+assert.deepEqual(
+  r4s14LiveR4s13Generated.shape,
+  PRE_R4I_LIVE_X86_SHAPE,
+);
+assert.deepEqual(
+  r4s14LiveR4s13Generated.memoryImportDescriptor,
+  LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR,
+);
+assert.equal(r4s14LiveR4s13Generated.normalizedBranchLabelRelocations, 1);
+assert.equal(r4s14LiveR4s13Generated.normalizedWords[3], 0x00020d04);
+assert.deepEqual(
+  r4s14LiveR4s13Generated.runtimeUnsupportedGuards.map((guard) =>
+    guard.reason),
+  ["branch-target-outside-recorded-words"],
 );
 assert.deepEqual(
   memoryImportTypeBytes(DETERMINISTIC_MEMORY_IMPORT_DESCRIPTOR),
