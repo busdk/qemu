@@ -1866,6 +1866,32 @@ run that reaches a weaker marker than normal multi-user readiness.
   TB ops, and `scripts/ci/wasm64-translate-metadata-test.mjs` now asserts the
   scratch-backed execute-and-count contract. No browser run or artifact build
   was run in this slice.
+- [x] R8 - Cross live generated-output dispatch from measurement to real
+  execution for commit-safe RV64 bodies. DoD: the normal
+  `tcg_wasm64_tb_exec()` path validates available generated output, executes
+  dispatch/exit-shaped generated bodies directly, commits env-relative CPU
+  state, records `generated_guest_instructions > 0`, returns the generated
+  dispatch/exit result instead of re-running the TB through TCI, and keeps
+  explicit TCI fallback for unavailable, stale, helper-terminal, SoftMMU
+  helper, or unsupported shapes. Accepted 2026-07-04:
+  `tcg/wasm64.c` now broadens live generated execution beyond the old 11-op
+  fixture, caches generated WebAssembly instances per TB/env/output checksum,
+  counts cache hits separately from fresh compiles, and treats a generated
+  execution as successful only after the body reports nonzero guest
+  instruction retirement and no helper or qemu_ld/st calls. The older
+  live-coverage probe now stays out of the way when real generated execution
+  is enabled, so it cannot shadow-run a generated body before the committing
+  path makes the acceleration/fallback decision. Deterministic coverage in
+  `scripts/ci/wasm-generated-output-equivalence-test.mjs` adds
+  `r8-rv64-real-generated-body-commits-state`, which proves generated and
+  reference execution produce identical register and memory state while the
+  live route reports `guestStateCommit: true`, no TCI correctness fallback,
+  one generated execution, and five generated guest instructions. The same
+  suite keeps the RV64 helper-prefix shape as explicit TCI fallback until a
+  continuation ABI can safely resume helper calls without losing temporary
+  register state. `scripts/ci/wasm64-translate-metadata-test.mjs` asserts the
+  new live real-execution shape gate and cache-hit accounting. No browser run
+  or artifact build was run in this slice.
 - [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
   accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
   cold in browser-hosted QEMU/WASM with the accelerator and reaches

@@ -1379,6 +1379,93 @@ function routeAvailableGeneratedOutput(metadata) {
   };
 }
 
+function routeR8RealGeneratedOutput(metadata) {
+  if (!metadata) {
+    return {
+      ok: false,
+      path: "tci-fallback",
+      reason: "metadata-missing",
+      generatedGuestInstructions: 0,
+      guestStateCommit: false,
+      tciCorrectnessFallback: true,
+    };
+  }
+  if (!metadata.generatedOutputAvailable || metadata.generatedOutputSize === 0 ||
+      metadata.generatedOutputSize % 4 !== 0) {
+    return {
+      ok: false,
+      path: "tci-fallback",
+      reason: "generated-output-unavailable",
+      generatedGuestInstructions: 0,
+      guestStateCommit: false,
+      tciCorrectnessFallback: true,
+    };
+  }
+
+  const shape = decodedShape(metadata.words);
+  const unsupportedOps = new Set(["call", "tci_qemu_ld_rrr", "tci_qemu_st_rrr"]);
+  const terminal = shape.find((op) => op === "goto_tb" || op === "exit_tb");
+  const terminalIndex = terminal ? shape.indexOf(terminal) : -1;
+
+  if (!terminal ||
+      shape.slice(0, terminalIndex + 1).some((op) => unsupportedOps.has(op))) {
+    return {
+      ok: false,
+      path: "tci-fallback",
+      reason: "selected-body-shape-unsupported",
+      shape,
+      generatedGuestInstructions: 0,
+      guestStateCommit: false,
+      tciCorrectnessFallback: true,
+    };
+  }
+  if (metadata.tbWords &&
+      (metadata.tbWords.length !== metadata.words.length ||
+       metadata.tbWords.some((word, index) =>
+         (word >>> 0) !== (metadata.words[index] >>> 0)))) {
+    return {
+      ok: false,
+      path: "tci-fallback",
+      reason: "metadata-output-tb-code-mismatch",
+      runExitReason: "invalidated",
+      shape,
+      generatedGuestInstructions: 0,
+      guestStateCommit: false,
+      tciCorrectnessFallback: true,
+    };
+  }
+
+  const emission = emitPerTBFunctionBody(metadata.words, metadata.relativeBase);
+  if (!emission.ok) {
+    return {
+      ok: false,
+      path: "tci-fallback",
+      reason: emission.reason,
+      shape,
+      generatedGuestInstructions: 0,
+      guestStateCommit: false,
+      tciCorrectnessFallback: true,
+    };
+  }
+
+  return {
+    ok: true,
+    path: "generated",
+    reason: null,
+    shape,
+    terminal,
+    generatedGuestInstructions: metadata.guestInstructions,
+    generatedCoverageNumerator: metadata.guestInstructions,
+    generatedExecuted: 1,
+    generatedChainLength: 1,
+    guestStateCommit: true,
+    tciCorrectnessFallback: false,
+    returnedDispatchTarget: terminal === "goto_tb",
+    moduleValid: emission.moduleValid,
+    moduleByteLength: emission.moduleByteLength,
+  };
+}
+
 function interpretGeneratedOutput(words, state, relativeBase) {
   const regs = state.regs.slice();
   const view = state.view;
@@ -2870,6 +2957,7 @@ const fixtures = [
     name: "rv64-boot-move-logic-family",
     terminal: "goto_tb",
     relativeBase: 0x5900,
+    guestInstructions: 5,
     words: [
       opImm20(OPS.tci_movi, 1, 0x123),
       opImm20(OPS.tci_movl, 9, 0),
@@ -4144,6 +4232,61 @@ assert.equal(
     .compatFallback,
   true,
 );
+
+const r8Rv64RealExecFixture = fixtures.find((fixture) =>
+  fixture.name === "rv64-boot-move-logic-family");
+const r8Rv64RealExecState = results.find((entry) =>
+  entry.name === r8Rv64RealExecFixture.name && entry.seed === 1);
+const r8RealGeneratedExecCases = [
+  {
+    name: "r8-rv64-real-generated-body-commits-state",
+    ...routeR8RealGeneratedOutput({
+      opCount: r8Rv64RealExecFixture.words.length,
+      generatedOutputAvailable: true,
+      generatedOutputSize: r8Rv64RealExecFixture.words.length * 4,
+      words: r8Rv64RealExecFixture.words,
+      tbWords: r8Rv64RealExecFixture.words,
+      relativeBase: r8Rv64RealExecFixture.relativeBase,
+      guestInstructions: r8Rv64RealExecFixture.guestInstructions,
+    }),
+    differential: {
+      registerStateMatched: r8Rv64RealExecState.registerStateMatched,
+      memoryStateMatched: r8Rv64RealExecState.memoryStateMatched,
+      generatedTciOpEquivalents:
+        r8Rv64RealExecState.generatedTciOpEquivalents,
+    },
+  },
+  {
+    name: "r8-rv64-helper-prefix-stays-fallback-until-continuation",
+    ...routeR8RealGeneratedOutput({
+      opCount: R7_RV64_HELPER_PREFIX_WORDS.length + 2,
+      generatedOutputAvailable: true,
+      generatedOutputSize: R7_RV64_HELPER_PREFIX_WORDS.length * 4,
+      words: R7_RV64_HELPER_PREFIX_WORDS,
+      tbWords: R7_RV64_HELPER_PREFIX_WORDS,
+      relativeBase: 0x6c00,
+      guestInstructions: 19,
+    }),
+  },
+];
+const r8GeneratedCommit = r8RealGeneratedExecCases.find((entry) =>
+  entry.name === "r8-rv64-real-generated-body-commits-state");
+assert.equal(r8GeneratedCommit.path, "generated");
+assert.equal(r8GeneratedCommit.guestStateCommit, true);
+assert.equal(r8GeneratedCommit.tciCorrectnessFallback, false);
+assert.equal(r8GeneratedCommit.generatedGuestInstructions, 5);
+assert.equal(r8GeneratedCommit.generatedExecuted, 1);
+assert.equal(r8GeneratedCommit.moduleValid, true);
+assert.equal(r8GeneratedCommit.differential.registerStateMatched, true);
+assert.equal(r8GeneratedCommit.differential.memoryStateMatched, true);
+assert.ok(r8GeneratedCommit.differential.generatedTciOpEquivalents > 0);
+const r8HelperFallback = r8RealGeneratedExecCases.find((entry) =>
+  entry.name === "r8-rv64-helper-prefix-stays-fallback-until-continuation");
+assert.equal(r8HelperFallback.path, "tci-fallback");
+assert.equal(r8HelperFallback.reason, "selected-body-shape-unsupported");
+assert.equal(r8HelperFallback.guestStateCommit, false);
+assert.equal(r8HelperFallback.tciCorrectnessFallback, true);
+
 r4kInvalidationResults.push({
   name: "r4k-invalidation-generated-output-mismatch",
   success: false,
@@ -4425,6 +4568,14 @@ console.log(JSON.stringify({
       entry.generatedExecuted > 0).length,
     compatFallbackFixtures: r7AvailableGeneratedOutputExecCases.filter(
       (entry) => entry.compatFallback).length,
+  },
+  r8RealGeneratedExec: {
+    fixtureCount: r8RealGeneratedExecCases.length,
+    fixtures: r8RealGeneratedExecCases,
+    generatedFixtures: r8RealGeneratedExecCases.filter((entry) =>
+      entry.path === "generated").length,
+    committedFixtures: r8RealGeneratedExecCases.filter((entry) =>
+      entry.guestStateCommit).length,
   },
   r4kLiveMetadataRouting: r4kLiveRoutingCases,
   unsupportedX86StateFixtures: unsupportedX86StateResults,
