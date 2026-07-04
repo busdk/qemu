@@ -2697,7 +2697,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     and live displacement targets are valid and the loaded
     `tcg_target_ulong` bytes are identical. Pool relocation stays fail-closed
     until that value-equality invariant is captured.
-  - [ ] R4s12 - Explain or fix the R4s11 module validation failure. DoD:
+  - [x] R4s12 - Explain or fix the R4s11 module validation failure. DoD:
     extend deterministic and live attribution so the 13-op R4s10 shape reports
     the exact validation/compile error from the WebAssembly engine, or fix the
     emitter generically if the invalid construct is clear and the fix
@@ -2715,7 +2715,34 @@ run that reaches a weaker marker than normal multi-user readiness.
     x86 Chromium preflight only when deterministic evidence predicts nonzero
     generated retirement or materially sharper live attribution. R4l speed
     gate remains blocked until bounded preflight reports nonzero generated
-    guest-instruction retirement.
+    guest-instruction retirement. Accepted 2026-07-04: worker branch
+    `qemu-r4s12-x86-module-validation-error` commit `dec16df5e8` fixed the
+    deterministic per-TB emitter to respect memory64 address typing when the
+    live shared memory descriptor is used. The previous validation blocker was
+    an `i64.load` address-type mismatch: memory64 load/store addresses require
+    `i64`, but the deterministic fixture path still used `i32` pointer
+    locals/addresses. The deterministic fixture
+    `r4s12-live-r4s10-body-shape-live-memory64-generated` now keeps the same
+    13-op R4s10 shape and live memory descriptor, validates the module,
+    executes through the generated path, retires `generatedGuestInstructions=1`,
+    reports `moduleValid=true`, and records zero rejects. Supervisor reran:
+    `git diff --check
+    7dad68f7da18dfb764e7ce96a42e761bb4783aff..dec16df5e87566baf79c6dcda5fe8eb7f20350ed`,
+    `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`, and
+    `node scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. No browser
+    preflight was run for this item; R4s13 owns that evidence now that
+    deterministic generated retirement is nonzero.
+  - [ ] R4s13 - Run the bounded x86 Chromium generated-retirement preflight on
+    a fresh same-commit artifact after R4s12. DoD: build current
+    `x86_64-softmmu` Emscripten/WASM artifacts from QEMU `develop`, record
+    artifact SHA-256 hashes, browser version, exact command, result JSON path,
+    marker/timeout, and generated-retirement counters. Acceptance for this
+    preflight is not a speed claim: it only unlocks R4l if the live browser
+    summary reports nonzero generated guest-instruction retirement without
+    hidden TCI fallback for the selected generated body. If generated
+    retirement is still zero, record the exact blocker and add the next
+    deterministic repair item instead of running R4l.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
