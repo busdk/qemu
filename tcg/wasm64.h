@@ -42,6 +42,9 @@ typedef struct TCGWasm64Counters {
     uint64_t generated_cache_hits;
     uint64_t generated_coverage_numerator;
     uint64_t generated_coverage_denominator;
+    uint64_t generated_guest_instructions;
+    uint64_t fallback_guest_instructions;
+    uint64_t generated_body_time_ns;
     uint64_t generated_exits[TCG_WASM64_EXIT__MAX];
     uint64_t translated_tbs;
     uint64_t translated_ops;

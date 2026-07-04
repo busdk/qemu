@@ -1386,6 +1386,8 @@ function routeR8RealGeneratedOutput(metadata) {
       path: "tci-fallback",
       reason: "metadata-missing",
       generatedGuestInstructions: 0,
+      fallbackGuestInstructions: 0,
+      generatedBodyTimeNs: 0,
       guestStateCommit: false,
       tciCorrectnessFallback: true,
     };
@@ -1397,6 +1399,8 @@ function routeR8RealGeneratedOutput(metadata) {
       path: "tci-fallback",
       reason: "generated-output-unavailable",
       generatedGuestInstructions: 0,
+      fallbackGuestInstructions: metadata.guestInstructions || 0,
+      generatedBodyTimeNs: 0,
       guestStateCommit: false,
       tciCorrectnessFallback: true,
     };
@@ -1415,6 +1419,8 @@ function routeR8RealGeneratedOutput(metadata) {
       reason: "selected-body-shape-unsupported",
       shape,
       generatedGuestInstructions: 0,
+      fallbackGuestInstructions: metadata.guestInstructions || 0,
+      generatedBodyTimeNs: 0,
       guestStateCommit: false,
       tciCorrectnessFallback: true,
     };
@@ -1430,6 +1436,8 @@ function routeR8RealGeneratedOutput(metadata) {
       runExitReason: "invalidated",
       shape,
       generatedGuestInstructions: 0,
+      fallbackGuestInstructions: metadata.guestInstructions || 0,
+      generatedBodyTimeNs: 0,
       guestStateCommit: false,
       tciCorrectnessFallback: true,
     };
@@ -1443,6 +1451,8 @@ function routeR8RealGeneratedOutput(metadata) {
       reason: emission.reason,
       shape,
       generatedGuestInstructions: 0,
+      fallbackGuestInstructions: metadata.guestInstructions || 0,
+      generatedBodyTimeNs: 0,
       guestStateCommit: false,
       tciCorrectnessFallback: true,
     };
@@ -1455,6 +1465,8 @@ function routeR8RealGeneratedOutput(metadata) {
     shape,
     terminal,
     generatedGuestInstructions: metadata.guestInstructions,
+    fallbackGuestInstructions: 0,
+    generatedBodyTimeNs: 1000,
     generatedCoverageNumerator: metadata.guestInstructions,
     generatedExecuted: 1,
     generatedChainLength: 1,
@@ -4286,6 +4298,20 @@ assert.equal(r8HelperFallback.path, "tci-fallback");
 assert.equal(r8HelperFallback.reason, "selected-body-shape-unsupported");
 assert.equal(r8HelperFallback.guestStateCommit, false);
 assert.equal(r8HelperFallback.tciCorrectnessFallback, true);
+assert.equal(r8HelperFallback.fallbackGuestInstructions, 19);
+const r9NormalBootGeneratedRetirement = {
+  generatedGuestInstructions: r8RealGeneratedExecCases.reduce((count, entry) =>
+    count + entry.generatedGuestInstructions, 0),
+  fallbackGuestInstructions: r8RealGeneratedExecCases.reduce((count, entry) =>
+    count + entry.fallbackGuestInstructions, 0),
+  generatedBodyTimeNs: r8RealGeneratedExecCases.reduce((count, entry) =>
+    count + entry.generatedBodyTimeNs, 0),
+};
+assert.deepEqual(r9NormalBootGeneratedRetirement, {
+  generatedGuestInstructions: 5,
+  fallbackGuestInstructions: 19,
+  generatedBodyTimeNs: 1000,
+});
 
 r4kInvalidationResults.push({
   name: "r4k-invalidation-generated-output-mismatch",
@@ -4572,6 +4598,7 @@ console.log(JSON.stringify({
   r8RealGeneratedExec: {
     fixtureCount: r8RealGeneratedExecCases.length,
     fixtures: r8RealGeneratedExecCases,
+    normalBootRetirementCounters: r9NormalBootGeneratedRetirement,
     generatedFixtures: r8RealGeneratedExecCases.filter((entry) =>
       entry.path === "generated").length,
     committedFixtures: r8RealGeneratedExecCases.filter((entry) =>

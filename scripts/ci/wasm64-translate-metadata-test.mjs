@@ -239,6 +239,9 @@ assert.match(runtime, /QEMU_WASM64_LIVE_TB_COVERAGE_SCAN_LIMIT/);
 assert.match(runtime, /TCG_WASM64_ONE_TB_NAME "live-x86-pre-r4i-ld32u-goto-tb-13"/);
 assert.match(runtime, /TCG_WASM64_LIVE_ONE_TB_NAME "live-x86-r4i-ld32u-goto-tb-11"/);
 assert.match(runtime, /TCG_WASM64_LIVE_TB_COVERAGE_NAME "live-rv64-generated-coverage"/);
+assert.match(header, /uint64_t generated_guest_instructions;/);
+assert.match(header, /uint64_t fallback_guest_instructions;/);
+assert.match(header, /uint64_t generated_body_time_ns;/);
 assert.doesNotMatch(runtime, /tcg_wasm64_live_one_tb_words\[\]/);
 assert.match(runtime, /tcg_wasm64_live_one_tb_ops\[\]/);
 assert.match(runtime, /INDEX_op_brcond/);
@@ -341,6 +344,7 @@ assert.match(runtime, /\\"compat_fallback\\":%s/);
 assert.match(runtime, /\\"no_silent_fallback\\":%s/);
 assert.match(runtime, /\\"generated_guest_instructions\\":%" PRIu64/);
 assert.match(runtime, /\\"generated_body_time_ns\\":%" PRIu64/);
+assert.match(runtime, /\\"fallback_guest_instructions\\":%" PRIu64/);
 assert.match(runtime, /\\"inline_tlb_hit_loads\\":%" PRIu64/);
 assert.match(runtime, /\\"inline_tlb_hit_stores\\":%" PRIu64/);
 assert.match(runtime, /\\"qemu_ld_calls\\":%" PRIu64/);
@@ -435,7 +439,13 @@ assert.match(
   liveMetadataCounterBody,
   /counters->translated_generated_output_tbs\+\+/,
 );
-assert.match(liveMetadataCounterBody, /tcg_wasm64_summary_maybe_report\(\)/);
+assert.doesNotMatch(liveMetadataCounterBody, /tcg_wasm64_summary_maybe_report\(\)/);
+const reportSummaryBody = runtime.match(
+  /void tcg_wasm64_report_summary\([\s\S]*?\n\}/,
+)?.[0] || "";
+assert.match(reportSummaryBody, /tcg_wasm64_counters_add\(&merged, &translated_counters\)/);
+assert.match(reportSummaryBody, /tcg_wasm64_counters_add\(&merged, active_counters\)/);
+assert.doesNotMatch(runtime, /tcg_wasm64_counters_add_translation/);
 const tbExecBody = runtime.match(
   /uintptr_t tcg_wasm64_tb_exec\(CPUArchState \*env,[\s\S]*?\n\}/,
 )?.[0] || "";
@@ -450,6 +460,9 @@ assert.match(
   /tcg_wasm64_execute_available_generated_output_try\(\s*\n\s*env, tb_ptr, metadata, &ret\)/,
 );
 assert.match(tbExecBody, /return ret;/);
+assert.match(tbExecBody, /fallback_guest_insns = tcg_wasm64_live_tb_guest_instructions\(tb_ptr\)/);
+assert.match(tbExecBody, /ret = tcg_tci_qemu_tb_exec\(env, tb_ptr\)/);
+assert.match(tbExecBody, /tcg_wasm64_record_tci_fallback_guest_instructions\(fallback_guest_insns\)/);
 const liveCoverageExecuteBody = runtime.match(
   /static bool tcg_wasm64_execute_available_generated_output_try\([\s\S]*?\n\}\n\nstatic void tcg_wasm64_live_generated_exec_count_reject/,
 )?.[0] || "";

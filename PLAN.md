@@ -2014,6 +2014,29 @@ run that reaches a weaker marker than normal multi-user readiness.
   register state. `scripts/ci/wasm64-translate-metadata-test.mjs` asserts the
   new live real-execution shape gate and cache-hit accounting. No browser run
   or artifact build was run in this slice.
+- [x] R9 - Expose normal-boot generated-retirement counters for the RV64
+  committing path before the supervisor speed proof. DoD: a plain browser boot
+  with committed generated execution enabled records generated guest
+  instructions, TCI fallback guest instructions, and generated-body wall time
+  in `wasm64Tcg.lastSummary`; the normal `tcg_wasm64_tb_exec()` summary path
+  merges runtime generated counters instead of metadata-only counters; and the
+  live TB coverage probe remains measurement-only and does not stand in for
+  acceleration evidence. Accepted 2026-07-04: tracing confirmed committed
+  generated execution is still opt-in on the normal path through
+  `QEMU_WASM64_LIVE_GENERATED_EXEC=1` or the browser runner flag
+  `--wasm64-live-generated-exec`. The normal summary path now exports
+  `generated_guest_instructions`, `fallback_guest_instructions`, and
+  `generated_body_time_ns` in `qemu-wasm64-tcg` summaries, accumulates
+  generated retirement/body time only after a committed generated body
+  succeeds, and accumulates TCI retirement after the fallback
+  `tcg_tci_qemu_tb_exec()` returns. The summary reporter now merges the full
+  aggregate runtime counters so generated attempts, execution/cache hits,
+  coverage, exits, fallback attribution, and the new retirement fields are all
+  visible in normal result JSON. Deterministic coverage was updated in
+  `scripts/ci/wasm64-translate-metadata-test.mjs`,
+  `scripts/ci/wasm-generated-output-equivalence-test.mjs`, and
+  `scripts/ci/wasm-browser-smoke-runner-test.mjs`. No browser run or artifact
+  build was run in this slice.
 - [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
   accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
   cold in browser-hosted QEMU/WASM with the accelerator and reaches

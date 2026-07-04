@@ -190,8 +190,8 @@ Options:
                      Enable opt-in generated execution proof for one real
                      live generated-output TB before falling back to TCI
   --wasm64-live-generated-exec
-                     Enable opt-in live metadata-backed generated TB execution
-                     before TCI fallback
+                     Enable opt-in committed live metadata-backed generated TB
+                     execution for supported TBs before TCI fallback
   --wasm64-live-generated-exec-no-fallback
                      Fail loudly instead of silently using TCI when live
                      generated execution rejects an enabled TB
@@ -1424,6 +1424,12 @@ export function wasm64TcgMetricGate(result, {
   const coverageDenominator =
     numericMetric(summary, "generated_coverage_denominator");
   const coveragePpm = numericMetric(summary, "generated_coverage_ppm");
+  const generatedGuestInstructions =
+    numericMetric(summary, "generated_guest_instructions");
+  const fallbackGuestInstructions =
+    numericMetric(summary, "fallback_guest_instructions");
+  const generatedBodyTimeNs =
+    numericMetric(summary, "generated_body_time_ns");
   const translatedTbs = numericMetric(summary, "translated_tbs");
   const unsupportedOps = Array.isArray(
     summary.translated_generated_first_unsupported_ops,
@@ -1473,6 +1479,9 @@ export function wasm64TcgMetricGate(result, {
       coverageNumerator,
       coverageDenominator,
       coveragePpm,
+      generatedGuestInstructions,
+      fallbackGuestInstructions,
+      generatedBodyTimeNs,
       translatedTbs,
       unsupportedOpShapes: unsupportedOps.length,
       hotBlocks: hotBlocks.length,
