@@ -2743,6 +2743,98 @@ run that reaches a weaker marker than normal multi-user readiness.
     hidden TCI fallback for the selected generated body. If generated
     retirement is still zero, record the exact blocker and add the next
     deterministic repair item instead of running R4l.
+
+    Rejected preflight 2026-07-04: fresh current `x86_64-softmmu`
+    backend artifacts were built from QEMU commit
+    `362842178615b1571bec4d37d6886480335f3f47` with command `python3
+    scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s13-x86-backend-artifacts-3628421-20260704
+    --target x86_64 --tcg-wasm64-backend`. Artifact directory:
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s13-x86-backend-artifacts-3628421-20260704`.
+    Artifact hashes: `qemu-system-x86_64.js`
+    `5547c17e21f9d7e40f009d019919cb21204edea3a4857392a23330f591473d72`,
+    `qemu-system-x86_64.wasm`
+    `5850bdeb6e07af3dbef7c87c16591687805dc9ea9a093427ec27c212b8047994`,
+    manifest `qemu-system-wasm-artifacts.json`
+    `c89fc1b9963550885767ad6dfe231c59f93cf5ecc4e5fd33f81132bc0aeaff09`,
+    and `SHA256SUMS`
+    `6edc433e8a2a2f9c6d9ee3b8075836dbb9d0267a2d23cc5f19112216ee8b1d81`.
+    Bounded Chromium `149.0.7827.55` preflight command:
+    `npm exec --yes --package=playwright -- node
+    scripts/ci/wasm-browser-smoke-runner.mjs --browser chromium
+    --artifact-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s13-x86-backend-artifacts-3628421-20260704
+    --firmware-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/projects/qemu/pc-bios
+    --guest-manifest
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4s8-guest-current/tuxboot-browser-smoke-guest.json
+    --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s13-x86-preflight-3628421-20260704/wasm-browser-smoke-result.json
+    --screenshot
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s13-x86-preflight-3628421-20260704/wasm-browser-smoke.png
+    --port 8213 --timeout-ms 60000 --max-output-bytes 100000
+    --page-text-tail-bytes 100000 --wasm64-live-generated-exec
+    --wasm64-live-generated-exec-preflight
+    --wasm64-live-generated-exec-preflight-limit 100
+    --wasm64-tcg-summary --wasm64-tcg-summary-interval 1000`.
+    Result JSON:
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s13-x86-preflight-3628421-20260704/wasm-browser-smoke-result.json`
+    (SHA256
+    `5aaa82461efa14022ce164999095fc343c1eff3cbe45fb6a5bd4ef06b8defe7f`);
+    screenshot SHA256
+    `dd09b48b461ac629fb19059bbb7de4e6d4cfdf0d851a82302d1880123dea4ee3`.
+    The generic marker `QEMU_WASM_LINUX_BOOT_OK` was not reached:
+    `markerSeen=false`, phase `timeout`, elapsed `60222` ms, final line
+    `Aborted(native code called abort())`. The runloop summary at `2483` ms
+    reported `reason=preflight-zero-generated-exec`, `preflight_ready=false`,
+    `compat_fallback=true`, `no_silent_fallback=false`, attempts `100`,
+    successes `0`, rejects `100`, skips `82`, generated guest instructions
+    `0`, generated run entries `0`, generated chain length `0`, generated
+    coverage `0 / 1120`, hotset probe attempts `100`, hotset goto sources
+    `98`, metadata hits `14`, output hits `14`, stale targets `84`, and
+    selected helper-exit skips `82`. `wasm64Tcg` was enabled but
+    `summaryCount=0`, so `node
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs --result
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s13-x86-preflight-3628421-20260704/wasm-browser-smoke-result.json
+    --require-tcg --json` failed with missing `wasm64Tcg.summaryCount` and
+    `wasm64Tcg.lastSummary`.
+
+    The exact live blockers were still fail-closed generated-body rejection,
+    not useful generated retirement:
+    `selected-body-softmmu-multi-access-unsupported=61`,
+    `js-status-module-emission-failed=24`,
+    `selected-body-memop-unsupported-alignment=6`,
+    `selected-body-memop-unsupported-size=5`, and
+    `js-status-metadata-output-pool-relocation=4`. The live module failure
+    remained `phase=body-build`, `status=6`, first op `ld32u`, terminal op
+    `goto_tb`, shape
+    `ld32u,tci_movi,tci_setcond32,brcond,tci_movi,st8,ld,tci_movi,add,st,goto_tb,exit_tb,exit_tb`,
+    with shared memory64 import `limits_flags=0x07`, initial pages `0`,
+    maximum pages `262144`, and `memory64=true`. The first metadata mismatch
+    was still pool relocation at index `12`, op `tci_movl`, metadata word
+    `0x0000057e`, live word `0x0007457e`. Reject MemOps were `0xa01`
+    for unsupported size and `0xae0` for unsupported alignment. The
+    multi-access attribution still includes store-before-later-guard cases
+    such as order `SSSS` and `SL`. This does not accept R4s13, does not
+    unlock R4l, makes no speed claim, and does not permit a Bus Engine OS
+    browser proof.
+  - [ ] R4s14 - Reconcile the R4s12 deterministic memory64-generated fixture
+    with the live R4s13 `body-build` module-emission failure before any new
+    browser preflight. DoD: add deterministic coverage that exercises the
+    same live generated-output emission path and memory64/shared import
+    descriptor reported by R4s13 for the 13-op
+    `ld32u,tci_movi,tci_setcond32,brcond,tci_movi,st8,ld,tci_movi,add,st,goto_tb,exit_tb,exit_tb`
+    shape. If the body can be emitted safely, fix the generic emission path
+    so the deterministic fixture retires generated guest instructions with
+    zero hidden fallback and preserves the fail-closed behavior for stale TB
+    code, unsafe pool relocation, unsupported direct memory, unsupported
+    branches, unsupported MemOps, unsupported CPU state, and unsafe
+    multi-access store-before-guard shapes. If it cannot be emitted yet,
+    replace the live `js-status-module-emission-failed` bucket with a precise
+    unsupported mechanism and keep generated work at zero. No Chromium
+    preflight, R4l speed gate, Bus Engine OS proof, or Bus-specific shortcut
+    may run until deterministic checks predict nonzero generated retirement
+    or materially sharper live attribution.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
