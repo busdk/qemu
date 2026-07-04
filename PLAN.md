@@ -1714,6 +1714,123 @@ run that reaches a weaker marker than normal multi-user readiness.
     and can execute a supported live generated body or fail no-silent preflight
     before a long run. Do not start an x86_64 Bus Engine OS browser proof from
     this artifact.
+
+    Failed speed gate 2026-07-04 after R4s17 unlock: `origin/develop` was
+    fetched and `projects/qemu` remained at base QEMU SHA
+    `0dd7cb05f400e9a5ac1738b71a9e99018822220a` (`Record x86 R4s17
+    no-silent preflight`). The worker used branch
+    `qemu-r4l-x86-speed-gate-current`. Default-TCI build command:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4l-0dd7cb0-default-artifacts
+    --target x86_64 --jobs 10 --build-image`. Accelerator build command:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4l-0dd7cb0-accelerator-artifacts
+    --target x86_64 --tcg-wasm64-backend --jobs 10 --build-image`.
+    Artifact directories:
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4l-0dd7cb0-default-artifacts`
+    and
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4l-0dd7cb0-accelerator-artifacts`.
+    Default artifact hashes: `qemu-system-x86_64.js`
+    `105d0404f8f105be8604cff8f4f094c665a663c9696bd5dab3f7ab7e20e69870`,
+    `qemu-system-x86_64.wasm`
+    `6fe1613185bcbdb0fdfd7fddfac6c1ea384a0ebb92893887c1081c5d6af7c50e`,
+    manifest `qemu-system-wasm-artifacts.json`
+    `d9c96709f2984502d92097397efcbf7c05dc695de05be9e9dd5e86e35190cad0`,
+    and `SHA256SUMS`
+    `6112eeaadc3764d8284ae02722eb907d08cf0ed73231d3a2b85f02bb38e8fad0`.
+    Accelerator artifact hashes: `qemu-system-x86_64.js`
+    `dca9af5932ad4f0ef594306904af9de7f630f90656d01ba5619439a050938076`,
+    `qemu-system-x86_64.wasm`
+    `a3edb64e351a7197454cbdddaf0d5636f9af95e2c3eda79fe16d16fe249c0157`,
+    manifest `qemu-system-wasm-artifacts.json`
+    `98ea500fe3c630737f45d103026fa165e8a8cee03c8e10d45ee02e98bd8a0cf7`,
+    and `SHA256SUMS`
+    `22172c9499fdd4053a57bfbe386f21592cdd4dc758daf16d1c676d49380c0ebc`.
+
+    Both runs used Chromium `149.0.7827.55` and the same generic x86_64
+    TuxBoot manifest
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4s8-guest-current/tuxboot-browser-smoke-guest.json`
+    (`microvm,acpi=off`, CPU `Nehalem`, marker
+    `QEMU_WASM_LINUX_BOOT_OK`; kernel SHA-256
+    `f57bfc6553bcd6e0a54aab86095bf642b33b5571d14e3af1731b18c87ed5aef8`,
+    initrd SHA-256
+    `632b8d6b856ca868bdf66b42c97ee64623b1897c144ebf9cf26608d4f9f06e02`).
+    Default run command: `npm exec --yes --package=playwright -- node
+    scripts/ci/wasm-browser-smoke-runner.mjs --browser chromium
+    --artifact-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4l-0dd7cb0-default-artifacts
+    --firmware-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/projects/qemu/pc-bios
+    --guest-manifest
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4s8-guest-current/tuxboot-browser-smoke-guest.json
+    --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4l-0dd7cb0-default-smoke/wasm-browser-smoke-result.json
+    --screenshot
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4l-0dd7cb0-default-smoke/wasm-browser-smoke.png
+    --port 8218 --timeout-ms 180000 --max-output-bytes 100000
+    --page-text-tail-bytes 100000`. Default result JSON:
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4l-0dd7cb0-default-smoke/wasm-browser-smoke-result.json`
+    (SHA-256
+    `4bad48c593d614115426eb38c69731d78cbf0b3ea34951ff5a4bc19048dc15c8`);
+    screenshot SHA-256
+    `7790c1602b7fc002de8c3020befa4d332828fe041dec420dbda28caa83284ff5`.
+    Default TCI reached the marker: `markerSeen=true`, phase `success`,
+    elapsed `86849` ms, final line `QEMU_WASM_LINUX_BOOT_OK`; kernel version
+    printed at `35989` ms and init started at `85094` ms.
+
+    Accelerator run command: `npm exec --yes --package=playwright -- node
+    scripts/ci/wasm-browser-smoke-runner.mjs --browser chromium
+    --artifact-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4l-0dd7cb0-accelerator-artifacts
+    --firmware-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/projects/qemu/pc-bios
+    --guest-manifest
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4s8-guest-current/tuxboot-browser-smoke-guest.json
+    --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4l-0dd7cb0-accelerator-smoke/wasm-browser-smoke-result.json
+    --screenshot
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4l-0dd7cb0-accelerator-smoke/wasm-browser-smoke.png
+    --port 8219 --timeout-ms 180000 --max-output-bytes 100000
+    --page-text-tail-bytes 100000 --wasm64-live-generated-exec
+    --wasm64-tcg-summary --wasm64-tcg-summary-interval 1000`. This measured
+    the normal accelerator path and did not use no-silent-fallback or
+    preflight mode. Accelerator result JSON:
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4l-0dd7cb0-accelerator-smoke/wasm-browser-smoke-result.json`
+    (SHA-256
+    `2a0ecae8d6d202e42440f01904c11a505b2d419b3e349f4584e261ac4640987f`);
+    screenshot SHA-256
+    `a86277b5f630e6a72011d17928c06e5c46df3f4f5d48f2416a7905e47747feac`.
+    The accelerator did not reach the marker: `markerSeen=false`, phase
+    `timeout`, elapsed `180200` ms, page status `timeout waiting for marker:
+    QEMU_WASM_LINUX_BOOT_OK`, final line `Pthread 0x31f695d0 sent an error!
+    http://127.0.0.1:8219/artifacts/qemu-system-x86_64.js:612: Uncaught
+    RuntimeError: operation does not support unaligned accesses`. No kernel
+    boot milestone was reached; the page recorded the unaligned-access
+    `RuntimeError` at `2371` ms.
+
+    Accelerator metrics captured before the runtime error:
+    `wasm64Runloop.summaryCount=1`, `reason=chain-target-unsupported`,
+    `preflight_ready=true`, `preflight=false`,
+    `no_silent_fallback=false`, `compat_fallback=false`, `attempts=1`,
+    `successes=1`, `rejects=0`, `skips=0`,
+    `generated_guest_instructions=1`, `generated_run_entries=1`,
+    `generated_chain_length=1`,
+    `generated_guest_instructions_per_entry=1`, generated coverage `1 / 1`,
+    `hotset_probe_attempts=1`, `hotset_goto_sources=1`,
+    `hotset_target_slots_read=1`, `hotset_target_slots_unsafe=0`,
+    `hotset_target_metadata_hits=0`, `hotset_target_output_hits=0`,
+    `hotset_target_stale=1`, `selected_body_helper_exit_skips=0`,
+    `selected_body_no_terminal=0`, no selected unsupported ops, no nonzero
+    reject reasons, and empty reject memop/multi-access lists. The result
+    JSON did not expose generated body wall time, TCI dispatch wall time,
+    helper/`qemu_ld`/`qemu_st` counts, inline TLB hit counts, compile time, or
+    instantiate time for this crash path. `wasm64Tcg` was enabled with
+    interval `1000` but emitted no periodic summary
+    (`summaryCount=0`, `lastSummary=null`) before the runtime error. The
+    computed speed improvement was `(86849 - 180200) / 86849 =
+    -1.0748655712788864` (`-107.49%`), and the accelerator therefore did not
+    beat default TCI by at least `25%`. R4l remains failed/rejected, and no
+    x86_64 Bus Engine OS proof was run.
   - [x] R4m - R4k follow-up: connect metadata-backed live x86 TBs to
     generated execution before TCI fallback. DoD: document the failed R4l
     diagnosis that the accelerator artifact still reached normal guest
@@ -3099,6 +3216,20 @@ run that reaches a weaker marker than normal multi-user readiness.
     generated-retirement preflight acceptance, unlocks the next R4l
     same-commit generic Chromium speed gate, makes no speed claim by itself,
     and no Bus Engine OS browser proof was run.
+  - [ ] R4s18 - Repair the normal-mode x86 live-generated-exec
+    unaligned-access crash before another R4l speed gate. DoD: using fresh
+    `x86_64-softmmu` backend artifacts from QEMU `develop`, a bounded generic
+    x86 Chromium run with `--wasm64-live-generated-exec` and
+    `--wasm64-tcg-summary` but without no-silent/preflight mode must no longer
+    raise `RuntimeError: operation does not support unaligned accesses` after
+    the first generated instruction and `chain-target-unsupported` stop. The
+    repair must either safely return from the generated body to the normal
+    TCI compatibility path or fail closed before executing an unsafe generated
+    memory access, and it must emit enough aggregate metrics to report
+    generated/fallback instruction counts, generated body time, TCI dispatch
+    time, helper/`qemu_ld`/`qemu_st` counts, hotset residency, coverage, and
+    synthetic exit/reject reasons. No further full x86 R4l browser speed gate
+    or Bus Engine OS proof may run until this bounded normal-mode gate passes.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
