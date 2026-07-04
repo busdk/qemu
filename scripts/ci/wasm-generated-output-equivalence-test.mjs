@@ -2110,6 +2110,7 @@ function routeLiveGeneratedOutput(metadata) {
     shape,
     normalizedBranchLabelRelocations:
       normalizedOutput.branchLabelRelocations,
+    normalizedPoolRelocations: normalizedOutput.poolRelocations,
     normalizedWords: words,
     moduleValid: emission.moduleValid,
     moduleByteLength: emission.moduleByteLength,
@@ -3062,20 +3063,30 @@ function metadataOutputMismatchReason({ metadataWord = 0, liveWord = 0 } = {}) {
   if (isBranchLabelRelocation(metadataWord, liveWord)) {
     return "js-status-metadata-output-branch-label-relocation";
   }
-  if (op === OPS.tci_movl || op === OPS.call) {
+  if (isPoolRelocation(metadataWord, liveWord)) {
     return "js-status-metadata-output-pool-relocation";
   }
   return "js-status-metadata-output-unknown-mismatch";
 }
 
-function isBranchLabelRelocation(metadataWord = 0, liveWord = 0) {
+function isTciRelocationWord(metadataWord = 0, liveWord = 0, acceptedOps = []) {
   const metadata = metadataWord >>> 0;
   const live = liveWord >>> 0;
+  const metadataOp = bits(metadata, 0, 8);
+  const liveOp = bits(live, 0, 8);
 
-  return bits(metadata, 0, 8) === OPS.brcond &&
-    bits(live, 0, 8) === OPS.brcond &&
+  return acceptedOps.includes(metadataOp) &&
+    metadataOp === liveOp &&
     ((metadata ^ live) & 0xfff) === 0 &&
     metadata !== live;
+}
+
+function isBranchLabelRelocation(metadataWord = 0, liveWord = 0) {
+  return isTciRelocationWord(metadataWord, liveWord, [OPS.brcond]);
+}
+
+function isPoolRelocation(metadataWord = 0, liveWord = 0) {
+  return isTciRelocationWord(metadataWord, liveWord, [OPS.tci_movl, OPS.call]);
 }
 
 function firstMetadataOutputMismatch(words, tbWords) {
@@ -3110,11 +3121,13 @@ function normalizeMetadataOutputWords(words, tbWords) {
       ok: true,
       words: words.map((word) => word >>> 0),
       branchLabelRelocations: 0,
+      poolRelocations: 0,
     };
   }
   const normalized = words.map((word) => word >>> 0);
   const limit = Math.max(words.length, tbWords.length);
   let branchLabelRelocations = 0;
+  let poolRelocations = 0;
 
   if (words.length !== tbWords.length) {
     const index = Math.min(words.length, tbWords.length);
@@ -3145,6 +3158,11 @@ function normalizeMetadataOutputWords(words, tbWords) {
       branchLabelRelocations++;
       continue;
     }
+    if (isPoolRelocation(metadataWord, liveWord)) {
+      normalized[index] = liveWord;
+      poolRelocations++;
+      continue;
+    }
     return {
       ok: false,
       mismatch: {
@@ -3161,6 +3179,7 @@ function normalizeMetadataOutputWords(words, tbWords) {
     ok: true,
     words: normalized,
     branchLabelRelocations,
+    poolRelocations,
   };
 }
 
@@ -5989,25 +6008,30 @@ assert.equal(
   r4s8bObservedX86BranchRelocationRoute.normalizedWords[3],
   0x00020d04,
 );
+const r4s8bPoolRelocationRoute = routeLiveGeneratedOutput({
+  opCount: 2,
+  generatedOutputAvailable: true,
+  generatedOutputSize: 8,
+  words: [
+    OPS.tci_movl | (2 << 8) | (4 << 12),
+    OPS.exit_tb,
+  ],
+  tbWords: [
+    (OPS.tci_movl | (2 << 8) | (5 << 12)) >>> 0,
+    OPS.exit_tb,
+  ],
+  relativeBase: r4iLiveX86Fixture.relativeBase,
+  guestInstructions: 1,
+});
+assert.equal(r4s8bPoolRelocationRoute.ok, true);
+assert.equal(r4s8bPoolRelocationRoute.reason, null);
+assert.equal(r4s8bPoolRelocationRoute.normalizedPoolRelocations, 1);
+assert.equal(
+  r4s8bPoolRelocationRoute.normalizedWords[0],
+  (OPS.tci_movl | (2 << 8) | (5 << 12)) >>> 0,
+);
 
 const r4s8bMetadataOutputMismatchFixtures = [
-  {
-    name: "r4s8b-pool-relocation-still-rejects",
-    words: [
-      OPS.tci_movl | (2 << 8) | (4 << 12),
-      OPS.exit_tb,
-    ],
-    tbWords: [
-      (OPS.tci_movl | (2 << 8) | (5 << 12)) >>> 0,
-      OPS.exit_tb,
-    ],
-    expected: {
-      reason: "js-status-metadata-output-pool-relocation",
-      index: 0,
-      op: OPS.tci_movl,
-      opName: "tci_movl",
-    },
-  },
   {
     name: "r4s8b-stale-reused-tb-code-still-rejects",
     words: r4iLiveX86Fixture.words,
@@ -6427,6 +6451,7 @@ function simulateR4mLiveGeneratedExec({
     tlbMirrorValidated: memopValidation.tlbMirrorValidated || false,
     normalizedBranchLabelRelocations:
       route.normalizedBranchLabelRelocations || 0,
+    normalizedPoolRelocations: route.normalizedPoolRelocations || 0,
     normalizedWords: route.normalizedWords || null,
     runtimeUnsupportedGuards: route.runtimeUnsupportedGuards || [],
   };

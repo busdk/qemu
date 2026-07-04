@@ -202,6 +202,11 @@ Options:
   --wasm64-live-generated-exec-preflight-limit N
                      Live generated execution preflight attempts before
                      failing when no generated body executes (default: 10000)
+  --wasm64-tbcode-diag
+                     Record first live generated-exec TB code mismatches in
+                     wasm64 TCG summaries
+  --wasm64-tbcode-diag-limit N
+                     Maximum TB code mismatch diagnostic records (default: 5)
   --wasm64-runloop-smoke
                      Enable opt-in QEMU wasm64 run/exit runtime smoke
   --wasm64-tcg-summary
@@ -314,6 +319,8 @@ export function parseArgs(argv) {
     wasm64LiveGeneratedExecNoFallback: false,
     wasm64LiveGeneratedExecPreflight: false,
     wasm64LiveGeneratedExecPreflightLimit: 10000,
+    wasm64TbcodeDiag: false,
+    wasm64TbcodeDiagLimit: 5,
     wasm64RunloopSmoke: false,
     wasm64TcgSummary: false,
     wasm64TcgSummaryInterval: 10000,
@@ -571,6 +578,16 @@ export function parseArgs(argv) {
     } else if (arg === "--wasm64-live-generated-exec-preflight-limit") {
       options.wasm64LiveGeneratedExecPreflightLimit = Number(argv[++i]);
       explicit.add("wasm64LiveGeneratedExecPreflightLimit");
+    } else if (arg === "--wasm64-tbcode-diag") {
+      options.wasm64LiveGeneratedExec = true;
+      options.wasm64TbcodeDiag = true;
+      options.wasm64TcgSummary = true;
+      explicit.add("wasm64LiveGeneratedExec");
+      explicit.add("wasm64TbcodeDiag");
+      explicit.add("wasm64TcgSummary");
+    } else if (arg === "--wasm64-tbcode-diag-limit") {
+      options.wasm64TbcodeDiagLimit = Number(argv[++i]);
+      explicit.add("wasm64TbcodeDiagLimit");
     } else if (arg === "--wasm64-runloop-smoke") {
       options.wasm64RunloopSmoke = true;
       explicit.add("wasm64RunloopSmoke");
@@ -616,6 +633,7 @@ export function parseArgs(argv) {
       "wasm64LiveGeneratedExec",
       "wasm64LiveGeneratedExecNoFallback",
       "wasm64LiveGeneratedExecPreflight",
+      "wasm64TbcodeDiag",
       "wasm64RunloopSmoke",
       "wasm64TcgSummary",
       "requireWasm64TcgCoverage",
@@ -634,6 +652,7 @@ export function parseArgs(argv) {
       "performanceAttributionTciInterval",
       "minWasm64TcgCoveragePpm",
       "wasm64LiveGeneratedExecPreflightLimit",
+      "wasm64TbcodeDiagLimit",
       "wasm64TcgSummaryInterval",
       "port",
       "preKeyboardWaitMs",
@@ -1672,6 +1691,13 @@ export function browserSmokeUrl(options) {
       String(options.wasm64LiveGeneratedExecPreflightLimit),
     );
   }
+  if (options.wasm64TbcodeDiag) {
+    url.searchParams.set("wasm64TbcodeDiag", "1");
+    url.searchParams.set(
+      "wasm64TbcodeDiagLimit",
+      String(options.wasm64TbcodeDiagLimit),
+    );
+  }
   if (options.wasm64TcgSummary) {
     url.searchParams.set("wasm64TcgSummary", "1");
     url.searchParams.set(
@@ -1810,6 +1836,10 @@ export function initialSmokeResult(options, browserVersion) {
       Number.isInteger(options.wasm64LiveGeneratedExecPreflightLimit)
         ? options.wasm64LiveGeneratedExecPreflightLimit
         : 10000,
+    wasm64TbcodeDiag: Boolean(options.wasm64TbcodeDiag),
+    wasm64TbcodeDiagLimit: Number.isInteger(options.wasm64TbcodeDiagLimit)
+      ? options.wasm64TbcodeDiagLimit
+      : 5,
     wasm64TcgSummary: Boolean(options.wasm64TcgSummary),
     wasm64TcgSummaryInterval: Number.isInteger(options.wasm64TcgSummaryInterval)
       ? options.wasm64TcgSummaryInterval

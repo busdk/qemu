@@ -80,13 +80,15 @@ assert.match(browserSmokeSource, /QEMU_WASM64_LIVE_TB_COVERAGE/);
 assert.match(browserSmokeSource, /QEMU_WASM64_LIVE_GENERATED_EXEC/);
 assert.match(browserSmokeSource, /QEMU_WASM64_LIVE_GENERATED_EXEC_NO_FALLBACK/);
 assert.match(browserSmokeSource, /QEMU_WASM64_LIVE_GENERATED_EXEC_PREFLIGHT/);
+assert.match(browserSmokeSource, /QEMU_WASM64_TBCODE_DIAG/);
 assert.match(
   browserSmokeSource,
   /QEMU_WASM64_LIVE_GENERATED_EXEC_PREFLIGHT_LIMIT/,
 );
+assert.match(browserSmokeSource, /QEMU_WASM64_TBCODE_DIAG_LIMIT/);
 assert.match(
   browserSmokeSource,
-  /config\.tciProgress \|\|\s*config\.tciWasmGeneratedTrace \|\|\s*config\.wasm64RunloopSmoke \|\|\s*config\.wasm64OneTbDifferential \|\|\s*config\.wasm64LiveOneTbDifferential \|\|\s*config\.wasm64LiveTbCoverage \|\|\s*config\.wasm64LiveGeneratedExec \|\|\s*config\.wasm64LiveGeneratedExecPreflight \|\|\s*config\.wasm64TcgSummary/,
+  /config\.wasm64RunloopSmoke \|\|\s*config\.wasm64OneTbDifferential \|\|\s*config\.wasm64LiveOneTbDifferential \|\|\s*config\.wasm64LiveTbCoverage \|\|\s*config\.wasm64LiveGeneratedExec \|\|\s*config\.wasm64LiveGeneratedExecPreflight \|\|\s*config\.wasm64TbcodeDiag/,
 );
 
 for (const status of [
@@ -1305,6 +1307,8 @@ for (const status of [
     wasm64LiveGeneratedExecNoFallback: true,
     wasm64LiveGeneratedExecPreflight: true,
     wasm64LiveGeneratedExecPreflightLimit: 17,
+    wasm64TbcodeDiag: true,
+    wasm64TbcodeDiagLimit: 3,
     wasm64RunloopSmoke: true,
   });
 
@@ -1317,6 +1321,8 @@ for (const status of [
   assert.equal(url.searchParams.get("wasm64LiveGeneratedExecNoFallback"), "1");
   assert.equal(url.searchParams.get("wasm64LiveGeneratedExecPreflight"), "1");
   assert.equal(url.searchParams.get("wasm64LiveGeneratedExecPreflightLimit"), "17");
+  assert.equal(url.searchParams.get("wasm64TbcodeDiag"), "1");
+  assert.equal(url.searchParams.get("wasm64TbcodeDiagLimit"), "3");
   assert.equal(url.searchParams.get("wasm64RunloopSmoke"), "1");
 }
 
@@ -1603,6 +1609,8 @@ for (const status of [
     wasm64LiveGeneratedExecNoFallback: true,
     wasm64LiveGeneratedExecPreflight: true,
     wasm64LiveGeneratedExecPreflightLimit: 23,
+    wasm64TbcodeDiag: true,
+    wasm64TbcodeDiagLimit: 4,
     wasm64RunloopSmoke: true,
   }, "HeadlessChrome/141.0.7390.37");
 
@@ -1654,6 +1662,8 @@ for (const status of [
   assert.equal(result.wasm64LiveGeneratedExecNoFallback, true);
   assert.equal(result.wasm64LiveGeneratedExecPreflight, true);
   assert.equal(result.wasm64LiveGeneratedExecPreflightLimit, 23);
+  assert.equal(result.wasm64TbcodeDiag, true);
+  assert.equal(result.wasm64TbcodeDiagLimit, 4);
   assert.equal(result.wasm64RunloopSmoke, true);
   assert.equal(Object.hasOwn(result, "tciWasmSubset"), false);
   assert.equal(Object.hasOwn(result, "tciWasmGeneratedOnly"), false);
@@ -1707,6 +1717,21 @@ for (const status of [
   assert.equal(options.requireWasm64TcgCoverage, true);
   assert.equal(options.wasm64TcgSummary, true);
   assert.equal(options.wasm64LiveTbCoverage, true);
+}
+
+{
+  const options = parseArgs([
+    "--artifact-dir", "/tmp/artifacts",
+    "--kernel", "/tmp/kernel",
+    "--initrd", "/tmp/initrd",
+    "--wasm64-tbcode-diag",
+    "--wasm64-tbcode-diag-limit", "7",
+  ]);
+
+  assert.equal(options.wasm64LiveGeneratedExec, true);
+  assert.equal(options.wasm64TbcodeDiag, true);
+  assert.equal(options.wasm64TbcodeDiagLimit, 7);
+  assert.equal(options.wasm64TcgSummary, true);
 }
 
 {

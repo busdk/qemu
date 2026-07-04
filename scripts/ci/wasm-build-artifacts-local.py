@@ -19,6 +19,7 @@ import re
 
 DEFAULT_IMAGE = "qemu/emsdk-wasm64-cross:latest"
 DEFAULT_TARGET = "x86_64"
+DEFAULT_OUT_PREFIX = "wasm-build-artifacts"
 DEFAULT_CONFIGURE_ARGS = [
     "--disable-docs",
     "--static",
@@ -38,7 +39,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         description="Build qemu-system-TARGET.js/.wasm artifacts in the local wasm64 Emscripten Docker image.",
     )
     parser.add_argument("--source-root", type=Path, default=Path.cwd())
-    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help=(
+            "output directory for artifacts "
+            "(default: SOURCE_ROOT/tmp/wasm-build-artifacts-TARGET)"
+        ),
+    )
     parser.add_argument("--target", default=DEFAULT_TARGET, help="QEMU system target without -softmmu, for example x86_64 or riscv64")
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     parser.add_argument("--docker", default="docker")
@@ -99,9 +108,16 @@ ls -lh
 """
 
 
+def output_dir(args: argparse.Namespace) -> Path:
+    source_root = args.source_root.resolve()
+    if args.out is None:
+        return source_root / "tmp" / f"{DEFAULT_OUT_PREFIX}-{args.target}"
+    return args.out.resolve()
+
+
 def docker_run_command(args: argparse.Namespace) -> list[str]:
     source_root = args.source_root.resolve()
-    out = args.out.resolve()
+    out = output_dir(args)
     tcg_backend_args = WASM64_TCG_BACKEND_ARGS if args.tcg_wasm64_backend else DEFAULT_TCG_BACKEND_ARGS
     configure_args = DEFAULT_CONFIGURE_ARGS + [
         *tcg_backend_args,
@@ -128,6 +144,7 @@ def validate_inputs(args: argparse.Namespace) -> None:
     source_root = args.source_root.resolve()
     if not TARGET_RE.fullmatch(args.target):
         raise SystemExit(f"invalid QEMU system target: {args.target}")
+    args.out = output_dir(args)
     if not (source_root / "configure").is_file():
         raise SystemExit(f"QEMU source root is missing configure: {source_root}")
     if not (source_root / "scripts" / "ci" / "wasm-artifact-manifest.py").is_file():

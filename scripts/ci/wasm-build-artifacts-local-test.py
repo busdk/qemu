@@ -64,6 +64,20 @@ def test_riscv64_docker_command():
         assert "--target-list=x86_64-softmmu" not in joined, joined
 
 
+def test_default_out_dir_uses_source_tmp_target():
+    module = load_module()
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / "src"
+        (source / "scripts" / "ci").mkdir(parents=True)
+        (source / "configure").write_text("#!/bin/sh\n", encoding="utf-8")
+        (source / "scripts" / "ci" / "wasm-artifact-manifest.py").write_text("", encoding="utf-8")
+        args = module.parse_args(["--source-root", str(source), "--target", "riscv64"])
+        command = module.docker_run_command(args)
+        joined = "\n".join(command)
+        expected = source.resolve() / "tmp" / "wasm-build-artifacts-riscv64"
+        assert f"{expected}:/host-out" in joined, joined
+
+
 def test_tcg_wasm64_backend_command_replaces_interpreter():
     module = load_module()
     with tempfile.TemporaryDirectory() as tmp:
@@ -105,6 +119,7 @@ def test_dry_run_includes_image_build():
 if __name__ == "__main__":
     test_default_docker_command()
     test_riscv64_docker_command()
+    test_default_out_dir_uses_source_tmp_target()
     test_tcg_wasm64_backend_command_replaces_interpreter()
     test_dry_run_includes_image_build()
     print("wasm-build-artifacts-local-test: ok")

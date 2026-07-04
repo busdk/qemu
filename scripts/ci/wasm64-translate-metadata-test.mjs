@@ -550,7 +550,15 @@ assert.match(runtime, /"js-status-metadata-output-unknown-mismatch"/);
 assert.match(runtime, /metadata_output_mismatch/);
 assert.match(runtime, /recordMetadataOutputMismatch/);
 assert.match(runtime, /brcondLabelRelocation/);
+assert.match(runtime, /tciPoolRelocation/);
 assert.match(runtime, /normalizeGeneratedOutputWords/);
+assert.match(runtime, /QEMU_WASM64_TBCODE_DIAG/);
+assert.match(runtime, /QEMU_WASM64_TBCODE_DIAG_LIMIT/);
+assert.match(runtime, /tb_code_diagnostics/);
+assert.match(runtime, /metadata_first_bytes/);
+assert.match(runtime, /live_first_bytes/);
+assert.match(runtime, /metadata_region/);
+assert.match(runtime, /live_region/);
 assert.match(runtime, /TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MISMATCH_INDEX/);
 assert.match(runtime, /TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MISMATCH_OP/);
 assert.match(
@@ -890,9 +898,9 @@ assert.match(generatedEquivalence, /generic-softmmu-tlb-contract-lowering/);
 assert.match(generatedEquivalence, /compileSharedSoftmmuAccessOp/);
 assert.match(
   generatedEquivalence,
-  /compileSharedGeneratedOutputOp\(op, diagnostics = null\)/,
+  /function compileSharedGeneratedOutputOp\(\s*op,\s*diagnostics = null,\s*options = \{\},\s*\)/,
 );
-assert.match(generatedEquivalence, /compileSharedGeneratedOutputOp\(op, diagnostics\)/);
+assert.match(generatedEquivalence, /compileSharedGeneratedOutputOp\(\s*op, diagnostics, options\)/);
 assert.match(generatedEquivalence, /emitPerTBFunctionBody\(fixture\.words/);
 assert.match(generatedEquivalence, /compileGeneratedOutputModule/);
 assert.match(generatedEquivalence, /softmmuLowering/);
@@ -951,7 +959,7 @@ assert.match(generatedEquivalence, /r4s7-atom-none-load-admitted-ram-hit/);
 assert.match(generatedEquivalence, /r4s7-atom-none-store-admitted-ram-hit/);
 assert.match(generatedEquivalence, /r4s8bBranchRelocationRoute/);
 assert.match(generatedEquivalence, /r4s8bObservedX86BranchRelocationRoute/);
-assert.match(generatedEquivalence, /r4s8b-pool-relocation-still-rejects/);
+assert.match(generatedEquivalence, /r4s8bPoolRelocationRoute/);
 assert.match(generatedEquivalence, /r4s8b-stale-reused-tb-code-still-rejects/);
 assert.match(generatedEquivalence, /r4s8b-unknown-same-op-mismatch-still-rejects/);
 assert.match(generatedEquivalence, /r4s8b-brcond-non-label-mismatch-still-rejects/);
