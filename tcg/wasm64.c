@@ -145,6 +145,9 @@ typedef enum TCGWasm64LiveGeneratedExecResultIndex {
     TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_TCI_OPS,
     TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_OUTPUT_WORDS,
     TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_CACHE_HIT,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_TB_CODE_EXACT_WORDS,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_TB_CODE_RELOCATED_WORDS,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_TB_CODE_MISMATCH_WORDS,
     TCG_WASM64_LIVE_GENERATED_EXEC_RESULT__MAX,
 } TCGWasm64LiveGeneratedExecResultIndex;
 
@@ -425,6 +428,11 @@ static __thread uint64_t live_generated_exec_hotset_target_slots_unsafe;
 static __thread uint64_t live_generated_exec_hotset_target_metadata_hits;
 static __thread uint64_t live_generated_exec_hotset_target_output_hits;
 static __thread uint64_t live_generated_exec_hotset_target_stale;
+static __thread uint64_t live_generated_exec_tb_code_exact_words;
+static __thread uint64_t live_generated_exec_tb_code_relocated_words;
+static __thread uint64_t live_generated_exec_tb_code_mismatch_words;
+static __thread uint64_t live_generated_exec_tb_code_relocated_tbs;
+static __thread uint64_t live_generated_exec_tb_code_mismatch_tbs;
 static __thread uint64_t live_generated_exec_selected_body_unsupported_ops[
     NB_OPS];
 static __thread uint64_t live_generated_exec_selected_body_helper_exit_skips;
@@ -2633,6 +2641,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
       (uintptr_t context_arg, uintptr_t scratch_arg, uintptr_t counters_arg,
        uintptr_t exit_arg, uintptr_t result_arg, uintptr_t tb_arg,
        uintptr_t env_arg, uint64_t guest_insns_arg,
+       uint32_t tb_code_size_arg,
        uintptr_t generated_output_arg, uint32_t generated_output_size_arg), {
     if (typeof wasmMemory === "undefined" || !wasmMemory) {
         return 1;
@@ -2646,6 +2655,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
     const tbPtr = Number(tb_arg);
     const envPtr = Number(env_arg);
     const guestInsns = BigInt(guest_insns_arg);
+    const tbCodeSize = Number(tb_code_size_arg);
     const generatedOutputPtr = Number(generated_output_arg);
     const generatedOutputSize = Number(generated_output_size_arg);
     const stackPtr = scratch + 0x3000;
@@ -2992,6 +3002,89 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
             }
         }
         return terminalSeen;
+    }
+
+    function fixedRelocationBitsMatch(metadataWord, liveWord) {
+        return (metadataWord & 0xfff) === (liveWord & 0xfff);
+    }
+
+    function resolveLiveTBCodeWords(metadataWords) {
+        const resolved = [];
+        let exactWords = 0;
+        let relocatedWords = 0;
+        let mismatchWords = 0;
+        const terminalIndex = metadataWords.findIndex((insn) => {
+            const opc = bits(insn >>> 0, 0, 8);
+
+            return opc === ops.goto_tb || opc === ops.exit_tb;
+        });
+
+        if (tbCodeSize < generatedOutputSize || terminalIndex < 0) {
+            return { ok: false, exactWords, relocatedWords, mismatchWords: 1 };
+        }
+
+        for (let i = 0; i < metadataWords.length; i++) {
+            const metadataWord = metadataWords[i] >>> 0;
+            const liveWord = HEAPU32[tbPtr / 4 + i] >>> 0;
+            const opc = bits(metadataWord, 0, 8);
+
+            if (liveWord === metadataWord) {
+                exactWords++;
+                resolved.push(liveWord);
+                continue;
+            }
+            if (!fixedRelocationBitsMatch(metadataWord, liveWord)) {
+                mismatchWords++;
+                return { ok: false, exactWords, relocatedWords, mismatchWords };
+            }
+
+            if (opc === ops.brcond) {
+                const targetOffset = (i + 1) * 4 +
+                                     sextract(liveWord, 12, 20);
+                const targetIndex = targetOffset / 4;
+
+                if (targetOffset % 4 !== 0 ||
+                    targetIndex <= i ||
+                    targetIndex > terminalIndex) {
+                    mismatchWords++;
+                    return {
+                        ok: false,
+                        exactWords,
+                        relocatedWords,
+                        mismatchWords,
+                    };
+                }
+                relocatedWords++;
+                resolved.push(liveWord);
+                continue;
+            }
+
+            if (opc === ops.tci_movl) {
+                const poolOffset = (i + 1) * 4 +
+                                   sextract(liveWord, 12, 20);
+
+                if (poolOffset < generatedOutputSize ||
+                    poolOffset % 8 !== 0 ||
+                    poolOffset + 8 > tbCodeSize) {
+                    mismatchWords++;
+                    return {
+                        ok: false,
+                        exactWords,
+                        relocatedWords,
+                        mismatchWords,
+                    };
+                }
+                relocatedWords++;
+                resolved.push(liveWord);
+                continue;
+            }
+
+            mismatchWords++;
+            return { ok: false, exactWords, relocatedWords, mismatchWords };
+        }
+
+        return { ok: true, words: resolved, exactWords, relocatedWords,
+                 mismatchWords };
     }
 
     function generatedOutputChecksum(words) {
@@ -3628,7 +3721,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
     }
 
     try {
-        const words = readGeneratedOutputWords();
+        let words = readGeneratedOutputWords();
         if (!words || words.length === 0) {
             setResult(0, 4n);
             return 4;
@@ -3637,13 +3730,16 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
             setResult(0, 5n);
             return 5;
         }
-        for (let i = 0; i < words.length; i++) {
-            if ((HEAPU32[tbPtr / 4 + i] >>> 0) !== words[i]) {
-                HEAPU32[exit / 4] = 8;
-                setResult(0, 3n);
-                return 3;
-            }
+        const liveTBCode = resolveLiveTBCodeWords(words);
+        setResult(7, BigInt(liveTBCode.exactWords));
+        setResult(8, BigInt(liveTBCode.relocatedWords));
+        setResult(9, BigInt(liveTBCode.mismatchWords));
+        if (!liveTBCode.ok) {
+            HEAPU32[exit / 4] = 8;
+            setResult(0, 3n);
+            return 3;
         }
+        words = liveTBCode.words;
 
         const checksum = generatedOutputChecksum(words);
         const cacheKey = `${tbPtr}:${envPtr}:${generatedOutputSize}:` +
@@ -7064,6 +7160,11 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             "\"hotset_target_metadata_hits\":%" PRIu64 ","
             "\"hotset_target_output_hits\":%" PRIu64 ","
             "\"hotset_target_stale\":%" PRIu64 ","
+            "\"tb_code_exact_words\":%" PRIu64 ","
+            "\"tb_code_relocated_words\":%" PRIu64 ","
+            "\"tb_code_mismatch_words\":%" PRIu64 ","
+            "\"tb_code_relocated_tbs\":%" PRIu64 ","
+            "\"tb_code_mismatch_tbs\":%" PRIu64 ","
             "\"selected_body_helper_exit_skips\":%" PRIu64 ","
             "\"selected_body_no_terminal\":%" PRIu64 ","
             "\"selected_body_unsupported_ops\":[",
@@ -7093,6 +7194,11 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             live_generated_exec_hotset_target_metadata_hits,
             live_generated_exec_hotset_target_output_hits,
             live_generated_exec_hotset_target_stale,
+            live_generated_exec_tb_code_exact_words,
+            live_generated_exec_tb_code_relocated_words,
+            live_generated_exec_tb_code_mismatch_words,
+            live_generated_exec_tb_code_relocated_tbs,
+            live_generated_exec_tb_code_mismatch_tbs,
             live_generated_exec_selected_body_helper_exit_skips,
             live_generated_exec_selected_body_no_terminal);
     tcg_wasm64_print_live_generated_exec_selected_unsupported_top();
@@ -7377,11 +7483,13 @@ static void tcg_wasm64_live_generated_exec_record_chain_stop(
 
 static bool tcg_wasm64_live_generated_exec_run_one(
     CPUArchState *env, const void *tb_ptr, const TCGWasm64TBMetadata *metadata,
-    uint64_t guest_insns, bool no_fallback, TCGWasm64TLBMirror *tlb,
-    TCGWasm64RunCounters *run_counters, TCGWasm64RunExit *exit,
-    uint64_t *result)
+    uint64_t guest_insns, uint32_t tb_code_size, bool no_fallback,
+    TCGWasm64TLBMirror *tlb, TCGWasm64RunCounters *run_counters,
+    TCGWasm64RunExit *exit, uint64_t *result)
 {
     TCGWasm64RunContext context = { 0 };
+    uint64_t tb_code_relocated_words;
+    uint64_t tb_code_mismatch_words;
 
     tcg_wasm64_run_counters_reset(run_counters);
     memset(exit, 0, sizeof(*exit));
@@ -7405,6 +7513,7 @@ static bool tcg_wasm64_live_generated_exec_run_one(
             (uintptr_t)&context, (uintptr_t)scratch,
             (uintptr_t)run_counters, (uintptr_t)exit, (uintptr_t)result,
             (uintptr_t)tb_ptr, (uintptr_t)env, guest_insns,
+            tb_code_size,
             (uintptr_t)metadata->generated_output,
             metadata->generated_output_size);
 
@@ -7413,6 +7522,23 @@ static bool tcg_wasm64_live_generated_exec_run_one(
 #else
     result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] = 1;
 #endif
+
+    live_generated_exec_tb_code_exact_words +=
+        result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_TB_CODE_EXACT_WORDS];
+    live_generated_exec_tb_code_relocated_words +=
+        result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_TB_CODE_RELOCATED_WORDS];
+    live_generated_exec_tb_code_mismatch_words +=
+        result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_TB_CODE_MISMATCH_WORDS];
+    tb_code_relocated_words =
+        result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_TB_CODE_RELOCATED_WORDS];
+    tb_code_mismatch_words =
+        result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_TB_CODE_MISMATCH_WORDS];
+    if (tb_code_relocated_words != 0) {
+        live_generated_exec_tb_code_relocated_tbs++;
+    }
+    if (tb_code_mismatch_words != 0) {
+        live_generated_exec_tb_code_mismatch_tbs++;
+    }
 
     if (exit->reason == 0) {
         uint32_t mapped_reason = 0;
@@ -7559,6 +7685,7 @@ static bool tcg_wasm64_live_generated_exec_try(
 
         if (!tcg_wasm64_live_generated_exec_run_one(
                 env, current_tb_ptr, current_metadata, guest_insns,
+                tb->tc.size,
                 no_fallback, tlb, &step_counters, &exit, result)) {
             TCGWasm64RunExitReason failed_reason;
             const char *failed_name;

@@ -614,6 +614,79 @@ function decodedShape(words) {
   return words.map((insn) => OP_NAMES[bits(insn >>> 0, 0, 8)] || "unknown");
 }
 
+function fixedRelocationBitsMatch(metadataWord, liveWord) {
+  return (metadataWord & 0xfff) === (liveWord & 0xfff);
+}
+
+function resolveLiveGeneratedTBWords(metadata) {
+  const words = metadata?.words || [];
+  const tbWords = metadata?.tbWords || words;
+  const generatedOutputSize = metadata?.generatedOutputSize || words.length * 4;
+  const tbCodeSize = metadata?.tbCodeSize || Math.max(generatedOutputSize, tbWords.length * 4);
+  const terminalIndex = words.findIndex((word) => {
+    const opc = bits(word >>> 0, 0, 8);
+
+    return opc === OPS.goto_tb || opc === OPS.exit_tb;
+  });
+  const resolved = [];
+  let exactWords = 0;
+  let relocatedWords = 0;
+  let mismatchWords = 0;
+
+  if (tbWords.length < words.length || tbCodeSize < generatedOutputSize ||
+      terminalIndex < 0) {
+    return { ok: false, exactWords, relocatedWords, mismatchWords: 1 };
+  }
+
+  for (let index = 0; index < words.length; index++) {
+    const metadataWord = words[index] >>> 0;
+    const liveWord = tbWords[index] >>> 0;
+    const opc = bits(metadataWord, 0, 8);
+
+    if (liveWord === metadataWord) {
+      exactWords++;
+      resolved.push(liveWord);
+      continue;
+    }
+    if (!fixedRelocationBitsMatch(metadataWord, liveWord)) {
+      mismatchWords++;
+      return { ok: false, exactWords, relocatedWords, mismatchWords };
+    }
+    if (opc === OPS.brcond) {
+      const targetOffset = (index + 1) * 4 + sextract(liveWord, 12, 20);
+      const targetIndex = targetOffset / 4;
+
+      if (targetOffset % 4 !== 0 ||
+          targetIndex <= index ||
+          targetIndex > terminalIndex) {
+        mismatchWords++;
+        return { ok: false, exactWords, relocatedWords, mismatchWords };
+      }
+      relocatedWords++;
+      resolved.push(liveWord);
+      continue;
+    }
+    if (opc === OPS.tci_movl) {
+      const poolOffset = (index + 1) * 4 + sextract(liveWord, 12, 20);
+
+      if (poolOffset < generatedOutputSize ||
+          poolOffset % 8 !== 0 ||
+          poolOffset + 8 > tbCodeSize) {
+        mismatchWords++;
+        return { ok: false, exactWords, relocatedWords, mismatchWords };
+      }
+      relocatedWords++;
+      resolved.push(liveWord);
+      continue;
+    }
+
+    mismatchWords++;
+    return { ok: false, exactWords, relocatedWords, mismatchWords };
+  }
+
+  return { ok: true, words: resolved, exactWords, relocatedWords, mismatchWords };
+}
+
 function toU64(value) {
   return BigInt.asUintN(64, BigInt(value));
 }
@@ -1819,10 +1892,8 @@ function routeLiveGeneratedOutput(metadata) {
       shape,
     };
   }
-  if (metadata.tbWords &&
-      (metadata.tbWords.length !== metadata.words.length ||
-       metadata.tbWords.some((word, index) =>
-         (word >>> 0) !== (metadata.words[index] >>> 0)))) {
+  const liveTBCode = resolveLiveGeneratedTBWords(metadata);
+  if (!liveTBCode.ok) {
     return {
       ok: false,
       reason: "metadata-output-tb-code-mismatch",
@@ -1837,11 +1908,14 @@ function routeLiveGeneratedOutput(metadata) {
       qemuStCalls: 0,
       runExitReason: "invalidated",
       exitsInvalidated: 1,
+      tbCodeExactWords: liveTBCode.exactWords,
+      tbCodeRelocatedWords: liveTBCode.relocatedWords,
+      tbCodeMismatchWords: liveTBCode.mismatchWords,
       shape,
     };
   }
 
-  const emission = emitPerTBFunctionBody(metadata.words, metadata.relativeBase);
+  const emission = emitPerTBFunctionBody(liveTBCode.words, metadata.relativeBase);
 
   if (!emission.ok) {
     return {
@@ -1864,6 +1938,9 @@ function routeLiveGeneratedOutput(metadata) {
     moduleByteLength: emission.moduleByteLength,
     softmmuLowering: emission.softmmuLowering,
     softmmuLoweredOps: emission.softmmuLoweredOps,
+    tbCodeExactWords: liveTBCode.exactWords,
+    tbCodeRelocatedWords: liveTBCode.relocatedWords,
+    tbCodeMismatchWords: liveTBCode.mismatchWords,
     inlineTlbHitLoads: shape.filter((op) => op === "tci_qemu_ld_rrr").length,
     inlineTlbHitStores: shape.filter((op) => op === "tci_qemu_st_rrr").length,
   };
@@ -5342,6 +5419,51 @@ assert.equal(r4kSoftmmuStaleOutputMismatch.qemuLdCalls, 0);
 assert.equal(r4kSoftmmuStaleOutputMismatch.qemuStCalls, 0);
 assert.equal(r4kSoftmmuStaleOutputMismatch.runExitReason, "invalidated");
 assert.equal(r4kSoftmmuStaleOutputMismatch.exitsInvalidated, 1);
+const relocatedTBCodeMetadataWords = [
+  opImm20(OPS.tci_movl, 1, 0),
+  opImm20(OPS.tci_movi, 2, 1),
+  opBranch(2, 0),
+  opImm20(OPS.tci_movi, 3, 2),
+  opImm20(OPS.goto_tb, 0, -8),
+];
+const relocatedTBCodeLiveWords = [
+  opImm20(OPS.tci_movl, 1, 44),
+  relocatedTBCodeMetadataWords[1],
+  opBranch(2, 4),
+  relocatedTBCodeMetadataWords[3],
+  relocatedTBCodeMetadataWords[4],
+];
+const relocatedTBCodeRoute = routeLiveGeneratedOutput({
+  opCount: relocatedTBCodeMetadataWords.length,
+  generatedOutputAvailable: true,
+  generatedOutputSize: relocatedTBCodeMetadataWords.length * 4,
+  words: relocatedTBCodeMetadataWords,
+  tbWords: relocatedTBCodeLiveWords,
+  tbCodeSize: 64,
+  relativeBase: 0x6800,
+  guestInstructions: 1,
+});
+assert.equal(relocatedTBCodeRoute.reason, null);
+assert.equal(relocatedTBCodeRoute.generatedGuestInstructions, 1);
+assert.equal(relocatedTBCodeRoute.moduleValid, true);
+assert.equal(relocatedTBCodeRoute.tbCodeExactWords, 3);
+assert.equal(relocatedTBCodeRoute.tbCodeRelocatedWords, 2);
+assert.equal(relocatedTBCodeRoute.tbCodeMismatchWords, 0);
+const fixedBitMismatchRoute = routeLiveGeneratedOutput({
+  opCount: relocatedTBCodeMetadataWords.length,
+  generatedOutputAvailable: true,
+  generatedOutputSize: relocatedTBCodeMetadataWords.length * 4,
+  words: relocatedTBCodeMetadataWords,
+  tbWords: relocatedTBCodeLiveWords.map((word, index) =>
+    index === 1 ? (word ^ 0x100) >>> 0 : word),
+  tbCodeSize: 64,
+  relativeBase: 0x6800,
+  guestInstructions: 1,
+});
+assert.equal(fixedBitMismatchRoute.reason, "metadata-output-tb-code-mismatch");
+assert.equal(fixedBitMismatchRoute.runExitReason, "invalidated");
+assert.equal(fixedBitMismatchRoute.generatedGuestInstructions, 0);
+assert.equal(fixedBitMismatchRoute.tbCodeMismatchWords, 1);
 
 function r4s5bOpWritesR0(op) {
   return ![

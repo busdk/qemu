@@ -540,6 +540,11 @@ assert.match(runtime, /\\"hotset_target_slots_unsafe\\":%" PRIu64/);
 assert.match(runtime, /\\"hotset_target_metadata_hits\\":%" PRIu64/);
 assert.match(runtime, /\\"hotset_target_output_hits\\":%" PRIu64/);
 assert.match(runtime, /\\"hotset_target_stale\\":%" PRIu64/);
+assert.match(runtime, /\\"tb_code_exact_words\\":%" PRIu64/);
+assert.match(runtime, /\\"tb_code_relocated_words\\":%" PRIu64/);
+assert.match(runtime, /\\"tb_code_mismatch_words\\":%" PRIu64/);
+assert.match(runtime, /\\"tb_code_relocated_tbs\\":%" PRIu64/);
+assert.match(runtime, /\\"tb_code_mismatch_tbs\\":%" PRIu64/);
 assert.match(runtime, /\\"skips\\":%" PRIu64/);
 assert.match(runtime, /\\"selected_body_helper_exit_skips\\":%" PRIu64/);
 assert.match(runtime, /"metadata-output-tb-code-mismatch"/);
@@ -634,6 +639,9 @@ assert.match(runtime, /MO_AMASK \| MO_ALIGN_TLB_ONLY/);
 assert.match(runtime, /MO_ATOM_NONE/);
 assert.match(runtime, /MO_ATOM_MASK/);
 assert.match(runtime, /TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_CACHE_HIT/);
+assert.match(runtime, /TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_TB_CODE_EXACT_WORDS/);
+assert.match(runtime, /TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_TB_CODE_RELOCATED_WORDS/);
+assert.match(runtime, /TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_TB_CODE_MISMATCH_WORDS/);
 assert.match(runtime, /tcg_wasm64_live_generated_exec_count_attempt/);
 const liveGeneratedExecTryBody = runtime.match(
   /static bool tcg_wasm64_live_generated_exec_try\([\s\S]*?\n\}\n\nstatic bool tcg_wasm64_translate_op_supported/,
