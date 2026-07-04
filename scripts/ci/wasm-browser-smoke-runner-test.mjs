@@ -709,6 +709,9 @@ for (const status of [
     generated_guest_instructions: 21,
     fallback_guest_instructions: 979,
     generated_body_time_ns: 45000,
+    generated_run_entries: 4,
+    generated_chain_length: 12,
+    generated_guest_instructions_per_entry: 5,
     generated_exits: {
       budget: 5,
       mmio: 1,
@@ -743,6 +746,9 @@ for (const status of [
   assert.equal(parsed.generated_guest_instructions, 21);
   assert.equal(parsed.fallback_guest_instructions, 979);
   assert.equal(parsed.generated_body_time_ns, 45000);
+  assert.equal(parsed.generated_run_entries, 4);
+  assert.equal(parsed.generated_chain_length, 12);
+  assert.equal(parsed.generated_guest_instructions_per_entry, 5);
   assert.deepEqual(parsed.generated_exits, {
     budget: 5,
     mmio: 1,
@@ -798,6 +804,9 @@ for (const status of [
         generated_guest_instructions: 20,
         fallback_guest_instructions: 980,
         generated_body_time_ns: 45000,
+        generated_run_entries: 4,
+        generated_chain_length: 10,
+        generated_guest_instructions_per_entry: 5,
         translated_tbs: 128,
         translated_generated_first_unsupported_ops: [
           {
@@ -822,6 +831,9 @@ for (const status of [
     generatedGuestInstructions: 20,
     fallbackGuestInstructions: 980,
     generatedBodyTimeNs: 45000,
+    generatedRunEntries: 4,
+    generatedChainLength: 10,
+    generatedGuestInstructionsPerEntry: 5,
     translatedTbs: 128,
     unsupportedOpShapes: 1,
     hotBlocks: 0,

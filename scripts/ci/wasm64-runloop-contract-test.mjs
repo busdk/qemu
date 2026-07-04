@@ -41,6 +41,19 @@ function macroValue(name) {
 assert.match(header, /typedef enum TCGWasm64RunMode/);
 assert.match(header, /TCG_WASM64_RUN_MODE_COMPAT = 0/);
 assert.match(header, /TCG_WASM64_RUN_MODE_PERF_PROOF = 1/);
+assert.match(header, /typedef struct TCGWasm64Counters/);
+for (const field of [
+  "generated_run_entries",
+  "generated_chain_length",
+]) {
+  assert.match(header, new RegExp(field));
+  assert.match(runtime, new RegExp(`${field} \\+= src->${field}`));
+  assert.match(runtime, new RegExp(field));
+}
+assert.match(runtime, /generated_guest_instructions_per_entry/);
+assert.match(runtime, /TCG_WASM64_LIVE_GENERATED_EXEC_CHAIN_BUDGET_ENV/);
+assert.match(runtime, /live_generated_exec_chain_budget/);
+assert.match(runtime, /\*ret & ~\(uintptr_t\)TB_EXIT_MASK/);
 assert.match(header, /typedef enum TCGWasm64RunExitReason/);
 for (const name of [
   "TCG_WASM64_RUN_EXIT_BUDGET",

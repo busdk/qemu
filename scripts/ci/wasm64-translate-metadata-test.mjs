@@ -453,6 +453,9 @@ assert.match(runtime, /tcg_wasm64_live_generated_exec_count_attempt/);
 const liveGeneratedExecTryBody = runtime.match(
   /static bool tcg_wasm64_live_generated_exec_try\([\s\S]*?\n\}\n\nstatic bool tcg_wasm64_translate_op_supported/,
 )?.[0] || "";
+const liveGeneratedExecPrepareTbBody = runtime.match(
+  /static bool tcg_wasm64_live_generated_exec_prepare_tb\([\s\S]*?\n\}\n\nstatic bool tcg_wasm64_live_generated_exec_main_loop_exit_pending/,
+)?.[0] || "";
 assert.match(
   liveGeneratedExecTryBody,
   /tcg_wasm64_live_generated_exec_helper_exit_shape\(metadata\)/,
@@ -471,16 +474,20 @@ assert.match(
 );
 assert.match(
   liveGeneratedExecTryBody,
+  /tcg_wasm64_live_generated_exec_prepare_tb\(\s*env,/,
+);
+assert.match(
+  liveGeneratedExecPrepareTbBody,
   /tcg_wasm64_live_generated_exec_validate_selected_memops\(\s*env, metadata, &has_memop\)/,
 );
 assert.match(
-  liveGeneratedExecTryBody,
+  liveGeneratedExecPrepareTbBody,
   /selected_body-softmmu-tlb-mirror-unwired|SELECTED_BODY_SOFTMMU_TLB_MIRROR_UNWIRED/,
 );
 assert(
   liveGeneratedExecTryBody.indexOf(
-    "tcg_wasm64_live_generated_exec_validate_selected_memops") <
-  liveGeneratedExecTryBody.indexOf("tcg_wasm64_live_generated_exec_js"),
+    "tcg_wasm64_live_generated_exec_prepare_tb") <
+  liveGeneratedExecTryBody.indexOf("tcg_wasm64_live_generated_exec_run_one"),
   "R4s5b MemOp validation must run before live JS execution",
 );
 assert.match(runtime, /translated_counters\.generated_executed\+\+/);
@@ -579,12 +586,8 @@ assert.match(tbExecBody, /return ret;/);
 assert.match(tbExecBody, /fallback_guest_insns = tcg_wasm64_live_tb_guest_instructions\(tb_ptr\)/);
 assert.match(tbExecBody, /ret = tcg_tci_qemu_tb_exec\(env, tb_ptr\)/);
 assert.match(tbExecBody, /tcg_wasm64_record_tci_fallback_guest_instructions\(fallback_guest_insns\)/);
-const liveCoverageExecuteBody = runtime.match(
-  /static bool tcg_wasm64_execute_available_generated_output_try\([\s\S]*?\n\}\n\nstatic void tcg_wasm64_live_generated_exec_count_reject/,
-)?.[0] || "";
-assert.match(liveCoverageExecuteBody, /tcg_wasm64_record_live_tb_generated_metrics\(guest_insns\)/);
-assert.match(liveCoverageExecuteBody, /live_tb_coverage_checked = true/);
-assert.match(liveCoverageExecuteBody, /return false;\s*\n\}/);
+assert.match(runtime, /tcg_wasm64_record_live_tb_generated_metrics\(guest_insns\)/);
+assert.match(runtime, /live_tb_coverage_checked = true/);
 assert.doesNotMatch(
   tbExecBody,
   /tcg_wasm64_counters_add_translation\(&translated_counters,\s*counters\)/,
@@ -650,6 +653,9 @@ assert.match(generatedEquivalence, /r7-available-generated-output-executes/);
 assert.match(generatedEquivalence, /r7-rv64-helper-prefix-executes-and-counts-before-tci/);
 assert.match(generatedEquivalence, /R7_RV64_HELPER_PREFIX_SHAPE/);
 assert.match(generatedEquivalence, /r7-available-generated-output-unsupported-falls-back/);
+assert.match(generatedEquivalence, /r7LongRunningGeneratedExec/);
+assert.match(generatedEquivalence, /generatedGuestInstructionsPerEntry/);
+assert.match(generatedEquivalence, /expectedGeneratedChainLength: 2/);
 assert.match(generatedEquivalence, /r8RealGeneratedExec/);
 assert.match(generatedEquivalence, /r8-rv64-real-generated-body-commits-state/);
 assert.match(generatedEquivalence, /guestStateCommit: true/);

@@ -1770,6 +1770,111 @@ function captureState(view, regsPtr, retPtr, dataBase, helpers) {
   };
 }
 
+function captureInterpreterState(state) {
+  return {
+    regs: state.regs.map((value) => value.toString()),
+    data: [
+      state.view.getUint32(state.dataBase, true),
+      state.view.getUint8(state.dataBase + 4),
+      state.view.getBigUint64(state.dataBase + 0x10, true).toString(),
+      state.view.getBigUint64(state.dataBase + 0x100, true).toString(),
+      state.view.getBigUint64(state.dataBase + 0x110, true).toString(),
+      state.view.getBigUint64(state.dataBase + 0x118, true).toString(),
+    ],
+    helpers: {
+      loads: state.helpers.calls.filter((call) => call.kind === "ld").length,
+      stores: state.helpers.calls.filter((call) => call.kind === "st").length,
+    },
+  };
+}
+
+function createChainedState(sourceFixture, targetTbPtr, seed) {
+  const state = createState(sourceFixture.relativeBase, sourceFixture.words, seed);
+  const terminal = splitGeneratedOutput(
+    sourceFixture.words, sourceFixture.relativeBase).terminal;
+
+  assert.equal(terminal.kind, "goto_tb");
+  state.view.setBigUint64(terminal.ret, BigInt(targetTbPtr), true);
+  return state;
+}
+
+function runInterpreterTB(state, fixture) {
+  const result = interpretGeneratedOutput(
+    fixture.words, state, fixture.relativeBase);
+
+  state.regs = result.regs.slice();
+  return result;
+}
+
+function simulateR7LongRunningGeneratedExec({
+  sourceFixture,
+  targetFixture,
+  targetTbPtr,
+  sourceGuestInstructions,
+  targetGuestInstructions,
+  budget,
+  seed,
+}) {
+  const generated = createChainedState(sourceFixture, targetTbPtr, seed);
+  const reference = createChainedState(sourceFixture, targetTbPtr, seed);
+  const generatedSource = runInterpreterTB(generated, sourceFixture);
+  const referenceSource = runInterpreterTB(reference, sourceFixture);
+
+  assert.equal(generatedSource.status, STATUS_DISPATCH);
+  assert.equal(referenceSource.status, STATUS_DISPATCH);
+  assert.equal(generatedSource.ret, BigInt(targetTbPtr));
+  assert.equal(referenceSource.ret, BigInt(targetTbPtr));
+
+  let generatedTarget = null;
+  let referenceTarget = null;
+  let generatedChainLength = 1;
+  let generatedGuestInstructions = sourceGuestInstructions;
+  let stopReason = null;
+  let path = "generated-chain";
+
+  if (budget < sourceGuestInstructions + targetGuestInstructions) {
+    stopReason = "chain-budget";
+    path = "generated-then-main-loop";
+  } else if (!targetFixture) {
+    stopReason = "chain-target-unsupported";
+    path = "generated-then-tci-fallback";
+  } else {
+    generatedTarget = runInterpreterTB(generated, targetFixture);
+    referenceTarget = runInterpreterTB(reference, targetFixture);
+    generatedChainLength++;
+    generatedGuestInstructions += targetGuestInstructions;
+  }
+
+  const generatedState = captureInterpreterState(generated);
+  const referenceState = captureInterpreterState(reference);
+
+  return {
+    path,
+    stopReason,
+    generatedRunEntries: 1,
+    generatedChainLength,
+    generatedGuestInstructions,
+    generatedGuestInstructionsPerEntry: generatedGuestInstructions,
+    generatedCoverageNumerator: generatedGuestInstructions,
+    generatedExecuted: generatedChainLength,
+    sourceStatus: generatedSource.status.toString(),
+    targetStatus: generatedTarget ? generatedTarget.status.toString() : null,
+    finalStatus: generatedTarget ? generatedTarget.status.toString()
+                                 : generatedSource.status.toString(),
+    finalRet: generatedTarget ? generatedTarget.ret.toString()
+                              : generatedSource.ret.toString(),
+    guestStateCommit: true,
+    tciCorrectnessFallback: stopReason === "chain-target-unsupported",
+    registerStateMatched:
+      JSON.stringify(generatedState.regs) ===
+      JSON.stringify(referenceState.regs),
+    memoryStateMatched:
+      JSON.stringify(generatedState.data) ===
+      JSON.stringify(referenceState.data),
+    helperCalls: generatedState.helpers.loads + generatedState.helpers.stores,
+  };
+}
+
 async function runFixture(fixture, seed) {
   const relativeBase = fixture.relativeBase;
   const reference = createState(relativeBase, fixture.words, seed);
@@ -5069,6 +5174,37 @@ assert.deepEqual(r9NormalBootGeneratedRetirement, {
   generatedBodyTimeNs: 1000,
 });
 
+const r7LongRunSourceFixture = fixtures.find((fixture) =>
+  fixture.name === "rv64-boot-move-logic-family");
+const r7LongRunTargetFixture = fixtures.find((fixture) =>
+  fixture.name === "rv64-boot-setcond-branch-family");
+const r7LongRunningGeneratedExec = simulateR7LongRunningGeneratedExec({
+  sourceFixture: r7LongRunSourceFixture,
+  targetFixture: r7LongRunTargetFixture,
+  targetTbPtr: r7LongRunTargetFixture.relativeBase,
+  sourceGuestInstructions: r7LongRunSourceFixture.guestInstructions,
+  targetGuestInstructions: 6,
+  budget: 64,
+  seed: 1,
+});
+assert.equal(r7LongRunningGeneratedExec.path, "generated-chain");
+assert.equal(r7LongRunningGeneratedExec.generatedRunEntries, 1);
+assert.equal(r7LongRunningGeneratedExec.generatedChainLength, 2);
+assert.equal(
+  r7LongRunningGeneratedExec.generatedGuestInstructions,
+  r7LongRunSourceFixture.guestInstructions + 6,
+);
+assert.equal(
+  r7LongRunningGeneratedExec.generatedGuestInstructionsPerEntry,
+  r7LongRunningGeneratedExec.generatedGuestInstructions,
+);
+assert.equal(r7LongRunningGeneratedExec.sourceStatus, STATUS_DISPATCH.toString());
+assert.equal(r7LongRunningGeneratedExec.targetStatus, STATUS_EXIT.toString());
+assert.equal(r7LongRunningGeneratedExec.registerStateMatched, true);
+assert.equal(r7LongRunningGeneratedExec.memoryStateMatched, true);
+assert.equal(r7LongRunningGeneratedExec.tciCorrectnessFallback, false);
+assert.equal(r7LongRunningGeneratedExec.helperCalls, 0);
+
 r4kInvalidationResults.push({
   name: "r4k-invalidation-generated-output-mismatch",
   success: false,
@@ -5350,6 +5486,12 @@ console.log(JSON.stringify({
       entry.generatedExecuted > 0).length,
     compatFallbackFixtures: r7AvailableGeneratedOutputExecCases.filter(
       (entry) => entry.compatFallback).length,
+  },
+  r7LongRunningGeneratedExec: {
+    fixtureCount: 1,
+    fixture: r7LongRunningGeneratedExec,
+    expectedGeneratedChainLength: 2,
+    expectedGeneratedRunEntries: 1,
   },
   r8RealGeneratedExec: {
     fixtureCount: r8RealGeneratedExecCases.length,

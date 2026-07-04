@@ -1430,6 +1430,12 @@ export function wasm64TcgMetricGate(result, {
     numericMetric(summary, "fallback_guest_instructions");
   const generatedBodyTimeNs =
     numericMetric(summary, "generated_body_time_ns");
+  const generatedRunEntries =
+    numericMetric(summary, "generated_run_entries");
+  const generatedChainLength =
+    numericMetric(summary, "generated_chain_length");
+  const generatedGuestInstructionsPerEntry =
+    numericMetric(summary, "generated_guest_instructions_per_entry");
   const translatedTbs = numericMetric(summary, "translated_tbs");
   const unsupportedOps = Array.isArray(
     summary.translated_generated_first_unsupported_ops,
@@ -1479,10 +1485,13 @@ export function wasm64TcgMetricGate(result, {
       coverageNumerator,
       coverageDenominator,
       coveragePpm,
-      generatedGuestInstructions,
-      fallbackGuestInstructions,
-      generatedBodyTimeNs,
-      translatedTbs,
+    generatedGuestInstructions,
+    fallbackGuestInstructions,
+    generatedBodyTimeNs,
+    generatedRunEntries,
+    generatedChainLength,
+    generatedGuestInstructionsPerEntry,
+    translatedTbs,
       unsupportedOpShapes: unsupportedOps.length,
       hotBlocks: hotBlocks.length,
     },

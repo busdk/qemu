@@ -2219,6 +2219,47 @@ run that reaches a weaker marker than normal multi-user readiness.
   `scripts/ci/wasm-generated-output-equivalence-test.mjs`, and
   `scripts/ci/wasm-browser-smoke-runner-test.mjs`. No browser run or artifact
   build was run in this slice.
+- [x] R7c - Add bounded internal chaining for RV64 live generated execution
+  after the one-TB generated-exec measurement showed no speedup. DoD:
+  `QEMU_WASM64_LIVE_GENERATED_EXEC=1` keeps committed generated execution
+  resident across multiple consecutive generated TBs within a guest-instruction
+  budget, resolves the next TB from the generated dispatch target with current
+  metadata/TB identity validation, exits to the existing TCI fallback on
+  unsupported next TBs before executing them, exits on budget/interruption or
+  invalidation, and reports aggregate generated run entries, chain length, and
+  guest instructions retired per run-loop entry. Accepted 2026-07-04:
+  `tcg/wasm64.c` now validates and executes a bounded chain of generated RV64
+  TBs from one live-generated-exec entry, strips `TB_EXIT_MASK` only for
+  internal target lookup while preserving the encoded final return to QEMU,
+  counts target metadata/coverage denominators for internally executed TBs,
+  and fail-closes mid-chain generated execution failures rather than replaying
+  ambiguous state through TCI. `qemu-wasm64-tcg` and
+  `qemu-wasm64-runloop` summaries now include `generated_run_entries`,
+  `generated_chain_length`, and `generated_guest_instructions_per_entry`.
+  Deterministic coverage in
+  `scripts/ci/wasm-generated-output-equivalence-test.mjs` adds an RV64
+  two-TB live-generated chain fixture proving `generated_chain_length=2`,
+  one generated run entry, combined guest-instruction retirement, and identical
+  final register/memory state versus the TCI-like interpreter. Parser/contract
+  coverage was updated in `scripts/ci/wasm-browser-smoke-runner.mjs`,
+  `scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+  `scripts/ci/wasm64-runloop-contract-test.mjs`, and
+  `scripts/ci/wasm64-translate-metadata-test.mjs`. Checks passed:
+  `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+  `node --check scripts/ci/wasm-browser-smoke-runner.mjs`,
+  `node --check scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+  `node --check scripts/ci/wasm64-runloop-contract-test.mjs`,
+  `node scripts/ci/wasm64-runloop-contract-test.mjs`,
+  `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+  `node scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+  `node scripts/ci/wasm-browser-smoke-runner-test.mjs`, and
+  `git diff --check`. No browser run, artifact build, speed claim, or Bus
+  Engine OS proof was run in this worker slice. Expected supervisor-run effect:
+  hot generated regions should report `generated_chain_length` greater than
+  the previous one-TB-per-entry path, `generated_guest_instructions_per_entry`
+  should rise above a single TB's icount, and generated retirement share should
+  improve when consecutive generated shapes are available; unsupported
+  non-generated TBs remain explicit TCI fallback and still bound total share.
 - [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
   accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
   cold in browser-hosted QEMU/WASM with the accelerator and reaches

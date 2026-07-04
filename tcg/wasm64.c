@@ -45,6 +45,8 @@
     "QEMU_WASM64_LIVE_GENERATED_EXEC_PREFLIGHT"
 #define TCG_WASM64_LIVE_GENERATED_EXEC_PREFLIGHT_LIMIT_ENV \
     "QEMU_WASM64_LIVE_GENERATED_EXEC_PREFLIGHT_LIMIT"
+#define TCG_WASM64_LIVE_GENERATED_EXEC_CHAIN_BUDGET_ENV \
+    "QEMU_WASM64_LIVE_GENERATED_EXEC_CHAIN_BUDGET"
 #define TCG_WASM64_LIVE_TB_COVERAGE_SCAN_LIMIT_ENV \
     "QEMU_WASM64_LIVE_TB_COVERAGE_SCAN_LIMIT"
 #define TCG_WASM64_ONE_TB_NAME "live-x86-pre-r4i-ld32u-goto-tb-13"
@@ -69,6 +71,7 @@
 #define TCG_WASM64_ONE_TB_MEMORY_WRITES 2u
 #define TCG_WASM64_LIVE_TB_COVERAGE_DEFAULT_SCAN_LIMIT 50000u
 #define TCG_WASM64_LIVE_GENERATED_EXEC_DEFAULT_PREFLIGHT_LIMIT 10000u
+#define TCG_WASM64_LIVE_GENERATED_EXEC_DEFAULT_CHAIN_BUDGET 4096u
 #define TCG_WASM64_LIVE_HOTSET_SLOT_BACKSCAN 256u
 
 static const uint32_t tcg_wasm64_one_tb_words[] = {
@@ -183,6 +186,9 @@ typedef enum TCGWasm64LiveGeneratedExecRejectReason {
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNEXPECTED_MMU_IDX,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_UNAVAILABLE,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_TLB_MIRROR_UNWIRED,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_CHAIN_BUDGET,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_CHAIN_TARGET_UNSUPPORTED,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_CHAIN_INTERRUPTED,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT__MAX,
 } TCGWasm64LiveGeneratedExecRejectReason;
 
@@ -415,11 +421,16 @@ static bool live_generated_exec_preflight;
 static uint64_t summary_interval;
 static uint64_t live_tb_coverage_scan_limit;
 static uint64_t live_generated_exec_preflight_limit;
+static uint64_t live_generated_exec_chain_budget;
 static uint64_t tcg_wasm64_current_tb_generation = 1;
 static uint64_t tcg_wasm64_current_address_space_generation = 1;
 
 static const char *tcg_wasm64_op_name(uint32_t op);
 static void tcg_wasm64_report_live_generated_exec_summary(const char *reason);
+static TCGWasm64TBMetadata *tcg_wasm64_translate_lookup_mutable(
+    const void *tb_ptr);
+static void tcg_wasm64_count_live_translation_metadata(
+    TCGWasm64TBMetadata *metadata);
 
 static uintptr_t tcg_wasm64_translate_cache_index(const void *tb_ptr)
 {
@@ -512,6 +523,8 @@ void tcg_wasm64_counters_add(TCGWasm64Counters *dst,
     dst->generated_guest_instructions += src->generated_guest_instructions;
     dst->fallback_guest_instructions += src->fallback_guest_instructions;
     dst->generated_body_time_ns += src->generated_body_time_ns;
+    dst->generated_run_entries += src->generated_run_entries;
+    dst->generated_chain_length += src->generated_chain_length;
     for (size_t i = 0; i < ARRAY_SIZE(dst->generated_exits); i++) {
         dst->generated_exits[i] += src->generated_exits[i];
     }
@@ -972,6 +985,11 @@ static bool tcg_wasm64_live_generated_exec_enabled(void)
             TCG_WASM64_LIVE_GENERATED_EXEC_DEFAULT_PREFLIGHT_LIMIT);
         live_generated_exec_preflight_limit = MAX(
             live_generated_exec_preflight_limit, 1);
+        live_generated_exec_chain_budget = tcg_wasm64_env_u64(
+            TCG_WASM64_LIVE_GENERATED_EXEC_CHAIN_BUDGET_ENV,
+            TCG_WASM64_LIVE_GENERATED_EXEC_DEFAULT_CHAIN_BUDGET);
+        live_generated_exec_chain_budget = MAX(
+            live_generated_exec_chain_budget, 1);
         g_once_init_leave(&live_generated_exec_env_initialized, 1);
     }
     return live_generated_exec_enabled;
@@ -5580,34 +5598,41 @@ static bool tcg_wasm64_execute_available_generated_output_try(
     return false;
 }
 
+static TCGWasm64ExitReason
+tcg_wasm64_live_generated_exec_summary_exit_reason(
+    TCGWasm64RunExitReason reason);
+
 static void tcg_wasm64_live_generated_exec_count_reject(
     TCGWasm64Counters *counters, TCGWasm64RunExitReason reason)
 {
-    TCGWasm64ExitReason summary_reason = TCG_WASM64_EXIT_UNSUPPORTED;
-
     if (counters) {
         tcg_wasm64_count_fallback(counters, TCG_WASM64_FALLBACK_RUNTIME);
     }
     translated_counters.fallback_runtime++;
+    tcg_wasm64_count_exit(
+        &translated_counters,
+        tcg_wasm64_live_generated_exec_summary_exit_reason(reason));
+}
+
+static TCGWasm64ExitReason
+tcg_wasm64_live_generated_exec_summary_exit_reason(
+    TCGWasm64RunExitReason reason)
+{
     switch (reason) {
     case TCG_WASM64_RUN_EXIT_MMIO:
-        summary_reason = TCG_WASM64_EXIT_MMIO;
-        break;
+        return TCG_WASM64_EXIT_MMIO;
     case TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT:
-        summary_reason = TCG_WASM64_EXIT_TLB_MISS;
-        break;
+        return TCG_WASM64_EXIT_TLB_MISS;
     case TCG_WASM64_RUN_EXIT_INTERRUPT:
-        summary_reason = TCG_WASM64_EXIT_INTERRUPT;
-        break;
+        return TCG_WASM64_EXIT_INTERRUPT;
+    case TCG_WASM64_RUN_EXIT_BUDGET:
+        return TCG_WASM64_EXIT_BUDGET;
     case TCG_WASM64_RUN_EXIT_INVALIDATED:
-        summary_reason = TCG_WASM64_EXIT_INVALIDATION;
-        break;
+        return TCG_WASM64_EXIT_INVALIDATION;
     case TCG_WASM64_RUN_EXIT_UNSUPPORTED:
     default:
-        summary_reason = TCG_WASM64_EXIT_UNSUPPORTED;
-        break;
+        return TCG_WASM64_EXIT_UNSUPPORTED;
     }
-    tcg_wasm64_count_exit(&translated_counters, summary_reason);
 }
 
 static void tcg_wasm64_live_generated_exec_fail_closed(
@@ -5707,6 +5732,12 @@ static const char * const live_generated_exec_reject_reason_names[] = {
         "selected-body-softmmu-unavailable",
     [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_TLB_MIRROR_UNWIRED] =
         "selected-body-softmmu-tlb-mirror-unwired",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_CHAIN_BUDGET] =
+        "chain-budget",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_CHAIN_TARGET_UNSUPPORTED] =
+        "chain-target-unsupported",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_CHAIN_INTERRUPTED] =
+        "chain-interrupted",
 };
 
 QEMU_BUILD_BUG_ON(ARRAY_SIZE(live_generated_exec_reject_reason_names) !=
@@ -5981,6 +6012,7 @@ static void tcg_wasm64_print_live_generated_exec_selected_unsupported_top(void)
 static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
 {
     bool preflight = tcg_wasm64_live_generated_exec_preflight();
+    uint64_t generated_guest_instructions_per_entry = 0;
 
     if (!live_generated_exec_enabled || live_generated_exec_attempted == 0) {
         return;
@@ -5996,6 +6028,11 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
         live_generated_exec_attempted;
     live_generated_exec_summary_reported_skips =
         live_generated_exec_selected_body_helper_exit_skips;
+    if (translated_counters.generated_run_entries != 0) {
+        generated_guest_instructions_per_entry =
+            translated_counters.generated_guest_instructions /
+            translated_counters.generated_run_entries;
+    }
 
     fprintf(stderr,
             "qemu-wasm64-runloop: {\"format\":1,"
@@ -6004,6 +6041,7 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             "\"compat_fallback\":%s,"
             "\"preflight\":%s,"
             "\"preflight_limit\":%" PRIu64 ","
+            "\"chain_budget\":%" PRIu64 ","
             "\"preflight_ready\":%s,"
             "\"no_silent_fallback\":%s,"
             "\"attempts\":%" PRIu64 ","
@@ -6011,6 +6049,9 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             "\"rejects\":%" PRIu64 ","
             "\"skips\":%" PRIu64 ","
             "\"generated_guest_instructions\":%" PRIu64 ","
+            "\"generated_run_entries\":%" PRIu64 ","
+            "\"generated_chain_length\":%" PRIu64 ","
+            "\"generated_guest_instructions_per_entry\":%" PRIu64 ","
             "\"generated_coverage_numerator\":%" PRIu64 ","
             "\"generated_coverage_denominator\":%" PRIu64 ","
             "\"hotset_probe_attempts\":%" PRIu64 ","
@@ -6029,13 +6070,17 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
              !live_generated_exec_no_fallback) ? "true" : "false",
             preflight ? "true" : "false",
             live_generated_exec_preflight_limit,
+            live_generated_exec_chain_budget,
             live_generated_exec_successes != 0 ? "true" : "false",
             live_generated_exec_no_fallback ? "true" : "false",
             live_generated_exec_attempted,
             live_generated_exec_successes,
             tcg_wasm64_live_generated_exec_reject_total(),
             live_generated_exec_selected_body_helper_exit_skips,
-            translated_counters.generated_coverage_numerator,
+            translated_counters.generated_guest_instructions,
+            translated_counters.generated_run_entries,
+            translated_counters.generated_chain_length,
+            generated_guest_instructions_per_entry,
             translated_counters.generated_coverage_numerator,
             translated_counters.generated_coverage_denominator,
             live_generated_exec_hotset_probe_attempts,
@@ -6238,86 +6283,108 @@ static bool tcg_wasm64_live_generated_exec_reject(
     return false;
 }
 
-static bool tcg_wasm64_live_generated_exec_try(
-    CPUArchState *env, const void *tb_ptr, const TCGWasm64TBMetadata *metadata,
-    TCGWasm64Counters *counters, uintptr_t *ret)
+static bool tcg_wasm64_live_generated_exec_prepare_tb(
+    CPUArchState *env, const void *tb_ptr,
+    const TCGWasm64TBMetadata *metadata,
+    TranslationBlock **tb_out, uint64_t *guest_insns_out,
+    const char **reject_reason_out,
+    TCGWasm64RunExitReason *exit_reason_out)
 {
     TranslationBlock *tb;
-    TCGWasm64RunCounters run_counters;
-    TCGWasm64RunExit exit = { 0 };
-    TCGWasm64RunContext context = { 0 };
-    uint64_t result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT__MAX] = { 0 };
-    uint64_t guest_insns;
     TCGWasm64LiveGeneratedExecRejectReason memop_reason;
-    bool no_fallback;
     bool has_memop;
-    bool ok;
 
-    if (!tcg_wasm64_live_generated_exec_enabled()) {
+    *tb_out = NULL;
+    *guest_insns_out = 0;
+    *reject_reason_out = "unsupported-body-state";
+    *exit_reason_out = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+
+    if (!metadata) {
+        *reject_reason_out = "metadata-missing";
+        return false;
+    }
+    if (!tcg_wasm64_translate_generated_output_available(metadata)) {
+        *reject_reason_out = "generated-output-unavailable";
+        return false;
+    }
+    if (tcg_wasm64_live_generated_exec_helper_exit_shape(metadata)) {
+        *reject_reason_out = "selected-body-helper-exit-unsupported";
         return false;
     }
 
-    no_fallback = tcg_wasm64_live_generated_exec_no_fallback();
-    if (!metadata) {
-        tcg_wasm64_live_generated_exec_count_attempt();
-        return tcg_wasm64_live_generated_exec_reject(
-            "metadata-missing", tb_ptr, metadata, NULL,
-            TCG_WASM64_RUN_EXIT_UNSUPPORTED, counters, no_fallback);
-    }
-    if (!tcg_wasm64_translate_generated_output_available(metadata)) {
-        tcg_wasm64_live_generated_exec_count_attempt();
-        return tcg_wasm64_live_generated_exec_reject(
-            "generated-output-unavailable", tb_ptr, metadata, NULL,
-            TCG_WASM64_RUN_EXIT_UNSUPPORTED, counters, no_fallback);
-    }
-    if (tcg_wasm64_live_generated_exec_helper_exit_shape(metadata)) {
-        if (!no_fallback) {
-            live_generated_exec_selected_body_helper_exit_skips++;
-            return false;
-        }
-        tcg_wasm64_live_generated_exec_count_attempt();
-        return tcg_wasm64_live_generated_exec_reject(
-            "selected-body-helper-exit-unsupported", tb_ptr, metadata, NULL,
-            TCG_WASM64_RUN_EXIT_UNSUPPORTED, counters, no_fallback);
-    }
-    tcg_wasm64_live_generated_exec_count_attempt();
     tb = tcg_tb_lookup((uintptr_t)tb_ptr);
     tcg_wasm64_live_generated_exec_probe_hotset_target(tb_ptr, metadata, tb);
     if (!tcg_wasm64_live_generated_exec_shape_supported_record(
             metadata, true)) {
-        return tcg_wasm64_live_generated_exec_reject(
-            "selected-body-shape-unsupported", tb_ptr, metadata, NULL,
-            TCG_WASM64_RUN_EXIT_UNSUPPORTED, counters, no_fallback);
+        *reject_reason_out = "selected-body-shape-unsupported";
+        return false;
     }
     memop_reason = tcg_wasm64_live_generated_exec_validate_selected_memops(
         env, metadata, &has_memop);
     if (memop_reason != TCG_WASM64_LIVE_GENERATED_EXEC_REJECT__MAX) {
-        return tcg_wasm64_live_generated_exec_reject(
-            tcg_wasm64_live_generated_exec_reject_reason_name(memop_reason),
-            tb_ptr, metadata, NULL, TCG_WASM64_RUN_EXIT_UNSUPPORTED,
-            counters, no_fallback);
+        *reject_reason_out =
+            tcg_wasm64_live_generated_exec_reject_reason_name(memop_reason);
+        return false;
     }
     if (has_memop) {
-        return tcg_wasm64_live_generated_exec_reject(
+        *reject_reason_out =
             tcg_wasm64_live_generated_exec_reject_reason_name(
-                TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_TLB_MIRROR_UNWIRED),
-            tb_ptr, metadata, NULL, TCG_WASM64_RUN_EXIT_UNSUPPORTED,
-            counters, no_fallback);
+                TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_TLB_MIRROR_UNWIRED);
+        return false;
     }
 
-    if (!tb || tb->tc.ptr != tb_ptr || tb->icount == 0) {
-        return tcg_wasm64_live_generated_exec_reject(
-            "tb-identity-missing-or-stale", tb_ptr, metadata, tb,
-            TCG_WASM64_RUN_EXIT_INVALIDATED, counters, no_fallback);
+    if (!tb || tb->tc.ptr != tb_ptr || tb->icount == 0 ||
+        (tb_cflags(tb) & CF_INVALID)) {
+        *tb_out = tb;
+        *reject_reason_out = "tb-identity-missing-or-stale";
+        *exit_reason_out = TCG_WASM64_RUN_EXIT_INVALIDATED;
+        return false;
     }
-    guest_insns = tb->icount;
 
-    tcg_wasm64_run_counters_reset(&run_counters);
-    memset(&exit, 0, sizeof(exit));
+    *tb_out = tb;
+    *guest_insns_out = tb->icount;
+    return true;
+}
+
+static bool tcg_wasm64_live_generated_exec_main_loop_exit_pending(
+    CPUArchState *env)
+{
+    CPUState *cpu = env_cpu(env);
+
+    return cpu->interrupt_request != 0 ||
+           cpu->exit_request ||
+           cpu->exception_index >= 0;
+}
+
+static void tcg_wasm64_live_generated_exec_record_chain_stop(
+    const char *reason, TCGWasm64RunExitReason exit_reason, bool no_fallback)
+{
+    tcg_wasm64_live_generated_exec_count_reason(reason);
+    tcg_wasm64_count_exit(
+        &translated_counters,
+        tcg_wasm64_live_generated_exec_summary_exit_reason(exit_reason));
+    if (no_fallback) {
+        tcg_wasm64_report_live_generated_exec_summary(reason);
+    }
+    tcg_wasm64_live_generated_exec_fail_closed(reason, no_fallback);
+}
+
+static bool tcg_wasm64_live_generated_exec_run_one(
+    CPUArchState *env, const void *tb_ptr, const TCGWasm64TBMetadata *metadata,
+    uint64_t guest_insns, bool no_fallback,
+    TCGWasm64RunCounters *run_counters, TCGWasm64RunExit *exit,
+    uint64_t *result)
+{
+    TCGWasm64RunContext context = { 0 };
+
+    tcg_wasm64_run_counters_reset(run_counters);
+    memset(exit, 0, sizeof(*exit));
+    memset(result, 0,
+           sizeof(uint64_t) * TCG_WASM64_LIVE_GENERATED_EXEC_RESULT__MAX);
     context.env = env;
     context.budget = guest_insns;
-    context.counters = &run_counters;
-    context.exit = &exit;
+    context.counters = run_counters;
+    context.exit = exit;
     context.mode = no_fallback ? TCG_WASM64_RUN_MODE_PERF_PROOF :
                                  TCG_WASM64_RUN_MODE_COMPAT;
     context.tb_generation = tcg_wasm64_tb_generation();
@@ -6329,7 +6396,7 @@ static bool tcg_wasm64_live_generated_exec_try(
             TCG_WASM64_ONE_TB_SCRATCH_SIZE);
         int js_status = tcg_wasm64_live_generated_exec_js(
             (uintptr_t)&context, (uintptr_t)scratch,
-            (uintptr_t)&run_counters, (uintptr_t)&exit, (uintptr_t)result,
+            (uintptr_t)run_counters, (uintptr_t)exit, (uintptr_t)result,
             (uintptr_t)tb_ptr, (uintptr_t)env, guest_insns,
             (uintptr_t)metadata->generated_output,
             metadata->generated_output_size);
@@ -6340,80 +6407,197 @@ static bool tcg_wasm64_live_generated_exec_try(
     result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] = 1;
 #endif
 
-    if (exit.reason == 0) {
+    if (exit->reason == 0) {
         uint32_t mapped_reason = 0;
 
         if (tcg_wasm64_live_tb_status_to_run_exit_reason(
                 result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS],
                 &mapped_reason)) {
-            exit.reason = mapped_reason;
+            exit->reason = mapped_reason;
         }
     }
-    if (exit.reason == TCG_WASM64_RUN_EXIT_UNSUPPORTED) {
-        tcg_wasm64_run_count_exit(&run_counters,
+    if (exit->reason == TCG_WASM64_RUN_EXIT_UNSUPPORTED) {
+        tcg_wasm64_run_count_exit(run_counters,
                                   TCG_WASM64_RUN_EXIT_UNSUPPORTED);
-    } else if (exit.reason == TCG_WASM64_RUN_EXIT_HELPER) {
-        tcg_wasm64_run_count_exit(&run_counters,
+    } else if (exit->reason == TCG_WASM64_RUN_EXIT_HELPER) {
+        tcg_wasm64_run_count_exit(run_counters,
                                   TCG_WASM64_RUN_EXIT_HELPER);
-    } else if (exit.reason == TCG_WASM64_RUN_EXIT_MMIO) {
-        tcg_wasm64_run_count_exit(&run_counters,
+    } else if (exit->reason == TCG_WASM64_RUN_EXIT_MMIO) {
+        tcg_wasm64_run_count_exit(run_counters,
                                   TCG_WASM64_RUN_EXIT_MMIO);
-    } else if (exit.reason == TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT) {
-        tcg_wasm64_run_count_exit(&run_counters,
+    } else if (exit->reason == TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT) {
+        tcg_wasm64_run_count_exit(run_counters,
                                   TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT);
-    } else if (exit.reason == TCG_WASM64_RUN_EXIT_INVALIDATED ||
+    } else if (exit->reason == TCG_WASM64_RUN_EXIT_INVALIDATED ||
                result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] == 3) {
-        exit.reason = TCG_WASM64_RUN_EXIT_INVALIDATED;
-        tcg_wasm64_run_count_exit(&run_counters,
+        exit->reason = TCG_WASM64_RUN_EXIT_INVALIDATED;
+        tcg_wasm64_run_count_exit(run_counters,
                                   TCG_WASM64_RUN_EXIT_INVALIDATED);
     }
 
-    ok = result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] == 0 &&
-         tcg_wasm64_live_tb_status_is_success(
-             result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS]) &&
-         result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_RET] != 0 &&
-         result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_GUEST_INSNS] ==
-             guest_insns &&
-         result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_TCI_OPS] != 0 &&
-         result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_OUTPUT_WORDS] ==
-             metadata->generated_output_op_count &&
-         run_counters.generated_guest_instructions == guest_insns &&
-         run_counters.generated_chain_length == 1 &&
-         run_counters.helper_calls == 0 &&
-         run_counters.qemu_ld_calls == 0 &&
-         run_counters.qemu_st_calls == 0;
+    return result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] == 0 &&
+           tcg_wasm64_live_tb_status_is_success(
+               result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS]) &&
+           result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_RET] != 0 &&
+           result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_GUEST_INSNS] ==
+               guest_insns &&
+           result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_TCI_OPS] != 0 &&
+           result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_OUTPUT_WORDS] ==
+               metadata->generated_output_op_count &&
+           run_counters->generated_guest_instructions == guest_insns &&
+           run_counters->generated_chain_length == 1 &&
+           run_counters->helper_calls == 0 &&
+           run_counters->qemu_ld_calls == 0 &&
+           run_counters->qemu_st_calls == 0;
+}
 
-    if (!ok) {
-        TCGWasm64RunExitReason reject_reason;
-        const char *reject_name;
+static bool tcg_wasm64_live_generated_exec_try(
+    CPUArchState *env, const void *tb_ptr, TCGWasm64TBMetadata *metadata,
+    TCGWasm64Counters *counters, uintptr_t *ret)
+{
+    const void *current_tb_ptr = tb_ptr;
+    TCGWasm64TBMetadata *current_metadata = metadata;
+    TranslationBlock *tb = NULL;
+    TCGWasm64RunCounters chain_counters;
+    TCGWasm64RunCounters step_counters;
+    TCGWasm64RunExit exit = { 0 };
+    uint64_t result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT__MAX] = { 0 };
+    uint64_t guest_insns = 0;
+    uint64_t remaining_budget;
+    const char *reject_reason = NULL;
+    TCGWasm64RunExitReason reject_exit =
+        TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+    bool no_fallback;
+    bool chained = false;
+    bool first_tb = true;
+    const char *summary_reason = "generated-exec-dispatch";
 
-        reject_name = tcg_wasm64_live_generated_exec_classify_reject(
-            metadata, &run_counters, &exit, result, guest_insns,
-            &reject_reason);
-        tcg_wasm64_live_generated_exec_count_reason(reject_name);
-        tcg_wasm64_live_generated_exec_count_reject(counters, reject_reason);
-        tcg_wasm64_live_generated_exec_preflight_maybe_fail();
-        if (no_fallback) {
-            tcg_wasm64_report_live_generated_exec_summary(reject_name);
-        }
-        tcg_wasm64_live_generated_exec_fail_closed(reject_name, no_fallback);
+    if (!tcg_wasm64_live_generated_exec_enabled()) {
         return false;
     }
 
-    if (result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_CACHE_HIT] != 0) {
-        translated_counters.generated_cache_hits++;
-    } else {
-        translated_counters.generated_compiled++;
+    no_fallback = tcg_wasm64_live_generated_exec_no_fallback();
+    if (tcg_wasm64_live_generated_exec_helper_exit_shape(metadata)) {
+        if (!no_fallback) {
+            live_generated_exec_selected_body_helper_exit_skips++;
+            return false;
+        }
+        tcg_wasm64_live_generated_exec_count_attempt();
+        return tcg_wasm64_live_generated_exec_reject(
+            "selected-body-helper-exit-unsupported", tb_ptr, metadata, NULL,
+            TCG_WASM64_RUN_EXIT_UNSUPPORTED, counters, no_fallback);
     }
-    translated_counters.generated_executed++;
-    translated_counters.generated_coverage_numerator += guest_insns;
+
+    live_generated_exec_attempted++;
+    remaining_budget = live_generated_exec_chain_budget;
+    tcg_wasm64_run_counters_reset(&chain_counters);
+
+    for (;;) {
+        translated_counters.generated_attempts++;
+        if (!tcg_wasm64_live_generated_exec_prepare_tb(
+                env, current_tb_ptr, current_metadata, &tb, &guest_insns,
+                &reject_reason, &reject_exit)) {
+            if (!chained) {
+                return tcg_wasm64_live_generated_exec_reject(
+                    reject_reason, current_tb_ptr, current_metadata, tb,
+                    reject_exit, counters, no_fallback);
+            }
+            tcg_wasm64_live_generated_exec_record_chain_stop(
+                "chain-target-unsupported", reject_exit, no_fallback);
+            *ret = (uintptr_t)current_tb_ptr;
+            break;
+        }
+
+        if (guest_insns > remaining_budget) {
+            if (!chained) {
+                return tcg_wasm64_live_generated_exec_reject(
+                    "chain-budget", current_tb_ptr, current_metadata, tb,
+                    TCG_WASM64_RUN_EXIT_BUDGET, counters, no_fallback);
+            }
+            tcg_wasm64_live_generated_exec_record_chain_stop(
+                "chain-budget", TCG_WASM64_RUN_EXIT_BUDGET, no_fallback);
+            *ret = (uintptr_t)current_tb_ptr;
+            break;
+        }
+
+        if (!first_tb) {
+            tcg_wasm64_count_live_translation_metadata(current_metadata);
+            tcg_wasm64_count_live_tb_coverage_denominator(current_tb_ptr);
+        }
+
+        if (!tcg_wasm64_live_generated_exec_run_one(
+                env, current_tb_ptr, current_metadata, guest_insns,
+                no_fallback, &step_counters, &exit, result)) {
+            TCGWasm64RunExitReason failed_reason;
+            const char *failed_name;
+
+            failed_name = tcg_wasm64_live_generated_exec_classify_reject(
+                current_metadata, &step_counters, &exit, result,
+                guest_insns, &failed_reason);
+
+            if (!chained) {
+                tcg_wasm64_live_generated_exec_count_reason(failed_name);
+                tcg_wasm64_live_generated_exec_count_reject(
+                    counters, failed_reason);
+                tcg_wasm64_live_generated_exec_preflight_maybe_fail();
+                if (no_fallback) {
+                    tcg_wasm64_report_live_generated_exec_summary(failed_name);
+                }
+                tcg_wasm64_live_generated_exec_fail_closed(
+                    failed_name, no_fallback);
+                return false;
+            }
+
+            tcg_wasm64_live_generated_exec_record_chain_stop(
+                failed_name, failed_reason, true);
+            return false;
+        }
+
+        if (result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_CACHE_HIT] != 0) {
+            translated_counters.generated_cache_hits++;
+        } else {
+            translated_counters.generated_compiled++;
+        }
+        translated_counters.generated_executed++;
+        tcg_wasm64_run_counters_add(&chain_counters, &step_counters);
+        remaining_budget -= guest_insns;
+        chained = true;
+        *ret = result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_RET];
+
+        if (result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS] ==
+            TCG_WASM64_LIVE_TB_STATUS_EXIT) {
+            summary_reason = "generated-exec-exit";
+            break;
+        }
+
+        if (remaining_budget == 0) {
+            tcg_wasm64_live_generated_exec_record_chain_stop(
+                "chain-budget", TCG_WASM64_RUN_EXIT_BUDGET, no_fallback);
+            break;
+        }
+        if (tcg_wasm64_live_generated_exec_main_loop_exit_pending(env)) {
+            tcg_wasm64_live_generated_exec_record_chain_stop(
+                "chain-interrupted", TCG_WASM64_RUN_EXIT_INTERRUPT,
+                no_fallback);
+            break;
+        }
+
+        current_tb_ptr = (const void *)(*ret & ~(uintptr_t)TB_EXIT_MASK);
+        current_metadata = tcg_wasm64_translate_lookup_mutable(current_tb_ptr);
+        first_tb = false;
+    }
+
+    translated_counters.generated_coverage_numerator +=
+        chain_counters.generated_guest_instructions;
     translated_counters.generated_guest_instructions +=
-        run_counters.generated_guest_instructions;
+        chain_counters.generated_guest_instructions;
     translated_counters.generated_body_time_ns +=
-        run_counters.generated_body_time_ns;
+        chain_counters.generated_body_time_ns;
+    translated_counters.generated_run_entries++;
+    translated_counters.generated_chain_length +=
+        chain_counters.generated_chain_length;
     live_generated_exec_successes++;
-    tcg_wasm64_report_live_generated_exec_summary("generated-exec-dispatch");
-    *ret = result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_RET];
+    tcg_wasm64_report_live_generated_exec_summary(summary_reason);
     return true;
 }
 
@@ -6819,6 +7003,7 @@ void tcg_wasm64_report_summary(const char *reason,
 {
     TCGWasm64Counters merged;
     uint64_t generated_coverage_ppm = 0;
+    uint64_t generated_guest_instructions_per_entry = 0;
 
     if (!counters) {
         return;
@@ -6837,6 +7022,11 @@ void tcg_wasm64_report_summary(const char *reason,
                         1000000u /
                         counters->generated_coverage_denominator));
     }
+    if (counters->generated_run_entries != 0) {
+        generated_guest_instructions_per_entry =
+            counters->generated_guest_instructions /
+            counters->generated_run_entries;
+    }
 
     fprintf(stderr,
             "qemu-wasm64-tcg: {\"format\":1,\"event\":\"summary\","
@@ -6851,6 +7041,9 @@ void tcg_wasm64_report_summary(const char *reason,
             "\"generated_guest_instructions\":%" PRIu64 ","
             "\"fallback_guest_instructions\":%" PRIu64 ","
             "\"generated_body_time_ns\":%" PRIu64 ","
+            "\"generated_run_entries\":%" PRIu64 ","
+            "\"generated_chain_length\":%" PRIu64 ","
+            "\"generated_guest_instructions_per_entry\":%" PRIu64 ","
             "\"generated_exits\":{\"budget\":%" PRIu64 ","
             "\"mmio\":%" PRIu64 ",\"tlb_miss\":%" PRIu64 ","
             "\"interrupt\":%" PRIu64 ",\"csr\":%" PRIu64 ","
@@ -6905,6 +7098,9 @@ void tcg_wasm64_report_summary(const char *reason,
             counters->generated_guest_instructions,
             counters->fallback_guest_instructions,
             counters->generated_body_time_ns,
+            counters->generated_run_entries,
+            counters->generated_chain_length,
+            generated_guest_instructions_per_entry,
             counters->generated_exits[TCG_WASM64_EXIT_BUDGET],
             counters->generated_exits[TCG_WASM64_EXIT_MMIO],
             counters->generated_exits[TCG_WASM64_EXIT_TLB_MISS],
