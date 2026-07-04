@@ -2228,6 +2228,37 @@ run that reaches a weaker marker than normal multi-user readiness.
       bodies enter the generic SoftMMU lowering with the TLB mirror refreshed
       and validated, while unsupported translated shapes remain distinct from
       supported shapes that the emitter cannot lower.
+    - [ ] R4s5d - Wire the generic SoftMMU/TLB lowering into the live x86
+      generated-exec JavaScript emitter. DoD:
+      `tcg_wasm64_live_generated_exec_js()` recognizes
+      `tci_qemu_ld_rrr` and `tci_qemu_st_rrr`, lowers supported single
+      qemu load/store words through the same generic SoftMMU/TLB contract
+      proven by R4s5c, uses the C-provided TLB mirror and header-backed
+      run-context/TLB layout constants, reports generated guest-instruction
+      retirement plus inline TLB-hit load/store counters, keeps
+      helper/`qemu_ld`/`qemu_st` counters at zero for clean RAM hits, and
+      preserves precise synthetic exits or fail-closed rejection for TLB miss,
+      MMIO, permission fault, page crossing, slow flags, unmirrored state,
+      unsupported MemOp, unsupported body state, and multi-qemu-access bodies.
+      This is a generic QEMU accelerator slice, not a Bus Engine OS or
+      fixed-shape shortcut. R4s6 must not spend browser time until this
+      deterministic live-emitter path passes.
+  - [ ] R4s6 - Run the bounded x86 Chromium preflight after the accepted
+    R4s5d live-emitter repair before any R4l speed gate. DoD: build a fresh
+    current
+    `x86_64-softmmu` backend artifact from QEMU `develop` with
+    `--tcg-wasm64-backend`, run only the generic TuxBoot browser smoke with
+    `--wasm64-live-generated-exec`,
+    `--wasm64-live-generated-exec-preflight`, bounded preflight limit, and
+    wasm64 TCG summary enabled, and record exact commands, Chromium version,
+    artifact hashes, result JSON, screenshot, marker or timeout, generated
+    guest-instruction retirement, generated coverage numerator/denominator,
+    generated attempts/successes/rejects, chain/run-loop residency metrics
+    when present, helper/`qemu_ld`/`qemu_st` counts when present, and the top
+    remaining reject or unsupported reasons. This is not a W3 speed gate. If
+    generated guest-instruction retirement remains zero, R4l stays blocked and
+    the next implementation item must name the measured blocker before more
+    code changes.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
