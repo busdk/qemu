@@ -175,6 +175,16 @@ const MO_8 = 0;
 const MO_16 = 1;
 const MO_32 = 2;
 const MO_64 = 3;
+const MO_SIZE = 0x07;
+const MO_SIGN = 0x08;
+const MO_BSWAP = 0x10;
+const MO_AMASK = 0x7 << 5;
+const MO_ALIGN_4 = 2 << 5;
+const MO_ALIGN_TLB_ONLY = 1 << 8;
+const MO_ATOM_SHIFT = 9;
+const MO_ATOM_NONE = 5 << MO_ATOM_SHIFT;
+const MO_ATOM_MASK = 7 << MO_ATOM_SHIFT;
+const MO_UNSUPPORTED_HIGH_FLAG = 1 << 12;
 const X86_REG_ENUMS = [
   "R_EAX", "R_ECX", "R_EDX", "R_EBX", "R_ESP", "R_EBP", "R_ESI", "R_EDI",
   "R_R8", "R_R9", "R_R10", "R_R11", "R_R12", "R_R13", "R_R14", "R_R15",
@@ -4271,6 +4281,121 @@ assert.equal(r4kSoftmmuStaleOutputMismatch.qemuStCalls, 0);
 assert.equal(r4kSoftmmuStaleOutputMismatch.runExitReason, "invalidated");
 assert.equal(r4kSoftmmuStaleOutputMismatch.exitsInvalidated, 1);
 
+function r4s5bOpWritesR0(op) {
+  return ![
+    OPS.brcond,
+    OPS.exit_tb,
+    OPS.goto_tb,
+    OPS.mb,
+    OPS.tci_qemu_st_rrr,
+  ].includes(op);
+}
+
+function r4s5bValidateMemop(memop) {
+  const supportedFlags =
+    MO_SIZE | MO_SIGN | MO_BSWAP | MO_AMASK |
+    MO_ALIGN_TLB_ONLY | MO_ATOM_MASK;
+
+  if ((memop & ~supportedFlags) !== 0) {
+    return "selected-body-memop-unsupported-high-flags";
+  }
+  if (![MO_8, MO_32, MO_64].includes(memop & MO_SIZE)) {
+    return "selected-body-memop-unsupported-size";
+  }
+  if ((memop & MO_SIGN) !== 0) {
+    return "selected-body-memop-unsupported-sign";
+  }
+  if ((memop & MO_BSWAP) !== 0) {
+    return "selected-body-memop-unsupported-endian";
+  }
+  if ((memop & (MO_AMASK | MO_ALIGN_TLB_ONLY)) !== 0) {
+    return "selected-body-memop-unsupported-alignment";
+  }
+  if ((memop & MO_ATOM_MASK) !== 0) {
+    return "selected-body-memop-unsupported-atomic";
+  }
+  return null;
+}
+
+function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_IDX) {
+  const known = new Array(16).fill(false);
+  const values = new Array(16).fill(0);
+  let hasMemop = false;
+
+  function markUnknown(reg) {
+    if (reg < known.length) {
+      known[reg] = false;
+      values[reg] = 0;
+    }
+  }
+
+  function markKnown(reg, value) {
+    if (reg < known.length) {
+      known[reg] = true;
+      values[reg] = value >>> 0;
+    }
+  }
+
+  function copyReg(dest, source) {
+    if (source < known.length && known[source]) {
+      markKnown(dest, values[source]);
+    } else {
+      markUnknown(dest);
+    }
+  }
+
+  for (const word of metadata?.words || []) {
+    const op = word & 0xff;
+    const r0 = bits(word, 8, 4);
+    const r1 = bits(word, 12, 4);
+    const r2 = bits(word, 16, 4);
+
+    if (op === OPS.tci_movi) {
+      markKnown(r0, sextract(word, 12, 20));
+      continue;
+    }
+    if (op === OPS.tci_movl) {
+      markUnknown(r0);
+      continue;
+    }
+    if (op === OPS.mov) {
+      copyReg(r0, r1);
+      continue;
+    }
+    if (op === OPS.tci_qemu_ld_rrr || op === OPS.tci_qemu_st_rrr) {
+      hasMemop = true;
+      if (r2 >= known.length || !known[r2]) {
+        return { reason: "selected-body-memop-unproven", hasMemop };
+      }
+      const oi = values[r2];
+      const memop = oi >>> 5;
+      const mmuIdx = oi & 31;
+      const memopReason = r4s5bValidateMemop(memop);
+      if (memopReason !== null) {
+        return { reason: memopReason, hasMemop };
+      }
+      if (mmuIdx !== currentMmuIdx) {
+        return {
+          reason: "selected-body-memop-unexpected-mmu-idx",
+          hasMemop,
+        };
+      }
+      if (op === OPS.tci_qemu_ld_rrr) {
+        markUnknown(r0);
+      }
+      continue;
+    }
+    if (r4s5bOpWritesR0(op)) {
+      markUnknown(r0);
+    }
+  }
+
+  return {
+    reason: hasMemop ? "selected-body-softmmu-tlb-mirror-unwired" : null,
+    hasMemop,
+  };
+}
+
 function simulateR4mLiveGeneratedExec({
   name,
   enabled,
@@ -4331,6 +4456,35 @@ function simulateR4mLiveGeneratedExec({
       skips: noFallback ? 0 : 1,
       exits: {
         unsupported: noFallback ? 1 : 0,
+        invalidated: 0,
+      },
+    };
+  }
+
+  const memopValidation = r4s5bValidateSelectedMemops(metadata);
+  if (memopValidation.reason !== null) {
+    return {
+      name,
+      enabled,
+      ok: false,
+      path: noFallback ? "fail-closed" : "tci-fallback",
+      reason: memopValidation.reason,
+      generatedGuestInstructions: 0,
+      generatedBodyTimeNs: 0,
+      generatedChainLength: 0,
+      inlineTlbHitLoads: 0,
+      inlineTlbHitStores: 0,
+      helperCalls: 0,
+      qemuLdCalls: 0,
+      qemuStCalls: 0,
+      compatFallback: !noFallback,
+      noSilentFallback: noFallback,
+      failedClosed: noFallback,
+      attempts: 1,
+      rejects: 1,
+      skips: 0,
+      exits: {
+        unsupported: 1,
         invalidated: 0,
       },
     };
@@ -4566,6 +4720,125 @@ assert.equal(r4s4NoFallbackHelperExitReject.skips, 0);
 assert.equal(r4s4NoFallbackHelperExitReject.generatedGuestInstructions, 0);
 assert.equal(r4s4NoFallbackHelperExitReject.exits.unsupported, 1);
 assert.equal(r4s4NoFallbackHelperExitReject.failedClosed, true);
+
+function r4s5bMemoryWords({
+  memop = MO_32,
+  mmuIdx = R4K_SOFTMMU_MMU_IDX,
+  op = OPS.tci_qemu_ld_rrr,
+  oiReg = 2,
+  proveOi = true,
+  useMovl = false,
+} = {}) {
+  const words = [];
+  if (proveOi) {
+    const oi = ((memop << 5) | mmuIdx) >>> 0;
+    words.push(useMovl ? opReg(OPS.tci_movl, oiReg) :
+      opImm20(OPS.tci_movi, oiReg, oi));
+  }
+  words.push(opReg(op, 0, 1, oiReg), OPS.exit_tb);
+  return words;
+}
+
+function r4s5bMemoryMetadata(overrides = {}) {
+  const words = r4s5bMemoryWords(overrides);
+  return {
+    opCount: words.length,
+    generatedOutputAvailable: true,
+    generatedOutputSize: words.length * 4,
+    words,
+    relativeBase: 0x1000,
+    guestInstructions: 1,
+  };
+}
+
+const r4s5bCases = [
+  {
+    name: "r4s5b-valid-load-rejects-unwired-tlb-mirror",
+    expectedReason: "selected-body-softmmu-tlb-mirror-unwired",
+    metadata: r4s5bMemoryMetadata(),
+  },
+  {
+    name: "r4s5b-valid-store-rejects-unwired-tlb-mirror",
+    expectedReason: "selected-body-softmmu-tlb-mirror-unwired",
+    metadata: r4s5bMemoryMetadata({ op: OPS.tci_qemu_st_rrr }),
+  },
+  {
+    name: "r4s5b-unproven-oi-rejects-before-inline-ram",
+    expectedReason: "selected-body-memop-unproven",
+    metadata: r4s5bMemoryMetadata({ proveOi: false }),
+  },
+  {
+    name: "r4s5b-movl-oi-rejects-before-inline-ram",
+    expectedReason: "selected-body-memop-unproven",
+    metadata: r4s5bMemoryMetadata({ useMovl: true }),
+  },
+  {
+    name: "r4s5b-unsupported-size-rejects-before-inline-ram",
+    expectedReason: "selected-body-memop-unsupported-size",
+    metadata: r4s5bMemoryMetadata({ memop: MO_16 }),
+  },
+  {
+    name: "r4s5b-sign-flag-rejects-before-inline-ram",
+    expectedReason: "selected-body-memop-unsupported-sign",
+    metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_SIGN }),
+  },
+  {
+    name: "r4s5b-endian-flag-rejects-before-inline-ram",
+    expectedReason: "selected-body-memop-unsupported-endian",
+    metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_BSWAP }),
+  },
+  {
+    name: "r4s5b-alignment-flag-rejects-before-inline-ram",
+    expectedReason: "selected-body-memop-unsupported-alignment",
+    metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_ALIGN_4 }),
+  },
+  {
+    name: "r4s5b-atomic-flag-rejects-before-inline-ram",
+    expectedReason: "selected-body-memop-unsupported-atomic",
+    metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_ATOM_NONE }),
+  },
+  {
+    name: "r4s5b-high-flag-rejects-before-inline-ram",
+    expectedReason: "selected-body-memop-unsupported-high-flags",
+    metadata: r4s5bMemoryMetadata({
+      memop: MO_32 | MO_UNSUPPORTED_HIGH_FLAG,
+    }),
+  },
+  {
+    name: "r4s5b-unexpected-mmu-idx-rejects-before-inline-ram",
+    expectedReason: "selected-body-memop-unexpected-mmu-idx",
+    metadata: r4s5bMemoryMetadata({ mmuIdx: R4K_SOFTMMU_MMU_IDX + 1 }),
+  },
+].map((testCase) => ({
+  ...testCase,
+  result: simulateR4mLiveGeneratedExec({
+    name: testCase.name,
+    enabled: true,
+    metadata: testCase.metadata,
+  }),
+  noFallbackResult: simulateR4mLiveGeneratedExec({
+    name: `${testCase.name}-no-fallback`,
+    enabled: true,
+    noFallback: true,
+    metadata: testCase.metadata,
+  }),
+}));
+
+for (const testCase of r4s5bCases) {
+  assert.equal(testCase.result.reason, testCase.expectedReason);
+  assert.equal(testCase.result.path, "tci-fallback");
+  assert.equal(testCase.result.generatedGuestInstructions, 0);
+  assert.equal(testCase.result.inlineTlbHitLoads, 0);
+  assert.equal(testCase.result.inlineTlbHitStores, 0);
+  assert.equal(testCase.result.qemuLdCalls, 0);
+  assert.equal(testCase.result.qemuStCalls, 0);
+  assert.equal(testCase.result.attempts, 1);
+  assert.equal(testCase.result.rejects, 1);
+  assert.equal(testCase.result.exits.unsupported, 1);
+  assert.equal(testCase.noFallbackResult.reason, testCase.expectedReason);
+  assert.equal(testCase.noFallbackResult.path, "fail-closed");
+  assert.equal(testCase.noFallbackResult.failedClosed, true);
+}
 
 function simulateR7AvailableGeneratedOutputExec({
   name,

@@ -8,8 +8,12 @@
  */
 
 #include "qemu/osdep.h"
+#if !defined(CONFIG_USER_ONLY)
+#include "accel/tcg/cpu-mmu-index.h"
+#endif
 #include "exec/cpu-common.h"
 #include "exec/mmu-access-type.h"
+#include "exec/memopidx.h"
 #include "exec/target_page.h"
 #include "exec/tlb-common.h"
 #include "exec/tlb-flags.h"
@@ -169,6 +173,16 @@ typedef enum TCGWasm64LiveGeneratedExecRejectReason {
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_TLB_MISS_OR_FAULT_EXIT,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_INVALIDATED,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_UNSUPPORTED_BODY_STATE,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNPROVEN,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_SIZE,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_SIGN,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_ENDIAN,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_ALIGNMENT,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_ATOMIC,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_HIGH_FLAGS,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNEXPECTED_MMU_IDX,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_UNAVAILABLE,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_TLB_MIRROR_UNWIRED,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT__MAX,
 } TCGWasm64LiveGeneratedExecRejectReason;
 
@@ -4767,6 +4781,8 @@ static bool tcg_wasm64_live_generated_exec_op_supported(uint32_t op)
     case INDEX_op_sub:
     case INDEX_op_tci_movi:
     case INDEX_op_tci_movl:
+    case INDEX_op_tci_qemu_ld_rrr:
+    case INDEX_op_tci_qemu_st_rrr:
     case INDEX_op_tci_setcond32:
     case INDEX_op_xor:
         return true;
@@ -5671,6 +5687,26 @@ static const char * const live_generated_exec_reject_reason_names[] = {
         "invalidated",
     [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_UNSUPPORTED_BODY_STATE] =
         "unsupported-body-state",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNPROVEN] =
+        "selected-body-memop-unproven",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_SIZE] =
+        "selected-body-memop-unsupported-size",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_SIGN] =
+        "selected-body-memop-unsupported-sign",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_ENDIAN] =
+        "selected-body-memop-unsupported-endian",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_ALIGNMENT] =
+        "selected-body-memop-unsupported-alignment",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_ATOMIC] =
+        "selected-body-memop-unsupported-atomic",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_HIGH_FLAGS] =
+        "selected-body-memop-unsupported-high-flags",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNEXPECTED_MMU_IDX] =
+        "selected-body-memop-unexpected-mmu-idx",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_UNAVAILABLE] =
+        "selected-body-softmmu-unavailable",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_TLB_MIRROR_UNWIRED] =
+        "selected-body-softmmu-tlb-mirror-unwired",
 };
 
 QEMU_BUILD_BUG_ON(ARRAY_SIZE(live_generated_exec_reject_reason_names) !=
@@ -5717,6 +5753,181 @@ static void tcg_wasm64_live_generated_exec_count_reason(const char *reason)
         tcg_wasm64_live_generated_exec_reject_reason(reason);
 
     live_generated_exec_reject_reasons[index]++;
+}
+
+typedef struct TCGWasm64LiveMemOpState {
+    bool known[16];
+    uint32_t value[16];
+} TCGWasm64LiveMemOpState;
+
+static uint32_t tcg_wasm64_tci_word_r0(uint32_t word)
+{
+    return extract32(word, 8, 4);
+}
+
+static uint32_t tcg_wasm64_tci_word_r1(uint32_t word)
+{
+    return extract32(word, 12, 4);
+}
+
+static uint32_t tcg_wasm64_tci_word_r2(uint32_t word)
+{
+    return extract32(word, 16, 4);
+}
+
+static uint32_t tcg_wasm64_tci_word_i20(uint32_t word)
+{
+    return (uint32_t)sextract32(word, 12, 20);
+}
+
+static void tcg_wasm64_live_memop_state_unknown(
+    TCGWasm64LiveMemOpState *state, uint32_t reg)
+{
+    if (reg < ARRAY_SIZE(state->known)) {
+        state->known[reg] = false;
+        state->value[reg] = 0;
+    }
+}
+
+static void tcg_wasm64_live_memop_state_known(
+    TCGWasm64LiveMemOpState *state, uint32_t reg, uint32_t value)
+{
+    if (reg < ARRAY_SIZE(state->known)) {
+        state->known[reg] = true;
+        state->value[reg] = value;
+    }
+}
+
+static void tcg_wasm64_live_memop_state_copy(
+    TCGWasm64LiveMemOpState *state, uint32_t dest, uint32_t source)
+{
+    if (dest >= ARRAY_SIZE(state->known)) {
+        return;
+    }
+    if (source < ARRAY_SIZE(state->known) && state->known[source]) {
+        tcg_wasm64_live_memop_state_known(state, dest, state->value[source]);
+    } else {
+        tcg_wasm64_live_memop_state_unknown(state, dest);
+    }
+}
+
+static bool tcg_wasm64_live_generated_exec_op_writes_r0(TCGOpcode op)
+{
+    switch (op) {
+    case INDEX_op_brcond:
+    case INDEX_op_exit_tb:
+    case INDEX_op_goto_tb:
+    case INDEX_op_mb:
+    case INDEX_op_tci_qemu_st_rrr:
+        return false;
+    default:
+        return true;
+    }
+}
+
+static TCGWasm64LiveGeneratedExecRejectReason
+tcg_wasm64_live_generated_exec_validate_memop(MemOp memop)
+{
+    const MemOp supported_flags = MO_SIZE | MO_SIGN | MO_BSWAP | MO_AMASK |
+                                  MO_ALIGN_TLB_ONLY | MO_ATOM_MASK;
+
+    if (memop & ~supported_flags) {
+        return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_HIGH_FLAGS;
+    }
+    switch (memop & MO_SIZE) {
+    case MO_8:
+    case MO_32:
+    case MO_64:
+        break;
+    default:
+        return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_SIZE;
+    }
+    if (memop & MO_SIGN) {
+        return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_SIGN;
+    }
+    if (memop & MO_BSWAP) {
+        return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_ENDIAN;
+    }
+    if (memop & (MO_AMASK | MO_ALIGN_TLB_ONLY)) {
+        return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_ALIGNMENT;
+    }
+    if (memop & MO_ATOM_MASK) {
+        return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_ATOMIC;
+    }
+    return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT__MAX;
+}
+
+static TCGWasm64LiveGeneratedExecRejectReason
+tcg_wasm64_live_generated_exec_validate_selected_memops(
+    CPUArchState *env, const TCGWasm64TBMetadata *metadata, bool *has_memop)
+{
+    TCGWasm64LiveMemOpState state = { 0 };
+
+    *has_memop = false;
+    for (uint32_t i = 0; i < metadata->generated_output_op_count; i++) {
+        uint32_t word = metadata->generated_output[i];
+        TCGOpcode op = (TCGOpcode)tcg_wasm64_tci_word_op(word);
+        uint32_t r0 = tcg_wasm64_tci_word_r0(word);
+
+        switch (op) {
+        case INDEX_op_tci_movi:
+            tcg_wasm64_live_memop_state_known(
+                &state, r0, tcg_wasm64_tci_word_i20(word));
+            break;
+        case INDEX_op_tci_movl:
+            tcg_wasm64_live_memop_state_unknown(&state, r0);
+            break;
+        case INDEX_op_mov:
+            tcg_wasm64_live_memop_state_copy(
+                &state, r0, tcg_wasm64_tci_word_r1(word));
+            break;
+        case INDEX_op_tci_qemu_ld_rrr:
+        case INDEX_op_tci_qemu_st_rrr:
+        {
+            uint32_t oi_reg = tcg_wasm64_tci_word_r2(word);
+            MemOpIdx oi;
+            MemOp memop;
+            unsigned mmu_idx;
+            TCGWasm64LiveGeneratedExecRejectReason reason;
+#if !defined(CONFIG_USER_ONLY)
+            int current_mmu_idx;
+#endif
+
+            *has_memop = true;
+            if (oi_reg >= ARRAY_SIZE(state.known) || !state.known[oi_reg]) {
+                return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNPROVEN;
+            }
+            oi = state.value[oi_reg];
+            memop = get_memop(oi);
+            mmu_idx = get_mmuidx(oi);
+            reason = tcg_wasm64_live_generated_exec_validate_memop(memop);
+            if (reason != TCG_WASM64_LIVE_GENERATED_EXEC_REJECT__MAX) {
+                return reason;
+            }
+#if defined(CONFIG_USER_ONLY)
+            return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_UNAVAILABLE;
+#else
+            if (!env) {
+                return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_UNAVAILABLE;
+            }
+            current_mmu_idx = cpu_mmu_index(env_cpu(env), false);
+            if (mmu_idx != (unsigned)current_mmu_idx) {
+                return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNEXPECTED_MMU_IDX;
+            }
+#endif
+            if (op == INDEX_op_tci_qemu_ld_rrr) {
+                tcg_wasm64_live_memop_state_unknown(&state, r0);
+            }
+            break;
+        }
+        default:
+            if (tcg_wasm64_live_generated_exec_op_writes_r0(op)) {
+                tcg_wasm64_live_memop_state_unknown(&state, r0);
+            }
+            break;
+        }
+    }
+    return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT__MAX;
 }
 
 static void tcg_wasm64_print_live_generated_exec_reject_reasons(void)
@@ -6037,7 +6248,9 @@ static bool tcg_wasm64_live_generated_exec_try(
     TCGWasm64RunContext context = { 0 };
     uint64_t result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT__MAX] = { 0 };
     uint64_t guest_insns;
+    TCGWasm64LiveGeneratedExecRejectReason memop_reason;
     bool no_fallback;
+    bool has_memop;
     bool ok;
 
     if (!tcg_wasm64_live_generated_exec_enabled()) {
@@ -6075,6 +6288,21 @@ static bool tcg_wasm64_live_generated_exec_try(
         return tcg_wasm64_live_generated_exec_reject(
             "selected-body-shape-unsupported", tb_ptr, metadata, NULL,
             TCG_WASM64_RUN_EXIT_UNSUPPORTED, counters, no_fallback);
+    }
+    memop_reason = tcg_wasm64_live_generated_exec_validate_selected_memops(
+        env, metadata, &has_memop);
+    if (memop_reason != TCG_WASM64_LIVE_GENERATED_EXEC_REJECT__MAX) {
+        return tcg_wasm64_live_generated_exec_reject(
+            tcg_wasm64_live_generated_exec_reject_reason_name(memop_reason),
+            tb_ptr, metadata, NULL, TCG_WASM64_RUN_EXIT_UNSUPPORTED,
+            counters, no_fallback);
+    }
+    if (has_memop) {
+        return tcg_wasm64_live_generated_exec_reject(
+            tcg_wasm64_live_generated_exec_reject_reason_name(
+                TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_TLB_MIRROR_UNWIRED),
+            tb_ptr, metadata, NULL, TCG_WASM64_RUN_EXIT_UNSUPPORTED,
+            counters, no_fallback);
     }
 
     if (!tb || tb->tc.ptr != tb_ptr || tb->icount == 0) {

@@ -2104,13 +2104,33 @@ run that reaches a weaker marker than normal multi-user readiness.
       --check` passed. No R4s5b/R4s5c MemOp/TLB mirror work, browser run,
       artifact build, speed claim, or Bus Engine OS proof was done in this
       slice.
-    - [ ] R4s5b - Add C-side selected-body memory-operation validation before
+    - [x] R4s5b - Add C-side selected-body memory-operation validation before
       live x86 SoftMMU execution. DoD: the live path can identify the
       `MemOpIdx`/`MemOp`/`mmu_idx` for the selected generated-output memory
       helpers it intends to run, rejects any unproven `oi`, unsupported size,
       sign/endian/atomic/alignment/high flag, or unexpected `mmu_idx` before
       inline RAM access, and deterministic tests prove the fail-closed
-      reasons.
+      reasons. Accepted 2026-07-04: `tcg/wasm64.c` now treats
+      `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` as live-selected shapes only
+      after a C-side validator proves their `oi` value from compact TCI
+      generated-output dataflow, decodes it with `get_memop()`/`get_mmuidx()`,
+      rejects unproven `tci_movl`/unknown provenance, unsupported size,
+      sign, endian, alignment, atomic and high flags, user-only or null-env
+      SoftMMU state, and unexpected data `mmu_idx` before JS execution or
+      inline RAM access. Valid proven memory helpers still reject as
+      `selected-body-softmmu-tlb-mirror-unwired` until R4s5c wires a
+      zero-initialized TLB mirror. Checks: `git diff --check`, `node --check
+      scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node --check
+      scripts/ci/wasm64-translate-metadata-test.mjs`, `node --check
+      scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, `node
+      scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+      scripts/ci/wasm64-translate-metadata-test.mjs`, and `node
+      scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs` passed. A
+      local compile check was attempted with `make -C build
+      qemu-system-x86_64` but this checkout's `build/` directory has no such
+      target, so native compile verification is unrun. No browser run,
+      artifact build, speed claim, R4l unlock, or Bus Engine OS proof was run
+      in this slice.
     - [ ] R4s5c - Wire a zero-initialized TLB mirror into live x86 generated
       execution only after R4s5b proves the memory operation and `mmu_idx`.
       DoD: `tcg_wasm64_live_generated_exec_try()` zero-initializes local TLB

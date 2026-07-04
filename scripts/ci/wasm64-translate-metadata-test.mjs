@@ -370,6 +370,8 @@ assert.match(runtime, /"selected-body-helper-exit-unsupported"/);
 assert.match(runtime, /"tb-identity-missing-or-stale"/);
 assert.match(runtime, /tcg_wasm64_live_generated_exec_classify_reject/);
 assert.doesNotMatch(runtime, /"generated-exec-rejected"/);
+assert.match(runtime, /#include "exec\/memopidx\.h"/);
+assert.match(runtime, /#include "accel\/tcg\/cpu-mmu-index\.h"/);
 assert.match(runtime, /TCG_WASM64_LIVE_TB_STATUS_EXIT 0x20u/);
 assert.match(runtime, /TCG_WASM64_LIVE_TB_STATUS_DISPATCH 0x21u/);
 assert.match(runtime, /TCG_WASM64_LIVE_TB_STATUS_HELPER 0x22u/);
@@ -418,12 +420,34 @@ for (const liveGeneratedExecRejectReason of [
   "tlb-miss-or-fault-exit",
   "invalidated",
   "unsupported-body-state",
+  "selected-body-memop-unproven",
+  "selected-body-memop-unsupported-size",
+  "selected-body-memop-unsupported-sign",
+  "selected-body-memop-unsupported-endian",
+  "selected-body-memop-unsupported-alignment",
+  "selected-body-memop-unsupported-atomic",
+  "selected-body-memop-unsupported-high-flags",
+  "selected-body-memop-unexpected-mmu-idx",
+  "selected-body-softmmu-unavailable",
+  "selected-body-softmmu-tlb-mirror-unwired",
 ]) {
   assert.match(
     runtime,
     new RegExp(`"${liveGeneratedExecRejectReason}"`),
   );
 }
+assert.match(runtime, /tcg_wasm64_live_generated_exec_validate_selected_memops/);
+assert.match(runtime, /get_memop\(oi\)/);
+assert.match(runtime, /get_mmuidx\(oi\)/);
+assert.match(runtime, /cpu_mmu_index\(env_cpu\(env\), false\)/);
+assert.match(runtime, /#if defined\(CONFIG_USER_ONLY\)/);
+assert.match(runtime, /!env/);
+assert.match(runtime, /INDEX_op_tci_qemu_ld_rrr/);
+assert.match(runtime, /INDEX_op_tci_qemu_st_rrr/);
+assert.match(runtime, /MO_SIGN/);
+assert.match(runtime, /MO_BSWAP/);
+assert.match(runtime, /MO_AMASK \| MO_ALIGN_TLB_ONLY/);
+assert.match(runtime, /MO_ATOM_MASK/);
 assert.match(runtime, /TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_CACHE_HIT/);
 assert.match(runtime, /tcg_wasm64_live_generated_exec_count_attempt/);
 const liveGeneratedExecTryBody = runtime.match(
@@ -444,6 +468,20 @@ assert.match(
 assert.match(
   liveGeneratedExecTryBody,
   /if \(tcg_wasm64_live_generated_exec_helper_exit_shape\(metadata\)\) \{\s+if \(!no_fallback\) \{\s+live_generated_exec_selected_body_helper_exit_skips\+\+;\s+return false;\s+\}\s+tcg_wasm64_live_generated_exec_count_attempt\(\);/,
+);
+assert.match(
+  liveGeneratedExecTryBody,
+  /tcg_wasm64_live_generated_exec_validate_selected_memops\(\s*env, metadata, &has_memop\)/,
+);
+assert.match(
+  liveGeneratedExecTryBody,
+  /selected_body-softmmu-tlb-mirror-unwired|SELECTED_BODY_SOFTMMU_TLB_MIRROR_UNWIRED/,
+);
+assert(
+  liveGeneratedExecTryBody.indexOf(
+    "tcg_wasm64_live_generated_exec_validate_selected_memops") <
+  liveGeneratedExecTryBody.indexOf("tcg_wasm64_live_generated_exec_js"),
+  "R4s5b MemOp validation must run before live JS execution",
 );
 assert.match(runtime, /translated_counters\.generated_executed\+\+/);
 assert.match(runtime, /translated_counters\.generated_cache_hits\+\+/);
@@ -637,5 +675,18 @@ assert.match(generatedEquivalence, /STATUS_MMIO = 0x23n/);
 assert.match(generatedEquivalence, /STATUS_TLB_MISS_OR_FAULT = 0x24n/);
 assert.match(generatedEquivalence, /STATUS_INVALIDATED = 0x26n/);
 assert.match(generatedEquivalence, /run-exit mmio value is not a generated status/);
+assert.match(generatedEquivalence, /r4s5b-valid-load-rejects-unwired-tlb-mirror/);
+assert.match(generatedEquivalence, /r4s5b-valid-store-rejects-unwired-tlb-mirror/);
+assert.match(generatedEquivalence, /r4s5b-unproven-oi-rejects-before-inline-ram/);
+assert.match(generatedEquivalence, /r4s5b-movl-oi-rejects-before-inline-ram/);
+assert.match(generatedEquivalence, /r4s5b-unsupported-size-rejects-before-inline-ram/);
+assert.match(generatedEquivalence, /r4s5b-sign-flag-rejects-before-inline-ram/);
+assert.match(generatedEquivalence, /r4s5b-endian-flag-rejects-before-inline-ram/);
+assert.match(generatedEquivalence, /r4s5b-alignment-flag-rejects-before-inline-ram/);
+assert.match(generatedEquivalence, /r4s5b-atomic-flag-rejects-before-inline-ram/);
+assert.match(generatedEquivalence, /r4s5b-high-flag-rejects-before-inline-ram/);
+assert.match(generatedEquivalence, /r4s5b-unexpected-mmu-idx-rejects-before-inline-ram/);
+assert.match(generatedEquivalence, /selected-body-softmmu-tlb-mirror-unwired/);
+assert.match(generatedEquivalence, /selected-body-memop-unsupported-high-flags/);
 
 console.log("wasm64 translate metadata contract: ok");
