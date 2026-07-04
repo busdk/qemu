@@ -3012,7 +3012,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     preflight, R4l speed gate, Bus Engine OS proof, or Bus-specific shortcut
     was run; the next fresh bounded x86 Chromium preflight is the remaining
     gate before R4l.
-  - [ ] R4s17 - Run the bounded x86 Chromium no-silent generated-retirement
+  - [x] R4s17 - Run the bounded x86 Chromium no-silent generated-retirement
     preflight after R4s16. DoD: build fresh current `x86_64-softmmu`
     Emscripten/WASM artifacts from QEMU `develop`, record artifact SHA-256
     hashes, browser version, exact build and preflight commands, result JSON
@@ -3026,6 +3026,79 @@ run that reaches a weaker marker than normal multi-user readiness.
     fallback, record the exact blocker and add the next deterministic repair
     item instead of running R4l. Do not run a Bus Engine OS browser proof from
     this item.
+    Accepted preflight 2026-07-04: fresh current `x86_64-softmmu`
+    backend artifacts were built from QEMU commit
+    `cba21b3562180612da08554f59842d7c8834958f` with command
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s17-x86-backend-artifacts-cba21b3-20260704
+    --target x86_64 --tcg-wasm64-backend --build-image`. Artifact
+    directory:
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s17-x86-backend-artifacts-cba21b3-20260704`.
+    Artifact hashes: `qemu-system-x86_64.js`
+    `dca9af5932ad4f0ef594306904af9de7f630f90656d01ba5619439a050938076`,
+    `qemu-system-x86_64.wasm`
+    `a3edb64e351a7197454cbdddaf0d5636f9af95e2c3eda79fe16d16fe249c0157`,
+    manifest `qemu-system-wasm-artifacts.json`
+    `98ea500fe3c630737f45d103026fa165e8a8cee03c8e10d45ee02e98bd8a0cf7`,
+    and `SHA256SUMS`
+    `22172c9499fdd4053a57bfbe386f21592cdd4dc758daf16d1c676d49380c0ebc`.
+
+    Bounded Chromium `149.0.7827.55` no-silent generated-retirement
+    preflight command: `npm exec --yes --package=playwright -- node
+    scripts/ci/wasm-browser-smoke-runner.mjs --browser chromium
+    --artifact-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s17-x86-backend-artifacts-cba21b3-20260704
+    --firmware-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/projects/qemu/pc-bios
+    --guest-manifest
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4s8-guest-current/tuxboot-browser-smoke-guest.json
+    --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s17-x86-preflight-cba21b3-20260704/wasm-browser-smoke-result.json
+    --screenshot
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s17-x86-preflight-cba21b3-20260704/wasm-browser-smoke.png
+    --port 8217 --timeout-ms 60000 --max-output-bytes 100000
+    --page-text-tail-bytes 100000 --wasm64-live-generated-exec
+    --wasm64-live-generated-exec-no-fallback
+    --wasm64-live-generated-exec-preflight
+    --wasm64-live-generated-exec-preflight-limit 100
+    --wasm64-tcg-summary --wasm64-tcg-summary-interval 1000`. Result JSON:
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s17-x86-preflight-cba21b3-20260704/wasm-browser-smoke-result.json`
+    (SHA256
+    `f84520e440839e7316bfa93df364722ac5587b87ccceabfcbcc643eb10f5f3dc`);
+    screenshot
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s17-x86-preflight-cba21b3-20260704/wasm-browser-smoke.png`
+    (SHA256
+    `f00eb3126d1e5d868675a33ac99d280693fa6503af1330ada9684f0a6192b6c4`).
+    The generic marker `QEMU_WASM_LINUX_BOOT_OK` was not reached:
+    `markerSeen=false`, phase `timeout`, elapsed `60235` ms, final
+    serial/page line `Pthread 0x31f695d0 sent an error!
+    http://127.0.0.1:8217/artifacts/qemu-system-x86_64.js:861: Uncaught
+    RuntimeError: Aborted(native code called abort())`.
+
+    The live-generated-exec summary at `2345` ms reported
+    `reason=chain-target-unsupported`, `preflight_ready=true`,
+    `compat_fallback=false`, `no_silent_fallback=true`, attempts `1`,
+    successes `1`, rejects `0`, skips `0`, generated guest instructions
+    `1`, generated run entries `1`, generated chain length `1`, generated
+    guest instructions per entry `1`, generated coverage `1 / 1`, hotset
+    probe attempts `1`, hotset goto sources `1`, hotset target slots read
+    `1`, hotset target unsafe `0`, hotset target metadata hits `0`, hotset
+    target output hits `0`, hotset target stale `1`, selected-body helper
+    exit skips `0`, selected-body no-terminal `0`, no unsupported selected
+    ops, and no nonzero reject reasons. The page then failed closed with
+    `qemu-wasm64-live-generated-exec: no-silent-fallback:
+    chain-target-unsupported`, so the committed generated instruction was not
+    replayed through hidden TCI compatibility fallback. `wasm64Tcg` summary
+    capture was enabled but emitted no periodic summary before the intentional
+    no-silent abort (`summaryCount=0`, `lastSummary=null`); consequently
+    `node scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs --result
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s17-x86-preflight-cba21b3-20260704/wasm-browser-smoke-result.json
+    --json` and the same command with `--require-tcg --json` exited nonzero
+    on the missing TCG summary, while reporting `runloop.ok=true` and
+    `runloop.acceptanceAllowed=true`. R4s17 therefore passes its no-silent
+    generated-retirement preflight acceptance, unlocks the next R4l
+    same-commit generic Chromium speed gate, makes no speed claim by itself,
+    and no Bus Engine OS browser proof was run.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
