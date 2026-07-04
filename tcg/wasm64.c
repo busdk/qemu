@@ -2708,7 +2708,8 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
       (uintptr_t context_arg, uintptr_t scratch_arg, uintptr_t counters_arg,
        uintptr_t exit_arg, uintptr_t result_arg, uintptr_t tb_arg,
        uintptr_t env_arg, uint64_t guest_insns_arg,
-       uintptr_t generated_output_arg, uint32_t generated_output_size_arg), {
+       uintptr_t generated_output_arg, uint32_t generated_output_size_arg,
+       uint32_t tb_code_size_arg), {
     if (typeof wasmMemory === "undefined" || !wasmMemory) {
         return 1;
     }
@@ -2723,6 +2724,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
     const guestInsns = BigInt(guest_insns_arg);
     const generatedOutputPtr = Number(generated_output_arg);
     const generatedOutputSize = Number(generated_output_size_arg);
+    const tbCodeSize = Number(tb_code_size_arg);
     const stackPtr = scratch + 0x3000;
     const statusExit = 0x20n;
     const statusDispatch = 0x21n;
@@ -3063,6 +3065,24 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                ((metadataWord ^ liveWord) & 0xfff) === 0;
     }
 
+    function tciMovlPoolRelocation(metadataWord, liveWord) {
+        const metadata = metadataWord >>> 0;
+        const live = liveWord >>> 0;
+
+        return bits(metadata, 0, 8) === ops.tci_movl &&
+               bits(live, 0, 8) === ops.tci_movl &&
+               ((metadata ^ live) & 0xfff) === 0 &&
+               metadata !== live;
+    }
+
+    function tciMovlPoolTargetInTb(index, word) {
+        const offset = (index + 1) * 4 + sextract(word >>> 0, 12, 20);
+
+        return Number.isInteger(tbCodeSize) &&
+               offset >= 0 &&
+               offset + 8 <= tbCodeSize;
+    }
+
     function normalizeGeneratedOutputWords(words) {
         const normalized = words.slice();
 
@@ -3071,9 +3091,19 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
             const liveWord = HEAPU32[tbPtr / 4 + i] >>> 0;
 
             if (metadataWord === liveWord) {
+                if (bits(metadataWord, 0, 8) === ops.tci_movl &&
+                    !tciMovlPoolTargetInTb(i, liveWord)) {
+                    recordMetadataOutputMismatch(i, metadataWord, liveWord);
+                    return null;
+                }
                 continue;
             }
             if (brcondLabelRelocation(metadataWord, liveWord)) {
+                normalized[i] = liveWord;
+                continue;
+            }
+            if (tciMovlPoolRelocation(metadataWord, liveWord) &&
+                tciMovlPoolTargetInTb(i, liveWord)) {
                 normalized[i] = liveWord;
                 continue;
             }
@@ -7796,8 +7826,12 @@ tcg_wasm64_live_generated_exec_metadata_output_mismatch_reason(
         }
         return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_METADATA_OUTPUT_UNKNOWN_MISMATCH;
     case INDEX_op_call:
-    case INDEX_op_tci_movl:
         return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_METADATA_OUTPUT_POOL_RELOCATION;
+    case INDEX_op_tci_movl:
+        if (((metadata_word ^ live_word) & 0xfff) == 0) {
+            return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_METADATA_OUTPUT_POOL_RELOCATION;
+        }
+        return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_METADATA_OUTPUT_UNKNOWN_MISMATCH;
     default:
         return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_METADATA_OUTPUT_UNKNOWN_MISMATCH;
     }
@@ -8115,6 +8149,20 @@ static bool tcg_wasm64_live_generated_exec_prepare_tb(
     }
 
     tb = tcg_tb_lookup((uintptr_t)tb_ptr);
+    if (!tb || tb->tc.ptr != tb_ptr || tb->icount == 0 ||
+        (tb_cflags(tb) & CF_INVALID)) {
+        *tb_out = tb;
+        *reject_reason_out = "tb-identity-missing-or-stale";
+        *exit_reason_out = TCG_WASM64_RUN_EXIT_INVALIDATED;
+        return false;
+    }
+    if (metadata->generated_output_size > tb->tc.size) {
+        *tb_out = tb;
+        *reject_reason_out = "tb-identity-missing-or-stale";
+        *exit_reason_out = TCG_WASM64_RUN_EXIT_INVALIDATED;
+        return false;
+    }
+
     tcg_wasm64_live_generated_exec_probe_hotset_target(tb_ptr, metadata, tb);
     if (!tcg_wasm64_live_generated_exec_shape_supported_record(
             metadata, true)) {
@@ -8126,14 +8174,6 @@ static bool tcg_wasm64_live_generated_exec_prepare_tb(
     if (memop_reason != TCG_WASM64_LIVE_GENERATED_EXEC_REJECT__MAX) {
         *reject_reason_out =
             tcg_wasm64_live_generated_exec_reject_reason_name(memop_reason);
-        return false;
-    }
-
-    if (!tb || tb->tc.ptr != tb_ptr || tb->icount == 0 ||
-        (tb_cflags(tb) & CF_INVALID)) {
-        *tb_out = tb;
-        *reject_reason_out = "tb-identity-missing-or-stale";
-        *exit_reason_out = TCG_WASM64_RUN_EXIT_INVALIDATED;
         return false;
     }
 
@@ -8183,11 +8223,12 @@ static void tcg_wasm64_live_generated_exec_commit_chain(
 
 static bool tcg_wasm64_live_generated_exec_run_one(
     CPUArchState *env, const void *tb_ptr, const TCGWasm64TBMetadata *metadata,
-    uint64_t guest_insns, bool no_fallback, TCGWasm64TLBMirror *tlb,
-    TCGWasm64RunCounters *run_counters, TCGWasm64RunExit *exit,
-    uint64_t *result)
+    const TranslationBlock *tb, uint64_t guest_insns, bool no_fallback,
+    TCGWasm64TLBMirror *tlb, TCGWasm64RunCounters *run_counters,
+    TCGWasm64RunExit *exit, uint64_t *result)
 {
     TCGWasm64RunContext context = { 0 };
+    uint32_t tb_code_size = tb ? tb->tc.size : 0;
 
     tcg_wasm64_run_counters_reset(run_counters);
     memset(exit, 0, sizeof(*exit));
@@ -8212,11 +8253,12 @@ static bool tcg_wasm64_live_generated_exec_run_one(
             (uintptr_t)run_counters, (uintptr_t)exit, (uintptr_t)result,
             (uintptr_t)tb_ptr, (uintptr_t)env, guest_insns,
             (uintptr_t)metadata->generated_output,
-            metadata->generated_output_size);
+            metadata->generated_output_size, tb_code_size);
 
         result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] = js_status;
     }
 #else
+    (void)tb_code_size;
     result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS] = 1;
 #endif
 
@@ -8382,7 +8424,7 @@ static bool tcg_wasm64_live_generated_exec_try(
         }
 
         if (!tcg_wasm64_live_generated_exec_run_one(
-                env, current_tb_ptr, current_metadata, guest_insns,
+                env, current_tb_ptr, current_metadata, tb, guest_insns,
                 no_fallback, tlb, &step_counters, &exit, result)) {
             TCGWasm64RunExitReason failed_reason;
             const char *failed_name;

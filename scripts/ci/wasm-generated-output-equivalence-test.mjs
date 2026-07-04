@@ -2017,7 +2017,9 @@ function routeLiveGeneratedOutput(metadata) {
     };
   }
   const normalizedOutput =
-    normalizeMetadataOutputWords(metadata.words, metadata.tbWords);
+    normalizeMetadataOutputWords(metadata.words, metadata.tbWords, {
+      tbCodeSize: metadata.tbCodeSize,
+    });
 
   if (!normalizedOutput.ok) {
     return {
@@ -2110,6 +2112,8 @@ function routeLiveGeneratedOutput(metadata) {
     shape,
     normalizedBranchLabelRelocations:
       normalizedOutput.branchLabelRelocations,
+    normalizedTciMovlPoolRelocations:
+      normalizedOutput.tciMovlPoolRelocations,
     normalizedWords: words,
     moduleValid: emission.moduleValid,
     moduleByteLength: emission.moduleByteLength,
@@ -3071,7 +3075,10 @@ function metadataOutputMismatchReason({ metadataWord = 0, liveWord = 0 } = {}) {
   if (isBranchLabelRelocation(metadataWord, liveWord)) {
     return "js-status-metadata-output-branch-label-relocation";
   }
-  if (op === OPS.tci_movl || op === OPS.call) {
+  if (op === OPS.call) {
+    return "js-status-metadata-output-pool-relocation";
+  }
+  if (op === OPS.tci_movl && ((metadataWord ^ liveWord) & 0xfff) === 0) {
     return "js-status-metadata-output-pool-relocation";
   }
   return "js-status-metadata-output-unknown-mismatch";
@@ -3085,6 +3092,29 @@ function isBranchLabelRelocation(metadataWord = 0, liveWord = 0) {
     bits(live, 0, 8) === OPS.brcond &&
     ((metadata ^ live) & 0xfff) === 0 &&
     metadata !== live;
+}
+
+function isTciMovlPoolRelocation(metadataWord = 0, liveWord = 0) {
+  const metadata = metadataWord >>> 0;
+  const live = liveWord >>> 0;
+
+  return bits(metadata, 0, 8) === OPS.tci_movl &&
+    bits(live, 0, 8) === OPS.tci_movl &&
+    ((metadata ^ live) & 0xfff) === 0 &&
+    metadata !== live;
+}
+
+function tciMovlPoolTargetOffset(index, word) {
+  return (index + 1) * 4 + sextract(word >>> 0, 12, 20);
+}
+
+function tciMovlPoolTargetInTb(index, word, tbCodeSize) {
+  if (!Number.isInteger(tbCodeSize) || tbCodeSize < 0) {
+    return false;
+  }
+
+  const offset = tciMovlPoolTargetOffset(index, word);
+  return offset >= 0 && offset + 8 <= tbCodeSize;
 }
 
 function firstMetadataOutputMismatch(words, tbWords) {
@@ -3113,17 +3143,20 @@ function firstMetadataOutputMismatch(words, tbWords) {
   return null;
 }
 
-function normalizeMetadataOutputWords(words, tbWords) {
+function normalizeMetadataOutputWords(words, tbWords, options = {}) {
   if (!tbWords) {
     return {
       ok: true,
       words: words.map((word) => word >>> 0),
       branchLabelRelocations: 0,
+      tciMovlPoolRelocations: 0,
     };
   }
   const normalized = words.map((word) => word >>> 0);
   const limit = Math.max(words.length, tbWords.length);
   let branchLabelRelocations = 0;
+  let tciMovlPoolRelocations = 0;
+  const tbCodeSize = options.tbCodeSize ?? tbWords.length * 4;
 
   if (words.length !== tbWords.length) {
     const index = Math.min(words.length, tbWords.length);
@@ -3147,11 +3180,31 @@ function normalizeMetadataOutputWords(words, tbWords) {
     const liveWord = tbWords[index] >>> 0;
 
     if (metadataWord === liveWord) {
+      if (bits(metadataWord, 0, 8) === OPS.tci_movl &&
+          !tciMovlPoolTargetInTb(index, liveWord, tbCodeSize)) {
+        return {
+          ok: false,
+          mismatch: {
+            reason: metadataOutputMismatchReason({ metadataWord, liveWord }),
+            index,
+            op: bits(metadataWord, 0, 8),
+            opName: OP_NAMES[bits(metadataWord, 0, 8)] ?? "unknown",
+            metadataWord,
+            liveWord,
+          },
+        };
+      }
       continue;
     }
     if (isBranchLabelRelocation(metadataWord, liveWord)) {
       normalized[index] = liveWord;
       branchLabelRelocations++;
+      continue;
+    }
+    if (isTciMovlPoolRelocation(metadataWord, liveWord) &&
+        tciMovlPoolTargetInTb(index, liveWord, tbCodeSize)) {
+      normalized[index] = liveWord;
+      tciMovlPoolRelocations++;
       continue;
     }
     return {
@@ -3170,6 +3223,7 @@ function normalizeMetadataOutputWords(words, tbWords) {
     ok: true,
     words: normalized,
     branchLabelRelocations,
+    tciMovlPoolRelocations,
   };
 }
 
@@ -3309,6 +3363,20 @@ const liveGeneratedExecRejectClassificationCases = [
     },
     expected: {
       reason: "js-status-metadata-output-pool-relocation",
+      exitReason: "invalidated",
+    },
+  },
+  {
+    name: "js status metadata mismatch tci_movl changed destination",
+    input: {
+      jsStatus: 3n,
+      metadataOutputMismatch: {
+        metadataWord: OPS.tci_movl | (1 << 8) | (4 << 12),
+        liveWord: (OPS.tci_movl | (2 << 8) | (5 << 12)) >>> 0,
+      },
+    },
+    expected: {
+      reason: "js-status-metadata-output-unknown-mismatch",
       exitReason: "invalidated",
     },
   },
@@ -5999,22 +6067,98 @@ assert.equal(
   0x00020d04,
 );
 
+const r4s19TciMovlPoolRelocationWords = [
+  opImm20(OPS.tci_movl, 2, 0),
+  OPS.exit_tb,
+];
+const r4s19TciMovlPoolRelocationRoute = routeLiveGeneratedOutput({
+  opCount: r4s19TciMovlPoolRelocationWords.length,
+  generatedOutputAvailable: true,
+  generatedOutputSize: r4s19TciMovlPoolRelocationWords.length * 4,
+  words: r4s19TciMovlPoolRelocationWords,
+  tbWords: [
+    opImm20(OPS.tci_movl, 2, 8),
+    OPS.exit_tb,
+  ],
+  tbCodeSize: 24,
+  relativeBase: 0x6200,
+  guestInstructions: 1,
+});
+assert.equal(r4s19TciMovlPoolRelocationRoute.ok, true);
+assert.equal(r4s19TciMovlPoolRelocationRoute.reason, null);
+assert.equal(r4s19TciMovlPoolRelocationRoute.generatedGuestInstructions, 1);
+assert.equal(r4s19TciMovlPoolRelocationRoute.moduleValid, true);
+assert.equal(r4s19TciMovlPoolRelocationRoute.normalizedTciMovlPoolRelocations,
+             1);
+assert.equal(
+  r4s19TciMovlPoolRelocationRoute.normalizedWords[0],
+  opImm20(OPS.tci_movl, 2, 8),
+);
+const r4s19TciMovlPoolRelocationExec = await runFixture({
+  name: "r4s19-tci-movl-pool-relocation-executes",
+  terminal: "exit_tb",
+  relativeBase: 0x6200,
+  words: r4s19TciMovlPoolRelocationRoute.normalizedWords,
+  guestInstructions: 1,
+}, 1);
+assert.equal(r4s19TciMovlPoolRelocationExec.moduleValid, true);
+assert.equal(r4s19TciMovlPoolRelocationExec.generatedGuestInstructions, 1);
+assert.equal(r4s19TciMovlPoolRelocationExec.registerStateMatched, true);
+assert.equal(r4s19TciMovlPoolRelocationExec.memoryStateMatched, true);
+
 const r4s8bMetadataOutputMismatchFixtures = [
   {
-    name: "r4s8b-pool-relocation-still-rejects",
+    name: "r4s19-tci-movl-changed-destination-rejects",
     words: [
-      OPS.tci_movl | (2 << 8) | (4 << 12),
+      opImm20(OPS.tci_movl, 2, 0),
       OPS.exit_tb,
     ],
     tbWords: [
-      (OPS.tci_movl | (2 << 8) | (5 << 12)) >>> 0,
+      opImm20(OPS.tci_movl, 3, 8),
       OPS.exit_tb,
     ],
+    tbCodeSize: 24,
+    expected: {
+      reason: "js-status-metadata-output-unknown-mismatch",
+      index: 0,
+      op: OPS.tci_movl,
+      opName: "tci_movl",
+    },
+  },
+  {
+    name: "r4s19-tci-movl-out-of-range-pool-target-rejects",
+    words: [
+      opImm20(OPS.tci_movl, 2, 0),
+      OPS.exit_tb,
+    ],
+    tbWords: [
+      opImm20(OPS.tci_movl, 2, 32),
+      OPS.exit_tb,
+    ],
+    tbCodeSize: 24,
     expected: {
       reason: "js-status-metadata-output-pool-relocation",
       index: 0,
       op: OPS.tci_movl,
       opName: "tci_movl",
+    },
+  },
+  {
+    name: "r4s19-call-pool-relocation-still-rejects",
+    words: [
+      opCall(1, 0),
+      OPS.exit_tb,
+    ],
+    tbWords: [
+      opCall(1, 4),
+      OPS.exit_tb,
+    ],
+    tbCodeSize: 24,
+    expected: {
+      reason: "js-status-metadata-output-pool-relocation",
+      index: 0,
+      op: OPS.call,
+      opName: "call",
     },
   },
   {
@@ -6073,6 +6217,7 @@ for (const fixture of r4s8bMetadataOutputMismatchFixtures) {
     generatedOutputSize: fixture.words.length * 4,
     words: fixture.words,
     tbWords: fixture.tbWords,
+    tbCodeSize: fixture.tbCodeSize,
     relativeBase: r4iLiveX86Fixture.relativeBase,
     guestInstructions: 1,
   });
@@ -6436,6 +6581,8 @@ function simulateR4mLiveGeneratedExec({
     tlbMirrorValidated: memopValidation.tlbMirrorValidated || false,
     normalizedBranchLabelRelocations:
       route.normalizedBranchLabelRelocations || 0,
+    normalizedTciMovlPoolRelocations:
+      route.normalizedTciMovlPoolRelocations || 0,
     normalizedWords: route.normalizedWords || null,
     runtimeUnsupportedGuards: route.runtimeUnsupportedGuards || [],
   };

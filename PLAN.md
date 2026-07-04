@@ -3302,7 +3302,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     coverage, dominated in this run by `js-status-metadata-output-pool-relocation`
     (`46931` rejects), selected-body memory alignment/multi-access rejects,
     module emission/validation failures, and unsupported `movcond`.
-  - [ ] R4s19 - Repair the dominant x86 live-generated pool-relocation
+  - [x] R4s19 - Repair the dominant x86 live-generated pool-relocation
     blocker before another R4l speed gate. DoD: the live generated-exec path
     safely rebases finalized `tci_movl` constant-pool operands from the
     current translated TB instead of rejecting them as
@@ -3335,6 +3335,95 @@ run that reaches a weaker marker than normal multi-user readiness.
     coverage numerator/denominator, top remaining reject reasons, and proof
     that the old unaligned-access crash is still absent. No full R4l speed
     gate or Bus Engine OS proof may run from this item.
+    Accepted 2026-07-04: QEMU branch
+    `qemu/r4s19-pool-relocation-20260704` safely rebases only `tci_movl`
+    constant-pool operands from the current TB. The live path now requires a
+    valid current `TranslationBlock`, `tb->tc.ptr == tb_ptr`, nonzero
+    `tb->icount`, no `CF_INVALID`, and a generated output size no larger
+    than `tb->tc.size` before reading live output words. `tci_movl` normalization
+    accepts only same-opcode, same low register/destination fields with a
+    relocation-field-only difference and a live pool target bounded by the
+    current TB code/pool size; changed destination/register fields,
+    out-of-range pool targets, stale code, unknown same-op mismatches, and
+    helper/call pool entries still fail closed.
+
+    Deterministic checks passed:
+    `git diff --check`;
+    `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`;
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`;
+    `node --check scripts/ci/wasm64-translate-metadata-test.mjs`; and
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`. The equivalence
+    coverage includes a positive pre-relocation `tci_movl` metadata word plus
+    finalized live word whose in-TB pool target normalizes and retires one
+    generated guest instruction, plus negative changed-destination,
+    out-of-range pool-target, stale/unknown mismatch, and helper/call
+    fail-closed cases. Existing branch-label relocation and stale-code
+    fixtures still pass.
+
+    Fresh x86 accelerator artifact build command:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s19-x86-accelerator-artifacts
+    --target x86_64 --tcg-wasm64-backend --jobs 10 --build-image`.
+    Artifact hashes: `qemu-system-x86_64.js`
+    `eec586e1b6af11b7c0f5ea610eaed1dae69d416c5ff7dd292ed4973226e0a11e`,
+    `qemu-system-x86_64.wasm`
+    `bac6c763eb1c9dbe1b0f4f62287a84d31d5eacff97886ec1911d93eabee1e8c3`,
+    manifest
+    `4e195d1e5c0d7450db5bd0c84919a43a99c9e7e6520a8bbe123b3b9fb203af77`,
+    and `SHA256SUMS`
+    `e5ab4bc28495b482f89499959a25d3bbcc3974e32e63daedfe03598b65c6fc61`.
+
+    Bounded normal-mode Chromium `149.0.7827.55` command:
+    `npm exec --yes --package=playwright -- node
+    scripts/ci/wasm-browser-smoke-runner.mjs --browser chromium
+    --artifact-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s19-x86-accelerator-artifacts
+    --firmware-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/projects/qemu/pc-bios
+    --guest-manifest
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4s8-guest-current/tuxboot-browser-smoke-guest.json
+    --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s19-x86-normal/wasm-browser-smoke-result.json
+    --screenshot
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s19-x86-normal/wasm-browser-smoke.png
+    --port 8230 --timeout-ms 60000 --max-output-bytes 100000
+    --page-text-tail-bytes 100000 --wasm64-live-generated-exec
+    --wasm64-tcg-summary --wasm64-tcg-summary-interval 1000`. The run
+    timed out on the generic boot marker as expected for this bounded
+    preflight (`markerSeen=false`, phase `timeout`, elapsed `60198` ms) and
+    did not report page errors, console errors, `RuntimeError: operation does
+    not support unaligned accesses`, or native abort signatures. Result JSON
+    SHA-256:
+    `a9636c70e103b05837b4d0e0af01755ef85cbdbfdfb57bd3ac3250f2ed1f4cdf`;
+    screenshot SHA-256:
+    `2ae655f69ca047c456790027650e14085e9675655225282361c00d61335072fc`.
+    `node scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs --result
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s19-x86-normal/wasm-browser-smoke-result.json
+    --json` passed.
+
+    Its final live run-loop summary reported attempts `39874`, successes
+    `629`, rejects `39245`, generated guest instructions `929`, fallback
+    guest instructions `325940`, generated body time `26035000` ns, TCI
+    dispatch time `43989457000` ns, generated coverage `929 / 326997`,
+    helper/`qemu_ld`/`qemu_st` calls all `0`, inline TLB-hit loads/stores
+    `1589 / 1918`, hotset goto sources `13720`, target metadata hits
+    `5926`, target output hits `5909`, target stale `7794`, unsupported
+    exits `346`, interrupt exits `73`, and no unsafe hotset slots. The final
+    TCG summary was present with generated coverage `477 / 96915` (`4921`
+    ppm). The R4s18 dominant pool-relocation family fell from `46931` rejects
+    to `0`; remaining top live reject reasons were
+    `js-status-module-emission-failed` (`27784`),
+    `js-status-module-validation-failed` (`5185`),
+    `selected-body-memop-unsupported-alignment` (`2937`),
+    `selected-body-softmmu-multi-access-unsupported` (`2127`),
+    `generated-output-unavailable` (`500`),
+    `selected-body-shape-unsupported` (`371`, `movcond`),
+    `selected-body-memop-unsupported-size` (`227`),
+    `selected-body-memop-unsupported-sign` (`101`), and
+    `unsupported-body-state` (`13`). This completes R4s19 and shifts the next
+    generic x86 accelerator work to R4s20 module emission/validation and the
+    remaining memory-shape rejects; it is not an R4l speed pass, and no full
+    R4l speed gate or Bus Engine OS proof was run.
   - [ ] R4s20 - Repair second-tier x86 live-emitter module
     validation/emission blockers after R4s19 evidence, unless R4s19 shows a
     different dominant blocker. DoD: make live and deterministic SoftMMU
