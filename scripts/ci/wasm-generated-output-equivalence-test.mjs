@@ -1869,6 +1869,257 @@ function runExitReasonName(reason) {
   return `unknown-${reason}`;
 }
 
+function liveGeneratedExecJsStatusReason(status) {
+  if (status === 1n) {
+    return "js-status-runtime-unavailable";
+  }
+  if (status === 2n) {
+    return "js-status-differential-mismatch";
+  }
+  if (status === 3n) {
+    return "js-status-metadata-output-tb-code-mismatch";
+  }
+  if (status === 4n) {
+    return "js-status-generated-output-unavailable";
+  }
+  if (status === 5n) {
+    return "js-status-selected-body-shape-unsupported";
+  }
+  if (status === 6n) {
+    return "js-status-module-emission-failed";
+  }
+  if (status === 7n) {
+    return "js-status-module-validation-failed";
+  }
+  return "js-status-unknown";
+}
+
+function classifyLiveGeneratedExecReject({
+  jsStatus = 0n,
+  generatedStatus = STATUS_DISPATCH,
+  generatedRet = 0x1000n,
+  generatedGuestInsns = 4n,
+  generatedTciOps = 1n,
+  generatedOutputWords = 1n,
+  metadataGeneratedOutputOpCount = 1n,
+  guestInsns = 4n,
+  counters = {},
+} = {}) {
+  const runCounters = {
+    generatedGuestInstructions: guestInsns,
+    generatedChainLength: 1n,
+    helperCalls: 0n,
+    qemuLdCalls: 0n,
+    qemuStCalls: 0n,
+    exitsMmio: 0n,
+    exitsTlbMissOrFault: 0n,
+    exitsHelper: 0n,
+    exitsUnsupported: 0n,
+    exitsInvalidated: 0n,
+    ...counters,
+  };
+
+  function rejected(reason, exitReason = RUN_EXIT_REASON_UNSUPPORTED) {
+    return { reason, exitReason: runExitReasonName(exitReason) };
+  }
+
+  if (jsStatus !== 0n) {
+    return rejected(
+      liveGeneratedExecJsStatusReason(jsStatus),
+      jsStatus === 3n ?
+        RUN_EXIT_REASON_INVALIDATED : RUN_EXIT_REASON_UNSUPPORTED,
+    );
+  }
+  if (runCounters.exitsMmio !== 0n) {
+    return rejected("mmio-exit", RUN_EXIT_REASON_MMIO);
+  }
+  if (runCounters.exitsTlbMissOrFault !== 0n) {
+    return rejected(
+      "tlb-miss-or-fault-exit",
+      RUN_EXIT_REASON_TLB_MISS_OR_FAULT,
+    );
+  }
+  if (runCounters.exitsInvalidated !== 0n ||
+      generatedStatus === BigInt(RUN_EXIT_REASON_INVALIDATED)) {
+    return rejected("invalidated", RUN_EXIT_REASON_INVALIDATED);
+  }
+  if (runCounters.exitsUnsupported !== 0n ||
+      generatedStatus === STATUS_UNSUPPORTED) {
+    return rejected("unsupported-body-state");
+  }
+  if (runCounters.exitsHelper !== 0n ||
+      generatedStatus === STATUS_HELPER) {
+    return rejected("generated-status-helper", RUN_EXIT_REASON_HELPER);
+  }
+  if (generatedStatus !== STATUS_DISPATCH && generatedStatus !== STATUS_EXIT) {
+    return rejected("generated-status-unexpected");
+  }
+  if (generatedRet === 0n) {
+    return rejected("missing-return-target");
+  }
+  if (generatedGuestInsns !== guestInsns) {
+    return rejected("guest-instruction-mismatch");
+  }
+  if (generatedTciOps === 0n) {
+    return rejected("tci-op-count-mismatch");
+  }
+  if (generatedOutputWords !== metadataGeneratedOutputOpCount) {
+    return rejected("generated-output-words-mismatch");
+  }
+  if (runCounters.generatedGuestInstructions !== guestInsns) {
+    return rejected("counter-guest-instruction-mismatch");
+  }
+  if (runCounters.generatedChainLength !== 1n) {
+    return rejected("chain-length-mismatch");
+  }
+  if (runCounters.helperCalls !== 0n) {
+    return rejected("helper-counter-mismatch", RUN_EXIT_REASON_HELPER);
+  }
+  if (runCounters.qemuLdCalls !== 0n ||
+      runCounters.qemuStCalls !== 0n) {
+    return rejected("qemu-helper-counter-mismatch");
+  }
+  return rejected("unsupported-body-state");
+}
+
+const liveGeneratedExecRejectClassificationCases = [
+  {
+    name: "js status",
+    input: { jsStatus: 6n },
+    expected: {
+      reason: "js-status-module-emission-failed",
+      exitReason: "unsupported",
+    },
+  },
+  {
+    name: "js status invalidation",
+    input: { jsStatus: 3n },
+    expected: {
+      reason: "js-status-metadata-output-tb-code-mismatch",
+      exitReason: "invalidated",
+    },
+  },
+  {
+    name: "generated status helper",
+    input: { generatedStatus: STATUS_HELPER },
+    expected: { reason: "generated-status-helper", exitReason: "helper" },
+  },
+  {
+    name: "generated status unexpected",
+    input: { generatedStatus: 99n },
+    expected: {
+      reason: "generated-status-unexpected",
+      exitReason: "unsupported",
+    },
+  },
+  {
+    name: "missing return target",
+    input: { generatedRet: 0n },
+    expected: {
+      reason: "missing-return-target",
+      exitReason: "unsupported",
+    },
+  },
+  {
+    name: "guest instruction mismatch",
+    input: { generatedGuestInsns: 3n },
+    expected: {
+      reason: "guest-instruction-mismatch",
+      exitReason: "unsupported",
+    },
+  },
+  {
+    name: "chain length mismatch",
+    input: { counters: { generatedChainLength: 2n } },
+    expected: {
+      reason: "chain-length-mismatch",
+      exitReason: "unsupported",
+    },
+  },
+  {
+    name: "helper counter mismatch",
+    input: { counters: { helperCalls: 1n } },
+    expected: { reason: "helper-counter-mismatch", exitReason: "helper" },
+  },
+  {
+    name: "qemu load helper counter mismatch",
+    input: { counters: { qemuLdCalls: 1n } },
+    expected: {
+      reason: "qemu-helper-counter-mismatch",
+      exitReason: "unsupported",
+    },
+  },
+  {
+    name: "qemu store helper counter mismatch",
+    input: { counters: { qemuStCalls: 1n } },
+    expected: {
+      reason: "qemu-helper-counter-mismatch",
+      exitReason: "unsupported",
+    },
+  },
+  {
+    name: "mmio exit",
+    input: { counters: { exitsMmio: 1n }, generatedRet: 0n },
+    expected: { reason: "mmio-exit", exitReason: "mmio" },
+  },
+  {
+    name: "tlb exit",
+    input: {
+      counters: { exitsTlbMissOrFault: 1n },
+      generatedRet: 0n,
+    },
+    expected: {
+      reason: "tlb-miss-or-fault-exit",
+      exitReason: "tlb-miss-or-fault",
+    },
+  },
+  {
+    name: "invalidation",
+    input: { counters: { exitsInvalidated: 1n } },
+    expected: { reason: "invalidated", exitReason: "invalidated" },
+  },
+  {
+    name: "unsupported body state",
+    input: { generatedStatus: STATUS_UNSUPPORTED },
+    expected: {
+      reason: "unsupported-body-state",
+      exitReason: "unsupported",
+    },
+  },
+  {
+    name: "tci op count mismatch",
+    input: { generatedTciOps: 0n },
+    expected: {
+      reason: "tci-op-count-mismatch",
+      exitReason: "unsupported",
+    },
+  },
+  {
+    name: "generated output words mismatch",
+    input: { generatedOutputWords: 2n },
+    expected: {
+      reason: "generated-output-words-mismatch",
+      exitReason: "unsupported",
+    },
+  },
+  {
+    name: "counter guest instruction mismatch",
+    input: { counters: { generatedGuestInstructions: 3n } },
+    expected: {
+      reason: "counter-guest-instruction-mismatch",
+      exitReason: "unsupported",
+    },
+  },
+];
+
+for (const testCase of liveGeneratedExecRejectClassificationCases) {
+  assert.deepEqual(
+    classifyLiveGeneratedExecReject(testCase.input),
+    testCase.expected,
+    testCase.name,
+  );
+}
+
 const HOTSET_LOCAL_COUNTERS_PTR = 19;
 const HOTSET_LOCAL_BUDGET = 20;
 const HOTSET_LOCAL_CHAIN_TARGET = 21;

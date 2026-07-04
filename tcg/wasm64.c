@@ -144,7 +144,28 @@ typedef enum TCGWasm64LiveGeneratedExecRejectReason {
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_OUTPUT_UNAVAILABLE,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SHAPE_UNSUPPORTED,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_TB_IDENTITY_MISSING_OR_STALE,
-    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_REJECTED,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_RUNTIME_UNAVAILABLE,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_DIFFERENTIAL_MISMATCH,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_METADATA_OUTPUT_MISMATCH,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_OUTPUT_UNAVAILABLE,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_SHAPE_UNSUPPORTED,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_MODULE_EMISSION_FAILED,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_MODULE_VALIDATION_FAILED,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_UNKNOWN,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_STATUS_HELPER,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_STATUS_UNEXPECTED,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_MISSING_RETURN_TARGET,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GUEST_INSTRUCTION_MISMATCH,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_TCI_OP_COUNT_MISMATCH,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_OUTPUT_WORDS_MISMATCH,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_COUNTER_GUEST_INSN_MISMATCH,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_CHAIN_LENGTH_MISMATCH,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_HELPER_COUNTER_MISMATCH,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_QEMU_HELPER_COUNTER_MISMATCH,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_MMIO_EXIT,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_TLB_MISS_OR_FAULT_EXIT,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_INVALIDATED,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_UNSUPPORTED_BODY_STATE,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT__MAX,
 } TCGWasm64LiveGeneratedExecRejectReason;
 
@@ -5512,44 +5533,86 @@ static void tcg_wasm64_live_generated_exec_fail_closed(
             reason);
 }
 
+static const char * const live_generated_exec_reject_reason_names[] = {
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_METADATA_MISSING] =
+        "metadata-missing",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_OUTPUT_UNAVAILABLE] =
+        "generated-output-unavailable",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SHAPE_UNSUPPORTED] =
+        "selected-body-shape-unsupported",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_TB_IDENTITY_MISSING_OR_STALE] =
+        "tb-identity-missing-or-stale",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_RUNTIME_UNAVAILABLE] =
+        "js-status-runtime-unavailable",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_DIFFERENTIAL_MISMATCH] =
+        "js-status-differential-mismatch",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_METADATA_OUTPUT_MISMATCH] =
+        "js-status-metadata-output-tb-code-mismatch",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_OUTPUT_UNAVAILABLE] =
+        "js-status-generated-output-unavailable",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_SHAPE_UNSUPPORTED] =
+        "js-status-selected-body-shape-unsupported",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_MODULE_EMISSION_FAILED] =
+        "js-status-module-emission-failed",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_MODULE_VALIDATION_FAILED] =
+        "js-status-module-validation-failed",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_UNKNOWN] =
+        "js-status-unknown",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_STATUS_HELPER] =
+        "generated-status-helper",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_STATUS_UNEXPECTED] =
+        "generated-status-unexpected",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_MISSING_RETURN_TARGET] =
+        "missing-return-target",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GUEST_INSTRUCTION_MISMATCH] =
+        "guest-instruction-mismatch",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_TCI_OP_COUNT_MISMATCH] =
+        "tci-op-count-mismatch",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_OUTPUT_WORDS_MISMATCH] =
+        "generated-output-words-mismatch",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_COUNTER_GUEST_INSN_MISMATCH] =
+        "counter-guest-instruction-mismatch",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_CHAIN_LENGTH_MISMATCH] =
+        "chain-length-mismatch",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_HELPER_COUNTER_MISMATCH] =
+        "helper-counter-mismatch",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_QEMU_HELPER_COUNTER_MISMATCH] =
+        "qemu-helper-counter-mismatch",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_MMIO_EXIT] =
+        "mmio-exit",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_TLB_MISS_OR_FAULT_EXIT] =
+        "tlb-miss-or-fault-exit",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_INVALIDATED] =
+        "invalidated",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_UNSUPPORTED_BODY_STATE] =
+        "unsupported-body-state",
+};
+
+QEMU_BUILD_BUG_ON(ARRAY_SIZE(live_generated_exec_reject_reason_names) !=
+                  TCG_WASM64_LIVE_GENERATED_EXEC_REJECT__MAX);
+
 static const char *tcg_wasm64_live_generated_exec_reject_reason_name(
     TCGWasm64LiveGeneratedExecRejectReason reason)
 {
-    switch (reason) {
-    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_METADATA_MISSING:
-        return "metadata-missing";
-    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_OUTPUT_UNAVAILABLE:
-        return "generated-output-unavailable";
-    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SHAPE_UNSUPPORTED:
-        return "selected-body-shape-unsupported";
-    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_TB_IDENTITY_MISSING_OR_STALE:
-        return "tb-identity-missing-or-stale";
-    case TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_REJECTED:
-        return "generated-exec-rejected";
-    default:
+    if (reason >= TCG_WASM64_LIVE_GENERATED_EXEC_REJECT__MAX ||
+        !live_generated_exec_reject_reason_names[reason]) {
         return "unknown";
     }
+    return live_generated_exec_reject_reason_names[reason];
 }
 
 static TCGWasm64LiveGeneratedExecRejectReason
 tcg_wasm64_live_generated_exec_reject_reason(const char *reason)
 {
-    if (g_strcmp0(reason, "metadata-missing") == 0) {
-        return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_METADATA_MISSING;
+    for (size_t i = 0;
+         i < ARRAY_SIZE(live_generated_exec_reject_reason_names);
+         i++) {
+        if (g_strcmp0(reason, live_generated_exec_reject_reason_names[i]) ==
+            0) {
+            return (TCGWasm64LiveGeneratedExecRejectReason)i;
+        }
     }
-    if (g_strcmp0(reason, "generated-output-unavailable") == 0) {
-        return
-            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_OUTPUT_UNAVAILABLE;
-    }
-    if (g_strcmp0(reason, "selected-body-shape-unsupported") == 0) {
-        return
-            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SHAPE_UNSUPPORTED;
-    }
-    if (g_strcmp0(reason, "tb-identity-missing-or-stale") == 0) {
-        return
-            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_TB_IDENTITY_MISSING_OR_STALE;
-    }
-    return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_EXEC_REJECTED;
+    return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_UNSUPPORTED_BODY_STATE;
 }
 
 static uint64_t tcg_wasm64_live_generated_exec_reject_total(void)
@@ -5701,6 +5764,135 @@ static void tcg_wasm64_live_generated_exec_preflight_maybe_fail(void)
             live_generated_exec_attempted);
 }
 
+static const char *
+tcg_wasm64_live_generated_exec_js_status_reject_reason(uint64_t status)
+{
+    switch (status) {
+    case 1:
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_RUNTIME_UNAVAILABLE);
+    case 2:
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_DIFFERENTIAL_MISMATCH);
+    case 3:
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_METADATA_OUTPUT_MISMATCH);
+    case 4:
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_OUTPUT_UNAVAILABLE);
+    case 5:
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_SHAPE_UNSUPPORTED);
+    case 6:
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_MODULE_EMISSION_FAILED);
+    case 7:
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_MODULE_VALIDATION_FAILED);
+    default:
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_UNKNOWN);
+    }
+}
+
+static const char *tcg_wasm64_live_generated_exec_classify_reject(
+    const TCGWasm64TBMetadata *metadata,
+    const TCGWasm64RunCounters *run_counters,
+    const TCGWasm64RunExit *exit, const uint64_t *result,
+    uint64_t guest_insns, TCGWasm64RunExitReason *exit_reason)
+{
+    uint64_t js_status =
+        result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_JS_STATUS];
+    uint64_t generated_status =
+        result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_STATUS];
+
+    *exit_reason = TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+
+    if (js_status != 0) {
+        if (js_status == 3) {
+            *exit_reason = TCG_WASM64_RUN_EXIT_INVALIDATED;
+        }
+        return tcg_wasm64_live_generated_exec_js_status_reject_reason(
+            js_status);
+    }
+
+    if (run_counters->exits_mmio != 0) {
+        *exit_reason = TCG_WASM64_RUN_EXIT_MMIO;
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_MMIO_EXIT);
+    }
+    if (run_counters->exits_tlb_miss_or_fault != 0) {
+        *exit_reason = TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT;
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_TLB_MISS_OR_FAULT_EXIT);
+    }
+    if (run_counters->exits_invalidated != 0 ||
+        exit->reason == TCG_WASM64_RUN_EXIT_INVALIDATED ||
+        generated_status == TCG_WASM64_LIVE_TB_STATUS_INVALIDATED) {
+        *exit_reason = TCG_WASM64_RUN_EXIT_INVALIDATED;
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_INVALIDATED);
+    }
+    if (run_counters->exits_unsupported != 0 ||
+        exit->reason == TCG_WASM64_RUN_EXIT_UNSUPPORTED ||
+        generated_status == TCG_WASM64_LIVE_TB_STATUS_UNSUPPORTED) {
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_UNSUPPORTED_BODY_STATE);
+    }
+    if (run_counters->exits_helper != 0 ||
+        exit->reason == TCG_WASM64_RUN_EXIT_HELPER ||
+        generated_status == TCG_WASM64_LIVE_TB_STATUS_HELPER) {
+        *exit_reason = TCG_WASM64_RUN_EXIT_HELPER;
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_STATUS_HELPER);
+    }
+    if (generated_status != TCG_WASM64_LIVE_TB_STATUS_DISPATCH &&
+        generated_status != TCG_WASM64_LIVE_TB_STATUS_EXIT) {
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GENERATED_STATUS_UNEXPECTED);
+    }
+    if (result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_RET] == 0) {
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_MISSING_RETURN_TARGET);
+    }
+    if (result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_GUEST_INSNS] !=
+        guest_insns) {
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_GUEST_INSTRUCTION_MISMATCH);
+    }
+    if (result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_TCI_OPS] ==
+        0) {
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_TCI_OP_COUNT_MISMATCH);
+    }
+    if (result[TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_GENERATED_OUTPUT_WORDS] !=
+        metadata->generated_output_op_count) {
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_OUTPUT_WORDS_MISMATCH);
+    }
+    if (run_counters->generated_guest_instructions != guest_insns) {
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_COUNTER_GUEST_INSN_MISMATCH);
+    }
+    if (run_counters->generated_chain_length != 1) {
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_CHAIN_LENGTH_MISMATCH);
+    }
+    if (run_counters->helper_calls != 0) {
+        *exit_reason = TCG_WASM64_RUN_EXIT_HELPER;
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_HELPER_COUNTER_MISMATCH);
+    }
+    if (run_counters->qemu_ld_calls != 0 ||
+        run_counters->qemu_st_calls != 0) {
+        return tcg_wasm64_live_generated_exec_reject_reason_name(
+            TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_QEMU_HELPER_COUNTER_MISMATCH);
+    }
+
+    return tcg_wasm64_live_generated_exec_reject_reason_name(
+        TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_UNSUPPORTED_BODY_STATE);
+}
+
 static bool tcg_wasm64_live_generated_exec_reject(
     const char *reason, const void *tb_ptr,
     const TCGWasm64TBMetadata *metadata, const TranslationBlock *tb,
@@ -5839,20 +6031,19 @@ static bool tcg_wasm64_live_generated_exec_try(
          run_counters.qemu_st_calls == 0;
 
     if (!ok) {
-        TCGWasm64RunExitReason reject_reason =
-            exit.reason == TCG_WASM64_RUN_EXIT_INVALIDATED ?
-            TCG_WASM64_RUN_EXIT_INVALIDATED : TCG_WASM64_RUN_EXIT_UNSUPPORTED;
+        TCGWasm64RunExitReason reject_reason;
+        const char *reject_name;
 
-        tcg_wasm64_live_generated_exec_count_reason(
-            "generated-exec-rejected");
+        reject_name = tcg_wasm64_live_generated_exec_classify_reject(
+            metadata, &run_counters, &exit, result, guest_insns,
+            &reject_reason);
+        tcg_wasm64_live_generated_exec_count_reason(reject_name);
         tcg_wasm64_live_generated_exec_count_reject(counters, reject_reason);
         tcg_wasm64_live_generated_exec_preflight_maybe_fail();
         if (no_fallback) {
-            tcg_wasm64_report_live_generated_exec_summary(
-                "generated-exec-rejected");
+            tcg_wasm64_report_live_generated_exec_summary(reject_name);
         }
-        tcg_wasm64_live_generated_exec_fail_closed(
-            "generated-exec-rejected", no_fallback);
+        tcg_wasm64_live_generated_exec_fail_closed(reject_name, no_fallback);
         return false;
     }
 

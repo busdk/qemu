@@ -2013,7 +2013,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     is still rejected. Therefore the attempted `tci_qemu_ld_rrr` /
     `tci_qemu_st_rrr` live SoftMMU slice is not accepted, must not be
     committed to `develop`, and R4l remains blocked.
-  - [ ] R4s3 - Replace the generic `generated-exec-rejected` bucket with
+  - [x] R4s3 - Replace the generic `generated-exec-rejected` bucket with
     precise live x86 rejection attribution before another browser run. DoD:
     deterministic tests prove that generated execution failures are classified
     as the actual exit or predicate that failed, including JS status,
@@ -2022,6 +2022,29 @@ run that reaches a weaker marker than normal multi-user readiness.
     exit, invalidation, and unsupported body state. No browser run is
     justified until this attribution can explain the R4s2 `56` generic
     rejects without reading a browser stack by hand.
+    Accepted 2026-07-04: `tcg/wasm64.c` now replaces the generic
+    `generated-exec-rejected` path with `tcg_wasm64_live_generated_exec_classify_reject()`
+    and explicit `reject_reasons[]` names for JS status failures, generated
+    status helper/unexpected, missing return target, guest-instruction
+    mismatch, generated TCI op/output-word mismatch, counter guest-instruction
+    mismatch, chain-length mismatch, helper/qemu helper counter mismatch,
+    MMIO exit, TLB miss/fault exit, invalidation, and unsupported body state.
+    The clean promoted patch deliberately excludes the rejected R4s2 live
+    SoftMMU execution body: it does not add a `TCGWasm64TLBMirror` to
+    `tcg_wasm64_live_generated_exec_try()`, does not newly enable
+    `tci_qemu_ld_rrr`/`tci_qemu_st_rrr` live execution, and adds a regression
+    assertion that `DISPATCH == MMIO` status aliasing is not used for R4s3
+    classification. Checks: `node --check
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node --check
+    scripts/ci/wasm64-translate-metadata-test.mjs`, `node --check
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`,
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`, `node
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, and
+    `git diff --check` passed. `ninja -C build qemu-system-x86_64` could not
+    run in this environment because `ninja` is not installed. No browser run,
+    artifact build, speed claim, R4l unlock, or Bus Engine OS proof was run
+    in this slice.
   - [ ] R4s4 - Handle or intentionally bypass `call`-fronted selected x86
     body shapes before rerunning the live preflight. DoD: the R4r-selected
     first-window shapes that currently report `call=44` either get a

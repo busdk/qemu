@@ -365,6 +365,37 @@ assert.match(runtime, /"metadata-missing"/);
 assert.match(runtime, /"generated-output-unavailable"/);
 assert.match(runtime, /"selected-body-shape-unsupported"/);
 assert.match(runtime, /"tb-identity-missing-or-stale"/);
+assert.match(runtime, /tcg_wasm64_live_generated_exec_classify_reject/);
+assert.doesNotMatch(runtime, /"generated-exec-rejected"/);
+assert.doesNotMatch(runtime, /exit->reason == TCG_WASM64_RUN_EXIT_MMIO/);
+assert.doesNotMatch(
+  runtime,
+  /exit->reason == TCG_WASM64_RUN_EXIT_TLB_MISS_OR_FAULT/,
+);
+for (const liveGeneratedExecRejectReason of [
+  "js-status-runtime-unavailable",
+  "js-status-metadata-output-tb-code-mismatch",
+  "js-status-module-emission-failed",
+  "generated-status-helper",
+  "generated-status-unexpected",
+  "missing-return-target",
+  "guest-instruction-mismatch",
+  "tci-op-count-mismatch",
+  "generated-output-words-mismatch",
+  "counter-guest-instruction-mismatch",
+  "chain-length-mismatch",
+  "helper-counter-mismatch",
+  "qemu-helper-counter-mismatch",
+  "mmio-exit",
+  "tlb-miss-or-fault-exit",
+  "invalidated",
+  "unsupported-body-state",
+]) {
+  assert.match(
+    runtime,
+    new RegExp(`"${liveGeneratedExecRejectReason}"`),
+  );
+}
 assert.match(runtime, /TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_CACHE_HIT/);
 assert.match(runtime, /translated_counters\.generated_attempts\+\+/);
 assert.match(runtime, /translated_counters\.generated_executed\+\+/);
