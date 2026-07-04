@@ -2316,6 +2316,68 @@ run that reaches a weaker marker than normal multi-user readiness.
     `608fa44bd53438b483410135ad944819d686fff194572468b45046a7d1761a27`.
     The bounded Chromium preflight has not run yet, so R4s6 remains open and
     R4l remains blocked.
+
+    Rejected preflight 2026-07-04: worker-run bounded Chromium preflight used
+    the artifact pair above and command shape `npm exec --yes
+    --package=playwright -- node scripts/ci/wasm-browser-smoke-runner.mjs
+    --browser chromium --artifact-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s6-x86-backend-artifacts
+    --firmware-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/projects/qemu/pc-bios
+    --guest-manifest
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s6-x86-guest-0d6ecfb-20260704/tuxboot-browser-smoke-guest.json
+    --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s6-x86-preflight/wasm-browser-smoke-result.json
+    --screenshot
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s6-x86-preflight/wasm-browser-smoke.png
+    --port 8128 --timeout-ms 60000 --max-output-bytes 100000
+    --page-text-tail-bytes 100000 --wasm64-live-generated-exec
+    --wasm64-live-generated-exec-preflight
+    --wasm64-live-generated-exec-preflight-limit 100
+    --wasm64-tcg-summary --wasm64-tcg-summary-interval 1000`.
+    Browser was Chromium `149.0.7827.55`. Result JSON SHA256
+    `217320ba03d15af2d348fb3de43c41b84fdfe9620859e5107425d973d9713c12`;
+    screenshot SHA256
+    `ce65ca61a9c0c454e7a46f21e39759409c259dcf4402cfb9d29076faa9a2eb79`.
+    The run timed out after `60640` ms without `QEMU_WASM_LINUX_BOOT_OK` and
+    ended with `Aborted(native code called abort())` because preflight failed.
+    The x86 metrics gate failed:
+    `runloop_ok=true runloop_event=live-generated-exec-summary
+    runloop_acceptance=false runloop_missing=0 tcg_present=true
+    tcg_ok=false tcg_missing=2 ok=false`.
+    `wasm64Runloop.lastSummary` reported
+    `reason=preflight-zero-generated-exec`, `preflight_ready=false`,
+    `attempts=100`, `successes=0`, `rejects=100`, `skips=82`,
+    `generated_guest_instructions=0`, `generated_run_entries=0`,
+    `generated_chain_length=0`, `generated_coverage_numerator=0`, and
+    `generated_coverage_denominator=1120`. Hotset attribution reported
+    `hotset_goto_sources=98`, `hotset_target_slots_read=98`,
+    `hotset_target_metadata_hits=14`, `hotset_target_output_hits=14`, and
+    `hotset_target_stale=84`. Nonzero reject reasons were
+    `selected-body-memop-unsupported-atomic=85`,
+    `js-status-metadata-output-tb-code-mismatch=13`,
+    `selected-body-memop-unsupported-size=1`, and
+    `selected-body-memop-unsupported-alignment=1`.
+    `wasm64Tcg` was enabled but `summaryCount=0`, so the TCG summary fields
+    required by the metrics gate were absent. R4s6 remains rejected, R4l
+    remains blocked, and the next x86 implementation item must address the
+    measured live-body MemOp rejection and metadata-output mismatch before
+    another browser speed run.
+  - [ ] R4s7 - Classify and repair the measured x86 live-body MemOp rejection
+    path before another browser run. DoD: using the R4s6 result above and
+    current `tcg/wasm64.c`, identify whether
+    `selected-body-memop-unsupported-atomic` represents guest-visible atomic
+    semantics or QEMU `MemOp` access-mode flags that can be handled by the
+    existing generic SoftMMU/TLB contract. Add deterministic tests that cover
+    the measured MemOp flag combinations for load and store rejection, then
+    either lower the safe generic subset with correct ordering/fault behavior
+    or keep it rejected with a more precise reason. Also add deterministic
+    attribution for `metadata-output-tb-code-mismatch` so stale generated
+    output, TB identity drift, and unsupported live-output mutation are
+    distinguishable. No Chromium run is allowed until deterministic evidence
+    predicts nonzero generated guest-instruction retirement for at least one
+    measured live x86 body, and the next bounded preflight must report whether
+    the reject histogram moved from zero generated execution.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
