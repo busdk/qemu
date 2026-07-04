@@ -677,6 +677,15 @@ function moduleFailureAttribution({
   };
 }
 
+function wasmModuleError(moduleBytes) {
+  try {
+    new WebAssembly.Module(moduleBytes);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
 function toU64(value) {
   return BigInt.asUintN(64, BigInt(value));
 }
@@ -847,8 +856,14 @@ function x86RegField(reg) {
   return `CPUX86State.regs[${X86_REG_ENUMS[reg]}]`;
 }
 
-function memoryAddress(regExpr, ofs) {
-  return i32WrapI64([...regExpr, ...i64Const(ofs), 0x7c]);
+function memoryAddress(regExpr, ofs, memory64 = false) {
+  const address = [...regExpr, ...i64Const(ofs), 0x7c];
+
+  return memory64 ? address : i32WrapI64(address);
+}
+
+function memoryConstAddress(address, memory64 = false) {
+  return memory64 ? i64Const(address) : i32Const(address);
 }
 
 function envRelativeAccessSupported(op, size) {
@@ -859,9 +874,13 @@ function envRelativeAccessSupported(op, size) {
          offset + size <= RV64_ENV_RELATIVE_MAX_EXCLUSIVE;
 }
 
-function envRelativeMemoryAddress(op, size) {
+function envRelativeMemoryAddress(op, size, memory64 = false) {
   return envRelativeAccessSupported(op, size)
-    ? memoryAddress(localGet(regLocal(op.r1)), sextract(op.insn, 16, 16))
+    ? memoryAddress(
+      localGet(regLocal(op.r1)),
+      sextract(op.insn, 16, 16),
+      memory64,
+    )
     : null;
 }
 
@@ -1287,8 +1306,13 @@ function compileSharedSoftmmuAccessOp(op, diagnostics = null) {
   return parts === null ? null : [...parts.guard, ...parts.commit];
 }
 
-function compileSharedGeneratedOutputOp(op, diagnostics = null) {
+function compileSharedGeneratedOutputOp(
+  op,
+  diagnostics = null,
+  options = {},
+) {
   const { insn, opc, r0, r1, r2 } = op;
+  const memory64 = options.memoryImportDescriptor?.memory64 === true;
 
   if (opc === OPS.tci_movi) {
     return localSet(regLocal(r0), i64Const(sextract(insn, 12, 20)));
@@ -1298,7 +1322,7 @@ function compileSharedGeneratedOutputOp(op, diagnostics = null) {
     return localSet(regLocal(r0), i64Load(i32Const(ptr), 0));
   }
   if (opc === OPS.ld32u || opc === OPS.ld32s) {
-    const address = envRelativeMemoryAddress(op, 4);
+    const address = envRelativeMemoryAddress(op, 4, memory64);
 
     if (address === null) {
       return null;
@@ -1310,24 +1334,24 @@ function compileSharedGeneratedOutputOp(op, diagnostics = null) {
                                       : i64ExtendI32S(loaded));
   }
   if (opc === OPS.ld) {
-    const address = envRelativeMemoryAddress(op, 8);
+    const address = envRelativeMemoryAddress(op, 8, memory64);
 
     return address === null ? null : localSet(regLocal(r0), i64Load(address));
   }
   if (opc === OPS.st8) {
-    const address = envRelativeMemoryAddress(op, 1);
+    const address = envRelativeMemoryAddress(op, 1, memory64);
 
     return address === null ? null
       : i32Store8(address, i32WrapI64(localGet(regLocal(r0))));
   }
   if (opc === OPS.st32) {
-    const address = envRelativeMemoryAddress(op, 4);
+    const address = envRelativeMemoryAddress(op, 4, memory64);
 
     return address === null ? null
       : i32Store(address, i32WrapI64(localGet(regLocal(r0))));
   }
   if (opc === OPS.st) {
-    const address = envRelativeMemoryAddress(op, 8);
+    const address = envRelativeMemoryAddress(op, 8, memory64);
 
     return address === null ? null
       : i64Store(address, localGet(regLocal(r0)));
@@ -1444,7 +1468,12 @@ function compileSharedGeneratedOutputOp(op, diagnostics = null) {
   return null;
 }
 
-function compileSharedGeneratedOutputBody(words, relativeBase, diagnostics = null) {
+function compileSharedGeneratedOutputBody(
+  words,
+  relativeBase,
+  diagnostics = null,
+  options = {},
+) {
   const { ops, terminal } = splitGeneratedOutput(words, relativeBase);
   const softmmuOps = ops.filter((op) =>
     op.opc === OPS.tci_qemu_ld_rrr || op.opc === OPS.tci_qemu_st_rrr);
@@ -1563,7 +1592,8 @@ function compileSharedGeneratedOutputBody(words, relativeBase, diagnostics = nul
         index++;
         continue;
       }
-      const compiled = compileSharedGeneratedOutputOp(op, diagnostics);
+      const compiled = compileSharedGeneratedOutputOp(
+        op, diagnostics, options);
 
       if (compiled === null) {
         return null;
@@ -1594,6 +1624,14 @@ function compileGeneratedOutputModule(
   const instructions = [];
   const memoryImportDescriptor =
     options.memoryImportDescriptor || DETERMINISTIC_MEMORY_IMPORT_DESCRIPTOR;
+  const memory64 = memoryImportDescriptor.memory64 === true;
+  const pointerType = memory64 ? VALUE_I64 : VALUE_I32;
+
+  function pointerFromContextField(offset) {
+    const loaded = i64Load(localGet(0), offset);
+
+    return memory64 ? loaded : i32WrapI64(loaded);
+  }
 
   if (diagnostics) {
     diagnostics.emitter = PER_TB_EMITTER_NAME;
@@ -1606,23 +1644,23 @@ function compileGeneratedOutputModule(
     throw new Error("injected deterministic live module emission failure");
   }
   instructions.push(...localSet(
-    1, i32WrapI64(i64Load(localGet(0), WASMJIT_RUN_CTX.env))));
+    1, pointerFromContextField(WASMJIT_RUN_CTX.env)));
   instructions.push(...localSet(
-    2, i32WrapI64(i64Load(localGet(0), WASMJIT_RUN_CTX.exit))));
+    2, pointerFromContextField(WASMJIT_RUN_CTX.exit)));
 
   for (let reg = 0; reg < 16; reg++) {
     instructions.push(...localSet(regLocal(reg), i64Load(localGet(1), reg * 8)));
   }
 
   const compiled = compileSharedGeneratedOutputBody(
-    words, relativeBase, diagnostics);
+    words, relativeBase, diagnostics, { memoryImportDescriptor });
 
   instructions.push(...compiled.body);
   instructions.push(...flushGeneratedRegisterLocals());
   instructions.push(...i64Store(
     localGet(2),
     compiled.terminal.kind === "goto_tb"
-      ? i64Load(i32Const(compiled.terminal.ret), 0)
+      ? i64Load(memoryConstAddress(compiled.terminal.ret, memory64), 0)
       : i64Const(compiled.terminal.ret),
     WASMJIT_RUN_EXIT.value,
   ));
@@ -1634,7 +1672,7 @@ function compileGeneratedOutputModule(
     0x00, 0x61, 0x73, 0x6d,
     0x01, 0x00, 0x00, 0x00,
     ...section(1, vector([
-      functionType([VALUE_I32], [VALUE_I64]),
+      functionType([pointerType], [VALUE_I64]),
     ])),
     ...section(2, vector([
       memoryImportTypeBytes(memoryImportDescriptor),
@@ -1644,7 +1682,7 @@ function compileGeneratedOutputModule(
     ...section(10, vector([functionBody(
       instructions,
       [
-        { count: 2, type: VALUE_I32 },
+        { count: 2, type: pointerType },
         { count: 16, type: VALUE_I64 },
         { count: 7, type: VALUE_I32 },
         { count: 35, type: VALUE_I64 },
@@ -1895,10 +1933,13 @@ function emitPerTBFunctionBody(words, relativeBase, options = {}) {
     }
 
     if (!moduleValid) {
+      const error = wasmModuleError(moduleBytes);
+
       return {
         ok: false,
         emitter: PER_TB_EMITTER_NAME,
         reason: "module-validation-failed",
+        error,
         shape: decodedShape(words),
         moduleFailureAttribution: moduleFailureAttribution({
           reason: "module-validation-failed",
@@ -1907,6 +1948,7 @@ function emitPerTBFunctionBody(words, relativeBase, options = {}) {
           words,
           memoryImportDescriptor:
             diagnostics.memoryImportDescriptor || memoryImportDescriptor,
+          error,
         }),
         moduleBytes,
         moduleValid,
@@ -2071,6 +2113,7 @@ function routeLiveGeneratedOutput(metadata) {
     normalizedWords: words,
     moduleValid: emission.moduleValid,
     moduleByteLength: emission.moduleByteLength,
+    memoryImportDescriptor: emission.memoryImportDescriptor,
     softmmuLowering: emission.softmmuLowering,
     softmmuLoweredOps: emission.softmmuLoweredOps,
     inlineTlbHitLoads: shape.filter((op) => op === "tci_qemu_ld_rrr").length,
@@ -6341,6 +6384,7 @@ function simulateR4mLiveGeneratedExec({
     ok: true,
     path: "generated",
     reason: null,
+    shape: route.shape,
     generatedGuestInstructions: route.generatedGuestInstructions,
     generatedBodyTimeNs: 1000,
     generatedChainLength: 1,
@@ -6356,6 +6400,8 @@ function simulateR4mLiveGeneratedExec({
     rejects: 0,
     skips: 0,
     exits: { unsupported: 0, invalidated: 0 },
+    moduleValid: route.moduleValid,
+    memoryImportDescriptor: route.memoryImportDescriptor || null,
     softmmuLowering: route.softmmuLowering || null,
     softmmuLoweredOps: route.softmmuLoweredOps || 0,
     multiAccessAttribution: memopValidation.multiAccessAttribution || null,
@@ -6475,7 +6521,7 @@ const r4mLiveGeneratedExecCases = [
     },
   }),
   simulateR4mLiveGeneratedExec({
-    name: "r4s11-live-r4s10-body-shape-live-memory-classified",
+    name: "r4s12-live-r4s10-body-shape-live-memory64-generated",
     enabled: true,
     noFallback: true,
     metadata: {
@@ -6503,7 +6549,7 @@ assert.deepEqual(
     "tci-fallback",
     "fail-closed",
     "fail-closed",
-    "fail-closed",
+    "generated",
   ],
 );
 assert.equal(
@@ -6591,42 +6637,21 @@ assert.deepEqual(r4mModuleEmissionFailure.moduleFailureAttribution, {
   terminalOp: "goto_tb",
   memoryImport: LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR,
 });
-const r4s11LiveR4s10BodyBuild = r4mLiveGeneratedExecCases.find((entry) =>
-  entry.name === "r4s11-live-r4s10-body-shape-live-memory-classified");
-assert.equal(r4s11LiveR4s10BodyBuild.reason, "module-validation-failed");
-assert.equal(r4s11LiveR4s10BodyBuild.failedClosed, true);
-assert.equal(r4s11LiveR4s10BodyBuild.generatedGuestInstructions, 0);
-assert.equal(
-  r4s11LiveR4s10BodyBuild.moduleFailureAttribution.reason,
-  "module-validation-failed",
-);
-assert.equal(
-  r4s11LiveR4s10BodyBuild.moduleFailureAttribution.phase,
-  "module-validate",
-);
-assert.equal(
-  r4s11LiveR4s10BodyBuild.moduleFailureAttribution.statusName,
-  "module-validation-failed",
-);
-assert.ok(
-  r4s11LiveR4s10BodyBuild.moduleFailureAttribution.error === null ||
-    typeof r4s11LiveR4s10BodyBuild.moduleFailureAttribution.error === "string",
-);
+const r4s12LiveR4s10Generated = r4mLiveGeneratedExecCases.find((entry) =>
+  entry.name === "r4s12-live-r4s10-body-shape-live-memory64-generated");
+assert.equal(r4s12LiveR4s10Generated.ok, true);
+assert.equal(r4s12LiveR4s10Generated.path, "generated");
+assert.equal(r4s12LiveR4s10Generated.reason, null);
+assert.equal(r4s12LiveR4s10Generated.moduleValid, true);
+assert.equal(r4s12LiveR4s10Generated.failedClosed, false);
+assert.equal(r4s12LiveR4s10Generated.generatedGuestInstructions, 1);
+assert.equal(r4s12LiveR4s10Generated.rejects, 0);
 assert.deepEqual(
-  r4s11LiveR4s10BodyBuild.moduleFailureAttribution.shape,
+  r4s12LiveR4s10Generated.shape,
   PRE_R4I_LIVE_X86_SHAPE,
 );
-assert.equal(
-  r4s11LiveR4s10BodyBuild.moduleFailureAttribution.shapeOpCount,
-  PRE_R4I_LIVE_X86_SHAPE.length,
-);
-assert.equal(r4s11LiveR4s10BodyBuild.moduleFailureAttribution.firstOp, "ld32u");
-assert.equal(
-  r4s11LiveR4s10BodyBuild.moduleFailureAttribution.terminalOp,
-  "goto_tb",
-);
 assert.deepEqual(
-  r4s11LiveR4s10BodyBuild.moduleFailureAttribution.memoryImport,
+  r4s12LiveR4s10Generated.memoryImportDescriptor,
   LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR,
 );
 assert.deepEqual(
