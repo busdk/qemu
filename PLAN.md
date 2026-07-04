@@ -3527,7 +3527,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     the top generic x86 coverage blocker, while R4s21-style MemOp-family work
     remains useful but secondary. No R4l speed gate or Bus Engine OS proof
     was run.
-  - [ ] R4s21 - Classify and implement the dominant generic x86
+  - [x] R4s21 - Classify and implement the dominant generic x86
     direct-memory blocker family before widening secondary MemOp flags. DoD:
     inspect the current R4s20a result and live generated-output metadata to
     identify the high-frequency `selected-body-direct-memory-unsupported`
@@ -3543,6 +3543,50 @@ run that reaches a weaker marker than normal multi-user readiness.
     reject family accounts for about `36313 / 44889` live rejects. This item
     is not accepted if it hard-codes Bus Engine OS, fixed PCs, fixed boot
     phases, or one measured trace shape without a reusable lowering rule.
+
+    Accepted 2026-07-04: QEMU branch
+    `qemu/r4s21-direct-memory-20260704` handles the first generic
+    direct-memory family behind the R4s20a aggregate blocker. The R4s20a JSON
+    had aggregate `selected-body-direct-memory-unsupported` counts but no
+    exemplar direct-memory shapes, so this slice used source attribution to
+    separate the two existing reject routes: immediate unsupported direct
+    memory, and bounded env-relative direct memory rejected only because it
+    appeared in a body with multiple guarded SoftMMU accesses. The accepted
+    lowering is limited to direct `ld32u`, `ld32s`, `ld`, `st8`, `st32`, and
+    `st` whose base register remains the proven env-relative base (`r14`) and
+    whose signed offset range stays within `[-16, 0x120 - size]`.
+
+    For multi-SoftMMU bodies, direct env loads execute before commit because
+    they have no guest-visible side effect, while direct env stores capture
+    both their computed address and value and commit only after all SoftMMU
+    guards have passed. The existing SoftMMU exits for page crossing, TLB
+    miss/fault, MMIO, unmirrored TLB state, unsupported MemOp/helper/state,
+    control-flow, and later-guard failure remain fail-closed. Direct
+    store-before-direct load overlap in a guarded multi-access body remains
+    unsupported to avoid changing TCI ordering semantics.
+
+    Deterministic fixtures now cover
+    `r4s21-direct-memory-with-qemu-load-store-all-or-nothing`, which executes
+    a bounded env-relative `ld32u`/`st8`/`ld`/`st` family mixed with guarded
+    SoftMMU load/store operations with zero helper, `qemu_ld`, or `qemu_st`
+    calls,
+    `r4s21-direct-memory-store-address-captured-before-r14-clobber`, which
+    proves a deferred direct store uses the original computed address even
+    when the env-base register is overwritten before final commit, and
+    `r4s21-direct-memory-overlap-with-qemu-guards-fails-closed`, which proves
+    the alias-risk case stays unsupported before partial commit. The live
+    summary also now reports `reject_direct_memory` attribution with route,
+    op name, base register, offset, size, env-relative support status, and
+    SoftMMU access count/order so the next bounded preflight can classify
+    real sub-shapes instead of relying on aggregate counts.
+
+    Required deterministic checks passed: `git diff --check`;
+    `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`;
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`;
+    `node --check scripts/ci/wasm64-translate-metadata-test.mjs`; and
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`. No browser run,
+    artifact build, R4l speed gate, or Bus Engine OS proof was run for this
+    deterministic slice.
   - [ ] R4s22 - Expand supported x86 live SoftMMU MemOp families only after
     R4s19/R4s20 identify memory rejects as a remaining dominant blocker.
     DoD: admit alignment flags only with explicit QEMU-equivalent alignment

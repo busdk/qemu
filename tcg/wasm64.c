@@ -218,6 +218,7 @@ typedef enum TCGWasm64LiveGeneratedExecRejectReason {
 #define TCG_WASM64_LIVE_MEMOP_REJECT_SLOTS 8
 #define TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES 4
 #define TCG_WASM64_LIVE_MULTI_ACCESS_REJECT_SLOTS 8
+#define TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_SLOTS 8
 
 typedef struct TCGWasm64LiveMemOpRejectStat {
     MemOp memop;
@@ -264,6 +265,23 @@ typedef struct TCGWasm64LiveMultiAccessRejectStat {
     bool store_before_later_guard;
     uint64_t count;
 } TCGWasm64LiveMultiAccessRejectStat;
+
+typedef enum TCGWasm64LiveDirectMemoryRejectRoute {
+    TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_IMMEDIATE_UNSUPPORTED,
+    TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_MULTI_ACCESS_ALIAS,
+} TCGWasm64LiveDirectMemoryRejectRoute;
+
+typedef struct TCGWasm64LiveDirectMemoryRejectStat {
+    TCGWasm64LiveDirectMemoryRejectRoute route;
+    TCGOpcode op;
+    uint32_t base_reg;
+    int32_t offset;
+    int32_t size;
+    bool env_relative_supported;
+    uint32_t softmmu_access_count;
+    char softmmu_order[TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES + 1];
+    uint64_t count;
+} TCGWasm64LiveDirectMemoryRejectStat;
 
 typedef enum TCGWasm64RunloopSmokeWorkload {
     TCG_WASM64_RUNLOOP_SMOKE_ALU_BRANCH = 0,
@@ -508,6 +526,9 @@ static __thread TCGWasm64ModuleFailure
 static __thread TCGWasm64LiveMultiAccessRejectStat
     live_generated_exec_reject_multi_accesses[
         TCG_WASM64_LIVE_MULTI_ACCESS_REJECT_SLOTS];
+static __thread TCGWasm64LiveDirectMemoryRejectStat
+    live_generated_exec_reject_direct_memory[
+        TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_SLOTS];
 static __thread bool live_tb_coverage_checked;
 static __thread bool live_tb_coverage_no_shape_reported;
 static __thread uint64_t live_tb_coverage_scanned;
@@ -3233,6 +3254,11 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         const softHostAddr = 34;
         const softMaxDeferredAccesses = 4;
         const softAccessLocalBase = 35;
+        const directMemoryMaxDeferredStores = 4;
+        const directMemoryStoreValueLocalBase =
+            softAccessLocalBase + softMaxDeferredAccesses * 4;
+        const directMemoryStoreAddressLocalBase =
+            directMemoryStoreValueLocalBase + directMemoryMaxDeferredStores;
         const terminalIndex = words.findIndex((insn) => {
             const opc = bits(insn >>> 0, 0, 8);
 
@@ -3249,6 +3275,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         const allOrNothingSoftmmu = softmmuAccessCount > 1;
         const deferredSoftmmuCommits = [];
         let nextSoftmmuAccessIndex = 0;
+        let nextDirectStoreIndex = 0;
         let softLoadAfterStore = false;
         let sawSoftStore = false;
 
@@ -3273,6 +3300,57 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
 
         function softAccessLocal(index, field) {
             return softAccessLocalBase + index * 4 + field;
+        }
+
+        function directMemoryStoreValueLocal(index) {
+            return directMemoryStoreValueLocalBase + index;
+        }
+
+        function directMemoryStoreAddressLocal(index) {
+            return directMemoryStoreAddressLocalBase + index;
+        }
+
+        function directMemorySize(opc) {
+            if (opc === ops.st8) {
+                return 1;
+            }
+            if (opc === ops.ld32u || opc === ops.ld32s ||
+                opc === ops.st32) {
+                return 4;
+            }
+            if (opc === ops.ld || opc === ops.st) {
+                return 8;
+            }
+            return null;
+        }
+
+        function directMemoryIsStore(opc) {
+            return opc === ops.st8 || opc === ops.st32 || opc === ops.st;
+        }
+
+        function directMemoryRange(insn) {
+            const opc = bits(insn >>> 0, 0, 8);
+            const size = directMemorySize(opc);
+
+            return size === null ? null : {
+                offset: sextract(insn >>> 0, 16, 16),
+                size,
+            };
+        }
+
+        function directMemoryRangesOverlap(lhs, rhs) {
+            return lhs.offset < rhs.offset + rhs.size &&
+                   rhs.offset < lhs.offset + lhs.size;
+        }
+
+        function directMemorySupported(insn) {
+            const range = directMemoryRange(insn);
+            const r1 = bits(insn >>> 0, 12, 4);
+
+            return range === null ||
+                   (r1 === envRelativeBaseReg &&
+                    range.offset >= envRelativeMinOffset &&
+                    range.offset + range.size <= envRelativeMaxExclusive);
         }
 
         function incrementRunCounter(offset) {
@@ -3568,6 +3646,8 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
             const src1 = regLocal(r1);
             const src2 = regLocal(r2);
             let address;
+            let addressLocal;
+            let valueLocal;
 
             if (opc === ops.tci_movi) {
                 return localSet(dst, i64Const(sextract(insn, 12, 20)));
@@ -3595,19 +3675,58 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                 address = addressAdd(localGet(src1),
                                      envRelativeOffset(insn, r1, 1));
                 inlineStores++;
-                return i32Store8(address, i32WrapI64(localGet(dst)));
+                if (!allOrNothingSoftmmu) {
+                    return i32Store8(address, i32WrapI64(localGet(dst)));
+                }
+                addressLocal =
+                    directMemoryStoreAddressLocal(nextDirectStoreIndex);
+                valueLocal = directMemoryStoreValueLocal(nextDirectStoreIndex++);
+                return {
+                    guard: [
+                        ...localSet(addressLocal, address),
+                        ...localSet(valueLocal, localGet(dst)),
+                    ],
+                    commit: i32Store8(localGet(addressLocal),
+                                      i32WrapI64(localGet(valueLocal))),
+                };
             }
             if (opc === ops.st32) {
                 address = addressAdd(localGet(src1),
                                      envRelativeOffset(insn, r1, 4));
                 inlineStores++;
-                return i32Store(address, i32WrapI64(localGet(dst)));
+                if (!allOrNothingSoftmmu) {
+                    return i32Store(address, i32WrapI64(localGet(dst)));
+                }
+                addressLocal =
+                    directMemoryStoreAddressLocal(nextDirectStoreIndex);
+                valueLocal = directMemoryStoreValueLocal(nextDirectStoreIndex++);
+                return {
+                    guard: [
+                        ...localSet(addressLocal, address),
+                        ...localSet(valueLocal, localGet(dst)),
+                    ],
+                    commit: i32Store(localGet(addressLocal),
+                                     i32WrapI64(localGet(valueLocal))),
+                };
             }
             if (opc === ops.st) {
                 address = addressAdd(localGet(src1),
                                      envRelativeOffset(insn, r1, 8));
                 inlineStores++;
-                return i64Store(address, localGet(dst));
+                if (!allOrNothingSoftmmu) {
+                    return i64Store(address, localGet(dst));
+                }
+                addressLocal =
+                    directMemoryStoreAddressLocal(nextDirectStoreIndex);
+                valueLocal = directMemoryStoreValueLocal(nextDirectStoreIndex++);
+                return {
+                    guard: [
+                        ...localSet(addressLocal, address),
+                        ...localSet(valueLocal, localGet(dst)),
+                    ],
+                    commit: i64Store(localGet(addressLocal),
+                                     localGet(valueLocal)),
+                };
             }
             if (opc === ops.mov) {
                 return localSet(dst, localGet(src1));
@@ -3798,16 +3917,44 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         if (terminalIndex < 0) {
             throw new Error("live generated-output body has no terminal");
         }
+        const directStoreRanges = [];
+        let directStoreCount = 0;
+        let directMemoryUnsupported = false;
+        let directMemoryStoreLoadAlias = false;
+
+        for (const insn of bodyWords) {
+            const opc = bits(insn >>> 0, 0, 8);
+            const range = directMemoryRange(insn);
+
+            if (range === null) {
+                continue;
+            }
+            if (!directMemorySupported(insn)) {
+                directMemoryUnsupported = true;
+                break;
+            }
+            if (directMemoryIsStore(opc)) {
+                directStoreCount++;
+                directStoreRanges.push(range);
+                continue;
+            }
+            if (directStoreRanges.some((store) =>
+                    directMemoryRangesOverlap(store, range))) {
+                directMemoryStoreLoadAlias = true;
+                break;
+            }
+        }
         if (softmmuAccessCount > softMaxDeferredAccesses ||
             (allOrNothingSoftmmu && softLoadAfterStore) ||
             (allOrNothingSoftmmu && bodyWords.some((insn) => {
                 const opc = bits(insn >>> 0, 0, 8);
 
-                return opc === ops.brcond ||
-                       opc === ops.ld || opc === ops.ld32s ||
-                       opc === ops.ld32u || opc === ops.st ||
-                       opc === ops.st8 || opc === ops.st32;
-            }))) {
+                return opc === ops.brcond;
+            })) ||
+            (allOrNothingSoftmmu && directMemoryUnsupported) ||
+            (allOrNothingSoftmmu && directMemoryStoreLoadAlias) ||
+            (allOrNothingSoftmmu &&
+             directStoreCount > directMemoryMaxDeferredStores)) {
             throw new Error("unsupported live generated-output multi-access shape");
         }
         {
@@ -3969,7 +4116,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                 ])),
                 ...section(10, vector([
                     functionBody(instructions, [
-                        { count: 51, type: valueI64 },
+                        { count: 59, type: valueI64 },
                     ]),
                 ])),
             ]);
@@ -7186,6 +7333,79 @@ static void tcg_wasm64_live_generated_exec_count_multi_access_reject(
         TCG_WASM64_LIVE_MULTI_ACCESS_REJECT_SLOTS - 1].count++;
 }
 
+static bool tcg_wasm64_live_generated_exec_direct_memory_stat_matches(
+    const TCGWasm64LiveDirectMemoryRejectStat *stat,
+    TCGWasm64LiveDirectMemoryRejectRoute route, TCGOpcode op,
+    uint32_t base_reg, int32_t offset, int32_t size,
+    bool env_relative_supported, uint32_t softmmu_access_count,
+    const char *softmmu_order)
+{
+    return stat->count != 0 &&
+           stat->route == route &&
+           stat->op == op &&
+           stat->base_reg == base_reg &&
+           stat->offset == offset &&
+           stat->size == size &&
+           stat->env_relative_supported == env_relative_supported &&
+           stat->softmmu_access_count == softmmu_access_count &&
+           strncmp(stat->softmmu_order, softmmu_order,
+                   sizeof(stat->softmmu_order)) == 0;
+}
+
+static void tcg_wasm64_live_generated_exec_store_direct_memory_stat(
+    TCGWasm64LiveDirectMemoryRejectStat *stat,
+    TCGWasm64LiveDirectMemoryRejectRoute route, TCGOpcode op,
+    uint32_t base_reg, int32_t offset, int32_t size,
+    bool env_relative_supported, uint32_t softmmu_access_count,
+    const char *softmmu_order)
+{
+    stat->route = route;
+    stat->op = op;
+    stat->base_reg = base_reg;
+    stat->offset = offset;
+    stat->size = size;
+    stat->env_relative_supported = env_relative_supported;
+    stat->softmmu_access_count = softmmu_access_count;
+    memset(stat->softmmu_order, 0, sizeof(stat->softmmu_order));
+    memcpy(stat->softmmu_order, softmmu_order,
+           MIN(strlen(softmmu_order), sizeof(stat->softmmu_order) - 1));
+    stat->count = 1;
+}
+
+static void tcg_wasm64_live_generated_exec_count_direct_memory_reject(
+    TCGWasm64LiveDirectMemoryRejectRoute route, TCGOpcode op,
+    uint32_t base_reg, int32_t offset, int32_t size,
+    bool env_relative_supported, uint32_t softmmu_access_count,
+    const char *softmmu_order)
+{
+    for (size_t i = 0; i < TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_SLOTS; i++) {
+        TCGWasm64LiveDirectMemoryRejectStat *stat =
+            &live_generated_exec_reject_direct_memory[i];
+
+        if (tcg_wasm64_live_generated_exec_direct_memory_stat_matches(
+                stat, route, op, base_reg, offset, size,
+                env_relative_supported, softmmu_access_count,
+                softmmu_order)) {
+            stat->count++;
+            return;
+        }
+    }
+    for (size_t i = 0; i < TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_SLOTS; i++) {
+        TCGWasm64LiveDirectMemoryRejectStat *stat =
+            &live_generated_exec_reject_direct_memory[i];
+
+        if (stat->count == 0) {
+            tcg_wasm64_live_generated_exec_store_direct_memory_stat(
+                stat, route, op, base_reg, offset, size,
+                env_relative_supported, softmmu_access_count,
+                softmmu_order);
+            return;
+        }
+    }
+    live_generated_exec_reject_direct_memory[
+        TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_SLOTS - 1].count++;
+}
+
 typedef struct TCGWasm64LiveMemOpState {
     bool known[16];
     uint32_t value[16];
@@ -7278,20 +7498,43 @@ static bool tcg_wasm64_live_generated_exec_direct_memory_size(TCGOpcode op,
     }
 }
 
+static bool tcg_wasm64_live_generated_exec_direct_memory_is_store(TCGOpcode op)
+{
+    switch (op) {
+    case INDEX_op_st:
+    case INDEX_op_st8:
+    case INDEX_op_st32:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static bool tcg_wasm64_live_generated_exec_direct_memory_supported(
-    uint32_t word)
+    uint32_t word, bool env_base_valid)
 {
     int32_t size;
     int32_t offset;
+    TCGOpcode op = (TCGOpcode)tcg_wasm64_tci_word_op(word);
 
     if (!tcg_wasm64_live_generated_exec_direct_memory_size(
-            (TCGOpcode)tcg_wasm64_tci_word_op(word), &size)) {
+            op, &size)) {
         return true;
     }
     offset = sextract32(word, 16, 16);
-    return tcg_wasm64_tci_word_r1(word) == 14 &&
+    return env_base_valid &&
+           tcg_wasm64_tci_word_r1(word) == 14 &&
+           (!tcg_wasm64_live_generated_exec_op_writes_r0(op) ||
+            tcg_wasm64_tci_word_r0(word) != 14) &&
            offset >= -16 &&
            offset + size <= 0x120;
+}
+
+static bool tcg_wasm64_live_generated_exec_direct_memory_ranges_overlap(
+    int32_t lhs_offset, int32_t lhs_size, int32_t rhs_offset, int32_t rhs_size)
+{
+    return lhs_offset < rhs_offset + rhs_size &&
+           rhs_offset < lhs_offset + lhs_size;
 }
 
 static bool tcg_wasm64_live_generated_exec_control_flow_supported(
@@ -7353,6 +7596,14 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
     bool have_mmu_idx = false;
     bool direct_memory_unsupported = false;
     bool control_flow_unsupported = false;
+    bool env_base_valid = true;
+    TCGWasm64LiveDirectMemoryRejectRoute direct_memory_reject_route =
+        TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_IMMEDIATE_UNSUPPORTED;
+    TCGOpcode direct_memory_reject_op = (TCGOpcode)0;
+    uint32_t direct_memory_reject_base = 0;
+    int32_t direct_memory_reject_offset = 0;
+    int32_t direct_memory_reject_size = 0;
+    bool direct_memory_reject_supported = false;
     bool saw_store_access = false;
     bool load_after_store = false;
     bool store_before_later_guard = false;
@@ -7360,6 +7611,9 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
     uint32_t memop_count = 0;
     uint32_t load_count = 0;
     uint32_t store_count = 0;
+    uint32_t direct_store_count = 0;
+    int32_t direct_store_offsets[TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES] = { 0 };
+    int32_t direct_store_sizes[TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES] = { 0 };
     char access_order[TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES + 1] = { 0 };
     MemOp access_memops[TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES] = { 0 };
 
@@ -7379,13 +7633,22 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
         case INDEX_op_tci_movi:
             tcg_wasm64_live_memop_state_known(
                 &state, r0, tcg_wasm64_tci_word_i20(word));
+            if (r0 == 14) {
+                env_base_valid = false;
+            }
             break;
         case INDEX_op_tci_movl:
             tcg_wasm64_live_memop_state_unknown(&state, r0);
+            if (r0 == 14) {
+                env_base_valid = false;
+            }
             break;
         case INDEX_op_mov:
             tcg_wasm64_live_memop_state_copy(
                 &state, r0, tcg_wasm64_tci_word_r1(word));
+            if (r0 == 14) {
+                env_base_valid = false;
+            }
             break;
         case INDEX_op_tci_qemu_ld_rrr:
         case INDEX_op_tci_qemu_st_rrr:
@@ -7452,6 +7715,9 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
             }
             if (op == INDEX_op_tci_qemu_ld_rrr) {
                 tcg_wasm64_live_memop_state_unknown(&state, r0);
+                if (r0 == 14) {
+                    env_base_valid = false;
+                }
             }
             break;
         }
@@ -7461,15 +7727,65 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
         case INDEX_op_st:
         case INDEX_op_st8:
         case INDEX_op_st32:
-            direct_memory_unsupported = true;
-            if (!tcg_wasm64_live_generated_exec_direct_memory_supported(
-                    word)) {
+        {
+            int32_t size;
+            int32_t offset = sextract32(word, 16, 16);
+            bool supported;
+
+            tcg_wasm64_live_generated_exec_direct_memory_size(op, &size);
+            supported =
+                tcg_wasm64_live_generated_exec_direct_memory_supported(
+                    word, env_base_valid);
+            if (!supported) {
+                tcg_wasm64_live_generated_exec_count_direct_memory_reject(
+                    TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_IMMEDIATE_UNSUPPORTED,
+                    op, tcg_wasm64_tci_word_r1(word), offset, size, false,
+                    memop_count, access_order);
                 return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_DIRECT_MEMORY_UNSUPPORTED;
+            }
+            if (tcg_wasm64_live_generated_exec_direct_memory_is_store(op)) {
+                if (direct_store_count >=
+                    TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES) {
+                    direct_memory_unsupported = true;
+                    direct_memory_reject_route =
+                        TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_MULTI_ACCESS_ALIAS;
+                    direct_memory_reject_op = op;
+                    direct_memory_reject_base =
+                        tcg_wasm64_tci_word_r1(word);
+                    direct_memory_reject_offset = offset;
+                    direct_memory_reject_size = size;
+                    direct_memory_reject_supported = true;
+                } else {
+                    direct_store_offsets[direct_store_count] = offset;
+                    direct_store_sizes[direct_store_count] = size;
+                    direct_store_count++;
+                }
+            } else {
+                for (uint32_t direct = 0; direct < direct_store_count;
+                     direct++) {
+                    if (tcg_wasm64_live_generated_exec_direct_memory_ranges_overlap(
+                            direct_store_offsets[direct],
+                            direct_store_sizes[direct], offset, size)) {
+                        direct_memory_unsupported = true;
+                        direct_memory_reject_route =
+                            TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_MULTI_ACCESS_ALIAS;
+                        direct_memory_reject_op = op;
+                        direct_memory_reject_base =
+                            tcg_wasm64_tci_word_r1(word);
+                        direct_memory_reject_offset = offset;
+                        direct_memory_reject_size = size;
+                        direct_memory_reject_supported = true;
+                    }
+                }
             }
             if (tcg_wasm64_live_generated_exec_op_writes_r0(op)) {
                 tcg_wasm64_live_memop_state_unknown(&state, r0);
+                if (r0 == 14) {
+                    env_base_valid = false;
+                }
             }
             break;
+        }
         case INDEX_op_brcond:
             control_flow_unsupported = true;
             if (!tcg_wasm64_live_generated_exec_control_flow_supported(
@@ -7480,11 +7796,19 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
         default:
             if (tcg_wasm64_live_generated_exec_op_writes_r0(op)) {
                 tcg_wasm64_live_memop_state_unknown(&state, r0);
+                if (r0 == 14) {
+                    env_base_valid = false;
+                }
             }
             break;
         }
     }
     if (memop_count > 1 && direct_memory_unsupported) {
+        tcg_wasm64_live_generated_exec_count_direct_memory_reject(
+            direct_memory_reject_route, direct_memory_reject_op,
+            direct_memory_reject_base, direct_memory_reject_offset,
+            direct_memory_reject_size, direct_memory_reject_supported,
+            memop_count, access_order);
         tcg_wasm64_live_generated_exec_count_multi_access_reject(
             memop_count, load_count, store_count, access_order,
             access_memops, store_before_later_guard);
@@ -7583,6 +7907,49 @@ static void tcg_wasm64_print_live_generated_exec_reject_multi_accesses(void)
                     (unsigned)stat->memops[i]);
         }
         fprintf(stderr, "],\"count\":%" PRIu64 "}", stat->count);
+        first = false;
+    }
+}
+
+static const char *tcg_wasm64_live_generated_exec_direct_memory_route_name(
+    TCGWasm64LiveDirectMemoryRejectRoute route)
+{
+    switch (route) {
+    case TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_IMMEDIATE_UNSUPPORTED:
+        return "immediate-unsupported";
+    case TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_MULTI_ACCESS_ALIAS:
+        return "multi-access-deferred-alias";
+    default:
+        return "unknown";
+    }
+}
+
+static void tcg_wasm64_print_live_generated_exec_reject_direct_memory(void)
+{
+    bool first = true;
+
+    for (size_t slot = 0;
+         slot < TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_SLOTS; slot++) {
+        const TCGWasm64LiveDirectMemoryRejectStat *stat =
+            &live_generated_exec_reject_direct_memory[slot];
+
+        if (stat->count == 0) {
+            continue;
+        }
+        fprintf(stderr,
+                "%s{\"route\":\"%s\",\"op\":%u,\"op_name\":\"%s\","
+                "\"base_reg\":%u,\"offset\":%d,\"size\":%d,"
+                "\"env_relative_supported\":%s,"
+                "\"softmmu_access_count\":%u,"
+                "\"softmmu_order\":\"%s\",\"count\":%" PRIu64 "}",
+                first ? "" : ",",
+                tcg_wasm64_live_generated_exec_direct_memory_route_name(
+                    stat->route),
+                (unsigned)stat->op, tcg_wasm64_op_name(stat->op),
+                stat->base_reg, stat->offset, stat->size,
+                stat->env_relative_supported ? "true" : "false",
+                stat->softmmu_access_count, stat->softmmu_order,
+                stat->count);
         first = false;
     }
 }
@@ -7877,6 +8244,9 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
     fprintf(stderr, "],"
             "\"reject_multi_accesses\":[");
     tcg_wasm64_print_live_generated_exec_reject_multi_accesses();
+    fprintf(stderr, "],"
+            "\"reject_direct_memory\":[");
+    tcg_wasm64_print_live_generated_exec_reject_direct_memory();
     fprintf(stderr, "]}\n");
 }
 

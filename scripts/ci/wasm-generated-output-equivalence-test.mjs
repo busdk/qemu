@@ -888,6 +888,12 @@ function envRelativeMemoryAddress(op, size, memory64 = false) {
     : null;
 }
 
+function envRelativeMemoryAddressI64(op, size) {
+  return envRelativeAccessSupported(op, size)
+    ? memoryAddress(localGet(regLocal(op.r1)), sextract(op.insn, 16, 16), true)
+    : null;
+}
+
 function targetIndexFromPtr(ptr, relativeBase) {
   const offset = ptr - relativeBase;
 
@@ -967,9 +973,45 @@ const SHARED_SOFTMMU_LOCAL_ADDEND = 43;
 const SHARED_SOFTMMU_LOCAL_HOST_ADDR = 44;
 const SHARED_SOFTMMU_MAX_DEFERRED_ACCESSES = 4;
 const SHARED_SOFTMMU_ACCESS_LOCAL_BASE = 45;
+const SHARED_DIRECT_MEMORY_MAX_DEFERRED_STORES = 4;
+const SHARED_DIRECT_MEMORY_STORE_VALUE_LOCAL_BASE =
+  SHARED_SOFTMMU_ACCESS_LOCAL_BASE + SHARED_SOFTMMU_MAX_DEFERRED_ACCESSES * 4;
+const SHARED_DIRECT_MEMORY_STORE_ADDRESS_LOCAL_BASE =
+  SHARED_DIRECT_MEMORY_STORE_VALUE_LOCAL_BASE +
+  SHARED_DIRECT_MEMORY_MAX_DEFERRED_STORES;
 
 function sharedSoftmmuAccessLocal(index, field) {
   return SHARED_SOFTMMU_ACCESS_LOCAL_BASE + index * 4 + field;
+}
+
+function sharedDirectMemoryStoreValueLocal(index) {
+  return SHARED_DIRECT_MEMORY_STORE_VALUE_LOCAL_BASE + index;
+}
+
+function sharedDirectMemoryStoreAddressLocal(index) {
+  return SHARED_DIRECT_MEMORY_STORE_ADDRESS_LOCAL_BASE + index;
+}
+
+function directMemoryAccessSize(opc) {
+  if (opc === OPS.st8) {
+    return 1;
+  }
+  if ([OPS.ld32u, OPS.ld32s, OPS.st32].includes(opc)) {
+    return 4;
+  }
+  if ([OPS.ld, OPS.st].includes(opc)) {
+    return 8;
+  }
+  return null;
+}
+
+function directMemoryIsStore(opc) {
+  return [OPS.st8, OPS.st32, OPS.st].includes(opc);
+}
+
+function directMemoryRangesOverlap(lhs, rhs) {
+  return lhs.offset < rhs.offset + rhs.size &&
+         rhs.offset < lhs.offset + lhs.size;
 }
 
 function i64ConstFromContract(value) {
@@ -1491,6 +1533,56 @@ function compileSharedGeneratedOutputOp(
   return null;
 }
 
+function compileSharedDirectMemoryAccessParts(op, storeIndex, options = {}) {
+  const { opc, r0 } = op;
+  const size = directMemoryAccessSize(opc);
+  const memory64 = options.memoryImportDescriptor?.memory64 === true;
+  const address = envRelativeMemoryAddressI64(op, size);
+  const pointerAddress = address === null
+    ? null : memoryAddressFromI64(address, memory64);
+
+  if (address === null || size === null) {
+    return null;
+  }
+  if (opc === OPS.ld32u || opc === OPS.ld32s) {
+    const loaded = i32Load(pointerAddress);
+
+    return {
+      code: localSet(regLocal(r0), opc === OPS.ld32u
+        ? i64ExtendI32U(loaded) : i64ExtendI32S(loaded)),
+      commit: [],
+    };
+  }
+  if (opc === OPS.ld) {
+    return {
+      code: localSet(regLocal(r0), i64Load(pointerAddress)),
+      commit: [],
+    };
+  }
+
+  if (storeIndex >= SHARED_DIRECT_MEMORY_MAX_DEFERRED_STORES) {
+    return null;
+  }
+
+  const addressLocal = sharedDirectMemoryStoreAddressLocal(storeIndex);
+  const valueLocal = sharedDirectMemoryStoreValueLocal(storeIndex);
+  const value = localGet(valueLocal);
+  const addressValue = memoryAddressFromI64(localGet(addressLocal), memory64);
+  const store = opc === OPS.st8
+    ? i32Store8(addressValue, i32WrapI64(value))
+    : opc === OPS.st32
+      ? i32Store(addressValue, i32WrapI64(value))
+      : i64Store(addressValue, value);
+
+  return {
+    code: [
+      ...localSet(addressLocal, address),
+      ...localSet(valueLocal, localGet(regLocal(r0))),
+    ],
+    commit: store,
+  };
+}
+
 function compileSharedGeneratedOutputBody(
   words,
   relativeBase,
@@ -1505,7 +1597,9 @@ function compileSharedGeneratedOutputBody(
     OPS.ld32u, OPS.ld32s, OPS.ld, OPS.st8, OPS.st32, OPS.st,
   ]);
   const deferredSoftmmuCommits = [];
+  const deferredDirectStores = [];
   let nextSoftmmuAccessIndex = 0;
+  let nextDirectStoreIndex = 0;
 
   function unsupportedMultiAccess(reason, op = softmmuOps.at(-1)) {
     if (diagnostics) {
@@ -1523,7 +1617,23 @@ function compileSharedGeneratedOutputBody(
   }
   if (allOrNothingSoftmmu) {
     const unsupportedDirectMemory = ops.find((op) =>
-      directMemoryOps.has(op.opc));
+      directMemoryOps.has(op.opc) &&
+      !envRelativeAccessSupported(op, directMemoryAccessSize(op.opc)));
+    const unsupportedDirectLoadAfterStore = ops.find((op) => {
+      const size = directMemoryAccessSize(op.opc);
+
+      if (size === null) {
+        return false;
+      }
+      const range = { offset: sextract(op.insn, 16, 16), size };
+
+      if (directMemoryIsStore(op.opc)) {
+        deferredDirectStores.push(range);
+        return false;
+      }
+      return deferredDirectStores.some((store) =>
+        directMemoryRangesOverlap(store, range));
+    });
     const unsupportedBranch = ops.find((op) => op.opc === OPS.brcond);
     let sawStore = false;
     const unsupportedLoadAfterStore = ops.find((op) => {
@@ -1538,6 +1648,12 @@ function compileSharedGeneratedOutputBody(
       unsupportedMultiAccess(
         "softmmu-multi-access-direct-memory-unsupported",
         unsupportedDirectMemory,
+      );
+    }
+    if (unsupportedDirectLoadAfterStore) {
+      unsupportedMultiAccess(
+        "softmmu-multi-access-direct-memory-alias-unsupported",
+        unsupportedDirectLoadAfterStore,
       );
     }
     if (unsupportedBranch) {
@@ -1612,6 +1728,21 @@ function compileSharedGeneratedOutputBody(
         }
         code.push(...parts.guard);
         deferredSoftmmuCommits.push(...parts.commit);
+        index++;
+        continue;
+      }
+      if (allOrNothingSoftmmu && directMemoryOps.has(op.opc)) {
+        const parts = compileSharedDirectMemoryAccessParts(
+          op, nextDirectStoreIndex, options);
+
+        if (parts === null) {
+          return null;
+        }
+        code.push(...parts.code);
+        if (parts.commit.length > 0) {
+          deferredSoftmmuCommits.push(...parts.commit);
+          nextDirectStoreIndex++;
+        }
         index++;
         continue;
       }
@@ -1710,7 +1841,7 @@ function compileGeneratedOutputModule(
         { count: 3, type: VALUE_I32 },
         { count: 2, type: pointerType },
         { count: 2, type: VALUE_I32 },
-        { count: 35, type: VALUE_I64 },
+        { count: 43, type: VALUE_I64 },
       ],
     )])),
   ]);
@@ -4879,6 +5010,40 @@ const fixtures = [
     ],
   },
   {
+    name: "r4s21-direct-memory-with-qemu-load-store-all-or-nothing",
+    terminal: "goto_tb",
+    relativeBase: 0x5fd0,
+    seeds: [1],
+    guestInstructions: 1,
+    words: [
+      opMem(OPS.ld32u, 4, RV64_ENV_RELATIVE_BASE_REG, -16),
+      opReg(OPS.tci_qemu_ld_rrr, 3, 14, 13),
+      opImm20(OPS.tci_movi, 5, 0x55),
+      opMem(OPS.st8, 5, RV64_ENV_RELATIVE_BASE_REG, -12),
+      opReg(OPS.tci_qemu_st_rrr, 3, 14, 13),
+      opMem(OPS.ld, 6, RV64_ENV_RELATIVE_BASE_REG, 0x100),
+      opReg(OPS.add, 6, 6, 4),
+      opMem(OPS.st, 6, RV64_ENV_RELATIVE_BASE_REG, 0x100),
+      opImm20(OPS.goto_tb, 0, -32),
+    ],
+  },
+  {
+    name: "r4s21-direct-memory-store-address-captured-before-r14-clobber",
+    terminal: "exit_tb",
+    relativeBase: 0x6040,
+    seeds: [1],
+    guestInstructions: 1,
+    words: [
+      opImm20(OPS.tci_movi, 5, 0x66),
+      opMem(OPS.st8, 5, RV64_ENV_RELATIVE_BASE_REG, -12),
+      opImm20(OPS.tci_movi, RV64_ENV_RELATIVE_BASE_REG, 0x20),
+      opImm20(OPS.tci_movi, 7, 0x3110),
+      opReg(OPS.tci_qemu_ld_rrr, 3, 7, 13),
+      opReg(OPS.tci_qemu_st_rrr, 3, 7, 13),
+      OPS.exit_tb,
+    ],
+  },
+  {
     name: "rv64-call-exit-prefix-family",
     terminal: "helper",
     relativeBase: 0x5e00,
@@ -5528,6 +5693,21 @@ const unsupportedFixtures = [
     ],
   },
   {
+    name: "r4s21-direct-memory-overlap-with-qemu-guards-fails-closed",
+    relativeBase: 0x6000,
+    expectedRuntimeUnsupportedGuards: [
+      "softmmu-multi-access-direct-memory-alias-unsupported",
+    ],
+    words: [
+      opImm20(OPS.tci_movi, 5, 0x55),
+      opMem(OPS.st8, 5, RV64_ENV_RELATIVE_BASE_REG, -12),
+      opMem(OPS.ld32u, 4, RV64_ENV_RELATIVE_BASE_REG, -12),
+      opReg(OPS.tci_qemu_ld_rrr, 3, 14, 13),
+      opReg(OPS.tci_qemu_ld_rrr, 4, 14, 13),
+      OPS.exit_tb,
+    ],
+  },
+  {
     name: "rv64-call-exit-int128-return-fails-closed",
     relativeBase: 0x5f00,
     words: [
@@ -5588,7 +5768,12 @@ const r6Rv64SoftmmuResults = [];
 
 for (const fixture of fixtures) {
   for (const seed of fixture.seeds || [1, 2]) {
-    results.push(await runFixture(fixture, seed));
+    try {
+      results.push(await runFixture(fixture, seed));
+    } catch (error) {
+      error.message = `${fixture.name} seed ${seed}: ${error.message}`;
+      throw error;
+    }
   }
 }
 
@@ -5634,9 +5819,9 @@ for (const fixture of r6Rv64SoftmmuFixtures) {
 
 const r4s8LaterAccessFails = await runR4s8LaterAccessFailsFixture();
 
-assert.equal(results.length, 22);
-assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 7);
-assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 13);
+assert.equal(results.length, 24);
+assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 8);
+assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 14);
 assert.equal(results.filter((entry) => entry.terminal === "helper").length, 2);
 const helperBoundaryResults = results.filter((entry) =>
   entry.helpers.loads > 0 || entry.helpers.stores > 0);
@@ -5654,6 +5839,11 @@ const r4iEmitterResults = results.filter((entry) =>
   entry.name === "live-x86-r4i-ld32u-goto-tb-11");
 const r4s8MultiAccessExecutableResults = results.filter((entry) =>
   entry.name.startsWith("r4s8-qemu-"));
+const r4s21DirectMemoryResults = results.filter((entry) =>
+  entry.name.startsWith("r4s21-direct-memory-with-qemu-"));
+const r4s21DirectMemoryAddressCaptureResults = results.filter((entry) =>
+  entry.name ===
+    "r4s21-direct-memory-store-address-captured-before-r14-clobber");
 assert.equal(liveX86Results.length, 2);
 assert.equal(
   liveX86Results.filter((entry) =>
@@ -5705,6 +5895,54 @@ assert.deepEqual(
     [
       "r4s8-qemu-store-store-all-or-nothing",
       0,
+      2,
+      0,
+      0,
+      true,
+      true,
+    ],
+  ],
+);
+assert.deepEqual(
+  r4s21DirectMemoryResults.map((entry) => [
+    entry.name,
+    entry.inlineTlbHitLoads,
+    entry.inlineTlbHitStores,
+    entry.memoryWrites,
+    entry.helpers.loads,
+    entry.helpers.stores,
+    entry.registerStateMatched,
+    entry.memoryStateMatched,
+  ]),
+  [
+    [
+      "r4s21-direct-memory-with-qemu-load-store-all-or-nothing",
+      3,
+      3,
+      3,
+      0,
+      0,
+      true,
+      true,
+    ],
+  ],
+);
+assert.deepEqual(
+  r4s21DirectMemoryAddressCaptureResults.map((entry) => [
+    entry.name,
+    entry.inlineTlbHitLoads,
+    entry.inlineTlbHitStores,
+    entry.memoryWrites,
+    entry.helpers.loads,
+    entry.helpers.stores,
+    entry.registerStateMatched,
+    entry.memoryStateMatched,
+  ]),
+  [
+    [
+      "r4s21-direct-memory-store-address-captured-before-r14-clobber",
+      1,
+      2,
       2,
       0,
       0,
@@ -6340,14 +6578,19 @@ function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_I
   let qemuStOps = 0;
   let directMemoryUnsupported = false;
   let controlFlowUnsupported = false;
+  let envBaseValid = true;
   let sawStoreAccess = false;
   let loadAfterStore = false;
   let storeBeforeLaterGuardCanFail = false;
   const accessOrder = [];
   const memops = [];
+  const directStoreRanges = [];
 
   function markUnknown(reg) {
     if (reg < known.length) {
+      if (reg === RV64_ENV_RELATIVE_BASE_REG) {
+        envBaseValid = false;
+      }
       known[reg] = false;
       values[reg] = 0;
     }
@@ -6355,6 +6598,9 @@ function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_I
 
   function markKnown(reg, value) {
     if (reg < known.length) {
+      if (reg === RV64_ENV_RELATIVE_BASE_REG) {
+        envBaseValid = false;
+      }
       known[reg] = true;
       values[reg] = value >>> 0;
     }
@@ -6441,12 +6687,19 @@ function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_I
       continue;
     }
     if (r4s20DirectMemorySize(op) !== null) {
-      directMemoryUnsupported = true;
-      if (!r4s20DirectMemorySupported(op, word, r1)) {
+      const size = r4s20DirectMemorySize(op);
+      const range = { offset: sextract(word, 16, 16), size };
+      if (!envBaseValid || !r4s20DirectMemorySupported(op, word, r1)) {
         return {
           reason: "selected-body-direct-memory-unsupported",
           hasMemop,
         };
+      }
+      if (directMemoryIsStore(op)) {
+        directStoreRanges.push(range);
+      } else if (directStoreRanges.some((store) =>
+        directMemoryRangesOverlap(store, range))) {
+        directMemoryUnsupported = true;
       }
     }
     if (op === OPS.brcond) {
@@ -6459,6 +6712,9 @@ function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_I
       }
     }
     if (r4s5bOpWritesR0(op)) {
+      if (r0 === RV64_ENV_RELATIVE_BASE_REG) {
+        envBaseValid = false;
+      }
       markUnknown(r0);
     }
   }
@@ -7319,7 +7575,18 @@ const r4s5bCases = [
     metadata: r4s8MultiMemoryMetadata(["store", "store"]),
   },
   {
-    name: "r4s20-direct-memory-multi-access-pre-rejects",
+    name: "r4s21-direct-memory-multi-access-admitted",
+    expectedReason: null,
+    expectedPath: "generated",
+    expectedInlineTlbHitLoads: 2,
+    expectedInlineTlbHitStores: 0,
+    expectedSoftmmuLoweredOps: 2,
+    metadata: r4s8MultiMemoryMetadata(["load", "load"], {
+      prefixWords: [opReg(OPS.ld32u, 4, 14, 0)],
+    }),
+  },
+  {
+    name: "r4s21-direct-memory-overlap-multi-access-rejects",
     expectedReason: "selected-body-direct-memory-unsupported",
     expectedMultiAccessAttribution: {
       accessCount: 2,
@@ -7330,7 +7597,10 @@ const r4s5bCases = [
       storeBeforeLaterGuardCanFail: false,
     },
     metadata: r4s8MultiMemoryMetadata(["load", "load"], {
-      prefixWords: [opReg(OPS.ld32u, 4, 14, 0)],
+      prefixWords: [
+        opReg(OPS.st8, 5, 14, 0),
+        opReg(OPS.ld32u, 4, 14, 0),
+      ],
     }),
   },
   {
