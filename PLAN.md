@@ -2141,7 +2141,7 @@ run that reaches a weaker marker than normal multi-user readiness.
       target, so native compile verification is unrun. No browser run,
       artifact build, speed claim, R4l unlock, or Bus Engine OS proof was run
       in this slice.
-    - [ ] R4s5c - Wire a zero-initialized TLB mirror into live x86 generated
+    - [x] R4s5c - Wire a zero-initialized TLB mirror into live x86 generated
       execution only after R4s5b proves the memory operation and `mmu_idx`.
       DoD: `tcg_wasm64_live_generated_exec_try()` zero-initializes local TLB
       mirror storage, refreshes it from the current CPU/env and proven
@@ -2162,7 +2162,7 @@ run that reaches a weaker marker than normal multi-user readiness.
       generated-output emitter/layout contract so qemu ld/st SoftMMU lowering
       is a backend capability, not a special path for the currently measured
       x86 body.
-      - [ ] R4s5c1 - Define the generic generated-output SoftMMU lowering
+      - [x] R4s5c1 - Define the generic generated-output SoftMMU lowering
         contract before live execution wiring. DoD: the deterministic emitter
         model names one reusable lowering entrypoint for
         `tci_qemu_ld_rrr`/`tci_qemu_st_rrr`, derives or validates every
@@ -2172,20 +2172,62 @@ run that reaches a weaker marker than normal multi-user readiness.
         constant that no longer matches the exported C/header contract. This
         item is not accepted by adding a measured-shape-only branch in
         `tcg_wasm64_live_generated_exec_js()`.
-      - [ ] R4s5c2 - Wire the C-side TLB mirror into live execution through
+      - [x] R4s5c2 - Wire the C-side TLB mirror into live execution through
         the generic lowering contract. DoD:
         `tcg_wasm64_live_generated_exec_try()` zero-initializes a local
         `TCGWasm64TLBMirror`, refreshes it only after R4s5b proves the
         memory operation and `mmu_idx`, assigns `context.tlb`, and preserves
         precise fail-closed reasons for missing, invalid, stale, MMIO,
         slow-flag, page-crossing, permission, and TLB-miss/fault cases.
-      - [ ] R4s5c3 - Prove live qemu ld/st lowering without helper calls in
+      - [x] R4s5c3 - Prove live qemu ld/st lowering without helper calls in
         deterministic tests. DoD: clean RAM-hit load and store fixtures report
         nonzero inline TLB-hit counters, zero helper/`qemu_ld`/`qemu_st`
         calls, and generated guest-instruction retirement through the generic
         emitter path; negative fixtures cover the same fail-closed cases as
         R4s5c2. No browser preflight or R4l speed gate may run until these
         checks pass.
+      Accepted 2026-07-04: QEMU now exposes header-backed MemOp and MemOpIdx
+      constants in `tcg/wasm64.h` and validates them with
+      `QEMU_BUILD_BUG_ON()` in `tcg/wasm64.c`. The live x86 generated
+      execution path proves selected qemu load/store memory operations and
+      `mmu_idx`, refreshes and validates a local `TCGWasm64TLBMirror`, and
+      passes it through `TCGWasm64RunContext.tlb`. The deterministic
+      generated-output model now routes `tci_qemu_ld_rrr` and
+      `tci_qemu_st_rrr` through the shared
+      `generic-softmmu-tlb-contract-lowering` hook in the generic per-TB
+      emitter, with drift assertions tying run-context, TLB mirror, TLB entry,
+      run-exit, counter, MemOp, and MemOpIdx constants back to
+      `tcg/wasm64.h`. Primary-checkout verification passed after supervisor
+      review and repair: `git diff
+      --check`, `node --check
+      scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node --check
+      scripts/ci/wasm64-translate-metadata-test.mjs`, `node --check
+      scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, `node
+      scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+      scripts/ci/wasm64-translate-metadata-test.mjs`, and `node
+      scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. The saved
+      equivalence JSON is
+      `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s5c-repaired-checks/wasm-generated-output-equivalence.json`
+      with SHA256
+      `54e6b1142305d87c8ace8700e438c9373ba85fcad9a886201be660a13ae023b4`.
+      Its x86 R4K SoftMMU fixtures report emitter
+      `r4k-per-tb-function-body-emitter`, lowering
+      `generic-softmmu-tlb-contract-lowering`, `16` fixtures, and four clean
+      RAM-hit load/store fixtures with nonzero inline TLB-hit counters and
+      zero helper, `qemu_ld`, or `qemu_st` calls. Fail-closed cases cover TLB
+      miss, MMIO, permission fault, page crossing, unsupported MemOp, slow
+      flags, unmirrored state, null mirror, missing table, stale mmu mirror,
+      layout mismatch, and stale output mismatch without helper calls. This is
+      deterministic R4s5c contract progress only: no browser run, artifact
+      build, speed claim, R4l unlock, Bus Engine OS proof, or Bus-specific
+      shortcut was run or accepted. The review repair explicitly rejects
+      multiple SoftMMU accesses in one selected body as
+      `selected-body-softmmu-multi-access-unsupported` before generated
+      execution, so the deterministic live model cannot partially commit a
+      store and then fall back to TCI re-execution. Valid single load/store
+      bodies enter the generic SoftMMU lowering with the TLB mirror refreshed
+      and validated, while unsupported translated shapes remain distinct from
+      supported shapes that the emitter cannot lower.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline

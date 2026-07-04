@@ -19,6 +19,31 @@ const tci = read("tcg/tci.c");
 const tciTarget = read("tcg/tci/tcg-target.c.inc");
 const generatedEquivalence = read("scripts/ci/wasm-generated-output-equivalence-test.mjs");
 
+function headerDefine(name) {
+  const match = header.match(
+    new RegExp(`^#define\\s+${name}\\s+\\(?(-?0x[0-9a-fA-F]+|-?\\d+)u?\\)?`, "m"),
+  );
+
+  assert.ok(match, `missing ${name} in tcg/wasm64.h`);
+  return Number.parseInt(match[1], 0);
+}
+
+function assertLiveTbCoverageJsConst(body, name, value) {
+  assert.match(
+    body,
+    new RegExp(`\\b${name}\\s*(?:=|:)\\s*${value}\\b`),
+    `tcg_wasm64_live_tb_coverage_js ${name} must match header value ${value}`,
+  );
+}
+
+function assertLiveTbCoverageJsBigIntConst(body, name, value) {
+  assert.match(
+    body,
+    new RegExp(`\\b${name}\\s*(?:=|:)\\s*${value}n\\b`),
+    `tcg_wasm64_live_tb_coverage_js ${name} must match header value ${value}n`,
+  );
+}
+
 function metadataCacheIndex(tbPtr, size) {
   return Number((BigInt(tbPtr) >> 4n) % BigInt(size));
 }
@@ -297,6 +322,64 @@ assert.match(runtime, /tcg_wasm64_report_summary\("interval",\s*&zero\)/);
 assert.match(runtime, /tcg_wasm64_live_tb_coverage_js/);
 assert.match(runtime, /tcg_wasm64_live_tb_coverage_shape_supported/);
 assert.match(runtime, /tcg_wasm64_live_tb_coverage_op_supported/);
+const liveTbCoverageJs = runtime.slice(
+  runtime.indexOf("EM_JS(int, tcg_wasm64_live_tb_coverage_js"),
+  runtime.indexOf("static bool tcg_wasm64_live_tb_coverage_op_supported"),
+);
+assert.ok(liveTbCoverageJs.includes("tcg_wasm64_live_tb_coverage_js"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "runCtxTlbOffset",
+                            headerDefine("TCG_WASM64_RUN_CTX_TLB_OFFSET"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "mask",
+                            headerDefine("TCG_WASM64_TLB_MIRROR_MASK_OFFSET"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "table",
+                            headerDefine("TCG_WASM64_TLB_MIRROR_TABLE_OFFSET"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "fulltlb",
+                            headerDefine("TCG_WASM64_TLB_MIRROR_FULLTLB_OFFSET"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "mmuIdx",
+                            headerDefine("TCG_WASM64_TLB_MIRROR_MMU_IDX_OFFSET"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "flags",
+                            headerDefine("TCG_WASM64_TLB_MIRROR_FLAGS_OFFSET"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "tlbMirrorValid",
+                            headerDefine("TCG_WASM64_TLB_MIRROR_VALID"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "addrRead",
+                            headerDefine("TCG_WASM64_CPUTLB_ENTRY_ADDR_READ_OFFSET"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "addrWrite",
+                            headerDefine("TCG_WASM64_CPUTLB_ENTRY_ADDR_WRITE_OFFSET"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "addend",
+                            headerDefine("TCG_WASM64_CPUTLB_ENTRY_ADDEND_OFFSET"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "size",
+                            headerDefine("TCG_WASM64_CPUTLB_ENTRY_SIZE"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "bits",
+                            headerDefine("TCG_WASM64_CPUTLB_ENTRY_BITS"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "slowFlags",
+                            headerDefine("TCG_WASM64_CPUTLB_ENTRY_FULL_SLOW_FLAGS_OFFSET"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "targetPageBits",
+                            headerDefine("TCG_WASM64_TARGET_PAGE_BITS"));
+assertLiveTbCoverageJsBigIntConst(
+  liveTbCoverageJs,
+  "targetPageMask",
+  BigInt.asIntN(64, -1n << BigInt(headerDefine("TCG_WASM64_TARGET_PAGE_BITS"))),
+);
+assertLiveTbCoverageJsBigIntConst(liveTbCoverageJs, "invalidMask",
+                                  BigInt(headerDefine("TCG_WASM64_TLB_INVALID_MASK")));
+assertLiveTbCoverageJsBigIntConst(liveTbCoverageJs, "flagsMask",
+                                  BigInt(headerDefine("TCG_WASM64_TLB_FLAGS_MASK")));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "slowFlagsMask",
+                            headerDefine("TCG_WASM64_TLB_SLOW_FLAGS_MASK"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "mmio",
+                            headerDefine("TCG_WASM64_TLB_MMIO"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "mmuDataLoad",
+                            headerDefine("TCG_WASM64_MMU_DATA_LOAD"));
+assertLiveTbCoverageJsConst(liveTbCoverageJs, "mmuDataStore",
+                            headerDefine("TCG_WASM64_MMU_DATA_STORE"));
+assertLiveTbCoverageJsBigIntConst(liveTbCoverageJs, "sizeMask",
+                                  BigInt(headerDefine("TCG_WASM64_MEMOP_SIZE")));
+assertLiveTbCoverageJsBigIntConst(liveTbCoverageJs, "byte",
+                                  BigInt(headerDefine("TCG_WASM64_MEMOP_8")));
+assertLiveTbCoverageJsBigIntConst(liveTbCoverageJs, "word",
+                                  BigInt(headerDefine("TCG_WASM64_MEMOP_32")));
+assertLiveTbCoverageJsBigIntConst(liveTbCoverageJs, "quad",
+                                  BigInt(headerDefine("TCG_WASM64_MEMOP_64")));
 const liveCoverageSupportedBody = runtime.match(
   /static bool tcg_wasm64_live_tb_coverage_op_supported\(uint32_t op\)\s*\{[\s\S]*?switch \(\(TCGOpcode\)op\) \{([\s\S]*?)default:/,
 )?.[1] || "";
@@ -318,7 +401,6 @@ for (const rv64GeneratedCoverageOp of [
 }
 assert.match(runtime, /HEAPU32\[tbPtr \/ 4 \+ i\]/);
 assert.match(runtime, /scratchWindowBase/);
-assert.match(runtime, /const runCtxTlbOffset = 48/);
 assert.match(runtime, /function compileSoftmmuTlbAccess/);
 assert.match(runtime, /i64LoadAtPtr\(0, runCtxTlbOffset\)/);
 assert.match(runtime, /tcg_wasm64_tlb_mirror_refresh\(\s*\n\s*&tlb_mirror, env, cpu_mmu_index\(env_cpu\(env\), false\)\)/);
@@ -440,7 +522,8 @@ for (const liveGeneratedExecRejectReason of [
   "selected-body-memop-unsupported-high-flags",
   "selected-body-memop-unexpected-mmu-idx",
   "selected-body-softmmu-unavailable",
-  "selected-body-softmmu-tlb-mirror-unwired",
+  "selected-body-softmmu-multi-access-unsupported",
+  "selected-body-softmmu-tlb-mirror-invalid",
 ]) {
   assert.match(
     runtime,
@@ -453,6 +536,9 @@ assert.match(runtime, /get_mmuidx\(oi\)/);
 assert.match(runtime, /cpu_mmu_index\(env_cpu\(env\), false\)/);
 assert.match(runtime, /#if defined\(CONFIG_USER_ONLY\)/);
 assert.match(runtime, /!env/);
+assert.match(runtime, /tcg_wasm64_tlb_mirror_refresh\(&tlb_mirror, env, memop_mmu_idx\)/);
+assert.match(runtime, /tcg_wasm64_tlb_mirror_valid\(&tlb_mirror, memop_mmu_idx\)/);
+assert.match(runtime, /context\.tlb = tlb/);
 assert.match(runtime, /INDEX_op_tci_qemu_ld_rrr/);
 assert.match(runtime, /INDEX_op_tci_qemu_st_rrr/);
 assert.match(runtime, /MO_SIGN/);
@@ -489,11 +575,27 @@ assert.match(
 );
 assert.match(
   liveGeneratedExecPrepareTbBody,
-  /tcg_wasm64_live_generated_exec_validate_selected_memops\(\s*env, metadata, &has_memop\)/,
+  /tcg_wasm64_live_generated_exec_validate_selected_memops\(\s*env, metadata, &has_memop, &memop_mmu_idx\)/,
 );
 assert.match(
+  liveGeneratedExecTryBody,
+  /TCGWasm64TLBMirror tlb_mirror = \{ 0 \}/,
+);
+assert.match(
+  liveGeneratedExecTryBody,
+  /TCGWasm64TLBMirror \*tlb = NULL/,
+);
+assert.match(
+  liveGeneratedExecTryBody,
+  /TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_TLB_MIRROR_INVALID/,
+);
+assert.match(
+  runtime,
+  /TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_MULTI_ACCESS_UNSUPPORTED/,
+);
+assert.doesNotMatch(
   liveGeneratedExecPrepareTbBody,
-  /selected_body-softmmu-tlb-mirror-unwired|SELECTED_BODY_SOFTMMU_TLB_MIRROR_UNWIRED/,
+  /SELECTED_BODY_SOFTMMU_TLB_MIRROR_UNWIRED/,
 );
 assert(
   liveGeneratedExecTryBody.indexOf(
@@ -646,6 +748,13 @@ for (const fixtureName of [
   "r4k-softmmu-mmio",
   "r4k-softmmu-permission-fault",
   "r4k-softmmu-page-crossing",
+  "r4k-softmmu-unsupported-memop",
+  "r4k-softmmu-slow-flags",
+  "r4k-softmmu-unmirrored-state",
+  "r4k-softmmu-null-mirror",
+  "r4k-softmmu-missing-table",
+  "r4k-softmmu-stale-mmu-mirror",
+  "r4k-softmmu-layout-constant-mismatch",
   "r4k-softmmu-stale-output-mismatch",
 ]) {
   assert.match(generatedEquivalence, new RegExp(fixtureName));
@@ -667,6 +776,24 @@ assert.match(generatedEquivalence, /r4kSoftmmuFastPath/);
 assert.match(generatedEquivalence, /r6Rv64SoftmmuFastPath/);
 assert.match(generatedEquivalence, /acceptedHitCounters/);
 assert.match(generatedEquivalence, /helperVisibleStateMatched/);
+assert.match(generatedEquivalence, /SHARED_SOFTMMU_LOWERING_NAME/);
+assert.match(generatedEquivalence, /generic-softmmu-tlb-contract-lowering/);
+assert.match(generatedEquivalence, /compileSharedSoftmmuAccessOp/);
+assert.match(
+  generatedEquivalence,
+  /compileSharedGeneratedOutputOp\(op, diagnostics = null\)/,
+);
+assert.match(generatedEquivalence, /compileSharedGeneratedOutputOp\(op, diagnostics\)/);
+assert.match(generatedEquivalence, /emitPerTBFunctionBody\(fixture\.words/);
+assert.match(generatedEquivalence, /compileGeneratedOutputModule/);
+assert.match(generatedEquivalence, /softmmuLowering/);
+assert.match(generatedEquivalence, /softmmuLoweredOps/);
+assert.match(generatedEquivalence, /fs\.readFileSync/);
+assert.match(generatedEquivalence, /tcg\/wasm64\.h/);
+assert.match(generatedEquivalence, /assertHeaderObject\(\s*"WASMJIT_RUN_CTX"/);
+assert.match(generatedEquivalence, /assertHeaderObject\(\s*"WASMJIT_TLB_MIRROR"/);
+assert.match(generatedEquivalence, /TCG_WASM64_MEMOPIDX_SHIFT/);
+assert.match(generatedEquivalence, /TCG_WASM64_MEMOPIDX_MMU_MASK/);
 assert.match(generatedEquivalence, /r4mLiveGeneratedExec/);
 assert.match(generatedEquivalence, /r4m-disabled-keeps-tci/);
 assert.match(generatedEquivalence, /r4m-supported-metadata-backed-live-tb-generated/);
@@ -708,8 +835,9 @@ assert.match(generatedEquivalence, /STATUS_MMIO = 0x23n/);
 assert.match(generatedEquivalence, /STATUS_TLB_MISS_OR_FAULT = 0x24n/);
 assert.match(generatedEquivalence, /STATUS_INVALIDATED = 0x26n/);
 assert.match(generatedEquivalence, /run-exit mmio value is not a generated status/);
-assert.match(generatedEquivalence, /r4s5b-valid-load-rejects-unwired-tlb-mirror/);
-assert.match(generatedEquivalence, /r4s5b-valid-store-rejects-unwired-tlb-mirror/);
+assert.match(generatedEquivalence, /r4s5c-valid-load-enters-generic-softmmu-lowering/);
+assert.match(generatedEquivalence, /r4s5c-valid-store-enters-generic-softmmu-lowering/);
+assert.match(generatedEquivalence, /r4s5c-multiple-memops-reject-before-partial-store/);
 assert.match(generatedEquivalence, /r4s5b-unproven-oi-rejects-before-inline-ram/);
 assert.match(generatedEquivalence, /r4s5b-movl-oi-rejects-before-inline-ram/);
 assert.match(generatedEquivalence, /r4s5b-unsupported-size-rejects-before-inline-ram/);
@@ -719,7 +847,7 @@ assert.match(generatedEquivalence, /r4s5b-alignment-flag-rejects-before-inline-r
 assert.match(generatedEquivalence, /r4s5b-atomic-flag-rejects-before-inline-ram/);
 assert.match(generatedEquivalence, /r4s5b-high-flag-rejects-before-inline-ram/);
 assert.match(generatedEquivalence, /r4s5b-unexpected-mmu-idx-rejects-before-inline-ram/);
-assert.match(generatedEquivalence, /selected-body-softmmu-tlb-mirror-unwired/);
+assert.match(generatedEquivalence, /selected-body-softmmu-multi-access-unsupported/);
 assert.match(generatedEquivalence, /selected-body-memop-unsupported-high-flags/);
 
 console.log("wasm64 translate metadata contract: ok");
