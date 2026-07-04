@@ -204,6 +204,8 @@ typedef enum TCGWasm64LiveGeneratedExecRejectReason {
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_ATOMIC,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNSUPPORTED_HIGH_FLAGS,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNEXPECTED_MMU_IDX,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_DIRECT_MEMORY_UNSUPPORTED,
+    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_CONTROL_FLOW_UNSUPPORTED,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_UNAVAILABLE,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_MULTI_ACCESS_UNSUPPORTED,
     TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_TLB_MIRROR_INVALID,
@@ -2743,6 +2745,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
     const runCtxTlbOffset = 48;
     const valueI32 = 0x7f;
     const valueI64 = 0x7e;
+    const liveMemoryImportMemory64 = true;
     const envRelativeBaseReg = 14;
     const envRelativeMinOffset = -16;
     const envRelativeMaxExclusive = 0x120;
@@ -2939,40 +2942,46 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         return [...expr, 0xad];
     }
 
+    function memoryAddress(expr) {
+        return liveMemoryImportMemory64 ? expr : i32WrapI64(expr);
+    }
+
     function i64Load(address, offset = 0) {
-        return [...address, 0x29, ...memArg(3, offset)];
+        return [...memoryAddress(address), 0x29, ...memArg(3, offset)];
     }
 
     function i32Load(address, offset = 0) {
-        return [...address, 0x28, ...memArg(2, offset)];
+        return [...memoryAddress(address), 0x28, ...memArg(2, offset)];
     }
 
     function i32Load8U(address, offset = 0) {
-        return [...address, 0x2d, ...memArg(0, offset)];
+        return [...memoryAddress(address), 0x2d, ...memArg(0, offset)];
     }
 
     function i64Store(address, value) {
-        return [...address, ...value, 0x37, ...memArg(3, 0)];
+        return [...memoryAddress(address), ...value, 0x37, ...memArg(3, 0)];
     }
 
     function i32Store8(address, value) {
-        return [...address, ...value, 0x3a, ...memArg(0, 0)];
+        return [...memoryAddress(address), ...value, 0x3a, ...memArg(0, 0)];
     }
 
     function i32Store(address, value) {
-        return [...address, ...value, 0x36, ...memArg(2, 0)];
+        return [...memoryAddress(address), ...value, 0x36, ...memArg(2, 0)];
     }
 
     function i64LoadAtPtr(ptrLocal, offset) {
-        return [...localGet(ptrLocal), 0x29, ...memArg(3, offset)];
+        return i64Load(localGet(ptrLocal), offset);
     }
 
     function i64StoreAtPtr(ptrLocal, offset, value) {
-        return [...localGet(ptrLocal), ...value, 0x37, ...memArg(3, offset)];
+        return [...memoryAddress(localGet(ptrLocal)), ...value,
+                0x37, ...memArg(3, offset)];
     }
 
     function i32StoreAtPtr(ptrLocal, offset, value) {
-        return [...localGet(ptrLocal), ...value, 0x36, ...memArg(2, offset)];
+        return [...memoryAddress(localGet(ptrLocal)), ...value,
+                0x36, ...memArg(2, offset)];
     }
 
     function addressAdd(base, offset) {
@@ -3355,18 +3364,18 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                 sizeExpr: i32WrapI64(localGet(softSize)),
             });
             const loadByte = i64ExtendI32U(i32Load8U(
-                i32WrapI64(localGet(softHostAddr))));
+                localGet(softHostAddr)));
             const loadWord = i64ExtendI32U(i32Load(
-                i32WrapI64(localGet(softHostAddr))));
-            const loadQuad = i64Load(i32WrapI64(localGet(softHostAddr)));
+                localGet(softHostAddr)));
+            const loadQuad = i64Load(localGet(softHostAddr));
             const storeByte = i32Store8(
-                i32WrapI64(localGet(hostLocal)),
+                localGet(hostLocal),
                 i32WrapI64(localGet(valueLocal)));
             const storeWord = i32Store(
-                i32WrapI64(localGet(hostLocal)),
+                localGet(hostLocal),
                 i32WrapI64(localGet(valueLocal)));
             const storeQuad = i64Store(
-                i32WrapI64(localGet(hostLocal)),
+                localGet(hostLocal),
                 localGet(valueLocal));
 
             const guard = [
@@ -4074,6 +4083,7 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
     const runExitInvalidated = 8;
     const valueI32 = 0x7f;
     const valueI64 = 0x7e;
+    const liveMemoryImportMemory64 = true;
     const envRelativeBaseReg = 14;
     const envRelativeMinOffset = -16;
     const envRelativeMaxExclusive = 0x120;
@@ -4262,36 +4272,43 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
         return [...expr, 0xad];
     }
 
+    function memoryAddress(expr) {
+        return liveMemoryImportMemory64 ? expr : i32WrapI64(expr);
+    }
+
     function i64Load(address) {
-        return [...address, 0x29, ...memArg(3, 0)];
+        return [...memoryAddress(address), 0x29, ...memArg(3, 0)];
     }
 
     function i32Load(address) {
-        return [...address, 0x28, ...memArg(2, 0)];
+        return [...memoryAddress(address), 0x28, ...memArg(2, 0)];
     }
 
     function i64Store(address, value) {
-        return [...address, ...value, 0x37, ...memArg(3, 0)];
+        return [...memoryAddress(address), ...value, 0x37, ...memArg(3, 0)];
     }
 
     function i32Store(address, value) {
-        return [...address, ...value, 0x36, ...memArg(2, 0)];
+        return [...memoryAddress(address), ...value, 0x36, ...memArg(2, 0)];
     }
 
     function i32Store8(address, value) {
-        return [...address, ...value, 0x3a, ...memArg(0, 0)];
+        return [...memoryAddress(address), ...value, 0x3a, ...memArg(0, 0)];
     }
 
     function i64LoadAtPtr(ptrLocal, offset) {
-        return [...localGet(ptrLocal), 0x29, ...memArg(3, offset)];
+        return [...memoryAddress(localGet(ptrLocal)),
+                0x29, ...memArg(3, offset)];
     }
 
     function i32StoreAtPtr(ptrLocal, offset, value) {
-        return [...localGet(ptrLocal), ...value, 0x36, ...memArg(2, offset)];
+        return [...memoryAddress(localGet(ptrLocal)), ...value,
+                0x36, ...memArg(2, offset)];
     }
 
     function i64StoreAtPtr(ptrLocal, offset, value) {
-        return [...localGet(ptrLocal), ...value, 0x37, ...memArg(3, offset)];
+        return [...memoryAddress(localGet(ptrLocal)), ...value,
+                0x37, ...memArg(3, offset)];
     }
 
     function bits(value, start, length) {
@@ -4821,18 +4838,18 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
             const comparatorOffset = softmmuComparatorOffset(access);
             const inlineCounterOffset = access === "store" ? 96 : 88;
             const loadByte = i64ExtendI32U(i32Load8U(
-                i32WrapI64(localGet(softHostAddr))));
+                localGet(softHostAddr)));
             const loadWord = i64ExtendI32U(i32Load(
-                i32WrapI64(localGet(softHostAddr))));
-            const loadQuad = i64Load(i32WrapI64(localGet(softHostAddr)));
+                localGet(softHostAddr)));
+            const loadQuad = i64Load(localGet(softHostAddr));
             const storeByte = i32Store8(
-                i32WrapI64(localGet(softHostAddr)),
+                localGet(softHostAddr),
                 i32WrapI64(localGet(softValue)));
             const storeWord = i32Store(
-                i32WrapI64(localGet(softHostAddr)),
+                localGet(softHostAddr),
                 i32WrapI64(localGet(softValue)));
             const storeQuad = i64Store(
-                i32WrapI64(localGet(softHostAddr)),
+                localGet(softHostAddr),
                 localGet(softValue));
             const commitLoad = [
                 ...ifBlock(i64Eq(
@@ -4874,7 +4891,7 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
                     unsupportedReturn),
                 ...ifBlock(i32Ne(
                     i32And(
-                        i32Load(i32WrapI64(localGet(softTlbPtr)),
+                        i32Load(localGet(softTlbPtr),
                                 tlbMirror.flags),
                         i32Const(tlbMirrorValid)),
                     i32Const(tlbMirrorValid)),
@@ -4893,7 +4910,7 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
                 ...ifBlock(i32Ne(
                     i32WrapI64(i64And(localGet(softOi),
                                       i64Const(memOpIdxMmuMask))),
-                    i32Load(i32WrapI64(localGet(softTlbPtr)),
+                    i32Load(localGet(softTlbPtr),
                             tlbMirror.mmuIdx)),
                     unsupportedReturn),
                 ...ifBlock(i64Ne(
@@ -4935,13 +4952,13 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
                     i64Const(0n)),
                     pageCrossingReturn),
                 ...localSet(softMask,
-                    i64Load(i32WrapI64(localGet(softTlbPtr)),
+                    i64Load(localGet(softTlbPtr),
                             tlbMirror.mask)),
                 ...localSet(softTablePtr,
-                    i64Load(i32WrapI64(localGet(softTlbPtr)),
+                    i64Load(localGet(softTlbPtr),
                             tlbMirror.table)),
                 ...localSet(softFulltlbPtr,
-                    i64Load(i32WrapI64(localGet(softTlbPtr)),
+                    i64Load(localGet(softTlbPtr),
                             tlbMirror.fulltlb)),
                 ...ifBlock(i64Eq(localGet(softTablePtr), i64Const(0n)),
                     unsupportedReturn),
@@ -4962,14 +4979,14 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
                            i64Mul(localGet(softIndex),
                                   i64Const(BigInt(tlbEntryFull.size))))),
                 ...localSet(softComparator,
-                    i64Load(i32WrapI64(localGet(softEntryPtr)),
+                    i64Load(localGet(softEntryPtr),
                             comparatorOffset)),
                 ...localSet(softAddend,
-                    i64Load(i32WrapI64(localGet(softEntryPtr)),
+                    i64Load(localGet(softEntryPtr),
                             tlbEntry.addend)),
                 ...localSet(softSlowFlags,
                     i64ExtendI32U(i32Load8U(
-                        i32WrapI64(localGet(softFullPtr)),
+                        localGet(softFullPtr),
                         tlbEntryFull.slowFlags + accessType))),
                 ...ifBlock(i64Ne(
                     i64And(localGet(softComparator),
@@ -6993,6 +7010,10 @@ static const char * const live_generated_exec_reject_reason_names[] = {
         "selected-body-memop-unsupported-high-flags",
     [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNEXPECTED_MMU_IDX] =
         "selected-body-memop-unexpected-mmu-idx",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_DIRECT_MEMORY_UNSUPPORTED] =
+        "selected-body-direct-memory-unsupported",
+    [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_CONTROL_FLOW_UNSUPPORTED] =
+        "selected-body-control-flow-unsupported",
     [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_UNAVAILABLE] =
         "selected-body-softmmu-unavailable",
     [TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_MULTI_ACCESS_UNSUPPORTED] =
@@ -7235,24 +7256,60 @@ static bool tcg_wasm64_live_generated_exec_op_writes_r0(TCGOpcode op)
     }
 }
 
-static bool tcg_wasm64_live_generated_exec_op_direct_memory(TCGOpcode op)
+static bool tcg_wasm64_live_generated_exec_direct_memory_size(TCGOpcode op,
+                                                              int32_t *size)
 {
     switch (op) {
-    case INDEX_op_ld:
+    case INDEX_op_st8:
+        *size = 1;
+        return true;
     case INDEX_op_ld32s:
     case INDEX_op_ld32u:
-    case INDEX_op_st:
-    case INDEX_op_st8:
     case INDEX_op_st32:
+        *size = 4;
+        return true;
+    case INDEX_op_ld:
+    case INDEX_op_st:
+        *size = 8;
         return true;
     default:
+        *size = 0;
         return false;
     }
 }
 
-static bool tcg_wasm64_live_generated_exec_op_control_flow(TCGOpcode op)
+static bool tcg_wasm64_live_generated_exec_direct_memory_supported(
+    uint32_t word)
 {
-    return op == INDEX_op_brcond;
+    int32_t size;
+    int32_t offset;
+
+    if (!tcg_wasm64_live_generated_exec_direct_memory_size(
+            (TCGOpcode)tcg_wasm64_tci_word_op(word), &size)) {
+        return true;
+    }
+    offset = sextract32(word, 16, 16);
+    return tcg_wasm64_tci_word_r1(word) == 14 &&
+           offset >= -16 &&
+           offset + size <= 0x120;
+}
+
+static bool tcg_wasm64_live_generated_exec_control_flow_supported(
+    uint32_t index, uint32_t word)
+{
+    int32_t target_offset;
+    int32_t target_index;
+
+    if ((TCGOpcode)tcg_wasm64_tci_word_op(word) != INDEX_op_brcond) {
+        return true;
+    }
+    target_offset = (int32_t)((index + 1) * 4) +
+                    sextract32(word, 12, 20);
+    if (target_offset % 4 != 0) {
+        return false;
+    }
+    target_index = target_offset / 4;
+    return target_index > (int32_t)index;
 }
 
 static TCGWasm64LiveGeneratedExecRejectReason
@@ -7294,7 +7351,8 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
 {
     TCGWasm64LiveMemOpState state = { 0 };
     bool have_mmu_idx = false;
-    bool multi_access_unsupported = false;
+    bool direct_memory_unsupported = false;
+    bool control_flow_unsupported = false;
     bool saw_store_access = false;
     bool load_after_store = false;
     bool store_before_later_guard = false;
@@ -7313,6 +7371,11 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
         uint32_t r0 = tcg_wasm64_tci_word_r0(word);
 
         switch (op) {
+        case INDEX_op_exit_tb:
+        case INDEX_op_goto_tb:
+        case INDEX_op_call:
+            i = metadata->generated_output_op_count;
+            break;
         case INDEX_op_tci_movi:
             tcg_wasm64_live_memop_state_known(
                 &state, r0, tcg_wasm64_tci_word_i20(word));
@@ -7392,19 +7455,48 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
             }
             break;
         }
-        default:
-            if (tcg_wasm64_live_generated_exec_op_direct_memory(op) ||
-                tcg_wasm64_live_generated_exec_op_control_flow(op)) {
-                multi_access_unsupported = true;
+        case INDEX_op_ld:
+        case INDEX_op_ld32s:
+        case INDEX_op_ld32u:
+        case INDEX_op_st:
+        case INDEX_op_st8:
+        case INDEX_op_st32:
+            direct_memory_unsupported = true;
+            if (!tcg_wasm64_live_generated_exec_direct_memory_supported(
+                    word)) {
+                return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_DIRECT_MEMORY_UNSUPPORTED;
             }
+            if (tcg_wasm64_live_generated_exec_op_writes_r0(op)) {
+                tcg_wasm64_live_memop_state_unknown(&state, r0);
+            }
+            break;
+        case INDEX_op_brcond:
+            control_flow_unsupported = true;
+            if (!tcg_wasm64_live_generated_exec_control_flow_supported(
+                    i, word)) {
+                return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_CONTROL_FLOW_UNSUPPORTED;
+            }
+            break;
+        default:
             if (tcg_wasm64_live_generated_exec_op_writes_r0(op)) {
                 tcg_wasm64_live_memop_state_unknown(&state, r0);
             }
             break;
         }
     }
-    if (memop_count > 1 && (multi_access_unsupported ||
-                            load_after_store)) {
+    if (memop_count > 1 && direct_memory_unsupported) {
+        tcg_wasm64_live_generated_exec_count_multi_access_reject(
+            memop_count, load_count, store_count, access_order,
+            access_memops, store_before_later_guard);
+        return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_DIRECT_MEMORY_UNSUPPORTED;
+    }
+    if (memop_count > 1 && control_flow_unsupported) {
+        tcg_wasm64_live_generated_exec_count_multi_access_reject(
+            memop_count, load_count, store_count, access_order,
+            access_memops, store_before_later_guard);
+        return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_CONTROL_FLOW_UNSUPPORTED;
+    }
+    if (memop_count > 1 && load_after_store) {
         tcg_wasm64_live_generated_exec_count_multi_access_reject(
             memop_count, load_count, store_count, access_order,
             access_memops, store_before_later_guard);

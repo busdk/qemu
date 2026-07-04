@@ -3424,7 +3424,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     generic x86 accelerator work to R4s20 module emission/validation and the
     remaining memory-shape rejects; it is not an R4l speed pass, and no full
     R4l speed gate or Bus Engine OS proof was run.
-  - [ ] R4s20 - Repair second-tier x86 live-emitter module
+  - [x] R4s20 - Repair second-tier x86 live-emitter module
     validation/emission blockers after R4s19 evidence, unless R4s19 shows a
     different dominant blocker. DoD: make live and deterministic SoftMMU
     emitters address-type aware so memory64 imports keep i64 memory
@@ -3438,6 +3438,40 @@ run that reaches a weaker marker than normal multi-user readiness.
     `js-status-module-validation-failed=993`) are useful second-tier
     blockers, but they should not drive a browser speed gate until the
     dominant pool-relocation blocker is reduced.
+    Accepted 2026-07-04: QEMU branch
+    `qemu/r4s20-module-validation-20260704` repairs the generic x86
+    live-emitter module blockers targeted by this slice. The live
+    generated-exec and live coverage SoftMMU emitters now route memory
+    instructions through an address-type helper so the shared memory64 import
+    keeps i64 address operands for TLB mirror and RAM-hit loads/stores. The
+    deterministic per-TB SoftMMU lowering mirrors the same contract: context
+    pointer locals use the imported memory address type, computed host/TLB
+    pointers stay i64 for memory64 modules and wrap only for memory32 modules,
+    and `tci_movl` constant-pool loads use the descriptor's address type.
+
+    Deterministic coverage now includes memory64 live-generated fixtures for
+    `tci_movi` proven `MemOpIdx` plus `tci_qemu_ld_rrr` and
+    `tci_qemu_st_rrr` clean RAM hits. Both validate as memory64 modules,
+    report the expected inline hit counter (`inlineTlbHitLoads=1` or
+    `inlineTlbHitStores=1`), and keep helper, `qemu_ld`, and `qemu_st` calls
+    at zero. The live C preflight and deterministic model also pre-reject
+    unsupported direct-memory, unsupported control-flow, and unsupported
+    multi-access SoftMMU shapes with actionable reasons before module
+    construction, instead of letting those families fall through to catch-all
+    body-build/module-emission attribution. The new reject reasons are
+    `selected-body-direct-memory-unsupported` and
+    `selected-body-control-flow-unsupported`; existing
+    `selected-body-softmmu-multi-access-unsupported` remains for true
+    multi-access ordering/limit rejects.
+
+    Required deterministic checks passed:
+    `git diff --check`;
+    `node --check scripts/ci/wasm-generated-output-equivalence-test.mjs`;
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`;
+    `node --check scripts/ci/wasm64-translate-metadata-test.mjs`; and
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`. No browser
+    preflight, fresh artifact build, full R4l speed gate, or Bus Engine OS
+    proof was run for this item.
   - [ ] R4s21 - Expand supported x86 live SoftMMU MemOp families only after
     R4s19/R4s20 identify memory rejects as a remaining dominant blocker.
     DoD: admit alignment flags only with explicit QEMU-equivalent alignment

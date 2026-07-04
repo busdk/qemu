@@ -866,6 +866,10 @@ function memoryConstAddress(address, memory64 = false) {
   return memory64 ? i64Const(address) : i32Const(address);
 }
 
+function memoryAddressFromI64(expr, memory64 = false) {
+  return memory64 ? expr : i32WrapI64(expr);
+}
+
 function envRelativeAccessSupported(op, size) {
   const offset = sextract(op.insn, 16, 16);
 
@@ -1005,10 +1009,16 @@ function sharedSoftmmuFailureReturn({
   ];
 }
 
-function compileSharedSoftmmuAccessParts(op, diagnostics = null, accessIndex = 0) {
+function compileSharedSoftmmuAccessParts(
+  op,
+  diagnostics = null,
+  accessIndex = 0,
+  options = {},
+) {
   const { opc, r0, r1, r2 } = op;
   const isLoad = opc === OPS.tci_qemu_ld_rrr;
   const isStore = opc === OPS.tci_qemu_st_rrr;
+  const memory64 = options.memoryImportDescriptor?.memory64 === true;
   const supportedMemopFlags =
     MO_SIZE | MO_SIGN | MO_BSWAP | MO_AMASK |
     MO_ALIGN_TLB_ONLY | MO_ATOM_MASK;
@@ -1043,6 +1053,18 @@ function compileSharedSoftmmuAccessParts(op, diagnostics = null, accessIndex = 0
   const valueLocal = sharedSoftmmuAccessLocal(accessIndex, 1);
   const memopLocal = sharedSoftmmuAccessLocal(accessIndex, 2);
 
+  function memoryPointerFromContextField(offset) {
+    return memoryAddressFromI64(i64Load(localGet(0), offset), memory64);
+  }
+
+  function computedMemoryAddress(expr) {
+    return memoryAddressFromI64(expr, memory64);
+  }
+
+  function pointerEqz(expr) {
+    return memory64 ? i64EqExpr(expr, i64Const(0n)) : i32Eqz(expr);
+  }
+
   if (!isLoad && !isStore) {
     return null;
   }
@@ -1054,10 +1076,10 @@ function compileSharedSoftmmuAccessParts(op, diagnostics = null, accessIndex = 0
 
   code.push(...localSet(
     SHARED_SOFTMMU_LOCAL_COUNTERS_PTR,
-    i32WrapI64(i64Load(localGet(0), WASMJIT_RUN_CTX.counters))));
+    memoryPointerFromContextField(WASMJIT_RUN_CTX.counters)));
   code.push(...localSet(
     SHARED_SOFTMMU_LOCAL_TLB_PTR,
-    i32WrapI64(i64Load(localGet(0), WASMJIT_RUN_CTX.tlb))));
+    memoryPointerFromContextField(WASMJIT_RUN_CTX.tlb)));
   code.push(...localSet(SHARED_SOFTMMU_LOCAL_TADDR, localGet(regLocal(r1))));
   code.push(...localSet(SHARED_SOFTMMU_LOCAL_OI, localGet(regLocal(r2))));
   code.push(...localSet(SHARED_SOFTMMU_LOCAL_ACCESS_SIZE, i32Const(0)));
@@ -1066,7 +1088,7 @@ function compileSharedSoftmmuAccessParts(op, diagnostics = null, accessIndex = 0
                           localGet(regLocal(r0))));
   }
 
-  code.push(...ifBlock(i32Eqz(localGet(SHARED_SOFTMMU_LOCAL_TLB_PTR)),
+  code.push(...ifBlock(pointerEqz(localGet(SHARED_SOFTMMU_LOCAL_TLB_PTR)),
                        unsupportedReturn));
   code.push(...ifBlock(
     i32Eqz(i32And(
@@ -1188,17 +1210,17 @@ function compileSharedSoftmmuAccessParts(op, diagnostics = null, accessIndex = 0
                  i64Const(BigInt(WASMJIT_TLB_ENTRY_FULL.size))))));
   code.push(...localSet(
     SHARED_SOFTMMU_LOCAL_COMPARATOR,
-    i64Load(i32WrapI64(localGet(SHARED_SOFTMMU_LOCAL_ENTRY_PTR)),
+    i64Load(computedMemoryAddress(localGet(SHARED_SOFTMMU_LOCAL_ENTRY_PTR)),
             isStore ? WASMJIT_TLB_ENTRY.addrWrite :
                       WASMJIT_TLB_ENTRY.addrRead)));
   code.push(...localSet(
     SHARED_SOFTMMU_LOCAL_ADDEND,
-    i64Load(i32WrapI64(localGet(SHARED_SOFTMMU_LOCAL_ENTRY_PTR)),
+    i64Load(computedMemoryAddress(localGet(SHARED_SOFTMMU_LOCAL_ENTRY_PTR)),
             WASMJIT_TLB_ENTRY.addend)));
   code.push(...localSet(
     SHARED_SOFTMMU_LOCAL_SLOW_FLAGS,
     i32Load8U(
-      i32WrapI64(localGet(SHARED_SOFTMMU_LOCAL_FULL_PTR)),
+      computedMemoryAddress(localGet(SHARED_SOFTMMU_LOCAL_FULL_PTR)),
       WASMJIT_TLB_ENTRY_FULL.slowFlags +
         (isStore ? WASMJIT_TLB_CONSTANTS.mmuDataStore :
                    WASMJIT_TLB_CONSTANTS.mmuDataLoad))));
@@ -1250,7 +1272,7 @@ function compileSharedSoftmmuAccessParts(op, diagnostics = null, accessIndex = 0
                    i64Const(BigInt(MO_SIZE))),
         i64Const(BigInt(MO_8))),
       localSet(regLocal(r0), i64ExtendI32U(i32Load8U(
-        i32WrapI64(localGet(SHARED_SOFTMMU_LOCAL_HOST_ADDR))))),
+        computedMemoryAddress(localGet(SHARED_SOFTMMU_LOCAL_HOST_ADDR))))),
     ));
     code.push(...ifBlock(
       i64EqExpr(
@@ -1258,7 +1280,7 @@ function compileSharedSoftmmuAccessParts(op, diagnostics = null, accessIndex = 0
                    i64Const(BigInt(MO_SIZE))),
         i64Const(BigInt(MO_32))),
       localSet(regLocal(r0), i64ExtendI32U(i32Load(
-        i32WrapI64(localGet(SHARED_SOFTMMU_LOCAL_HOST_ADDR))))),
+        computedMemoryAddress(localGet(SHARED_SOFTMMU_LOCAL_HOST_ADDR))))),
     ));
     code.push(...ifBlock(
       i64EqExpr(
@@ -1266,7 +1288,7 @@ function compileSharedSoftmmuAccessParts(op, diagnostics = null, accessIndex = 0
                    i64Const(BigInt(MO_SIZE))),
         i64Const(BigInt(MO_64))),
       localSet(regLocal(r0), i64Load(
-        i32WrapI64(localGet(SHARED_SOFTMMU_LOCAL_HOST_ADDR)))),
+        computedMemoryAddress(localGet(SHARED_SOFTMMU_LOCAL_HOST_ADDR)))),
     ));
     commit.push(...sharedIncrementCounter(WASMJIT_COUNTERS.inlineTlbHitLoads));
   } else {
@@ -1276,7 +1298,7 @@ function compileSharedSoftmmuAccessParts(op, diagnostics = null, accessIndex = 0
         i64AndExpr(localGet(memopLocal),
                    i64Const(BigInt(MO_SIZE))),
         i64Const(BigInt(MO_8))),
-      i32Store8(i32WrapI64(localGet(hostLocal)),
+      i32Store8(computedMemoryAddress(localGet(hostLocal)),
                 i32WrapI64(localGet(valueLocal))),
     ));
     commit.push(...ifBlock(
@@ -1284,7 +1306,7 @@ function compileSharedSoftmmuAccessParts(op, diagnostics = null, accessIndex = 0
         i64AndExpr(localGet(memopLocal),
                    i64Const(BigInt(MO_SIZE))),
         i64Const(BigInt(MO_32))),
-      i32Store(i32WrapI64(localGet(hostLocal)),
+      i32Store(computedMemoryAddress(localGet(hostLocal)),
                i32WrapI64(localGet(valueLocal))),
     ));
     commit.push(...ifBlock(
@@ -1292,7 +1314,7 @@ function compileSharedSoftmmuAccessParts(op, diagnostics = null, accessIndex = 0
         i64AndExpr(localGet(memopLocal),
                    i64Const(BigInt(MO_SIZE))),
         i64Const(BigInt(MO_64))),
-      i64Store(i32WrapI64(localGet(hostLocal)),
+      i64Store(computedMemoryAddress(localGet(hostLocal)),
                localGet(valueLocal)),
     ));
     commit.push(...sharedIncrementCounter(WASMJIT_COUNTERS.inlineTlbHitStores));
@@ -1300,8 +1322,8 @@ function compileSharedSoftmmuAccessParts(op, diagnostics = null, accessIndex = 0
   return { guard: code, commit };
 }
 
-function compileSharedSoftmmuAccessOp(op, diagnostics = null) {
-  const parts = compileSharedSoftmmuAccessParts(op, diagnostics, 0);
+function compileSharedSoftmmuAccessOp(op, diagnostics = null, options = {}) {
+  const parts = compileSharedSoftmmuAccessParts(op, diagnostics, 0, options);
 
   return parts === null ? null : [...parts.guard, ...parts.commit];
 }
@@ -1319,7 +1341,8 @@ function compileSharedGeneratedOutputOp(
   }
   if (opc === OPS.tci_movl) {
     const ptr = op.tbPtr + sextract(insn, 12, 20);
-    return localSet(regLocal(r0), i64Load(i32Const(ptr), 0));
+    return localSet(regLocal(r0),
+                    i64Load(memoryConstAddress(ptr, memory64), 0));
   }
   if (opc === OPS.ld32u || opc === OPS.ld32s) {
     const address = envRelativeMemoryAddress(op, 4, memory64);
@@ -1460,10 +1483,10 @@ function compileSharedGeneratedOutputOp(
       : localSet(regLocal(r0), i64ExtendI32U(comparison));
   }
   if (opc === OPS.tci_qemu_ld_rrr) {
-    return compileSharedSoftmmuAccessOp(op, diagnostics);
+    return compileSharedSoftmmuAccessOp(op, diagnostics, options);
   }
   if (opc === OPS.tci_qemu_st_rrr) {
-    return compileSharedSoftmmuAccessOp(op, diagnostics);
+    return compileSharedSoftmmuAccessOp(op, diagnostics, options);
   }
   return null;
 }
@@ -1582,7 +1605,7 @@ function compileSharedGeneratedOutputBody(
           (op.opc === OPS.tci_qemu_ld_rrr ||
            op.opc === OPS.tci_qemu_st_rrr)) {
         const parts = compileSharedSoftmmuAccessParts(
-          op, diagnostics, nextSoftmmuAccessIndex++);
+          op, diagnostics, nextSoftmmuAccessIndex++, options);
 
         if (parts === null) {
           return null;
@@ -1684,7 +1707,9 @@ function compileGeneratedOutputModule(
       [
         { count: 2, type: pointerType },
         { count: 16, type: VALUE_I64 },
-        { count: 7, type: VALUE_I32 },
+        { count: 3, type: VALUE_I32 },
+        { count: 2, type: pointerType },
+        { count: 2, type: VALUE_I32 },
         { count: 35, type: VALUE_I64 },
       ],
     )])),
@@ -6277,6 +6302,35 @@ function r4s5bValidateMemop(memop) {
   return null;
 }
 
+function r4s20DirectMemorySize(op) {
+  if (op === OPS.st8) {
+    return 1;
+  }
+  if ([OPS.ld32u, OPS.ld32s, OPS.st32].includes(op)) {
+    return 4;
+  }
+  if ([OPS.ld, OPS.st].includes(op)) {
+    return 8;
+  }
+  return null;
+}
+
+function r4s20DirectMemorySupported(op, word, r1) {
+  const size = r4s20DirectMemorySize(op);
+
+  if (size === null) {
+    return true;
+  }
+  return envRelativeAccessSupported({ insn: word, r1 }, size);
+}
+
+function r4s20ControlFlowSupported(index, word) {
+  const targetOffset = (index + 1) * 4 + sextract(word, 12, 20);
+  const targetIndex = targetOffset / 4;
+
+  return targetOffset % 4 === 0 && targetIndex > index;
+}
+
 function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_IDX) {
   const known = new Array(16).fill(false);
   const values = new Array(16).fill(0);
@@ -6284,7 +6338,8 @@ function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_I
   let memopCount = 0;
   let qemuLdOps = 0;
   let qemuStOps = 0;
-  let multiAccessUnsupported = false;
+  let directMemoryUnsupported = false;
+  let controlFlowUnsupported = false;
   let sawStoreAccess = false;
   let loadAfterStore = false;
   let storeBeforeLaterGuardCanFail = false;
@@ -6313,12 +6368,15 @@ function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_I
     }
   }
 
-  for (const word of metadata?.words || []) {
+  for (const [index, word] of (metadata?.words || []).entries()) {
     const op = word & 0xff;
     const r0 = bits(word, 8, 4);
     const r1 = bits(word, 12, 4);
     const r2 = bits(word, 16, 4);
 
+    if ([OPS.exit_tb, OPS.goto_tb, OPS.call].includes(op)) {
+      break;
+    }
     if (op === OPS.tci_movi) {
       markKnown(r0, sextract(word, 12, 20));
       continue;
@@ -6382,16 +6440,58 @@ function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_I
       }
       continue;
     }
-    if ([OPS.brcond, OPS.ld32u, OPS.ld32s, OPS.ld,
-         OPS.st8, OPS.st32, OPS.st].includes(op)) {
-      multiAccessUnsupported = true;
+    if (r4s20DirectMemorySize(op) !== null) {
+      directMemoryUnsupported = true;
+      if (!r4s20DirectMemorySupported(op, word, r1)) {
+        return {
+          reason: "selected-body-direct-memory-unsupported",
+          hasMemop,
+        };
+      }
+    }
+    if (op === OPS.brcond) {
+      controlFlowUnsupported = true;
+      if (!r4s20ControlFlowSupported(index, word)) {
+        return {
+          reason: "selected-body-control-flow-unsupported",
+          hasMemop,
+        };
+      }
     }
     if (r4s5bOpWritesR0(op)) {
       markUnknown(r0);
     }
   }
 
-  if (memopCount > 1 && (multiAccessUnsupported || loadAfterStore)) {
+  if (memopCount > 1 && directMemoryUnsupported) {
+    return {
+      reason: "selected-body-direct-memory-unsupported",
+      hasMemop,
+      multiAccessAttribution: {
+        accessCount: memopCount,
+        order: accessOrder.slice(),
+        loadCount: qemuLdOps,
+        storeCount: qemuStOps,
+        memops: memops.slice(),
+        storeBeforeLaterGuardCanFail,
+      },
+    };
+  }
+  if (memopCount > 1 && controlFlowUnsupported) {
+    return {
+      reason: "selected-body-control-flow-unsupported",
+      hasMemop,
+      multiAccessAttribution: {
+        accessCount: memopCount,
+        order: accessOrder.slice(),
+        loadCount: qemuLdOps,
+        storeCount: qemuStOps,
+        memops: memops.slice(),
+        storeBeforeLaterGuardCanFail,
+      },
+    };
+  }
+  if (memopCount > 1 && loadAfterStore) {
     return {
       reason: "selected-body-softmmu-multi-access-unsupported",
       hasMemop,
@@ -6699,6 +6799,28 @@ const r4mLiveGeneratedExecCases = [
     },
   }),
   simulateR4mLiveGeneratedExec({
+    name: "r4s20-memory64-softmmu-ld-ram-hit-validates",
+    enabled: true,
+    noFallback: true,
+    metadata: {
+      ...r4s5bMemoryMetadata(),
+      emitOptions: {
+        memoryImportDescriptor: LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR,
+      },
+    },
+  }),
+  simulateR4mLiveGeneratedExec({
+    name: "r4s20-memory64-softmmu-st-ram-hit-validates",
+    enabled: true,
+    noFallback: true,
+    metadata: {
+      ...r4s5bMemoryMetadata({ op: OPS.tci_qemu_st_rrr }),
+      emitOptions: {
+        memoryImportDescriptor: LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR,
+      },
+    },
+  }),
+  simulateR4mLiveGeneratedExec({
     name: "r4s12-live-r4s10-body-shape-live-memory64-generated",
     enabled: true,
     noFallback: true,
@@ -6744,6 +6866,8 @@ assert.deepEqual(
     "tci-fallback",
     "fail-closed",
     "fail-closed",
+    "generated",
+    "generated",
     "generated",
     "generated",
   ],
@@ -6833,6 +6957,56 @@ assert.deepEqual(r4mModuleEmissionFailure.moduleFailureAttribution, {
   terminalOp: "goto_tb",
   memoryImport: LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR,
 });
+const r4s20Memory64SoftmmuHits = [
+  r4mLiveGeneratedExecCases.find((entry) =>
+    entry.name === "r4s20-memory64-softmmu-ld-ram-hit-validates"),
+  r4mLiveGeneratedExecCases.find((entry) =>
+    entry.name === "r4s20-memory64-softmmu-st-ram-hit-validates"),
+];
+assert.deepEqual(
+  r4s20Memory64SoftmmuHits.map((entry) => [
+    entry.ok,
+    entry.path,
+    entry.reason,
+    entry.moduleValid,
+    entry.helperCalls,
+    entry.qemuLdCalls,
+    entry.qemuStCalls,
+    entry.memoryImportDescriptor,
+  ]),
+  [
+    [
+      true,
+      "generated",
+      null,
+      true,
+      0,
+      0,
+      0,
+      LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR,
+    ],
+    [
+      true,
+      "generated",
+      null,
+      true,
+      0,
+      0,
+      0,
+      LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR,
+    ],
+  ],
+);
+assert.deepEqual(
+  r4s20Memory64SoftmmuHits.map((entry) => [
+    entry.inlineTlbHitLoads,
+    entry.inlineTlbHitStores,
+  ]),
+  [
+    [1, 0],
+    [0, 1],
+  ],
+);
 const r4s12LiveR4s10Generated = r4mLiveGeneratedExecCases.find((entry) =>
   entry.name === "r4s12-live-r4s10-body-shape-live-memory64-generated");
 assert.equal(r4s12LiveR4s10Generated.ok, true);
@@ -7004,6 +7178,17 @@ function r4s5bMemoryMetadata(overrides = {}) {
   };
 }
 
+function r4s20GeneratedOutputMetadata(words) {
+  return {
+    opCount: words.length,
+    generatedOutputAvailable: true,
+    generatedOutputSize: words.length * 4,
+    words,
+    relativeBase: 0x1000,
+    guestInstructions: 1,
+  };
+}
+
 function r4s5bMultipleMemoryMetadata() {
   const oi = (((MO_32 | MO_ATOM_NONE) << TCG_WASM64_MEMOPIDX_SHIFT) |
               R4K_SOFTMMU_MMU_IDX) >>> 0;
@@ -7134,8 +7319,39 @@ const r4s5bCases = [
     metadata: r4s8MultiMemoryMetadata(["store", "store"]),
   },
   {
+    name: "r4s20-direct-memory-multi-access-pre-rejects",
+    expectedReason: "selected-body-direct-memory-unsupported",
+    expectedMultiAccessAttribution: {
+      accessCount: 2,
+      order: ["load", "load"],
+      loadCount: 2,
+      storeCount: 0,
+      memops: [MO_32 | MO_ATOM_NONE, MO_32 | MO_ATOM_NONE],
+      storeBeforeLaterGuardCanFail: false,
+    },
+    metadata: r4s8MultiMemoryMetadata(["load", "load"], {
+      prefixWords: [opReg(OPS.ld32u, 4, 14, 0)],
+    }),
+  },
+  {
+    name: "r4s20-unsupported-direct-memory-pre-rejects",
+    expectedReason: "selected-body-direct-memory-unsupported",
+    metadata: r4s20GeneratedOutputMetadata([
+      opReg(OPS.ld32u, 4, 1, 0),
+      OPS.exit_tb,
+    ]),
+  },
+  {
+    name: "r4s20-unsupported-control-flow-pre-rejects",
+    expectedReason: "selected-body-control-flow-unsupported",
+    metadata: r4s20GeneratedOutputMetadata([
+      opBranch(0, -4),
+      OPS.exit_tb,
+    ]),
+  },
+  {
     name: "r4s8-branchy-multi-access-rejects-with-attribution",
-    expectedReason: "selected-body-softmmu-multi-access-unsupported",
+    expectedReason: "selected-body-control-flow-unsupported",
     expectedMultiAccessAttribution: {
       accessCount: 2,
       order: ["store", "load"],

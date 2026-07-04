@@ -634,6 +634,8 @@ for (const liveGeneratedExecRejectReason of [
   "selected-body-memop-unsupported-atomic",
   "selected-body-memop-unsupported-high-flags",
   "selected-body-memop-unexpected-mmu-idx",
+  "selected-body-direct-memory-unsupported",
+  "selected-body-control-flow-unsupported",
   "selected-body-softmmu-unavailable",
   "selected-body-softmmu-multi-access-unsupported",
   "selected-body-softmmu-tlb-mirror-invalid",
@@ -980,6 +982,13 @@ assert.match(generatedEquivalence, /r4s7-within16-rejects-before-inline-ram/);
 assert.match(generatedEquivalence, /r4s7-subalign-rejects-before-inline-ram/);
 assert.match(generatedEquivalence, /r4s5b-high-flag-rejects-before-inline-ram/);
 assert.match(generatedEquivalence, /r4s5b-unexpected-mmu-idx-rejects-before-inline-ram/);
+assert.match(generatedEquivalence, /r4s20-memory64-softmmu-ld-ram-hit-validates/);
+assert.match(generatedEquivalence, /r4s20-memory64-softmmu-st-ram-hit-validates/);
+assert.match(generatedEquivalence, /r4s20-direct-memory-multi-access-pre-rejects/);
+assert.match(generatedEquivalence, /r4s20-unsupported-direct-memory-pre-rejects/);
+assert.match(generatedEquivalence, /r4s20-unsupported-control-flow-pre-rejects/);
+assert.match(generatedEquivalence, /selected-body-direct-memory-unsupported/);
+assert.match(generatedEquivalence, /selected-body-control-flow-unsupported/);
 assert.match(generatedEquivalence, /selected-body-softmmu-multi-access-unsupported/);
 assert.match(generatedEquivalence, /selected-body-memop-unsupported-high-flags/);
 
