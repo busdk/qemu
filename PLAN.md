@@ -1957,6 +1957,87 @@ run that reaches a weaker marker than normal multi-user readiness.
   x86 Chromium preflight may run only after those deterministic tests pass,
   and R4l remains blocked until that preflight reports nonzero generated
   guest-instruction retirement from live x86 TBs.
+  - [x] R4s0 - Refresh the x86 lane to the latest shared QEMU `develop`
+    before continuing R4s. Accepted 2026-07-04: `git fetch origin develop`
+    confirmed QEMU `HEAD`, `origin/develop`, and `FETCH_HEAD` all at
+    `e26d9f2aa2cb9892b4da6da1185304b0c8eb2013`; the x86 metrics gate then
+    accepted commit `20ebd0b380a6d91b78c095364f06cd99faee09db`
+    (`wasm64: require x86 generated instruction metrics`) on top of that
+    latest tip. Checks: `node --check
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs`, `node --check
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`,
+    `node scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, and
+    `git diff --check`. QEMU `develop` was pushed and the supervisor
+    submodule pointer was committed and pushed in
+    `6fb6abb34a6c398aa501632a309b38c071ad9f55`. BusDK
+    `./scripts/sync-submodules.sh` ran afterward and left BusDK clean.
+  - [x] R4s1 - Rebase the active R4s implementation worktree onto latest
+    QEMU before measuring it. Accepted 2026-07-04: isolated branch
+    `qemu/r4s-x86-softmmu-runloop` in
+    `tmp/worktrees/qemu-r4s-x86-softmmu-runloop` rebased with autostash onto
+    `20ebd0b380a6d91b78c095364f06cd99faee09db`. Deterministic checks passed:
+    `node scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `node scripts/ci/wasm64-runloop-contract-test.mjs`,
+    `node scripts/ci/wasm-browser-smoke-runner-test.mjs`,
+    `node scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke-runner.mjs`, and
+    `git diff --check`.
+  - [x] R4s2 - Do not accept the first R4s implementation attempt as-is.
+    Rejected 2026-07-04: the rebased attempt compiled but the bounded x86
+    Chromium preflight still retired zero generated guest instructions. Build
+    command: `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s-x86-softmmu-runloop-artifacts-20ebd
+    --target x86_64 --tcg-wasm64-backend --jobs 20 --build-image`. Artifact
+    hashes: `qemu-system-x86_64.js`
+    `f4644b08df413c2f6d933c4204825d321df68d112792992e68f4f6fba65d430f`,
+    `qemu-system-x86_64.wasm`
+    `4508058635d4557064dfdaa69f0106f6383da2db59baf56703274ccb655978ac`,
+    manifest
+    `b6128dde3c87e5ac8ba0a92f55d2eb5e1a0c0dde78684dc22f58a12209c3fe88`.
+    Browser command used Chromium `149.0.7827.55` with
+    `--wasm64-live-generated-exec --wasm64-live-generated-exec-preflight
+    --wasm64-live-generated-exec-preflight-limit 100 --wasm64-tcg-summary`.
+    Result JSON:
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s-x86-softmmu-runloop-preflight-20ebd/wasm-browser-smoke-result.json`.
+    The run aborted with `preflight-zero-generated-exec`: attempts `100`,
+    successes `0`, rejects `100`, generated guest instructions `0`,
+    generated coverage `0 / 555`, hotset `goto_tb` sources `54`, target
+    metadata hits `9`, target output hits `9`, stale targets `45`,
+    selected-body unsupported op `call=44`, and `generated-exec-rejected=56`.
+    Independent read-only review also found that this attempt leaves a
+    `TCGWasm64TLBMirror` uninitialized before refresh, masks away high
+    `MemOp` flags such as alignment and atomicity instead of failing closed,
+    and aliases the MMIO generated status with dispatch status. The RAM-hit
+    path did not call `qemu_ld`, `qemu_st`, or helpers, but the implementation
+    is still rejected. Therefore the attempted `tci_qemu_ld_rrr` /
+    `tci_qemu_st_rrr` live SoftMMU slice is not accepted, must not be
+    committed to `develop`, and R4l remains blocked.
+  - [ ] R4s3 - Replace the generic `generated-exec-rejected` bucket with
+    precise live x86 rejection attribution before another browser run. DoD:
+    deterministic tests prove that generated execution failures are classified
+    as the actual exit or predicate that failed, including JS status,
+    generated status, missing return target, guest-instruction mismatch,
+    chain-length mismatch, helper/qemu helper counter mismatch, TLB/MMIO
+    exit, invalidation, and unsupported body state. No browser run is
+    justified until this attribution can explain the R4s2 `56` generic
+    rejects without reading a browser stack by hand.
+  - [ ] R4s4 - Handle or intentionally bypass `call`-fronted selected x86
+    body shapes before rerunning the live preflight. DoD: the R4r-selected
+    first-window shapes that currently report `call=44` either get a
+    fail-closed helper-exit continuation that preserves temporary register
+    state, or the selector skips them without consuming the preflight budget
+    so a measured non-call memory-helper shape can be tested. This item must
+    include deterministic coverage and must not silently fall back while
+    reporting generated progress.
+  - [ ] R4s5 - Rework the live x86 SoftMMU slice with fail-closed safety
+    before another artifact build. DoD: the implementation zero-initializes
+    the TLB mirror before refresh, rejects any `MemOpIdx` whose `MemOp`
+    carries unmodeled high flags such as alignment or atomicity, assigns
+    distinct generated status values for dispatch, exit, MMIO,
+    TLB-miss/fault, unsupported, and invalidated outcomes, and has
+    deterministic tests that prove each fail-closed case is classified
+    precisely. This item must land before any new R4s browser preflight.
 - [x] R7 - Dispatch available RISC-V generated output from the live wasm64
   run loop before TCI fallback. DoD: when live TB metadata reports
   `tcg_wasm64_translate_generated_output_available()` and the RV64
