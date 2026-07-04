@@ -161,6 +161,28 @@ const PER_TB_EMITTER_NAME = "r4k-per-tb-function-body-emitter";
 const TWO_TB_HOTSET_EMITTER_NAME = "r4k-two-tb-hotset-dispatch-fixture";
 const TWO_TB_HOTSET_BODY_TIME_NS_PER_TB = 1000n;
 const X86_CPU_STATE_CONTRACT_VERSION = 1;
+const DETERMINISTIC_MEMORY_IMPORT_DESCRIPTOR = {
+  module: "env",
+  name: "memory",
+  kind: 0x02,
+  limitsFlags: 0x00,
+  initialPages: 1,
+  hasMaximum: false,
+  maximumPages: null,
+  shared: false,
+  memory64: false,
+};
+const LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR = {
+  module: "env",
+  name: "memory",
+  kind: 0x02,
+  limitsFlags: 0x07,
+  initialPages: 0,
+  hasMaximum: true,
+  maximumPages: 0x40000,
+  shared: true,
+  memory64: true,
+};
 const R4K_SOFTMMU_EMITTER_NAME = "r4k-softmmu-tlb-fastpath-fixture";
 const R6_RV64_SOFTMMU_EMITTER_NAME =
   "r6-rv64-softmmu-tlb-fastpath-fixture";
@@ -612,6 +634,47 @@ function sextract(value, start, length) {
 
 function decodedShape(words) {
   return words.map((insn) => OP_NAMES[bits(insn >>> 0, 0, 8)] || "unknown");
+}
+
+function memoryImportTypeBytes(descriptor) {
+  const bytes = [
+    ...name(descriptor.module),
+    ...name(descriptor.name),
+    descriptor.kind,
+    descriptor.limitsFlags,
+    ...encodeU32(descriptor.initialPages),
+  ];
+
+  if (descriptor.hasMaximum) {
+    bytes.push(...encodeU32(descriptor.maximumPages));
+  }
+  return bytes;
+}
+
+function moduleTerminalOp(words) {
+  return decodedShape(words).find((op) =>
+    op === "goto_tb" || op === "exit_tb" || op === "call") || "none";
+}
+
+function moduleFailureAttribution({
+  reason,
+  phase,
+  statusName,
+  words,
+  memoryImportDescriptor,
+  error = null,
+}) {
+  return {
+    reason,
+    phase,
+    statusName,
+    error,
+    shape: decodedShape(words),
+    shapeOpCount: words.length,
+    firstOp: words.length > 0 ? decodedShape(words)[0] : "none",
+    terminalOp: moduleTerminalOp(words),
+    memoryImport: { ...memoryImportDescriptor },
+  };
 }
 
 function toU64(value) {
@@ -1522,14 +1585,25 @@ function compileSharedGeneratedOutputBody(words, relativeBase, diagnostics = nul
   return { body, terminal, ops };
 }
 
-function compileGeneratedOutputModule(words, relativeBase, diagnostics = null) {
+function compileGeneratedOutputModule(
+  words,
+  relativeBase,
+  diagnostics = null,
+  options = {},
+) {
   const instructions = [];
+  const memoryImportDescriptor =
+    options.memoryImportDescriptor || DETERMINISTIC_MEMORY_IMPORT_DESCRIPTOR;
 
   if (diagnostics) {
     diagnostics.emitter = PER_TB_EMITTER_NAME;
     diagnostics.runtimeUnsupportedGuards = [];
     diagnostics.softmmuLowering = null;
     diagnostics.softmmuLoweredOps = 0;
+    diagnostics.memoryImportDescriptor = { ...memoryImportDescriptor };
+  }
+  if (options.forceModuleEmissionFailure) {
+    throw new Error("injected deterministic live module emission failure");
   }
   instructions.push(...localSet(
     1, i32WrapI64(i64Load(localGet(0), WASMJIT_RUN_CTX.env))));
@@ -1563,7 +1637,7 @@ function compileGeneratedOutputModule(words, relativeBase, diagnostics = null) {
       functionType([VALUE_I32], [VALUE_I64]),
     ])),
     ...section(2, vector([
-      [...name("env"), ...name("memory"), 0x02, 0x00, 0x01],
+      memoryImportTypeBytes(memoryImportDescriptor),
     ])),
     ...section(3, vector([[0x00]])),
     ...section(7, vector([[...name("run"), 0x00, ...encodeU32(0)]])),
@@ -1782,13 +1856,15 @@ function failClosedReason(error) {
   return "module-emission-failed";
 }
 
-function emitPerTBFunctionBody(words, relativeBase) {
+function emitPerTBFunctionBody(words, relativeBase, options = {}) {
   const diagnostics = {};
   const stateContract = analyzeX86CpuStateContract(words, relativeBase);
+  const memoryImportDescriptor =
+    options.memoryImportDescriptor || DETERMINISTIC_MEMORY_IMPORT_DESCRIPTOR;
 
   try {
     const moduleBytes = compileGeneratedOutputModule(words, relativeBase,
-                                                     diagnostics);
+                                                     diagnostics, options);
     const moduleValid = WebAssembly.validate(moduleBytes);
 
     if (!moduleValid) {
@@ -1797,6 +1873,14 @@ function emitPerTBFunctionBody(words, relativeBase) {
         emitter: PER_TB_EMITTER_NAME,
         reason: "module-validation-failed",
         shape: decodedShape(words),
+        moduleFailureAttribution: moduleFailureAttribution({
+          reason: "module-validation-failed",
+          phase: "module-validate",
+          statusName: "module-validation-failed",
+          words,
+          memoryImportDescriptor:
+            diagnostics.memoryImportDescriptor || memoryImportDescriptor,
+        }),
         moduleBytes,
         moduleValid,
         runtimeUnsupportedGuards: diagnostics.runtimeUnsupportedGuards,
@@ -1813,6 +1897,8 @@ function emitPerTBFunctionBody(words, relativeBase) {
       moduleBytes,
       moduleValid,
       moduleByteLength: moduleBytes.length,
+      memoryImportDescriptor:
+        diagnostics.memoryImportDescriptor || memoryImportDescriptor,
       runtimeUnsupportedGuards: diagnostics.runtimeUnsupportedGuards,
       softmmuLowering: diagnostics.softmmuLowering,
       softmmuLoweredOps: diagnostics.softmmuLoweredOps,
@@ -1825,6 +1911,15 @@ function emitPerTBFunctionBody(words, relativeBase) {
       reason: failClosedReason(error),
       error: error instanceof Error ? error.message : String(error),
       shape: decodedShape(words),
+      moduleFailureAttribution: moduleFailureAttribution({
+        reason: failClosedReason(error),
+        phase: "body-build",
+        statusName: "module-emission-failed",
+        words,
+        memoryImportDescriptor:
+          diagnostics.memoryImportDescriptor || memoryImportDescriptor,
+        error: error instanceof Error ? error.message : String(error),
+      }),
       moduleValid: false,
       runtimeUnsupportedGuards: diagnostics.runtimeUnsupportedGuards || [],
       softmmuLowering: diagnostics.softmmuLowering || null,
@@ -1920,7 +2015,11 @@ function routeLiveGeneratedOutput(metadata) {
     };
   }
 
-  const emission = emitPerTBFunctionBody(words, metadata.relativeBase);
+  const emission = emitPerTBFunctionBody(
+    words,
+    metadata.relativeBase,
+    metadata.emitOptions || {},
+  );
 
   if (!emission.ok) {
     return {
@@ -1931,6 +2030,7 @@ function routeLiveGeneratedOutput(metadata) {
         : "module-emission-failed",
       generatedGuestInstructions: 0,
       shape,
+      moduleFailureAttribution: emission.moduleFailureAttribution,
     };
   }
   return {
@@ -6191,6 +6291,7 @@ function simulateR4mLiveGeneratedExec({
       generatedChainLength: 0,
       inlineTlbHitLoads: 0,
       inlineTlbHitStores: 0,
+      moduleFailureAttribution: route.moduleFailureAttribution || null,
       helperCalls: 0,
       qemuLdCalls: 0,
       qemuStCalls: 0,
@@ -6329,6 +6430,23 @@ const r4mLiveGeneratedExecCases = [
       guestInstructions: 1,
     },
   }),
+  simulateR4mLiveGeneratedExec({
+    name: "r4m-module-emission-failure-attributed",
+    enabled: true,
+    noFallback: true,
+    metadata: {
+      opCount: R4I_LIVE_X86_SHAPE.length,
+      generatedOutputAvailable: true,
+      generatedOutputSize: r4iLiveX86Fixture.words.length * 4,
+      words: r4iLiveX86Fixture.words,
+      relativeBase: r4iLiveX86Fixture.relativeBase,
+      guestInstructions: 1,
+      emitOptions: {
+        forceModuleEmissionFailure: true,
+        memoryImportDescriptor: LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR,
+      },
+    },
+  }),
 ];
 assert.deepEqual(
   r4mLiveGeneratedExecCases.map((entry) => entry.path),
@@ -6340,6 +6458,7 @@ assert.deepEqual(
     "tci-fallback",
     "tci-fallback",
     "tci-fallback",
+    "fail-closed",
     "fail-closed",
   ],
 );
@@ -6412,6 +6531,33 @@ assert.equal(r4s4NoFallbackHelperExitReject.skips, 0);
 assert.equal(r4s4NoFallbackHelperExitReject.generatedGuestInstructions, 0);
 assert.equal(r4s4NoFallbackHelperExitReject.exits.unsupported, 1);
 assert.equal(r4s4NoFallbackHelperExitReject.failedClosed, true);
+const r4mModuleEmissionFailure = r4mLiveGeneratedExecCases.find((entry) =>
+  entry.name === "r4m-module-emission-failure-attributed");
+assert.equal(r4mModuleEmissionFailure.reason, "module-emission-failed");
+assert.equal(r4mModuleEmissionFailure.failedClosed, true);
+assert.equal(r4mModuleEmissionFailure.generatedGuestInstructions, 0);
+assert.deepEqual(r4mModuleEmissionFailure.moduleFailureAttribution, {
+  reason: "module-emission-failed",
+  phase: "body-build",
+  statusName: "module-emission-failed",
+  error: "injected deterministic live module emission failure",
+  shape: R4I_LIVE_X86_SHAPE,
+  shapeOpCount: R4I_LIVE_X86_SHAPE.length,
+  firstOp: "ld32u",
+  terminalOp: "goto_tb",
+  memoryImport: LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR,
+});
+assert.deepEqual(
+  memoryImportTypeBytes(DETERMINISTIC_MEMORY_IMPORT_DESCRIPTOR),
+  [...name("env"), ...name("memory"), 0x02, 0x00, 0x01],
+);
+assert.deepEqual(
+  memoryImportTypeBytes(LIVE_GENERATED_EXEC_MEMORY_IMPORT_DESCRIPTOR),
+  [
+    ...name("env"), ...name("memory"),
+    0x02, 0x07, 0x00, 0x80, 0x80, 0x10,
+  ],
+);
 
 function r4s5bMemoryWords({
   memop = MO_32 | MO_ATOM_NONE,

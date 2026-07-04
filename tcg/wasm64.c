@@ -149,6 +149,18 @@ typedef enum TCGWasm64LiveGeneratedExecResultIndex {
     TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MISMATCH_OP,
     TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MISMATCH_METADATA_WORD,
     TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MISMATCH_LIVE_WORD,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_PHASE,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_STATUS,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_MEMORY_KIND,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_MEMORY_FLAGS,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_MEMORY_INITIAL,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_MEMORY_MAXIMUM,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_MEMORY_HAS_MAXIMUM,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_MEMORY_SHARED,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_MEMORY64,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_SHAPE_OP_COUNT,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_FIRST_OP,
+    TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_TERMINAL_OP,
     TCG_WASM64_LIVE_GENERATED_EXEC_RESULT__MAX,
 } TCGWasm64LiveGeneratedExecResultIndex;
 
@@ -218,6 +230,28 @@ typedef struct TCGWasm64MetadataOutputMismatch {
     uint32_t metadata_word;
     uint32_t live_word;
 } TCGWasm64MetadataOutputMismatch;
+
+#define TCG_WASM64_LIVE_MODULE_FAILURE_SHAPE_SLOTS 16
+#define TCG_WASM64_LIVE_MODULE_FAILURE_NO_MAX UINT64_MAX
+
+typedef struct TCGWasm64ModuleFailure {
+    bool seen;
+    TCGWasm64LiveGeneratedExecRejectReason reason;
+    uint64_t phase;
+    uint64_t status;
+    uint32_t shape_op_count;
+    uint32_t first_op;
+    uint32_t terminal_op;
+    uint32_t shape[
+        TCG_WASM64_LIVE_MODULE_FAILURE_SHAPE_SLOTS];
+    uint32_t memory_kind;
+    uint32_t memory_flags;
+    uint64_t memory_initial;
+    uint64_t memory_maximum;
+    bool memory_has_maximum;
+    bool memory_shared;
+    bool memory64;
+} TCGWasm64ModuleFailure;
 
 typedef struct TCGWasm64LiveMultiAccessRejectStat {
     uint32_t access_count;
@@ -466,6 +500,8 @@ static __thread TCGWasm64LiveMemOpRejectStat
         [TCG_WASM64_LIVE_MEMOP_REJECT_SLOTS];
 static __thread TCGWasm64MetadataOutputMismatch
     live_generated_exec_first_metadata_output_mismatch;
+static __thread TCGWasm64ModuleFailure
+    live_generated_exec_first_module_failure;
 static __thread TCGWasm64LiveMultiAccessRejectStat
     live_generated_exec_reject_multi_accesses[
         TCG_WASM64_LIVE_MULTI_ACCESS_REJECT_SLOTS];
@@ -492,6 +528,10 @@ static uint64_t tcg_wasm64_current_address_space_generation = 1;
 
 static const char *tcg_wasm64_op_name(uint32_t op);
 static void tcg_wasm64_report_live_generated_exec_summary(const char *reason);
+static const char *
+tcg_wasm64_live_generated_exec_js_status_reject_reason(uint64_t status);
+static const char *
+tcg_wasm64_live_generated_exec_module_failure_phase_name(uint64_t phase);
 static TCGWasm64TBMetadata *tcg_wasm64_translate_lookup_mutable(
     const void *tb_ptr);
 static void tcg_wasm64_count_live_translation_metadata(
@@ -3762,6 +3802,60 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         setResult(resultMismatchLiveWord, BigInt(liveWord >>> 0));
     }
 
+    const resultModuleFailurePhase = 11;
+    const resultModuleFailureStatus = 12;
+    const resultModuleFailureMemoryKind = 13;
+    const resultModuleFailureMemoryFlags = 14;
+    const resultModuleFailureMemoryInitial = 15;
+    const resultModuleFailureMemoryMaximum = 16;
+    const resultModuleFailureMemoryHasMaximum = 17;
+    const resultModuleFailureMemoryShared = 18;
+    const resultModuleFailureMemory64 = 19;
+    const resultModuleFailureShapeOpCount = 20;
+    const resultModuleFailureFirstOp = 21;
+    const resultModuleFailureTerminalOp = 22;
+    const moduleFailurePhaseBuild = 1n;
+    const moduleFailurePhaseValidate = 2n;
+    const moduleFailurePhaseCompile = 3n;
+    const moduleFailurePhaseInstantiate = 4n;
+    const noMemoryMaximum = 0xffffffffffffffffn;
+    const liveMemoryImport = {
+        kind: 0x02n,
+        flags: 0x07n,
+        initial: 0n,
+        maximum: 0x40000n,
+        hasMaximum: 1n,
+        shared: 1n,
+        memory64: 1n,
+    };
+
+    function recordModuleFailure(phase, status, words) {
+        const shape = words || [];
+        const terminalOp = shape.find((word) => {
+            const op = bits(word >>> 0, 0, 8);
+            return op === ops.goto_tb || op === ops.exit_tb ||
+                   op === ops.call;
+        });
+
+        setResult(resultModuleFailurePhase, phase);
+        setResult(resultModuleFailureStatus, status);
+        setResult(resultModuleFailureMemoryKind, liveMemoryImport.kind);
+        setResult(resultModuleFailureMemoryFlags, liveMemoryImport.flags);
+        setResult(resultModuleFailureMemoryInitial, liveMemoryImport.initial);
+        setResult(resultModuleFailureMemoryMaximum, liveMemoryImport.maximum);
+        setResult(resultModuleFailureMemoryHasMaximum,
+                  liveMemoryImport.hasMaximum);
+        setResult(resultModuleFailureMemoryShared, liveMemoryImport.shared);
+        setResult(resultModuleFailureMemory64, liveMemoryImport.memory64);
+        setResult(resultModuleFailureShapeOpCount, BigInt(shape.length));
+        setResult(resultModuleFailureFirstOp,
+                  BigInt(shape.length ? bits(shape[0] >>> 0, 0, 8) :
+                         0xffffffff));
+        setResult(resultModuleFailureTerminalOp,
+                  BigInt(terminalOp === undefined ? 0xffffffff :
+                         bits(terminalOp >>> 0, 0, 8)));
+    }
+
     try {
         const metadataWords = readGeneratedOutputWords();
         if (!metadataWords || metadataWords.length === 0) {
@@ -3797,6 +3891,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
             instance = cached.instance;
             generatedTciOps = BigInt(cached.generatedTciOps);
         } else {
+            recordModuleFailure(moduleFailurePhaseBuild, 6n, words);
             const instructions = buildGeneratedInstructions(words);
             generatedTciOps = BigInt(buildGeneratedInstructions.generatedTciOps);
             const bytes = Uint8Array.from([
@@ -3822,15 +3917,18 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                 ])),
             ]);
             if (!WebAssembly.validate(bytes)) {
+                recordModuleFailure(moduleFailurePhaseValidate, 7n, words);
                 setResult(0, 7n);
                 return 7;
             }
 
             const compileStart = performance.now();
+            recordModuleFailure(moduleFailurePhaseCompile, 6n, words);
             const module = new WebAssembly.Module(bytes);
             compileNs = BigInt(Math.round(
                 (performance.now() - compileStart) * 1000000));
             const instantiateStart = performance.now();
+            recordModuleFailure(moduleFailurePhaseInstantiate, 6n, words);
             instance = new WebAssembly.Instance(module, {
                 env: { memory: wasmMemory },
             });
@@ -3863,6 +3961,8 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         HEAPU64[counters / 8 + 8] = compileNs;
         HEAPU64[counters / 8 + 9] = instantiateNs;
         setResult(0, 0n);
+        setResult(resultModuleFailurePhase, 0n);
+        setResult(resultModuleFailureStatus, 0n);
         setResult(1, generatedStatus);
         setResult(2, HEAPU64[exit / 8 + 4]);
         setResult(3, HEAPU64[counters / 8 + 0]);
@@ -7346,6 +7446,80 @@ tcg_wasm64_print_live_generated_exec_metadata_output_mismatch(void)
             mismatch->live_word);
 }
 
+static void tcg_wasm64_print_live_generated_exec_module_failure(void)
+{
+    const TCGWasm64ModuleFailure *failure =
+        &live_generated_exec_first_module_failure;
+    uint32_t count;
+
+    if (!failure->seen) {
+        fprintf(stderr, "null");
+        return;
+    }
+
+    fprintf(stderr,
+            "{\"reason\":\"%s\","
+            "\"phase\":\"%s\","
+            "\"phase_code\":%" PRIu64 ","
+            "\"status\":%" PRIu64 ","
+            "\"status_name\":\"%s\","
+            "\"shape_op_count\":%" PRIu32 ","
+            "\"shape_truncated\":%s,"
+            "\"first_op\":%" PRIu32 ","
+            "\"first_op_name\":\"%s\","
+            "\"terminal_op\":%" PRIu32 ","
+            "\"terminal_op_name\":\"%s\","
+            "\"shape\":[",
+            tcg_wasm64_live_generated_exec_reject_reason_name(
+                failure->reason),
+            tcg_wasm64_live_generated_exec_module_failure_phase_name(
+                failure->phase),
+            failure->phase,
+            failure->status,
+            tcg_wasm64_live_generated_exec_js_status_reject_reason(
+                failure->status),
+            failure->shape_op_count,
+            failure->shape_op_count > ARRAY_SIZE(failure->shape) ?
+                "true" : "false",
+            failure->first_op,
+            tcg_wasm64_op_name(failure->first_op),
+            failure->terminal_op,
+            tcg_wasm64_op_name(failure->terminal_op));
+    count = MIN(failure->shape_op_count,
+                (uint32_t)ARRAY_SIZE(failure->shape));
+    for (uint32_t i = 0; i < count; i++) {
+        fprintf(stderr, "%s{\"op\":%" PRIu32 ",\"name\":\"%s\"}",
+                i == 0 ? "" : ",",
+                failure->shape[i],
+                tcg_wasm64_op_name(failure->shape[i]));
+    }
+    fprintf(stderr,
+            "],\"memory_import\":{"
+            "\"module\":\"env\","
+            "\"name\":\"memory\","
+            "\"kind\":%" PRIu32 ","
+            "\"limits_flags\":%" PRIu32 ","
+            "\"limits_flags_hex\":\"0x%02" PRIx32 "\","
+            "\"initial_pages\":%" PRIu64 ","
+            "\"has_maximum\":%s,"
+            "\"maximum_pages\":",
+            failure->memory_kind,
+            failure->memory_flags,
+            failure->memory_flags,
+            failure->memory_initial,
+            failure->memory_has_maximum ? "true" : "false");
+    if (failure->memory_maximum == TCG_WASM64_LIVE_MODULE_FAILURE_NO_MAX) {
+        fprintf(stderr, "null");
+    } else {
+        fprintf(stderr, "%" PRIu64, failure->memory_maximum);
+    }
+    fprintf(stderr,
+            ",\"shared\":%s,"
+            "\"memory64\":%s}}",
+            failure->memory_shared ? "true" : "false",
+            failure->memory64 ? "true" : "false");
+}
+
 static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
 {
     bool preflight = tcg_wasm64_live_generated_exec_preflight();
@@ -7430,6 +7604,8 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             live_generated_exec_selected_body_helper_exit_skips,
             live_generated_exec_selected_body_no_terminal);
     tcg_wasm64_print_live_generated_exec_metadata_output_mismatch();
+    fprintf(stderr, ",\"module_failure\":");
+    tcg_wasm64_print_live_generated_exec_module_failure();
     fprintf(stderr, ",\"selected_body_unsupported_ops\":[");
     tcg_wasm64_print_live_generated_exec_selected_unsupported_top();
     fprintf(stderr, "],"
@@ -7513,6 +7689,75 @@ tcg_wasm64_live_generated_exec_record_metadata_output_mismatch(
 }
 
 static const char *
+tcg_wasm64_live_generated_exec_module_failure_phase_name(uint64_t phase)
+{
+    switch (phase) {
+    case 1:
+        return "body-build";
+    case 2:
+        return "module-validate";
+    case 3:
+        return "module-compile";
+    case 4:
+        return "module-instantiate";
+    default:
+        return "unknown";
+    }
+}
+
+static void tcg_wasm64_live_generated_exec_record_module_failure(
+    const TCGWasm64TBMetadata *metadata, const uint64_t *result,
+    TCGWasm64LiveGeneratedExecRejectReason reason)
+{
+    TCGWasm64ModuleFailure *failure =
+        &live_generated_exec_first_module_failure;
+    uint32_t count;
+
+    if (failure->seen) {
+        return;
+    }
+
+    failure->seen = true;
+    failure->reason = reason;
+    failure->phase = result[
+        TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_PHASE];
+    failure->status = result[
+        TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_STATUS];
+    failure->shape_op_count = (uint32_t)result[
+        TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_SHAPE_OP_COUNT];
+    failure->first_op = (uint32_t)result[
+        TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_FIRST_OP];
+    failure->terminal_op = (uint32_t)result[
+        TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_TERMINAL_OP];
+    failure->memory_kind = (uint32_t)result[
+        TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_MEMORY_KIND];
+    failure->memory_flags = (uint32_t)result[
+        TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_MEMORY_FLAGS];
+    failure->memory_initial = result[
+        TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_MEMORY_INITIAL];
+    failure->memory_maximum = result[
+        TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_MEMORY_MAXIMUM];
+    failure->memory_has_maximum =
+        result[
+            TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_MEMORY_HAS_MAXIMUM] != 0;
+    failure->memory_shared =
+        result[
+            TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_MEMORY_SHARED] != 0;
+    failure->memory64 =
+        result[
+            TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_MODULE_FAILURE_MEMORY64] != 0;
+
+    count = MIN(failure->shape_op_count,
+                (uint32_t)ARRAY_SIZE(failure->shape));
+    if (metadata && metadata->generated_output) {
+        for (uint32_t i = 0; i < count; i++) {
+            failure->shape[i] =
+                tcg_wasm64_tci_word_op(metadata->generated_output[i]);
+        }
+    }
+}
+
+static const char *
 tcg_wasm64_live_generated_exec_js_status_reject_reason(uint64_t status)
 {
     switch (status) {
@@ -7571,6 +7816,15 @@ static const char *tcg_wasm64_live_generated_exec_classify_reject(
                 result, mismatch_reason);
             return tcg_wasm64_live_generated_exec_reject_reason_name(
                 mismatch_reason);
+        }
+        if (js_status == 6 || js_status == 7) {
+            TCGWasm64LiveGeneratedExecRejectReason module_reason =
+                js_status == 7 ?
+                    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_MODULE_VALIDATION_FAILED :
+                    TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_JS_STATUS_MODULE_EMISSION_FAILED;
+
+            tcg_wasm64_live_generated_exec_record_module_failure(
+                metadata, result, module_reason);
         }
         return tcg_wasm64_live_generated_exec_js_status_reject_reason(
             js_status);
