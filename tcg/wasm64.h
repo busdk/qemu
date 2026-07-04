@@ -51,6 +51,8 @@ typedef struct TCGWasm64Counters {
     uint64_t translated_tbs;
     uint64_t translated_ops;
     uint64_t translated_fallback_markers;
+    uint64_t translated_metadata_lookups;
+    uint64_t translated_metadata_hits;
     uint64_t translated_metadata_misses;
     uint64_t translated_profiled_tbs;
     uint64_t translated_lowerable_tbs;

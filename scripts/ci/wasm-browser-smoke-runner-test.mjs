@@ -726,7 +726,10 @@ for (const status of [
     translated_tbs: 8,
     translated_ops: 144,
     translated_fallback_markers: 8,
+    translated_metadata_lookups: 10,
+    translated_metadata_hits: 9,
     translated_metadata_misses: 1,
+    translated_metadata_hit_ppm: 900000,
     fallback_unsupported: 88,
     fallback_runtime: 1,
     translated_generated_first_unsupported_ops: [
@@ -763,7 +766,10 @@ for (const status of [
   assert.equal(parsed.translated_tbs, 8);
   assert.equal(parsed.translated_ops, 144);
   assert.equal(parsed.translated_fallback_markers, 8);
+  assert.equal(parsed.translated_metadata_lookups, 10);
+  assert.equal(parsed.translated_metadata_hits, 9);
   assert.equal(parsed.translated_metadata_misses, 1);
+  assert.equal(parsed.translated_metadata_hit_ppm, 900000);
   assert.equal(parsed.fallback_unsupported, 88);
   assert.equal(parsed.translated_generated_first_unsupported_ops[0].name, "ld32u");
   assert.equal(wasm64TcgSummary("ordinary serial line"), null);

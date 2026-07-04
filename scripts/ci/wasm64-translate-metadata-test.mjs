@@ -44,52 +44,37 @@ function assertLiveTbCoverageJsBigIntConst(body, name, value) {
   );
 }
 
-function metadataCacheIndex(tbPtr, size) {
-  return Number((BigInt(tbPtr) >> 4n) % BigInt(size));
+function insertMetadata(cache, tbPtr) {
+  cache.set(tbPtr, { tbPtr, metadataTbPtr: tbPtr, valid: true });
 }
 
-function insertMetadata(cache, tbPtr, probeLimit) {
-  const start = metadataCacheIndex(tbPtr, cache.length);
-  let firstEmpty = -1;
-  for (let probe = 0; probe < probeLimit; probe++) {
-    const index = (start + probe) % cache.length;
-    const entry = cache[index];
-    if (entry?.tbPtr === tbPtr) {
-      cache[index] = { tbPtr, metadataTbPtr: tbPtr, valid: true };
-      return index;
-    }
-    if (firstEmpty === -1 && !entry?.valid) {
-      firstEmpty = index;
-    }
-  }
-  const index = firstEmpty !== -1 ? firstEmpty : start;
-  cache[index] = { tbPtr, metadataTbPtr: tbPtr, valid: true };
-  return index;
-}
-
-function lookupMetadata(cache, tbPtr, probeLimit) {
-  const start = metadataCacheIndex(tbPtr, cache.length);
-  for (let probe = 0; probe < probeLimit; probe++) {
-    const entry = cache[(start + probe) % cache.length];
-    if (entry?.valid && entry.tbPtr === tbPtr && entry.metadataTbPtr === tbPtr) {
-      return entry;
-    }
+function lookupMetadata(cache, tbPtr) {
+  const entry = cache.get(tbPtr);
+  if (entry?.valid && entry.tbPtr === tbPtr && entry.metadataTbPtr === tbPtr) {
+    return entry;
   }
   return null;
 }
 
 {
-  const cache = Array.from({ length: 4 }, () => null);
-  assert.equal(insertMetadata(cache, 0x1000n, 2), 0);
-  assert.equal(insertMetadata(cache, 0x1040n, 2), 1);
-  assert.equal(lookupMetadata(cache, 0x1000n, 2)?.tbPtr, 0x1000n);
-  assert.equal(lookupMetadata(cache, 0x1040n, 2)?.tbPtr, 0x1040n);
-  cache[1].metadataTbPtr = 0x1000n;
-  assert.equal(lookupMetadata(cache, 0x1040n, 2), null);
-  assert.equal(insertMetadata(cache, 0x1080n, 2), 0);
-  assert.equal(lookupMetadata(cache, 0x1000n, 2), null);
-  assert.equal(lookupMetadata(cache, 0x1040n, 2), null);
-  assert.equal(lookupMetadata(cache, 0x1080n, 2)?.tbPtr, 0x1080n);
+  const cache = new Map();
+  const oldWindowCollidingTbPtrs = Array.from({ length: 512 }, (_, index) =>
+    0x1000n + BigInt(index) * 0x20000n);
+  for (const tbPtr of oldWindowCollidingTbPtrs) {
+    insertMetadata(cache, tbPtr);
+  }
+  for (const tbPtr of oldWindowCollidingTbPtrs) {
+    assert.equal(lookupMetadata(cache, tbPtr)?.tbPtr, tbPtr);
+  }
+  const mismatchedTbPtr = oldWindowCollidingTbPtrs[127];
+  lookupMetadata(cache, mismatchedTbPtr).metadataTbPtr = 0x1000n;
+  assert.equal(lookupMetadata(cache, mismatchedTbPtr), null);
+  assert.equal(lookupMetadata(cache, oldWindowCollidingTbPtrs[126])?.tbPtr,
+    oldWindowCollidingTbPtrs[126]);
+  assert.equal(lookupMetadata(cache, oldWindowCollidingTbPtrs[128])?.tbPtr,
+    oldWindowCollidingTbPtrs[128]);
+  insertMetadata(cache, mismatchedTbPtr);
+  assert.equal(lookupMetadata(cache, mismatchedTbPtr)?.tbPtr, mismatchedTbPtr);
 }
 
 assert.match(target, /#define\s+tcg_out_tci_note_op\s+tcg_wasm64_note_tci_op/);
@@ -153,18 +138,24 @@ assert.match(header, /TCG_WASM64_TLB_FLAGS_MASK/);
 assert.match(header, /tcg_wasm64_tlb_mirror_reset\(TCGWasm64TLBMirror \*mirror\)/);
 assert.match(header, /tcg_wasm64_tlb_mirror_refresh\(TCGWasm64TLBMirror \*mirror,\s*\n\s*CPUArchState \*env,\s*uint32_t mmu_idx\)/);
 
-assert.match(runtime, /TCG_WASM64_TRANSLATE_CACHE_SIZE/);
-assert.match(runtime, /TCG_WASM64_TRANSLATE_CACHE_PROBE_LIMIT/);
-assert.match(runtime, /static __thread TCGWasm64TranslateEntry translate_cache/);
-assert.match(runtime, /tcg_wasm64_translate_cache_index/);
+assert.match(runtime, /static __thread GHashTable \*translate_cache/);
+assert.match(runtime, /static __thread TCGWasm64TranslateEntry \*active_translate_entry/);
+assert.match(runtime, /g_hash_table_new_full\(\s*g_direct_hash,\s*g_direct_equal/);
+assert.match(runtime, /tcg_wasm64_translate_entry_free/);
 assert.match(runtime, /tcg_wasm64_translate_entry_for_insert/);
 assert.match(runtime, /tcg_wasm64_translate_entry_for_lookup/);
 assert.match(runtime, /tcg_wasm64_translate_entry_matches/);
 assert.match(runtime, /entry->metadata\.tb_ptr == tb_ptr/);
-assert.match(runtime, /first_empty \? first_empty : &translate_cache\[start\]/);
+assert.match(runtime, /g_hash_table_lookup\(translate_cache, tb_ptr\)/);
+assert.match(runtime, /TCG_WASM64_TRANSLATE_OUTPUT_INITIAL_WORDS/);
+assert.match(runtime, /tcg_wasm64_translate_entry_ensure_generated_output/);
 assert.doesNotMatch(
   runtime,
-  /return &translate_cache\[hash % TCG_WASM64_TRANSLATE_CACHE_SIZE\];/,
+  /TCG_WASM64_TRANSLATE_CACHE_PROBE_LIMIT/,
+);
+assert.doesNotMatch(
+  runtime,
+  /static __thread TCGWasm64TranslateEntry translate_cache\[/,
 );
 assert.match(runtime, /tcg_wasm64_translate_op_supported/);
 assert.match(runtime, /tcg_wasm64_translate_op_generated_supported/);
@@ -223,7 +214,10 @@ assert.match(runtime, /void tcg_wasm64_translate_note_tci_insn\(uint32_t op,\s*u
 assert.match(runtime, /tcg_wasm64_translate_generated_output_available/);
 assert.match(runtime, /const TCGWasm64TBMetadata \*tcg_wasm64_translate_lookup/);
 assert.match(runtime, /translated_fallback_markers/);
+assert.match(runtime, /translated_metadata_lookups/);
+assert.match(runtime, /translated_metadata_hits/);
 assert.match(runtime, /translated_metadata_misses/);
+assert.match(runtime, /translated_metadata_hit_ppm/);
 assert.match(runtime, /translated_profile_supported_ops/);
 assert.match(runtime, /translated_profile_unsupported_ops/);
 assert.match(runtime, /translated_generated_candidate_tbs/);
@@ -241,7 +235,8 @@ assert.match(runtime, /first_generated_unsupported_op = UINT32_MAX/);
 assert.match(runtime, /tcg_wasm64_count_generated_first_unsupported/);
 assert.match(header, /TCG_WASM64_TRANSLATE_OUTPUT_WORDS/);
 assert.match(header, /const uint32_t \*generated_output/);
-assert.match(runtime, /uint32_t generated_output\[TCG_WASM64_TRANSLATE_OUTPUT_WORDS\]/);
+assert.match(runtime, /uint32_t \*generated_output/);
+assert.match(runtime, /uint32_t generated_output_capacity/);
 assert.match(runtime, /generated_output_size % sizeof\(uint32_t\) == 0/);
 assert.match(runtime, /tcg_wasm64_translate_generated_output_expected_ops/);
 assert.match(runtime, /generated_output_op_count == expected_ops/);

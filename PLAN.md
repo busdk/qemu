@@ -2407,6 +2407,40 @@ run that reaches a weaker marker than normal multi-user readiness.
   should rise above a single TB's icount, and generated retirement share should
   improve when consecutive generated shapes are available; unsupported
   non-generated TBs remain explicit TCI fallback and still bound total share.
+- [x] R7d - Raise RV64 live generated-exec metadata resolution without
+  reintroducing side-cache collisions. DoD: replace the tiny fixed probe
+  side-cache with a keyed association that can retain many translated TB
+  metadata records until live execution, validate the full TB metadata key on
+  every lookup, keep stale or mismatched metadata as fail-closed TCI fallback,
+  expose runtime metadata lookup/hit/miss/hit-rate counters, and add
+  deterministic coverage proving many distinct old-window-colliding TBs all
+  resolve while an intentionally mismatched metadata key does not. Accepted
+  2026-07-04: `tcg/wasm64.c` now stores translation metadata in a thread-local
+  `GHashTable` keyed by TB pointer and still requires valid metadata magic,
+  version, entry TB pointer, and metadata TB pointer before returning a record.
+  Generated-output storage is dynamically allocated per metadata entry instead
+  of reserving a fixed 4 KiB buffer for every table slot. Normal summaries now
+  include `translated_metadata_lookups`, `translated_metadata_hits`, and
+  `translated_metadata_hit_ppm` alongside the existing
+  `translated_metadata_misses`; parser and metrics-gate tests cover those
+  fields. `scripts/ci/wasm64-translate-metadata-test.mjs` models 512 TB
+  identities that would collide under the old 8192-slot/32-probe window and
+  proves they all resolve, then corrupts one metadata TB pointer and proves
+  only that entry fails closed. Checks passed: `for f in
+  scripts/ci/*-test.mjs; do node "$f"; done`; `for f in
+  scripts/ci/*-test.py; do python3 "$f"; done`; `for f in scripts/ci/*.mjs;
+  do node --check "$f"; done`; `PYTHONPYCACHEPREFIX=./tmp/pycache python3 -m
+  py_compile scripts/ci/*.py`; and `git diff --check`. No browser run,
+  artifact build, speed claim, or Bus Engine OS proof was run in this worker
+  slice. Expected supervisor-run effect: the previous plain-boot
+  `metadata-missing` reject majority (`546416 / 632477` rejects) should fall
+  sharply for translated live TBs whose metadata was previously evicted by the
+  probe window, `translated_metadata_hit_ppm` should rise accordingly, and
+  `generated_run_entries` should become nonzero when those resolved TBs also
+  pass the existing generated-output, stale-output, shape, and SoftMMU checks.
+  Remaining rejects should shift to real unsupported classes such as
+  stale-output mismatch and unsupported atomic/sign memops rather than cache
+  capacity misses.
 - [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
   accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
   cold in browser-hosted QEMU/WASM with the accelerator and reaches
