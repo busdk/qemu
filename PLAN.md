@@ -3302,6 +3302,68 @@ run that reaches a weaker marker than normal multi-user readiness.
     coverage, dominated in this run by `js-status-metadata-output-pool-relocation`
     (`46931` rejects), selected-body memory alignment/multi-access rejects,
     module emission/validation failures, and unsupported `movcond`.
+  - [ ] R4s19 - Repair the dominant x86 live-generated pool-relocation
+    blocker before another R4l speed gate. DoD: the live generated-exec path
+    safely rebases finalized `tci_movl` constant-pool operands from the
+    current translated TB instead of rejecting them as
+    `js-status-metadata-output-pool-relocation`, while preserving strict
+    fail-closed behavior for stale code, opcode/register changes,
+    out-of-range pool targets, helper/call pool entries, and any unrecognized
+    mismatch. This must be generic QEMU accelerator work: no Bus Engine OS
+    checks, no fixed guest PCs, no fixed boot-stage behavior, and no
+    measured-shape-only JavaScript path.
+
+    Prediction: R4s18 reported `46931` pool-relocation rejects out of `57372`
+    total live run-loop rejects, with generated coverage only `995 / 500082`.
+    A correct R4s19 fix should sharply reduce that reject family and move a
+    material fraction of those attempts into either generated execution or a
+    more precise later-stage rejection. It is not expected to pass R4l by
+    itself because memory alignment/multi-access rejects, module
+    emission/validation failures, and unsupported `movcond` remain.
+
+    Deterministic tests must come first. Required cases: a pre-relocation
+    `tci_movl` metadata word plus finalized live word whose pool target is
+    within the current TB code/pool area normalizes and executes; the same
+    opcode with a changed destination register rejects; out-of-range pool
+    targets reject; stale/unknown same-op mismatches reject; existing
+    branch-label relocation and stale-code fixtures still pass. Browser work
+    is limited to one bounded generic x86 Chromium normal-mode preflight
+    equivalent to R4s18 (`--wasm64-live-generated-exec` and
+    `--wasm64-tcg-summary`, no no-silent/preflight mode) after deterministic
+    checks pass. The bounded result must include artifact hashes, browser
+    version, result JSON path/hash, generated/fallback instruction counts,
+    coverage numerator/denominator, top remaining reject reasons, and proof
+    that the old unaligned-access crash is still absent. No full R4l speed
+    gate or Bus Engine OS proof may run from this item.
+  - [ ] R4s20 - Repair second-tier x86 live-emitter module
+    validation/emission blockers after R4s19 evidence, unless R4s19 shows a
+    different dominant blocker. DoD: make live and deterministic SoftMMU
+    emitters address-type aware so memory64 imports keep i64 memory
+    addresses while memory32 imports use i32 addresses; add deterministic
+    memory64 validation fixtures for `tci_qemu_ld_rrr` and
+    `tci_qemu_st_rrr` clean RAM hits with zero helper/`qemu_ld`/`qemu_st`
+    calls; and replace catch-all module-build exceptions with actionable
+    pre-reject reasons for unsupported direct-memory, multi-access, and
+    control-flow shapes before module construction. R4s18 module failures
+    (`js-status-module-emission-failed=3571`,
+    `js-status-module-validation-failed=993`) are useful second-tier
+    blockers, but they should not drive a browser speed gate until the
+    dominant pool-relocation blocker is reduced.
+  - [ ] R4s21 - Expand supported x86 live SoftMMU MemOp families only after
+    R4s19/R4s20 identify memory rejects as a remaining dominant blocker.
+    DoD: admit alignment flags only with explicit QEMU-equivalent alignment
+    checks, add generic `MO_16` load/store lowering, add signed-load
+    sign-extension for supported sizes, and keep byte/word/dword/qword RAM
+    hits helper-free. Fail closed for unaligned guarded accesses, page
+    crossing, TLB miss/fault, MMIO, slow flags, unsupported atomics/endian
+    flags, unmirrored state, and unproven `mmu_idx`. Multi-access support
+    requires a guard-before-commit design: no guest RAM, env store, register
+    flush, counter increment, or dispatch target may commit until every
+    guard on the executed path has passed. R4s18 memory rejects were material
+    but not dominant (`selected-body-memop-unsupported-alignment=2436`,
+    `selected-body-softmmu-multi-access-unsupported=2223`, size `256`,
+    sign `126`), so this item is not the next speed-gate driver unless new
+    evidence changes that ordering.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
