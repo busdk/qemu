@@ -2228,8 +2228,41 @@ run that reaches a weaker marker than normal multi-user readiness.
       bodies enter the generic SoftMMU lowering with the TLB mirror refreshed
       and validated, while unsupported translated shapes remain distinct from
       supported shapes that the emitter cannot lower.
-    - [ ] R4s5d - Wire the generic SoftMMU/TLB lowering into the live x86
-      generated-exec JavaScript emitter. DoD:
+    - [x] R4s5d - Wire the generic SoftMMU/TLB lowering into the live x86
+      generated-exec JavaScript emitter. Accepted 2026-07-04:
+      `tcg_wasm64_live_generated_exec_js()` now recognizes
+      `tci_qemu_ld_rrr` and `tci_qemu_st_rrr`, lowers a supported single
+      qemu load/store word through the generic SoftMMU/TLB mirror contract,
+      reads the C-provided TLB mirror from the run context, increments inline
+      TLB-hit load/store counters, and keeps the clean RAM-hit path free of
+      helper, `qemu_ld`, and `qemu_st` calls. The live emitter fails closed
+      for unmirrored/invalid TLB state, unsupported MemOp/MMU state, TLB miss
+      or permission fault, MMIO, page crossing, slow flags, unsupported body
+      state, and multi-qemu-access bodies instead of silently falling back
+      inside the generated body. The metadata tests now assert that the live
+      emitter's run-context, TLB mirror, TLB entry, MemOp, and MemOpIdx
+      constants match the C header contract and that the coverage path also
+      uses the named MemOpIdx constants.
+
+      Checks: `git diff --check`, `node --check
+      scripts/ci/wasm64-translate-metadata-test.mjs`, `node --check
+      scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+      scripts/ci/wasm64-translate-metadata-test.mjs`, `node
+      scripts/ci/wasm-generated-output-equivalence-test.mjs`, and `node
+      scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. The
+      deterministic equivalence result still reports the accepted R4s5c/R4i
+      counters (`r4iPerTBEmitterGeneratedGuestInstructions=1`,
+      `r4iPerTBEmitterInlineTlbHitLoads=2`,
+      `r4iPerTBEmitterInlineTlbHitStores=2`, helper/`qemu_ld`/`qemu_st`
+      calls all zero).
+
+      No artifact build, browser preflight, speed claim, R4l unlock, Bus
+      Engine OS proof, or Bus-specific shortcut was run or accepted. The
+      local Docker cleanup removed the required
+      `qemu/emsdk-wasm64-cross:latest` image, so R4s6 remains the next item
+      after restoring or rebuilding that build image.
+
+      Original DoD:
       `tcg_wasm64_live_generated_exec_js()` recognizes
       `tci_qemu_ld_rrr` and `tci_qemu_st_rrr`, lowers supported single
       qemu load/store words through the same generic SoftMMU/TLB contract

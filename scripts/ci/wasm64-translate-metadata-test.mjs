@@ -367,6 +367,18 @@ assertLiveTbCoverageJsConst(liveTbCoverageJs, "mmuDataLoad",
                             headerDefine("TCG_WASM64_MMU_DATA_LOAD"));
 assertLiveTbCoverageJsConst(liveTbCoverageJs, "mmuDataStore",
                             headerDefine("TCG_WASM64_MMU_DATA_STORE"));
+assertLiveTbCoverageJsBigIntConst(
+  liveTbCoverageJs,
+  "memOpIdxShift",
+  BigInt(headerDefine("TCG_WASM64_MEMOPIDX_SHIFT")),
+);
+assertLiveTbCoverageJsBigIntConst(
+  liveTbCoverageJs,
+  "memOpIdxMmuMask",
+  BigInt(headerDefine("TCG_WASM64_MEMOPIDX_MMU_MASK")),
+);
+assert.match(liveTbCoverageJs, /i64Const\(memOpIdxShift\)/);
+assert.match(liveTbCoverageJs, /i64Const\(memOpIdxMmuMask\)/);
 assertLiveTbCoverageJsBigIntConst(liveTbCoverageJs, "sizeMask",
                                   BigInt(headerDefine("TCG_WASM64_MEMOP_SIZE")));
 assertLiveTbCoverageJsBigIntConst(liveTbCoverageJs, "byte",
@@ -417,6 +429,83 @@ assert.match(
 assert.match(runtime, /tcg_wasm64_live_generated_exec_enabled/);
 assert.match(runtime, /tcg_wasm64_live_generated_exec_no_fallback/);
 assert.match(runtime, /tcg_wasm64_live_generated_exec_js/);
+const liveGeneratedExecJs = runtime.match(
+  /EM_JS\(int, tcg_wasm64_live_generated_exec_js,[\s\S]*?\n\}\);\n\nEM_JS\(int, tcg_wasm64_live_tb_coverage_js,/,
+)?.[0] || "";
+assert.match(liveGeneratedExecJs, /tci_qemu_ld_rrr:\s*138/);
+assert.match(liveGeneratedExecJs, /tci_qemu_st_rrr:\s*139/);
+assert.match(liveGeneratedExecJs, /function compileSoftmmuTlbAccess/);
+assert.match(liveGeneratedExecJs, /opc === ops\.tci_qemu_ld_rrr/);
+assert.match(liveGeneratedExecJs, /opc === ops\.tci_qemu_st_rrr/);
+assert.match(liveGeneratedExecJs, /access: "load"/);
+assert.match(liveGeneratedExecJs, /access: "store"/);
+assert.match(liveGeneratedExecJs, /i64LoadAtPtr\(0, runCtxTlbOffset\)/);
+assert.match(liveGeneratedExecJs, /unsupported live generated-output multi-access shape/);
+assert.match(liveGeneratedExecJs, /runCounters\.inlineTlbHitLoads/);
+assert.match(liveGeneratedExecJs, /runCounters\.inlineTlbHitStores/);
+for (const [name, value, isBigInt] of [
+  ["runCtxTlbOffset", headerDefine("TCG_WASM64_RUN_CTX_TLB_OFFSET"), false],
+  ["targetPageBits", headerDefine("TCG_WASM64_TARGET_PAGE_BITS"), false],
+  ["targetPageMask", -(2 ** headerDefine("TCG_WASM64_TARGET_PAGE_BITS")), true],
+  ["invalidMask", headerDefine("TCG_WASM64_TLB_INVALID_MASK"), true],
+  ["flagsMask", headerDefine("TCG_WASM64_TLB_FLAGS_MASK"), true],
+  ["slowFlagsMask", headerDefine("TCG_WASM64_TLB_SLOW_FLAGS_MASK"), false],
+  ["mmio", headerDefine("TCG_WASM64_TLB_MMIO"), false],
+  ["mmuDataLoad", headerDefine("TCG_WASM64_MMU_DATA_LOAD"), false],
+  ["mmuDataStore", headerDefine("TCG_WASM64_MMU_DATA_STORE"), false],
+  ["memOpIdxShift", headerDefine("TCG_WASM64_MEMOPIDX_SHIFT"), true],
+  ["memOpIdxMmuMask", headerDefine("TCG_WASM64_MEMOPIDX_MMU_MASK"), true],
+]) {
+  assert.match(
+    liveGeneratedExecJs,
+    new RegExp(`\\b${name}\\s*(?:=|:)\\s*${value}${isBigInt ? "n" : "\\b"}`),
+    `tcg_wasm64_live_generated_exec_js ${name} must match header value ${value}`,
+  );
+}
+assert.match(liveGeneratedExecJs, /i64Const\(memOpIdxShift\)/);
+assert.match(liveGeneratedExecJs, /i64Const\(memOpIdxMmuMask\)/);
+for (const [name, value] of [
+  ["byte", headerDefine("TCG_WASM64_MEMOP_8")],
+  ["word", headerDefine("TCG_WASM64_MEMOP_32")],
+  ["quad", headerDefine("TCG_WASM64_MEMOP_64")],
+]) {
+  assert.match(
+    liveGeneratedExecJs,
+    new RegExp(`\\b${name}\\s*:\\s*${value}n\\b`),
+    `tcg_wasm64_live_generated_exec_js memOp.${name} must match header value ${value}n`,
+  );
+}
+for (const [name, value] of [
+  ["mask", headerDefine("TCG_WASM64_TLB_MIRROR_MASK_OFFSET")],
+  ["table", headerDefine("TCG_WASM64_TLB_MIRROR_TABLE_OFFSET")],
+  ["fulltlb", headerDefine("TCG_WASM64_TLB_MIRROR_FULLTLB_OFFSET")],
+  ["mmuIdx", headerDefine("TCG_WASM64_TLB_MIRROR_MMU_IDX_OFFSET")],
+  ["targetPageBits", headerDefine("TCG_WASM64_TLB_MIRROR_TARGET_PAGE_BITS_OFFSET")],
+  ["cpuTlbEntryBits", headerDefine("TCG_WASM64_TLB_MIRROR_CPU_TLB_ENTRY_BITS_OFFSET")],
+  ["tlbEntrySize", headerDefine("TCG_WASM64_TLB_MIRROR_TLB_ENTRY_SIZE_OFFSET")],
+  ["tlbFlagsMask", headerDefine("TCG_WASM64_TLB_MIRROR_TLB_FLAGS_MASK_OFFSET")],
+  ["tlbSlowFlagsMask", headerDefine("TCG_WASM64_TLB_MIRROR_TLB_SLOW_FLAGS_MASK_OFFSET")],
+  ["flags", headerDefine("TCG_WASM64_TLB_MIRROR_FLAGS_OFFSET")],
+]) {
+  assert.match(
+    liveGeneratedExecJs,
+    new RegExp(`\\b${name}:\\s*${value}\\b`),
+    `tcg_wasm64_live_generated_exec_js tlbMirror.${name} must match header value ${value}`,
+  );
+}
+for (const [name, value] of [
+  ["addrRead", headerDefine("TCG_WASM64_CPUTLB_ENTRY_ADDR_READ_OFFSET")],
+  ["addrWrite", headerDefine("TCG_WASM64_CPUTLB_ENTRY_ADDR_WRITE_OFFSET")],
+  ["addend", headerDefine("TCG_WASM64_CPUTLB_ENTRY_ADDEND_OFFSET")],
+  ["size", headerDefine("TCG_WASM64_CPUTLB_ENTRY_SIZE")],
+  ["bits", headerDefine("TCG_WASM64_CPUTLB_ENTRY_BITS")],
+]) {
+  assert.match(
+    liveGeneratedExecJs,
+    new RegExp(`\\b${name}:\\s*${value}\\b`),
+    `tcg_wasm64_live_generated_exec_js tlbEntry.${name} must match header value ${value}`,
+  );
+}
 assert.match(runtime, /tcg_wasm64_live_generated_exec_shape_supported/);
 assert.match(runtime, /tcg_wasm64_live_generated_exec_op_supported/);
 assert.match(runtime, /if \(tcg_wasm64_live_generated_exec_enabled\(\)\) {\s+return false;\s+}\s+if \(!metadata/);

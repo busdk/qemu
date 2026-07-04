@@ -3371,7 +3371,10 @@ const SOFTMMU_LOCAL_ADDEND = 17;
 const SOFTMMU_LOCAL_HOST_ADDR = 18;
 
 function softmmuMemOpIdx(memop, mmuIdx = R4K_SOFTMMU_MMU_IDX) {
-  return BigInt((memop << 5) | mmuIdx);
+  return BigInt(
+    (memop << TCG_WASM64_MEMOPIDX_SHIFT) |
+    (mmuIdx & TCG_WASM64_MEMOPIDX_MMU_MASK),
+  );
 }
 
 function softmmuAccessSize(memop) {
@@ -3542,14 +3545,20 @@ function emitSoftmmuFastPathModule(fixture) {
   ));
   instructions.push(...ifBlock(
     i32Ne(
-      i32WrapI64(i64AndExpr(localGet(SOFTMMU_LOCAL_OI), i64Const(31n))),
+      i32WrapI64(i64AndExpr(
+        localGet(SOFTMMU_LOCAL_OI),
+        i64Const(BigInt(TCG_WASM64_MEMOPIDX_MMU_MASK)),
+      )),
       i32Load(localGet(SOFTMMU_LOCAL_TLB_PTR),
               WASMJIT_TLB_MIRROR.mmuIdx)),
     unsupportedReturn,
   ));
   instructions.push(...localSet(
     SOFTMMU_LOCAL_MEMOP,
-    i64ShrUExpr(localGet(SOFTMMU_LOCAL_OI), i64Const(5n))));
+    i64ShrUExpr(
+      localGet(SOFTMMU_LOCAL_OI),
+      i64Const(BigInt(TCG_WASM64_MEMOPIDX_SHIFT)),
+    )));
   instructions.push(...ifBlock(
     i64NeExpr(localGet(SOFTMMU_LOCAL_MEMOP), i64Const(BigInt(generatedMemop))),
     unsupportedReturn,
@@ -5414,8 +5423,8 @@ function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_I
         return { reason: "selected-body-memop-unproven", hasMemop };
       }
       const oi = values[r2];
-      const memop = oi >>> 5;
-      const mmuIdx = oi & 31;
+      const memop = oi >>> TCG_WASM64_MEMOPIDX_SHIFT;
+      const mmuIdx = oi & TCG_WASM64_MEMOPIDX_MMU_MASK;
       const memopReason = r4s5bValidateMemop(memop);
       if (memopReason !== null) {
         return { reason: memopReason, hasMemop };
@@ -5788,7 +5797,8 @@ function r4s5bMemoryWords({
 } = {}) {
   const words = [];
   if (proveOi) {
-    const oi = ((memop << 5) | mmuIdx) >>> 0;
+    const oi = ((memop << TCG_WASM64_MEMOPIDX_SHIFT) |
+                (mmuIdx & TCG_WASM64_MEMOPIDX_MMU_MASK)) >>> 0;
     words.push(useMovl ? opReg(OPS.tci_movl, oiReg) :
       opImm20(OPS.tci_movi, oiReg, oi));
   }

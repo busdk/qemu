@@ -2634,12 +2634,78 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
     const stackPtr = scratch + 0x3000;
     const statusExit = 0x20n;
     const statusDispatch = 0x21n;
+    const statusMmio = 0x23n;
+    const statusTlbMissOrFault = 0x24n;
+    const statusUnsupported = 0x25n;
     const runExitNone = 0;
+    const runExitMmio = 2;
+    const runExitTlbMissOrFault = 3;
+    const runExitUnsupported = 6;
+    const runExitFlagPageCrossing = 1;
+    const runCtxTlbOffset = 48;
     const valueI32 = 0x7f;
     const valueI64 = 0x7e;
     const envRelativeBaseReg = 14;
     const envRelativeMinOffset = -16;
     const envRelativeMaxExclusive = 0x120;
+    const tlbMirror = {
+        mask: 0,
+        table: 8,
+        fulltlb: 16,
+        mmuIdx: 32,
+        targetPageBits: 36,
+        cpuTlbEntryBits: 40,
+        tlbEntrySize: 44,
+        tlbFlagsMask: 48,
+        tlbSlowFlagsMask: 52,
+        flags: 56,
+    };
+    const tlbMirrorValid = 1;
+    const tlbEntry = {
+        addrRead: 0,
+        addrWrite: 8,
+        addend: 24,
+        size: 32,
+        bits: 5,
+    };
+    const tlbEntryFull = {
+        slowFlags: 35,
+        size: 48,
+    };
+    const tlbConstants = {
+        targetPageBits: 12,
+        targetPageMask: -4096n,
+        invalidMask: 64n,
+        flagsMask: 448n,
+        slowFlagsMask: 31,
+        mmio: 16,
+        mmuDataLoad: 0,
+        mmuDataStore: 1,
+    };
+    const memOp = {
+        byte: 0n,
+        word: 2n,
+        quad: 3n,
+    };
+    const memOpIdxShift = 5n;
+    const memOpIdxMmuMask = 31n;
+    const runExit = {
+        reason: 0,
+        vaddr: 16,
+        paddr: 24,
+        value: 32,
+        size: 40,
+        flags: 44,
+    };
+    const runCounters = {
+        generatedGuestInstructions: 0,
+        generatedChainLength: 80,
+        inlineTlbHitLoads: 88,
+        inlineTlbHitStores: 96,
+        exitsMmio: 136,
+        exitsTlbMissOrFault: 144,
+        exitsUnsupported: 168,
+    };
     const ops = {
         brcond: 4,
         mb: 5,
@@ -2667,6 +2733,8 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         goto_tb: 73,
         tci_movi: 125,
         tci_movl: 126,
+        tci_qemu_ld_rrr: 138,
+        tci_qemu_st_rrr: 139,
         tci_setcond32: 136,
     };
 
@@ -2770,12 +2838,16 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         return [...expr, 0xad];
     }
 
-    function i64Load(address) {
-        return [...address, 0x29, ...memArg(3, 0)];
+    function i64Load(address, offset = 0) {
+        return [...address, 0x29, ...memArg(3, offset)];
     }
 
-    function i32Load(address) {
-        return [...address, 0x28, ...memArg(2, 0)];
+    function i32Load(address, offset = 0) {
+        return [...address, 0x28, ...memArg(2, offset)];
+    }
+
+    function i32Load8U(address, offset = 0) {
+        return [...address, 0x2d, ...memArg(0, offset)];
     }
 
     function i64Store(address, value) {
@@ -2804,6 +2876,42 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
 
     function addressAdd(base, offset) {
         return i64Add(base, i64Const(offset));
+    }
+
+    function i64Mul(lhs, rhs) {
+        return [...lhs, ...rhs, 0x7e];
+    }
+
+    function i64And(lhs, rhs) {
+        return [...lhs, ...rhs, 0x83];
+    }
+
+    function i64Xor(lhs, rhs) {
+        return [...lhs, ...rhs, 0x85];
+    }
+
+    function i64Shl(lhs, rhs) {
+        return [...lhs, ...rhs, 0x86];
+    }
+
+    function i64ShrU(lhs, rhs) {
+        return [...lhs, ...rhs, 0x88];
+    }
+
+    function i64Eq(lhs, rhs) {
+        return [...lhs, ...rhs, 0x51];
+    }
+
+    function i64Ne(lhs, rhs) {
+        return [...lhs, ...rhs, 0x52];
+    }
+
+    function i32And(lhs, rhs) {
+        return [...lhs, ...rhs, 0x71];
+    }
+
+    function i32Ne(lhs, rhs) {
+        return [...lhs, ...rhs, 0x47];
     }
 
     function incrementCounter(ptrLocal, offset, value) {
@@ -2940,6 +3048,22 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         let inlineStores = 0;
         let executedOps = 0;
         let terminal = null;
+        const softTlbPtr = 19;
+        const softSlowFlags = 20;
+        const softTaddr = 21;
+        const softOi = 22;
+        const softMemop = 23;
+        const softSize = 24;
+        const softValue = 25;
+        const softMask = 26;
+        const softTablePtr = 27;
+        const softFulltlbPtr = 28;
+        const softIndex = 29;
+        const softEntryPtr = 30;
+        const softFullPtr = 31;
+        const softComparator = 32;
+        const softAddend = 33;
+        const softHostAddr = 34;
         const terminalIndex = words.findIndex((insn) => {
             const opc = bits(insn >>> 0, 0, 8);
 
@@ -2948,6 +3072,253 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
 
         function regLocal(reg) {
             return regLocalBase + reg;
+        }
+
+        function ifBlock(condition, thenBody) {
+            return [...condition, 0x04, 0x40, ...thenBody, 0x0b];
+        }
+
+        function incrementRunCounter(offset) {
+            return incrementCounter(countersPtr, offset, 1);
+        }
+
+        function softmmuStoreExit(reason, sizeExpr, flags) {
+            return [
+                ...i32StoreAtPtr(exitPtr, runExit.reason,
+                                 i32Const(reason)),
+                ...i64StoreAtPtr(exitPtr, runExit.vaddr,
+                                 localGet(softTaddr)),
+                ...i64StoreAtPtr(exitPtr, runExit.paddr,
+                                 i64Const(0n)),
+                ...i32StoreAtPtr(exitPtr, runExit.size, sizeExpr),
+                ...i32StoreAtPtr(exitPtr, runExit.flags,
+                                 i32Const(flags)),
+            ];
+        }
+
+        function softmmuFailureReturn({
+            status,
+            reason,
+            sizeExpr = i32Const(0),
+            flags = 0,
+        }) {
+            return [
+                ...softmmuStoreExit(reason, sizeExpr, flags),
+                ...i64Const(status),
+                0x0f,
+            ];
+        }
+
+        function softmmuAccessType(access) {
+            return access === "store" ? tlbConstants.mmuDataStore :
+                                        tlbConstants.mmuDataLoad;
+        }
+
+        function softmmuComparatorOffset(access) {
+            return access === "store" ? tlbEntry.addrWrite :
+                                        tlbEntry.addrRead;
+        }
+
+        function compileSoftmmuTlbAccess({
+            access,
+            dst,
+            addrReg,
+            valueReg,
+            oiReg,
+        }) {
+            const accessType = softmmuAccessType(access);
+            const comparatorOffset = softmmuComparatorOffset(access);
+            const inlineCounterOffset = access === "store" ?
+                runCounters.inlineTlbHitStores :
+                runCounters.inlineTlbHitLoads;
+            const unsupportedReturn = softmmuFailureReturn({
+                status: statusUnsupported,
+                reason: runExitUnsupported,
+            });
+            const tlbMissReturn = softmmuFailureReturn({
+                status: statusTlbMissOrFault,
+                reason: runExitTlbMissOrFault,
+                sizeExpr: i32WrapI64(localGet(softSize)),
+            });
+            const pageCrossingReturn = softmmuFailureReturn({
+                status: statusTlbMissOrFault,
+                reason: runExitTlbMissOrFault,
+                sizeExpr: i32WrapI64(localGet(softSize)),
+                flags: runExitFlagPageCrossing,
+            });
+            const mmioReturn = softmmuFailureReturn({
+                status: statusMmio,
+                reason: runExitMmio,
+                sizeExpr: i32WrapI64(localGet(softSize)),
+            });
+            const loadByte = i64ExtendI32U(i32Load8U(
+                i32WrapI64(localGet(softHostAddr))));
+            const loadWord = i64ExtendI32U(i32Load(
+                i32WrapI64(localGet(softHostAddr))));
+            const loadQuad = i64Load(i32WrapI64(localGet(softHostAddr)));
+            const storeByte = i32Store8(
+                i32WrapI64(localGet(softHostAddr)),
+                i32WrapI64(localGet(softValue)));
+            const storeWord = i32Store(
+                i32WrapI64(localGet(softHostAddr)),
+                i32WrapI64(localGet(softValue)));
+            const storeQuad = i64Store(
+                i32WrapI64(localGet(softHostAddr)),
+                localGet(softValue));
+
+            return [
+                ...localSet(softTaddr, localGet(addrReg)),
+                ...localSet(softOi, localGet(oiReg)),
+                ...(access === "store"
+                    ? localSet(softValue, localGet(valueReg)) : []),
+                ...localSet(softSize, i64Const(0n)),
+                ...localSet(softTlbPtr,
+                    i64LoadAtPtr(0, runCtxTlbOffset)),
+                ...ifBlock(i64Eq(localGet(softTlbPtr), i64Const(0n)),
+                    unsupportedReturn),
+                ...ifBlock(i32Ne(
+                    i32And(
+                        i32Load(localGet(softTlbPtr), tlbMirror.flags),
+                        i32Const(tlbMirrorValid)),
+                    i32Const(tlbMirrorValid)),
+                    unsupportedReturn),
+                ...ifBlock(i32Ne(
+                    i32Load(localGet(softTlbPtr),
+                            tlbMirror.targetPageBits),
+                    i32Const(tlbConstants.targetPageBits)),
+                    unsupportedReturn),
+                ...ifBlock(i32Ne(
+                    i32Load(localGet(softTlbPtr),
+                            tlbMirror.cpuTlbEntryBits),
+                    i32Const(tlbEntry.bits)),
+                    unsupportedReturn),
+                ...ifBlock(i32Ne(
+                    i32Load(localGet(softTlbPtr), tlbMirror.tlbEntrySize),
+                    i32Const(tlbEntry.size)),
+                    unsupportedReturn),
+                ...ifBlock(i32Ne(
+                    i32Load(localGet(softTlbPtr),
+                            tlbMirror.tlbFlagsMask),
+                    i32Const(Number(tlbConstants.flagsMask))),
+                    unsupportedReturn),
+                ...ifBlock(i32Ne(
+                    i32Load(localGet(softTlbPtr),
+                            tlbMirror.tlbSlowFlagsMask),
+                    i32Const(tlbConstants.slowFlagsMask)),
+                    unsupportedReturn),
+                ...localSet(softMemop,
+                    i64ShrU(localGet(softOi), i64Const(memOpIdxShift))),
+                ...ifBlock(i64Ne(
+                    i64And(localGet(softMemop), i64Const(~7n)),
+                    i64Const(0n)),
+                    unsupportedReturn),
+                ...ifBlock(i32Ne(
+                    i32WrapI64(i64And(localGet(softOi),
+                                      i64Const(memOpIdxMmuMask))),
+                    i32Load(localGet(softTlbPtr), tlbMirror.mmuIdx)),
+                    unsupportedReturn),
+                ...ifBlock(i64Eq(localGet(softMemop), i64Const(memOp.byte)),
+                    localSet(softSize, i64Const(1n))),
+                ...ifBlock(i64Eq(localGet(softMemop), i64Const(memOp.word)),
+                    localSet(softSize, i64Const(4n))),
+                ...ifBlock(i64Eq(localGet(softMemop), i64Const(memOp.quad)),
+                    localSet(softSize, i64Const(8n))),
+                ...ifBlock(i64Eq(localGet(softSize), i64Const(0n)),
+                    unsupportedReturn),
+                ...ifBlock(i64Ne(
+                    i64And(
+                        i64Xor(localGet(softTaddr),
+                               i64Add(localGet(softTaddr),
+                                      i64Add(localGet(softSize),
+                                             i64Const(-1n)))),
+                        i64Const(tlbConstants.targetPageMask)),
+                    i64Const(0n)),
+                    pageCrossingReturn),
+                ...localSet(softMask,
+                    i64Load(localGet(softTlbPtr), tlbMirror.mask)),
+                ...localSet(softTablePtr,
+                    i64Load(localGet(softTlbPtr), tlbMirror.table)),
+                ...localSet(softFulltlbPtr,
+                    i64Load(localGet(softTlbPtr), tlbMirror.fulltlb)),
+                ...ifBlock(i64Eq(localGet(softTablePtr), i64Const(0n)),
+                    unsupportedReturn),
+                ...ifBlock(i64Eq(localGet(softFulltlbPtr), i64Const(0n)),
+                    unsupportedReturn),
+                ...localSet(softIndex,
+                    i64And(
+                        i64ShrU(localGet(softTaddr),
+                                i64Const(BigInt(
+                                    tlbConstants.targetPageBits))),
+                        i64ShrU(localGet(softMask),
+                                i64Const(BigInt(tlbEntry.bits))))),
+                ...localSet(softEntryPtr,
+                    i64Add(localGet(softTablePtr),
+                           i64Shl(localGet(softIndex),
+                                  i64Const(BigInt(tlbEntry.bits))))),
+                ...localSet(softFullPtr,
+                    i64Add(localGet(softFulltlbPtr),
+                           i64Mul(localGet(softIndex),
+                                  i64Const(BigInt(tlbEntryFull.size))))),
+                ...localSet(softComparator,
+                    i64Load(localGet(softEntryPtr), comparatorOffset)),
+                ...localSet(softAddend,
+                    i64Load(localGet(softEntryPtr), tlbEntry.addend)),
+                ...localSet(softSlowFlags,
+                    i64ExtendI32U(i32Load8U(
+                        localGet(softFullPtr),
+                        tlbEntryFull.slowFlags + accessType))),
+                ...ifBlock(i64Ne(
+                    i64And(localGet(softComparator),
+                           i64Const(tlbConstants.targetPageMask)),
+                    i64And(localGet(softTaddr),
+                           i64Const(tlbConstants.targetPageMask))),
+                    tlbMissReturn),
+                ...ifBlock(i64Ne(
+                    i64And(localGet(softComparator),
+                           i64Const(tlbConstants.invalidMask)),
+                    i64Const(0n)),
+                    tlbMissReturn),
+                ...ifBlock(i64Ne(
+                    i64And(localGet(softSlowFlags),
+                           i64Const(BigInt(tlbConstants.mmio))),
+                    i64Const(0n)),
+                    mmioReturn),
+                ...ifBlock(i64Ne(
+                    i64And(localGet(softComparator),
+                           i64Const(tlbConstants.flagsMask)),
+                    i64Const(0n)),
+                    unsupportedReturn),
+                ...ifBlock(i64Ne(
+                    i64And(localGet(softSlowFlags),
+                           i64Const(BigInt(
+                               tlbConstants.slowFlagsMask))),
+                    i64Const(0n)),
+                    unsupportedReturn),
+                ...localSet(softHostAddr,
+                    i64Add(localGet(softTaddr), localGet(softAddend))),
+                ...(access === "store" ? [
+                    ...ifBlock(i64Eq(localGet(softMemop),
+                                     i64Const(memOp.byte)),
+                        storeByte),
+                    ...ifBlock(i64Eq(localGet(softMemop),
+                                     i64Const(memOp.word)),
+                        storeWord),
+                    ...ifBlock(i64Eq(localGet(softMemop),
+                                     i64Const(memOp.quad)),
+                        storeQuad),
+                ] : [
+                    ...ifBlock(i64Eq(localGet(softMemop),
+                                     i64Const(memOp.byte)),
+                        localSet(dst, loadByte)),
+                    ...ifBlock(i64Eq(localGet(softMemop),
+                                     i64Const(memOp.word)),
+                        localSet(dst, loadWord)),
+                    ...ifBlock(i64Eq(localGet(softMemop),
+                                     i64Const(memOp.quad)),
+                        localSet(dst, loadQuad)),
+                ]),
+                ...incrementRunCounter(inlineCounterOffset),
+            ];
         }
 
         function compileOp(index, insn) {
@@ -3088,6 +3459,23 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                     localGet(src1), localGet(src2), bits(insn, 20, 4));
                 return value ? localSet(dst, i64ExtendI32U(value)) : null;
             }
+            if (opc === ops.tci_qemu_ld_rrr) {
+                return compileSoftmmuTlbAccess({
+                    access: "load",
+                    dst,
+                    addrReg: src1,
+                    oiReg: src2,
+                });
+            }
+            if (opc === ops.tci_qemu_st_rrr) {
+                return compileSoftmmuTlbAccess({
+                    access: "store",
+                    dst,
+                    addrReg: src1,
+                    valueReg: dst,
+                    oiReg: src2,
+                });
+            }
             if (opc === ops.mb) {
                 return [];
             }
@@ -3154,6 +3542,14 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
 
         if (terminalIndex < 0) {
             throw new Error("live generated-output body has no terminal");
+        }
+        if (words.slice(0, terminalIndex).filter((insn) => {
+            const opc = bits(insn >>> 0, 0, 8);
+
+            return opc === ops.tci_qemu_ld_rrr ||
+                   opc === ops.tci_qemu_st_rrr;
+        }).length > 1) {
+            throw new Error("unsupported live generated-output multi-access shape");
         }
         {
             const insn = words[terminalIndex] >>> 0;
@@ -3250,7 +3646,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                 ])),
                 ...section(10, vector([
                     functionBody(instructions, [
-                        { count: 20, type: valueI64 },
+                        { count: 35, type: valueI64 },
                     ]),
                 ])),
             ]);
@@ -3399,6 +3795,8 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
         word: 2n,
         quad: 3n,
     };
+    const memOpIdxShift = 5n;
+    const memOpIdxMmuMask = 31n;
     const ops = {
         add: Number(op_add_arg),
         and: Number(op_and_arg),
@@ -4142,13 +4540,14 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
                     i32Const(tlbMirrorValid)),
                     unsupportedReturn),
                 ...localSet(softMemop,
-                    i64ShrU(localGet(softOi), i64Const(5n))),
+                    i64ShrU(localGet(softOi), i64Const(memOpIdxShift))),
                 ...ifBlock(i64Ne(
                     i64And(localGet(softMemop), i64Const(~7n)),
                     i64Const(0n)),
                     unsupportedReturn),
                 ...ifBlock(i32Ne(
-                    i32WrapI64(i64And(localGet(softOi), i64Const(31n))),
+                    i32WrapI64(i64And(localGet(softOi),
+                                      i64Const(memOpIdxMmuMask))),
                     i32Load(i32WrapI64(localGet(softTlbPtr)),
                             tlbMirror.mmuIdx)),
                     unsupportedReturn),
