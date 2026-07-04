@@ -2973,7 +2973,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     clause, R4l remains blocked, no speed claim is made, and no Bus Engine OS
     browser proof was run.
 
-  - [ ] R4s16 - Repair the x86 live-generated-exec chain-target stop before
+  - [x] R4s16 - Repair the x86 live-generated-exec chain-target stop before
     another R4s browser preflight. DoD: deterministic coverage proves that
     when a selected generated body retires guest instructions and then reaches
     a stale or unsupported `goto_tb` chain target, the generated work is
@@ -2984,6 +2984,34 @@ run that reaches a weaker marker than normal multi-user readiness.
     fail-closed, and the next bounded Chromium preflight must report nonzero
     generated guest-instruction retirement with `no_silent_fallback=true`
     before R4l can run.
+    Accepted deterministic repair 2026-07-04: based on QEMU
+    `1d7f40df71be7b21016c0908d5647bc16bba138b`,
+    `tcg_wasm64_live_generated_exec_try()` now treats any `chained == true`
+    stop as post-commit: source generated counters are copied into
+    `translated_counters`, `generated_run_entries` and
+    `live_generated_exec_successes` are incremented, and the stop is reported
+    as an explicit synthetic generated exit before no-silent mode fails
+    closed. Pre-execution failures still use the existing reject path with
+    zero generated counters. This covers stale/unsupported prepared targets,
+    invalid target TLB mirrors, post-source chain budget/interruption stops,
+    and failed target generated runs without returning `false` to replay the
+    already-committed source TB through TCI. Deterministic coverage in
+    `scripts/ci/wasm-generated-output-equivalence-test.mjs` adds
+    `r4s16ChainTargetStop`, using the R4s14 live x86 generated body with
+    `noFallback=true` and a missing `goto_tb` target; it reports
+    `path=generated-chain-target-exit`, `stopReason=chain-target-unsupported`,
+    `generatedGuestInstructions=1`, `generatedChainLength=1`,
+    `generatedRunEntries=1`, `generatedCoverageNumerator=1`,
+    `compatFallback=false`, `noSilentFallback=true`, `successes=1`,
+    `rejects=0`, and `targetExecuted=false`. Checks passed: `git diff
+    --check`, `node --check
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node --check
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, and `node
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. No Chromium
+    preflight, R4l speed gate, Bus Engine OS proof, or Bus-specific shortcut
+    was run; the next fresh bounded x86 Chromium preflight is the remaining
+    gate before R4l.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline

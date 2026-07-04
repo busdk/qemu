@@ -2716,6 +2716,7 @@ function simulateR7LongRunningGeneratedExec({
   targetGuestInstructions,
   budget,
   seed,
+  noFallback = false,
 }) {
   const generated = createChainedState(sourceFixture, targetTbPtr, seed);
   const reference = createChainedState(sourceFixture, targetTbPtr, seed);
@@ -2739,7 +2740,7 @@ function simulateR7LongRunningGeneratedExec({
     path = "generated-then-main-loop";
   } else if (!targetFixture) {
     stopReason = "chain-target-unsupported";
-    path = "generated-then-tci-fallback";
+    path = "generated-chain-target-exit";
   } else {
     generatedTarget = runInterpreterTB(generated, targetFixture);
     referenceTarget = runInterpreterTB(reference, targetFixture);
@@ -2753,6 +2754,13 @@ function simulateR7LongRunningGeneratedExec({
   return {
     path,
     stopReason,
+    noSilentFallback: noFallback,
+    failedClosed: noFallback && stopReason !== null,
+    compatFallback: false,
+    attempts: 1,
+    successes: 1,
+    rejects: 0,
+    preflightReady: generatedGuestInstructions > 0,
     generatedRunEntries: 1,
     generatedChainLength,
     generatedGuestInstructions,
@@ -2761,12 +2769,14 @@ function simulateR7LongRunningGeneratedExec({
     generatedExecuted: generatedChainLength,
     sourceStatus: generatedSource.status.toString(),
     targetStatus: generatedTarget ? generatedTarget.status.toString() : null,
+    targetExecuted: generatedTarget !== null,
     finalStatus: generatedTarget ? generatedTarget.status.toString()
                                  : generatedSource.status.toString(),
     finalRet: generatedTarget ? generatedTarget.ret.toString()
                               : generatedSource.ret.toString(),
     guestStateCommit: true,
-    tciCorrectnessFallback: stopReason === "chain-target-unsupported",
+    chainTargetExit: stopReason === "chain-target-unsupported",
+    tciCorrectnessFallback: false,
     registerStateMatched:
       JSON.stringify(generatedState.regs) ===
       JSON.stringify(referenceState.regs),
@@ -6712,6 +6722,45 @@ assert.deepEqual(
     guard.reason),
   ["branch-target-outside-recorded-words"],
 );
+const R4S16_MISSING_CHAIN_TARGET = 0x7777000n;
+const r4s16ChainTargetStop = simulateR7LongRunningGeneratedExec({
+  sourceFixture: {
+    ...liveX86Fixture,
+    words: r4s13LiveBodyBuildWords,
+    guestInstructions: 1,
+  },
+  targetFixture: null,
+  targetTbPtr: R4S16_MISSING_CHAIN_TARGET,
+  sourceGuestInstructions: 1,
+  targetGuestInstructions: 1,
+  budget: 64,
+  seed: 1,
+  noFallback: true,
+});
+assert.equal(r4s16ChainTargetStop.path, "generated-chain-target-exit");
+assert.equal(r4s16ChainTargetStop.stopReason, "chain-target-unsupported");
+assert.equal(r4s16ChainTargetStop.compatFallback, false);
+assert.equal(r4s16ChainTargetStop.noSilentFallback, true);
+assert.equal(r4s16ChainTargetStop.failedClosed, true);
+assert.equal(r4s16ChainTargetStop.preflightReady, true);
+assert.equal(r4s16ChainTargetStop.attempts, 1);
+assert.equal(r4s16ChainTargetStop.successes, 1);
+assert.equal(r4s16ChainTargetStop.rejects, 0);
+assert.equal(r4s16ChainTargetStop.generatedRunEntries, 1);
+assert.equal(r4s16ChainTargetStop.generatedChainLength, 1);
+assert.equal(r4s16ChainTargetStop.generatedGuestInstructions, 1);
+assert.equal(r4s16ChainTargetStop.generatedGuestInstructionsPerEntry, 1);
+assert.equal(r4s16ChainTargetStop.generatedCoverageNumerator, 1);
+assert.equal(r4s16ChainTargetStop.generatedExecuted, 1);
+assert.equal(r4s16ChainTargetStop.chainTargetExit, true);
+assert.equal(r4s16ChainTargetStop.tciCorrectnessFallback, false);
+assert.equal(r4s16ChainTargetStop.targetExecuted, false);
+assert.equal(r4s16ChainTargetStop.targetStatus, null);
+assert.equal(r4s16ChainTargetStop.finalRet,
+             R4S16_MISSING_CHAIN_TARGET.toString());
+assert.equal(r4s16ChainTargetStop.registerStateMatched, true);
+assert.equal(r4s16ChainTargetStop.memoryStateMatched, true);
+assert.equal(r4s16ChainTargetStop.helperCalls, 0);
 assert.deepEqual(
   memoryImportTypeBytes(DETERMINISTIC_MEMORY_IMPORT_DESCRIPTOR),
   [...name("env"), ...name("memory"), 0x02, 0x00, 0x01],
@@ -7782,6 +7831,7 @@ console.log(JSON.stringify({
     fixtureCount: r4mLiveGeneratedExecCases.length,
     fixtures: r4mLiveGeneratedExecCases,
     memopRejectAttribution: r4s7MemopRejectAttribution,
+    r4s16ChainTargetStop,
     generatedFixtures: r4mLiveGeneratedExecCases.filter((entry) =>
       entry.path === "generated").length,
     failClosedFixtures: r4mLiveGeneratedExecCases.filter((entry) =>
