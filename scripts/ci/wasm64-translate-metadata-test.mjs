@@ -17,6 +17,7 @@ const runtime = read("tcg/wasm64.c");
 const header = read("tcg/wasm64.h");
 const tci = read("tcg/tci.c");
 const tciTarget = read("tcg/tci/tcg-target.c.inc");
+const translator = read("accel/tcg/translator.c");
 const generatedEquivalence = read("scripts/ci/wasm-generated-output-equivalence-test.mjs");
 
 function headerDefine(name) {
@@ -855,6 +856,15 @@ assert.doesNotMatch(tci, /addFunction\(instance\.exports\.run, "ii"\)/);
 assert.doesNotMatch(tci, /tcg_wasm64_translate_generated_output_available\(metadata\)/);
 assert.doesNotMatch(tci, /tci_wasm_generated_try_exec/);
 assert.doesNotMatch(tci, /return \[0xfe, 0x03, 0x00\]; \/\* atomic\.fence \*\//);
+
+for (const width of [2, 4, 8]) {
+  assert.match(
+    translator,
+    new RegExp(
+      `QEMU_IS_ALIGNED\\(pc, ${width}\\) && QEMU_PTR_IS_ALIGNED\\(host, ${width}\\)[\\s\\S]*?qatomic_read`,
+    ),
+  );
+}
 
 assert.match(generatedEquivalence, /X86_CPU_STATE_CONTRACT_VERSION/);
 assert.match(generatedEquivalence, /analyzeX86CpuStateContract/);

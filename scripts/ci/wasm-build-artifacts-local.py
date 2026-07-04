@@ -94,6 +94,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=[],
         help="extra configure argument appended after the default wasm64 CI arguments",
     )
+    parser.add_argument(
+        "--extra-cflag",
+        action="append",
+        default=[],
+        help="extra C compiler flag appended to the default wasm64 --extra-cflags value",
+    )
+    parser.add_argument(
+        "--extra-ldflag",
+        action="append",
+        default=[],
+        help="extra linker flag appended to the default wasm64 --extra-ldflags value",
+    )
     return parser.parse_args(argv)
 
 
@@ -188,6 +200,11 @@ cd /tmp/build
 {configure_step}
 make -j{make_jobs}
 cp -v {shlex.quote(artifact_js)} {shlex.quote(artifact_wasm)} /host-out/
+for extra_artifact in {shlex.quote(artifact_js)}.symbols {shlex.quote(artifact_wasm)}.symbols; do
+    if [ -f "$extra_artifact" ]; then
+        cp -v "$extra_artifact" /host-out/
+    fi
+done
 cd /host-out
 python3 /tmp/src/scripts/ci/wasm-artifact-manifest.py --root . --output qemu-system-wasm-artifacts.json
 python3 /tmp/src/scripts/ci/wasm-artifact-manifest-check.py --manifest qemu-system-wasm-artifacts.json --target {shlex.quote(target)}
@@ -208,9 +225,18 @@ def docker_run_command(args: argparse.Namespace) -> list[str]:
         "--cc=ccache emcc",
         "--cxx=ccache em++",
     ]
+    default_configure_args = list(DEFAULT_CONFIGURE_ARGS)
+    if args.extra_cflag:
+        default_configure_args[default_configure_args.index("--extra-cflags=-sUSE_SDL=2")] = (
+            "--extra-cflags=-sUSE_SDL=2 " + " ".join(args.extra_cflag)
+        )
+    if args.extra_ldflag:
+        default_configure_args[default_configure_args.index("--extra-ldflags=-sUSE_SDL=2")] = (
+            "--extra-ldflags=-sUSE_SDL=2 " + " ".join(args.extra_ldflag)
+        )
     configure_args = [
         *ccache_configure_args,
-        *DEFAULT_CONFIGURE_ARGS,
+        *default_configure_args,
         *tcg_backend_args,
         f"--target-list={args.target}-softmmu",
     ] + list(args.configure_arg)
