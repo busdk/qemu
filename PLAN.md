@@ -2176,6 +2176,33 @@ run that reaches a weaker marker than normal multi-user readiness.
         emitter path; negative fixtures cover the same fail-closed cases as
         R4s5c2. No browser preflight or R4l speed gate may run until these
         checks pass.
+- [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
+  fast paths in the load/store lowering region. DoD: common RV64
+  `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
+  WebAssembly loads/stores instead of generic `qemu_ld`/`qemu_st` helper
+  calls, while TLB miss, MMIO, page crossing, permission/fault, unsupported
+  `MemOp`, and unmirrored TLB state return synthetic exits and fall through
+  to TCI correctness fallback. Accepted 2026-07-04: `tcg/wasm64.c` now wires
+  a zero-initialized `TCGWasm64TLBMirror` into the RV64 live generated-output
+  coverage context, lowers generated-output qemu load/store words through an
+  inline SoftMMU TLB-hit path for byte, 32-bit, and 64-bit RAM accesses, and
+  reports `inline_tlb_hit_loads`, `inline_tlb_hit_stores`, helper counts, and
+  MMIO/TLB-miss-or-fault/unsupported exits in live coverage JSON. The path
+  rejects unsupported `MemOpIdx` flags and mismatched `mmu_idx`, leaves helper
+  counters at zero on accepted RAM hits, and classifies fail-closed TLB/MMIO
+  exits before TCI fallback. Deterministic coverage in
+  `scripts/ci/wasm-generated-output-equivalence-test.mjs` adds R6 RV64
+  SoftMMU fixtures for `ld32u`, `ld`, `st8`, `st32`, and `st` TLB-hit RAM
+  cases plus TLB miss, MMIO, permission fault, and page-crossing exits. The
+  accepted hit fixtures report aggregate `inline_tlb_hit_loads=2`,
+  `inline_tlb_hit_stores=3`, and zero helper, `qemu_ld`, and `qemu_st` calls;
+  fail-closed fixtures report zero inline hits and preserve RAM before TCI
+  fallback. This is expected to increase the generated-retirement share only
+  for same-commit RV64 paths whose memory operations are TLB-hit RAM accesses;
+  miss/MMIO/fault cases should remain TCI fallback work and not inflate the
+  generated share. Checks passed: all deterministic `scripts/ci/*-test.mjs`
+  and `scripts/ci/*-test.py` tests, plus `git diff --check`. No browser run,
+  artifact build, speed claim, or Bus Engine OS proof was run in this slice.
 - [x] R7 - Dispatch available RISC-V generated output from the live wasm64
   run loop before TCI fallback. DoD: when live TB metadata reports
   `tcg_wasm64_translate_generated_output_available()` and the RV64

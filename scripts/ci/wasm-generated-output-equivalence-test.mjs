@@ -161,6 +161,8 @@ const TWO_TB_HOTSET_EMITTER_NAME = "r4k-two-tb-hotset-dispatch-fixture";
 const TWO_TB_HOTSET_BODY_TIME_NS_PER_TB = 1000n;
 const X86_CPU_STATE_CONTRACT_VERSION = 1;
 const R4K_SOFTMMU_EMITTER_NAME = "r4k-softmmu-tlb-fastpath-fixture";
+const R6_RV64_SOFTMMU_EMITTER_NAME =
+  "r6-rv64-softmmu-tlb-fastpath-fixture";
 const R4K_SOFTMMU_MMU_IDX = 2;
 const R4K_SOFTMMU_PAGE_BITS = WASMJIT_TLB_CONSTANTS.targetPageBits;
 const R4K_SOFTMMU_PAGE_MASK = WASMJIT_TLB_CONSTANTS.targetPageMask;
@@ -3008,16 +3010,20 @@ function emitSoftmmuFastPathModule(fixture) {
       localGet(SOFTMMU_LOCAL_ENV_PTR), loaded, r0 * 8));
     instructions.push(...softmmuIncrementCounter(
       WASMJIT_COUNTERS.inlineTlbHitLoads));
-  } else if (generatedMemop === MO_8) {
-    instructions.push(...i32Store8(
-      i32WrapI64(localGet(SOFTMMU_LOCAL_HOST_ADDR)),
-      i32WrapI64(localGet(SOFTMMU_LOCAL_VALUE))));
-    instructions.push(...softmmuIncrementCounter(
-      WASMJIT_COUNTERS.inlineTlbHitStores));
   } else {
-    instructions.push(...i64Store(
-      i32WrapI64(localGet(SOFTMMU_LOCAL_HOST_ADDR)),
-      localGet(SOFTMMU_LOCAL_VALUE)));
+    if (generatedMemop === MO_8) {
+      instructions.push(...i32Store8(
+        i32WrapI64(localGet(SOFTMMU_LOCAL_HOST_ADDR)),
+        i32WrapI64(localGet(SOFTMMU_LOCAL_VALUE))));
+    } else if (generatedMemop === MO_32) {
+      instructions.push(...i32Store(
+        i32WrapI64(localGet(SOFTMMU_LOCAL_HOST_ADDR)),
+        i32WrapI64(localGet(SOFTMMU_LOCAL_VALUE))));
+    } else {
+      instructions.push(...i64Store(
+        i32WrapI64(localGet(SOFTMMU_LOCAL_HOST_ADDR)),
+        localGet(SOFTMMU_LOCAL_VALUE)));
+    }
     instructions.push(...softmmuIncrementCounter(
       WASMJIT_COUNTERS.inlineTlbHitStores));
   }
@@ -3051,7 +3057,7 @@ function emitSoftmmuFastPathModule(fixture) {
 
   return {
     ok: WebAssembly.validate(moduleBytes),
-    emitter: R4K_SOFTMMU_EMITTER_NAME,
+    emitter: fixture.emitterName || R4K_SOFTMMU_EMITTER_NAME,
     moduleBytes,
     moduleByteLength: moduleBytes.length,
     moduleValid: WebAssembly.validate(moduleBytes),
@@ -3172,6 +3178,38 @@ function readSoftmmuExit(view, exitPtr) {
   };
 }
 
+function applySoftmmuReferenceRamAccess(state, fixture) {
+  const value = state.view.getBigUint64(state.regsPtr, true);
+
+  if (fixture.access === "load") {
+    if (fixture.generatedMemop === MO_8) {
+      state.view.setBigUint64(
+        state.regsPtr, BigInt(state.view.getUint8(state.hostAddr)), true);
+    } else if (fixture.generatedMemop === MO_32) {
+      state.view.setBigUint64(
+        state.regsPtr, BigInt(state.view.getUint32(state.hostAddr, true)),
+        true);
+    } else if (fixture.generatedMemop === MO_64) {
+      state.view.setBigUint64(
+        state.regsPtr, state.view.getBigUint64(state.hostAddr, true), true);
+    } else {
+      throw new Error(`unsupported reference load memop ${fixture.generatedMemop}`);
+    }
+    return;
+  }
+
+  if (fixture.generatedMemop === MO_8) {
+    state.view.setUint8(state.hostAddr, Number(value & 0xffn));
+  } else if (fixture.generatedMemop === MO_32) {
+    state.view.setUint32(
+      state.hostAddr, Number(value & 0xffffffffn), true);
+  } else if (fixture.generatedMemop === MO_64) {
+    state.view.setBigUint64(state.hostAddr, value, true);
+  } else {
+    throw new Error(`unsupported reference store memop ${fixture.generatedMemop}`);
+  }
+}
+
 async function runSoftmmuFixture(fixture) {
   const emission = emitSoftmmuFastPathModule(fixture);
 
@@ -3179,6 +3217,7 @@ async function runSoftmmuFixture(fixture) {
   assert.equal(emission.moduleValid, true,
                `${fixture.name} emitted invalid softmmu module`);
   const state = createSoftmmuState(fixture);
+  const reference = createSoftmmuState(fixture);
   const beforeRam64 = state.view.getBigUint64(state.hostAddr, true);
   const beforeReg0 = state.view.getBigUint64(state.regsPtr, true);
   const compiled = await WebAssembly.compile(emission.moduleBytes);
@@ -3192,6 +3231,7 @@ async function runSoftmmuFixture(fixture) {
   const exit = readSoftmmuExit(state.view, state.exitPtr);
   const afterRam64 = state.view.getBigUint64(state.hostAddr, true);
   const afterReg0 = state.view.getBigUint64(state.regsPtr, true);
+  let helperVisibleStateMatched = null;
 
   assert.equal(status, fixture.expectedStatus,
                `${fixture.name} status mismatch`);
@@ -3226,6 +3266,16 @@ async function runSoftmmuFixture(fixture) {
     assert.equal(afterRam64, beforeRam64,
                  `${fixture.name} failed path must not touch RAM`);
   }
+  if (fixture.expectedSuccess) {
+    applySoftmmuReferenceRamAccess(reference, fixture);
+    helperVisibleStateMatched =
+      state.view.getBigUint64(state.regsPtr, true) ===
+        reference.view.getBigUint64(reference.regsPtr, true) &&
+      state.view.getBigUint64(state.hostAddr, true) ===
+        reference.view.getBigUint64(reference.hostAddr, true);
+    assert.equal(helperVisibleStateMatched, true,
+                 `${fixture.name} inline path diverged from helper RAM path`);
+  }
 
   return {
     name: fixture.name,
@@ -3239,6 +3289,7 @@ async function runSoftmmuFixture(fixture) {
     fallbackReason: fixture.fallbackReason,
     exitFlags: exit.flags,
     expectedSuccess: fixture.expectedSuccess,
+    helperVisibleStateMatched,
     inlineTlbHitLoads: counters.inlineTlbHitLoads.toString(),
     inlineTlbHitStores: counters.inlineTlbHitStores.toString(),
     helperCalls: counters.helperCalls.toString(),
@@ -3929,6 +3980,155 @@ const r4kSoftmmuFixtures = [
   },
 ];
 
+function r6Rv64SoftmmuFixture(name, overrides) {
+  return {
+    name: `r6-rv64-softmmu-${name}`,
+    emitterName: R6_RV64_SOFTMMU_EMITTER_NAME,
+    ...overrides,
+  };
+}
+
+const r6Rv64SoftmmuFixtures = [
+  r6Rv64SoftmmuFixture("ld32u-tlb-hit-ram", {
+    access: "load",
+    fallbackReason: null,
+    generatedMemop: MO_32,
+    initialRam32: 0x10203040,
+    expectedSuccess: true,
+    expectedStatus: STATUS_EXIT,
+    expectedRunExitReason: "none",
+    expectedInlineLoads: 1,
+    expectedInlineStores: 0,
+    expectedReg0: 0x10203040n,
+    words: [
+      OPS.tci_qemu_ld_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  }),
+  r6Rv64SoftmmuFixture("ld-tlb-hit-ram", {
+    access: "load",
+    fallbackReason: null,
+    generatedMemop: MO_64,
+    initialRam64: 0x0fedcba987654321n,
+    expectedSuccess: true,
+    expectedStatus: STATUS_EXIT,
+    expectedRunExitReason: "none",
+    expectedInlineLoads: 1,
+    expectedInlineStores: 0,
+    expectedReg0: 0x0fedcba987654321n,
+    words: [
+      OPS.tci_qemu_ld_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  }),
+  r6Rv64SoftmmuFixture("st8-tlb-hit-ram", {
+    access: "store",
+    fallbackReason: null,
+    generatedMemop: MO_8,
+    storeValue: 0x5an,
+    expectedSuccess: true,
+    expectedStatus: STATUS_EXIT,
+    expectedRunExitReason: "none",
+    expectedInlineLoads: 0,
+    expectedInlineStores: 1,
+    expectedRam64: 0x887766554433225an,
+    words: [
+      OPS.tci_qemu_st_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  }),
+  r6Rv64SoftmmuFixture("st32-tlb-hit-ram", {
+    access: "store",
+    fallbackReason: null,
+    generatedMemop: MO_32,
+    storeValue: 0x01020304n,
+    expectedSuccess: true,
+    expectedStatus: STATUS_EXIT,
+    expectedRunExitReason: "none",
+    expectedInlineLoads: 0,
+    expectedInlineStores: 1,
+    expectedRam64: 0x8877665501020304n,
+    words: [
+      OPS.tci_qemu_st_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  }),
+  r6Rv64SoftmmuFixture("st-tlb-hit-ram", {
+    access: "store",
+    fallbackReason: null,
+    generatedMemop: MO_64,
+    storeValue: 0xaabbccddeeff0011n,
+    expectedSuccess: true,
+    expectedStatus: STATUS_EXIT,
+    expectedRunExitReason: "none",
+    expectedInlineLoads: 0,
+    expectedInlineStores: 1,
+    expectedRam64: 0xaabbccddeeff0011n,
+    words: [
+      OPS.tci_qemu_st_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  }),
+  r6Rv64SoftmmuFixture("tlb-miss", {
+    access: "load",
+    fallbackReason: "tlb-miss",
+    generatedMemop: MO_32,
+    comparator: 0x3000n,
+    expectedSuccess: false,
+    expectedStatus: STATUS_TLB_MISS_OR_FAULT,
+    expectedRunExitReason: "tlb-miss-or-fault",
+    expectedExitsTlbMissOrFault: 1,
+    words: [
+      OPS.tci_qemu_ld_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  }),
+  r6Rv64SoftmmuFixture("mmio", {
+    access: "load",
+    fallbackReason: "mmio",
+    generatedMemop: MO_32,
+    comparatorFlags: Number(WASMJIT_TLB_CONSTANTS.forceSlow),
+    slowFlags: WASMJIT_TLB_CONSTANTS.mmio,
+    expectedSuccess: false,
+    expectedStatus: STATUS_MMIO,
+    expectedRunExitReason: "mmio",
+    expectedExitsMmio: 1,
+    words: [
+      OPS.tci_qemu_ld_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  }),
+  r6Rv64SoftmmuFixture("permission-fault", {
+    access: "load",
+    fallbackReason: "permission-fault",
+    generatedMemop: MO_32,
+    comparatorFlags: Number(WASMJIT_TLB_CONSTANTS.invalidMask),
+    expectedSuccess: false,
+    expectedStatus: STATUS_TLB_MISS_OR_FAULT,
+    expectedRunExitReason: "tlb-miss-or-fault",
+    expectedExitsTlbMissOrFault: 1,
+    words: [
+      OPS.tci_qemu_ld_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  }),
+  r6Rv64SoftmmuFixture("page-crossing", {
+    access: "load",
+    fallbackReason: "page-crossing",
+    generatedMemop: MO_64,
+    taddr: 0xffcn,
+    expectedSuccess: false,
+    expectedStatus: STATUS_TLB_MISS_OR_FAULT,
+    expectedRunExitReason: "tlb-miss-or-fault",
+    expectedExitFlags: RUN_EXIT_FLAG_PAGE_CROSSING,
+    expectedExitsTlbMissOrFault: 1,
+    words: [
+      OPS.tci_qemu_ld_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  }),
+];
+
 const unsupportedFixtures = [
   {
     name: "rv64-call-exit-at-entry-fails-closed",
@@ -3995,6 +4195,7 @@ const unsupportedX86StateResults = [];
 const r4kTwoTBHotsetResults = [];
 const r4kInvalidationResults = [];
 const r4kSoftmmuResults = [];
+const r6Rv64SoftmmuResults = [];
 
 for (const fixture of fixtures) {
   for (const seed of fixture.seeds || [1, 2]) {
@@ -4033,6 +4234,10 @@ for (const fixture of r4kInvalidationFixtures) {
 
 for (const fixture of r4kSoftmmuFixtures) {
   r4kSoftmmuResults.push(await runSoftmmuFixture(fixture));
+}
+
+for (const fixture of r6Rv64SoftmmuFixtures) {
+  r6Rv64SoftmmuResults.push(await runSoftmmuFixture(fixture));
 }
 
 assert.equal(results.length, 21);
@@ -5386,6 +5591,104 @@ assert.equal(
     entry.name === "r4k-softmmu-stale-output-mismatch").exits.invalidated,
   "1",
 );
+
+assert.deepEqual(
+  r6Rv64SoftmmuResults.map((entry) => entry.name),
+  [
+    "r6-rv64-softmmu-ld32u-tlb-hit-ram",
+    "r6-rv64-softmmu-ld-tlb-hit-ram",
+    "r6-rv64-softmmu-st8-tlb-hit-ram",
+    "r6-rv64-softmmu-st32-tlb-hit-ram",
+    "r6-rv64-softmmu-st-tlb-hit-ram",
+    "r6-rv64-softmmu-tlb-miss",
+    "r6-rv64-softmmu-mmio",
+    "r6-rv64-softmmu-permission-fault",
+    "r6-rv64-softmmu-page-crossing",
+  ],
+);
+assert.equal(
+  r6Rv64SoftmmuResults.every((entry) =>
+    entry.emitter === R6_RV64_SOFTMMU_EMITTER_NAME && entry.moduleValid),
+  true,
+);
+const r6Rv64SoftmmuRamHits = r6Rv64SoftmmuResults.filter((entry) =>
+  entry.name.endsWith("tlb-hit-ram"));
+const r6Rv64SoftmmuFailClosed = r6Rv64SoftmmuResults.filter((entry) =>
+  !entry.expectedSuccess);
+assert.deepEqual(
+  r6Rv64SoftmmuRamHits.map((entry) => [
+    entry.runExitReason,
+    entry.helperVisibleStateMatched,
+    entry.inlineTlbHitLoads,
+    entry.inlineTlbHitStores,
+    entry.helperCalls,
+    entry.qemuLdCalls,
+    entry.qemuStCalls,
+  ]),
+  [
+    ["none", true, "1", "0", "0", "0", "0"],
+    ["none", true, "1", "0", "0", "0", "0"],
+    ["none", true, "0", "1", "0", "0", "0"],
+    ["none", true, "0", "1", "0", "0", "0"],
+    ["none", true, "0", "1", "0", "0", "0"],
+  ],
+);
+assert.deepEqual(
+  r6Rv64SoftmmuFailClosed.map((entry) => [
+    entry.fallbackReason,
+    entry.runExitReason,
+    entry.inlineTlbHitLoads,
+    entry.inlineTlbHitStores,
+    entry.helperCalls,
+    entry.qemuLdCalls,
+    entry.qemuStCalls,
+    entry.failClosedBeforeRamAccess,
+  ]),
+  [
+    ["tlb-miss", "tlb-miss-or-fault", "0", "0", "0", "0", "0", true],
+    ["mmio", "mmio", "0", "0", "0", "0", "0", true],
+    [
+      "permission-fault",
+      "tlb-miss-or-fault",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      true,
+    ],
+    [
+      "page-crossing",
+      "tlb-miss-or-fault",
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+      true,
+    ],
+  ],
+);
+assert.equal(
+  r6Rv64SoftmmuResults.find((entry) =>
+    entry.name === "r6-rv64-softmmu-mmio").exits.mmio,
+  "1",
+);
+assert.equal(
+  r6Rv64SoftmmuResults.find((entry) =>
+    entry.name === "r6-rv64-softmmu-tlb-miss").exits.tlbMissOrFault,
+  "1",
+);
+assert.equal(
+  r6Rv64SoftmmuResults.find((entry) =>
+    entry.name === "r6-rv64-softmmu-permission-fault").exits.tlbMissOrFault,
+  "1",
+);
+assert.equal(
+  r6Rv64SoftmmuResults.find((entry) =>
+    entry.name === "r6-rv64-softmmu-page-crossing").exitFlags,
+  RUN_EXIT_FLAG_PAGE_CROSSING,
+);
 console.log(JSON.stringify({
   format: 1,
   event: "generated-output-equivalence",
@@ -5468,6 +5771,25 @@ console.log(JSON.stringify({
     fixtures: r4kSoftmmuResults,
     ramHits: r4kSoftmmuRamHits,
     failClosedCases: r4kSoftmmuFailClosed,
+  },
+  r6Rv64SoftmmuFastPath: {
+    emitter: R6_RV64_SOFTMMU_EMITTER_NAME,
+    fixtureCount: r6Rv64SoftmmuResults.length,
+    fixtures: r6Rv64SoftmmuResults,
+    ramHits: r6Rv64SoftmmuRamHits,
+    failClosedCases: r6Rv64SoftmmuFailClosed,
+    acceptedHitCounters: {
+      inlineTlbHitLoads: r6Rv64SoftmmuRamHits.reduce(
+        (count, entry) => count + BigInt(entry.inlineTlbHitLoads), 0n)
+        .toString(),
+      inlineTlbHitStores: r6Rv64SoftmmuRamHits.reduce(
+        (count, entry) => count + BigInt(entry.inlineTlbHitStores), 0n)
+        .toString(),
+      qemuLdCalls: r6Rv64SoftmmuRamHits.reduce(
+        (count, entry) => count + BigInt(entry.qemuLdCalls), 0n).toString(),
+      qemuStCalls: r6Rv64SoftmmuRamHits.reduce(
+        (count, entry) => count + BigInt(entry.qemuStCalls), 0n).toString(),
+    },
   },
   r4mLiveGeneratedExec: {
     fixtureCount: r4mLiveGeneratedExecCases.length,

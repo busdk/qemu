@@ -318,6 +318,17 @@ for (const rv64GeneratedCoverageOp of [
 }
 assert.match(runtime, /HEAPU32\[tbPtr \/ 4 \+ i\]/);
 assert.match(runtime, /scratchWindowBase/);
+assert.match(runtime, /const runCtxTlbOffset = 48/);
+assert.match(runtime, /function compileSoftmmuTlbAccess/);
+assert.match(runtime, /i64LoadAtPtr\(0, runCtxTlbOffset\)/);
+assert.match(runtime, /tcg_wasm64_tlb_mirror_refresh\(\s*\n\s*&tlb_mirror, env, cpu_mmu_index\(env_cpu\(env\), false\)\)/);
+assert.match(runtime, /context\.tlb = &tlb_mirror/);
+assert.match(runtime, /tcg_wasm64_live_tb_coverage_fallback_exit/);
+assert.match(runtime, /run_counters->exits_mmio/);
+assert.match(runtime, /run_counters->exits_tlb_miss_or_fault/);
+assert.match(runtime, /\\"event\\":\\"live-tb-coverage/);
+assert.match(runtime, /\\"inline_tlb_hit_loads\\":%" PRIu64/);
+assert.match(runtime, /\\"inline_tlb_hit_stores\\":%" PRIu64/);
 assert.match(runtime, /guest_state_commit\\":%s/);
 assert.match(runtime, /"false",\s*\n\s*\(uintptr_t\)tb->tc\.ptr/);
 assert.match(runtime, /tcg_wasm64_count_live_tb_coverage_denominator/);
@@ -639,7 +650,23 @@ for (const fixtureName of [
 ]) {
   assert.match(generatedEquivalence, new RegExp(fixtureName));
 }
+for (const fixtureName of [
+  "r6-rv64-softmmu-ld32u-tlb-hit-ram",
+  "r6-rv64-softmmu-ld-tlb-hit-ram",
+  "r6-rv64-softmmu-st8-tlb-hit-ram",
+  "r6-rv64-softmmu-st32-tlb-hit-ram",
+  "r6-rv64-softmmu-st-tlb-hit-ram",
+  "r6-rv64-softmmu-tlb-miss",
+  "r6-rv64-softmmu-mmio",
+  "r6-rv64-softmmu-permission-fault",
+  "r6-rv64-softmmu-page-crossing",
+]) {
+  assert.match(generatedEquivalence, new RegExp(fixtureName));
+}
 assert.match(generatedEquivalence, /r4kSoftmmuFastPath/);
+assert.match(generatedEquivalence, /r6Rv64SoftmmuFastPath/);
+assert.match(generatedEquivalence, /acceptedHitCounters/);
+assert.match(generatedEquivalence, /helperVisibleStateMatched/);
 assert.match(generatedEquivalence, /r4mLiveGeneratedExec/);
 assert.match(generatedEquivalence, /r4m-disabled-keeps-tci/);
 assert.match(generatedEquivalence, /r4m-supported-metadata-backed-live-tb-generated/);
