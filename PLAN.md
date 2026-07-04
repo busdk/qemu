@@ -2587,7 +2587,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-generated-output-equivalence-test.mjs`, and `node
     scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. No browser
     speed gate or Bus Engine OS proof was run in this slice.
-  - [ ] R4s10 - Attribute the next post-R4s9 x86 preflight blockers before
+  - [x] R4s10 - Attribute the next post-R4s9 x86 preflight blockers before
     widening execution again. DoD: using QEMU commit `b6b2d886c7` artifacts
     (`qemu-system-x86_64.js`
     `0c98c41b6ed8f7db55ce0896467ad78a0dcef1a65c5af9f3b660a89d23cde22f`,
@@ -2618,6 +2618,63 @@ run that reaches a weaker marker than normal multi-user readiness.
     This item is attribution/planning unless the fix is deterministic and
     small; no R4l speed gate or Bus Engine OS browser proof may run until a
     bounded preflight reports nonzero generated guest-instruction retirement.
+    Accepted 2026-07-04: QEMU commit `a81e60902a97` adds fail-closed
+    live/deterministic module-emission attribution without admitting new
+    generated bodies. Deterministic checks passed: `git diff --check
+    HEAD~1..HEAD`, `node --check
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, and `node
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. The
+    deterministic fixture `r4m-module-emission-failure-attributed` records
+    `reason=module-emission-failed`, `phase=body-build`, first op `ld32u`,
+    terminal op `goto_tb`, and the live memory import descriptor matching the
+    emitted bytes: kind `0x02`, limits flags `0x07`, initial pages `0`,
+    maximum pages `0x40000`, shared `true`, memory64 `true`. Fresh artifacts
+    built from `a81e60902a97` at
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s10-x86-module-attribution-artifacts-a81e609-20260704`;
+    hashes were `qemu-system-x86_64.js`
+    `33eb61d317e72e29a6a12cc8798cf60b4ca9e047534cdfc4993b00019ca973c9`,
+    `qemu-system-x86_64.wasm`
+    `41f67b3630e98a14798f938b8217f16f838cd4d576c1a14082ad255874dfb7bd`,
+    and manifest
+    `53c2237502b2e87280efd0916b67958cd6af0d0dfb647aa05edf58eb31234f10`.
+    Bounded Chromium `149.0.7827.55` preflight on port `8200` wrote
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s10-x86-module-attribution-preflight-a81e609/wasm-browser-smoke-result.json`
+    and
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s10-x86-module-attribution-preflight-a81e609/wasm-browser-smoke.png`.
+    It still failed with `preflight-zero-generated-exec`: attempts `100`,
+    successes `0`, rejects `100`, skips `82`, generated guest instructions
+    `0`, generated run entries `0`, denominator `1120`. The accepted new
+    detail is `module_failure.reason=js-status-module-emission-failed`,
+    `phase=body-build`, status `6`, first op `ld32u`, terminal op `goto_tb`,
+    and shape
+    `ld32u,tci_movi,tci_setcond32,brcond,tci_movi,st8,ld,tci_movi,add,st,goto_tb,exit_tb,exit_tb`.
+    The direct-env-load multi-access candidate branch
+    `worker/x86-direct-env-load-multiaccess` commit `9369d66801` was
+    measured and rejected for promotion: deterministic tests passed, but its
+    bounded Chromium preflight at
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s11-candidate-x86-preflight-9369d66/wasm-browser-smoke-result.json`
+    still reported generated guest instructions `0`,
+    `selected-body-softmmu-multi-access-unsupported=61`, and the same
+    module-emission/pool-relocation/memop blockers. It is not accepted
+    performance work.
+  - [ ] R4s11 - Make the R4s10 x86 live body-build failure reproducible and
+    either fix it generically or classify the exact unsupported mechanism.
+    DoD: add a deterministic fixture for the live R4s10 shape
+    `ld32u,tci_movi,tci_setcond32,brcond,tci_movi,st8,ld,tci_movi,add,st,goto_tb,exit_tb,exit_tb`
+    using the live memory import descriptor. If the body can be safely
+    emitted, accept only a generic fix that preserves fail-closed behavior for
+    stale metadata, pool relocations, unsafe direct memory, unsupported
+    branches, and unsupported memops. If it cannot be safely emitted yet,
+    record a precise reason/code in the live summary rather than another
+    generic `body-build` failure. Required checks: `git diff --check`, `node
+    --check scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+    scripts/ci/wasm-generated-output-equivalence-test.mjs`, `node
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, and then one
+    bounded x86 Chromium preflight only if deterministic checks predict
+    nonzero generated retirement or materially sharper attribution. R4l speed
+    gate remains blocked until bounded preflight reports nonzero generated
+    guest-instruction retirement.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
