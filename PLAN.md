@@ -2859,6 +2859,17 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. No Chromium
     preflight, R4l speed gate, Bus Engine OS proof, or Bus-specific shortcut
     was run.
+  - [ ] R4s15 - Run the bounded x86 Chromium generated-retirement preflight
+    after R4s14. DoD: build fresh current `x86_64-softmmu`
+    Emscripten/WASM artifacts from QEMU `develop`, record artifact SHA-256
+    hashes, browser version, exact build and preflight commands, result JSON
+    path, marker/timeout, and generated-retirement counters. Acceptance for
+    this item is not a speed claim and does not itself satisfy R4l. It only
+    unlocks R4l if the live browser summary reports nonzero generated
+    guest-instruction retirement for the selected generated body without
+    hidden TCI fallback. If generated retirement remains zero, record the
+    exact blocker and add the next deterministic repair item instead of
+    running R4l. Do not run a Bus Engine OS browser proof from this item.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
