@@ -3587,6 +3587,100 @@ run that reaches a weaker marker than normal multi-user readiness.
     `node scripts/ci/wasm64-translate-metadata-test.mjs`. No browser run,
     artifact build, R4l speed gate, or Bus Engine OS proof was run for this
     deterministic slice.
+  - [x] R4s21a - Re-measure current x86 live blocker attribution after R4s21
+    before widening the next direct-memory family. DoD: use fresh
+    `x86_64-softmmu` backend artifacts from QEMU `develop`, run only a
+    bounded generic Chromium preflight against the pinned x86 TuxBoot guest,
+    record artifact hashes, browser version, result JSON, generated/fallback
+    instruction counters, inline TLB-hit counters, helper counts, module
+    emission/validation reject counts, direct-memory attribution, and the top
+    remaining reject reasons. This item is measurement only; it must not claim
+    a speed pass or run a Bus Engine OS proof.
+
+    Accepted measurement 2026-07-04: QEMU commit
+    `d4c5dc533f4b071cdfa63a40e625413291c5e7df` matched
+    `origin/develop`. Artifact build output from the first measurement worker
+    was reused because the artifact manifest matched that commit and target:
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s21-current-x86-artifacts`.
+    Artifact hashes: `qemu-system-x86_64.js`
+    `8b5e981e3ba2cfeea880b83b12f8aeac9abc511b5a2b4267b275122fdd143a96`,
+    `qemu-system-x86_64.wasm`
+    `b14c5f8a9adf857bb77bef2beb7a214ba920d492e247b8e3f8a930fdb927200a`,
+    manifest
+    `99ff666e0e4169aff62e24f2b7b01254a406d0e309550238cc5d0d6b3eb8a54a`,
+    and `SHA256SUMS`
+    `f0bb8562627deac7700662bb8c406e92a3756009ce4d5a84dad6d55a6741c2cd`.
+    Bounded Chromium `149.0.7827.55` preflight command:
+    `npm exec --yes --package=playwright -- node
+    scripts/ci/wasm-browser-smoke-runner.mjs --browser chromium --artifact-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s21-current-x86-artifacts
+    --firmware-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/projects/qemu/pc-bios
+    --guest-manifest
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4s8-guest-current/tuxboot-browser-smoke-guest.json
+    --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s21-current-x86-normal/wasm-browser-smoke-preflight-result.json
+    --screenshot
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s21-current-x86-normal/wasm-browser-smoke-preflight.png
+    --port 8129 --timeout-ms 60000 --max-output-bytes 100000
+    --page-text-tail-bytes 100000 --wasm64-live-generated-exec
+    --wasm64-live-generated-exec-preflight
+    --wasm64-live-generated-exec-preflight-limit 100 --wasm64-tcg-summary
+    --wasm64-tcg-summary-interval 1000`.
+    Result JSON SHA-256
+    `b5689e8201c585b0a6c047c5101796fd6da659d550c6a9ff0d282fc68b49ee11`;
+    screenshot SHA-256
+    `42417fb5b6face43d6acf98f2e5156b39de86e954f046ebb260a77cba7907da0`.
+    The run timed out at `60216` ms without
+    `QEMU_WASM_LINUX_BOOT_OK`, as expected for this bounded preflight.
+    Final runloop metrics reported generated/fallback guest instructions
+    `2312 / 368223`, generated coverage `2312 / 370535`, attempts/successes/
+    rejects `42650 / 1224 / 41426`, inline TLB-hit loads/stores
+    `4172 / 5358`, helper/`qemu_ld`/`qemu_st` calls `0 / 0 / 0`, module
+    failure `null`, and module emission/validation reject counts `0 / 0`.
+    The top reject reasons were `selected-body-direct-memory-unsupported`
+    (`33592`), `mmio-exit` (`3994`),
+    `selected-body-memop-unsupported-alignment` (`2215`),
+    `selected-body-softmmu-multi-access-unsupported` (`534`),
+    `generated-output-unavailable` (`416`),
+    `selected-body-shape-unsupported` (`365`),
+    `selected-body-memop-unsupported-size` (`201`),
+    `selected-body-memop-unsupported-sign` (`51`),
+    `unsupported-body-state` (`37`),
+    `selected-body-control-flow-unsupported` (`15`), and
+    `tlb-miss-or-fault-exit` (`6`). Direct-memory attribution showed the
+    dominant immediate unsupported families as `ld32u` with `base_reg=14`,
+    `offset=304`, `size=4`, `count=26654`, and `st32` with `base_reg=14`,
+    `offset=296`, `size=4`, with counts `1573`, `88`, and `71` across
+    guard-order variants. The largest non-immediate family was still
+    `multi-access-deferred-alias st base_reg=14 offset=256 size=8 order=SS`
+    with count `5208`.
+
+    Read-only source mapping confirmed `r14` is the TCG env base
+    (`TCG_AREG0`) and these offsets are raw `CPUX86State` env offsets. On
+    `x86_64`, `0x128` is `CPUX86State.cc_op`, `0x130` is
+    `CPUX86State.hflags`, and `0x180` is
+    `CPUX86State.segs[R_DS].selector`. This accepts R4s21a as blocker
+    attribution only. It does not unlock R4l or any Bus Engine OS proof.
+  - [ ] R4s21b - Add an exact x86 env-direct field allowlist for measured
+    direct-memory state fields instead of widening the whole env-relative
+    window. DoD: admit only `tcg_env + offsetof(CPUX86State, field)` direct
+    memory forms for `cc_op` at `0x128`, `hflags` at `0x130`, and
+    `segs[R_DS].selector` at `0x180`, with exact size and access checks for
+    the observed `ld32u`/`st32` forms and the existing `r14` validity,
+    no-r14-clobber, fail-closed fallback, and guard-before-commit rules.
+    Do not accept padding, unrelated CPU state between `0x120` and `0x180`,
+    arbitrary segment fields, fixed guest PCs, Bus Engine OS boot-stage
+    checks, or product-specific shortcuts. Deterministic tests must cover a
+    positive guarded multi-SoftMMU body using `ld32u [r14+0x130]`,
+    `st32 [r14+0x128]`, and `st32 [r14+0x180]`; fail-closed same-range but
+    unapproved offsets and wrong sizes; deferred store address/value capture
+    before an `r14` clobber; no commit after a later SoftMMU guard exit; and
+    the existing overlapping direct-store/direct-load alias rejection. Run
+    `git diff --check`, generated-output equivalence tests, and metadata
+    contract tests. A bounded Chromium preflight may run only after the
+    deterministic checks pass, and only to re-rank blockers; this item is not
+    a speed gate or Bus Engine OS proof.
   - [ ] R4s22 - Expand supported x86 live SoftMMU MemOp families only after
     R4s19/R4s20 identify memory rejects as a remaining dominant blocker.
     DoD: admit alignment flags only with explicit QEMU-equivalent alignment
