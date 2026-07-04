@@ -2422,6 +2422,63 @@ run that reaches a weaker marker than normal multi-user readiness.
     `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s7-generated-output-equivalence.json`
     with SHA256
     `3d48b3182b618c7e2e0032f016eb4210d83ce6510e6596deed1e26a5748edd93`.
+    Post-slice bounded preflight 2026-07-04: a verification worker built a
+    fresh current `x86_64-softmmu` backend artifact from QEMU commit
+    `bdcfb5897c` with command `python3
+    scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s7-x86-backend-artifacts-bdcfb58
+    --target x86_64 --tcg-wasm64-backend`. Artifact hashes:
+    `qemu-system-x86_64.js`
+    `bcfe82f7b4e06c1c71d7c8337af8f2f6f1e170452b09cbd13000d6b2df9e1399`,
+    `qemu-system-x86_64.wasm`
+    `3d7f20e73898a00aefa7c4f46f8a97a92ce0eb5a4c7924e01cf61bd3279c60bb`,
+    manifest
+    `ae6b92d6b858554c1a5c40850e5b8b401467a65076d428192f4dd70bc326396c`,
+    `SHA256SUMS`
+    `5d90d2a030c2c0e97217b8524a5a545f7d5479c6e2e3d72c2238fe7d20dd5673`.
+    Chromium `149.0.7827.55` bounded preflight wrote
+    `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-r4s7-x86-preflight-bdcfb58/wasm-browser-smoke-result.json`
+    with SHA256
+    `385080a3a7545a13ffb0ac1b1acb2af332821518da5fcf2208d41c35a463cec5`
+    and screenshot SHA256
+    `7683f0f1de9b93b59049d92e24574a7740efd64ab3cea717f3923d975a9f266b`.
+    The marker `QEMU_WASM_LINUX_BOOT_OK` was not seen before the `60000` ms
+    timeout (`elapsedMs=60218`), and preflight aborted with
+    `reason=preflight-zero-generated-exec`. The runloop summary reported
+    `preflight_ready=false`, `attempts=100`, `successes=0`, `rejects=100`,
+    `skips=82`, `generated_guest_instructions=0`,
+    `generated_run_entries=0`, `generated_chain_length=0`,
+    `generated_coverage_numerator=0`, and
+    `generated_coverage_denominator=1120`. The previous dominant
+    `selected-body-memop-unsupported-atomic` reject disappeared. New nonzero
+    reject reasons were `selected-body-softmmu-multi-access-unsupported=70`,
+    `js-status-metadata-output-tb-code-mismatch=28`,
+    `selected-body-memop-unsupported-size=1`, and
+    `selected-body-memop-unsupported-alignment=1`; reject MemOps were
+    `0xa01` for unsupported size and `0xae0` for unsupported alignment.
+    `wasm64Tcg` was enabled but `summaryCount=0`, so the metrics gate failed
+    with `tcg_missing=2`. R4l remains blocked.
+  - [ ] R4s8 - Support or precisely reject measured x86 multi-access
+    SoftMMU bodies without partial side effects. DoD: using the post-R4s7
+    preflight histogram, add deterministic attribution for selected
+    `tci_qemu_ld_rrr`/`tci_qemu_st_rrr` bodies rejected as
+    `selected-body-softmmu-multi-access-unsupported`, including access count,
+    access order, load/store mix, MemOp values, and whether any store would
+    become guest-visible before a later guard can fail. Implement only a
+    generic all-or-nothing generated path for a proven-safe subset of multiple
+    clean RAM-hit accesses: no generated body may commit a store, register
+    flush, dispatch target, or guest-visible counter until every memory access
+    in the body has passed TLB, MMIO, permission, page-crossing, slow-flag,
+    MemOp, and mirror-generation guards. Unsupported multi-access shapes must
+    keep a precise reject reason and zero generated work. Add deterministic
+    fixtures for at least a load+load body, a load+store body, a store+store
+    body, and a later-access-fails case proving no partial store before
+    fallback. Also classify `metadata-output-tb-code-mismatch` into stale
+    generated output versus live TB-code mutation before another browser run.
+    No Chromium run is allowed until deterministic evidence predicts nonzero
+    generated guest-instruction retirement for at least one measured live x86
+    multi-access body; the next bounded preflight must report whether
+    generated execution moved above zero and how the reject histogram changed.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
