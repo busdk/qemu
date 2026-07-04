@@ -2363,21 +2363,30 @@ run that reaches a weaker marker than normal multi-user readiness.
     remains blocked, and the next x86 implementation item must address the
     measured live-body MemOp rejection and metadata-output mismatch before
     another browser speed run.
-  - [ ] R4s7 - Classify and repair the measured x86 live-body MemOp rejection
-    path before another browser run. DoD: using the R4s6 result above and
-    current `tcg/wasm64.c`, identify whether
-    `selected-body-memop-unsupported-atomic` represents guest-visible atomic
-    semantics or QEMU `MemOp` access-mode flags that can be handled by the
-    existing generic SoftMMU/TLB contract. Add deterministic tests that cover
-    the measured MemOp flag combinations for load and store rejection, then
-    either lower the safe generic subset with correct ordering/fault behavior
-    or keep it rejected with a more precise reason. Also add deterministic
-    attribution for `metadata-output-tb-code-mismatch` so stale generated
-    output, TB identity drift, and unsupported live-output mutation are
-    distinguishable. No Chromium run is allowed until deterministic evidence
-    predicts nonzero generated guest-instruction retirement for at least one
-    measured live x86 body, and the next bounded preflight must report whether
-    the reject histogram moved from zero generated execution.
+  - [ ] R4s7 - Admit safe MemOp atomicity metadata for ordinary x86 live
+    qemu load/store bodies. DoD: using the R4s6 preflight histogram, add
+    deterministic attribution for the exact `MemOp` values behind
+    `selected-body-memop-unsupported-atomic`,
+    `selected-body-memop-unsupported-size`, and
+    `selected-body-memop-unsupported-alignment` on selected
+    `tci_qemu_ld_rrr` / `tci_qemu_st_rrr` bodies. Treat the dominant
+    `unsupported-atomic` result as QEMU `MemOp` access-mode metadata on
+    ordinary qemu load/store paths, not as proof that x86 guest atomic RMW
+    semantics must be implemented. Extend the C validator and live
+    generated-output SoftMMU lowering to allow only the proven-safe ordinary
+    load/store subset, starting with `MO_ATOM_NONE` for single clean RAM-hit
+    `MO_8`/`MO_32`/`MO_64` accesses, while preserving precise fail-closed
+    rejection for unproven atomic modes, alignment requirements, unsupported
+    sizes, MMIO, TLB miss/fault, page crossing, slow flags, unmirrored state,
+    and multi-access bodies. Update the live JS lowering so it validates
+    allowed `MemOp` flags and masks size with `MO_SIZE` instead of rejecting
+    every non-size bit. Add deterministic load/store RAM-hit and fail-closed
+    tests, plus attribution for `metadata-output-tb-code-mismatch` as
+    zero-work invalidation. No Chromium run is allowed until deterministic
+    evidence predicts at least one measured live x86 body can retire nonzero
+    generated guest instructions; the next bounded preflight must report
+    whether generated execution moved above zero and how the reject histogram
+    changed.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
