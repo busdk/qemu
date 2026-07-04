@@ -294,7 +294,29 @@ assert.match(runtime, /tcg_wasm64_report_summary\("interval",\s*&zero\)/);
 assert.match(runtime, /tcg_wasm64_live_tb_coverage_js/);
 assert.match(runtime, /tcg_wasm64_live_tb_coverage_shape_supported/);
 assert.match(runtime, /tcg_wasm64_live_tb_coverage_op_supported/);
+const liveCoverageSupportedBody = runtime.match(
+  /static bool tcg_wasm64_live_tb_coverage_op_supported\(uint32_t op\)\s*\{[\s\S]*?switch \(\(TCGOpcode\)op\) \{([\s\S]*?)default:/,
+)?.[1] || "";
+for (const rv64GeneratedCoverageOp of [
+  "INDEX_op_ld32u",
+  "INDEX_op_tci_setcond32",
+  "INDEX_op_brcond",
+  "INDEX_op_st8",
+  "INDEX_op_ld",
+  "INDEX_op_st",
+  "INDEX_op_call",
+  "INDEX_op_tci_qemu_ld_rrr",
+  "INDEX_op_tci_qemu_st_rrr",
+]) {
+  assert.match(
+    liveCoverageSupportedBody,
+    new RegExp(`case\\s+${rv64GeneratedCoverageOp}:`),
+  );
+}
 assert.match(runtime, /HEAPU32\[tbPtr \/ 4 \+ i\]/);
+assert.match(runtime, /scratchWindowBase/);
+assert.match(runtime, /guest_state_commit\\":%s/);
+assert.match(runtime, /"false",\s*\n\s*\(uintptr_t\)tb->tc\.ptr/);
 assert.match(runtime, /tcg_wasm64_count_live_tb_coverage_denominator/);
 assert.match(runtime, /tcg_wasm64_execute_available_generated_output_try/);
 assert.match(
@@ -348,24 +370,31 @@ assert.match(runtime, /tcg_tci_qemu_tb_exec\(env, tb_ptr\)/);
 assert.match(runtime, /\\"event\\":\\"live-tb-coverage\\"/);
 assert.match(runtime, /\\"guest_state_commit\\":%s/);
 assert.match(runtime, /TCG_WASM64_LIVE_TB_COVERAGE_ENV/);
-assert.match(runtime, /INDEX_op_add, INDEX_op_and, INDEX_op_exit_tb, INDEX_op_goto_tb/);
 const liveTbCoverageSupportedBody = runtime.match(
   /static bool tcg_wasm64_live_tb_coverage_op_supported\(uint32_t op\)\s*\{[\s\S]*?switch \(\(TCGOpcode\)op\) \{([\s\S]*?)default:/,
 )?.[1] || "";
-for (const unsafeLiveCoverageOp of [
+for (const liveCoverageGeneratedOp of [
   "INDEX_op_call",
   "INDEX_op_ld",
   "INDEX_op_ld32u",
   "INDEX_op_st",
   "INDEX_op_st8",
-  "INDEX_op_qemu_ld",
-  "INDEX_op_qemu_st",
   "INDEX_op_tci_qemu_ld_rrr",
   "INDEX_op_tci_qemu_st_rrr",
 ]) {
+  assert.match(
+    liveTbCoverageSupportedBody,
+    new RegExp(`case\\s+${liveCoverageGeneratedOp}:`),
+  );
+}
+for (const directQemuMemoryOp of [
+  "INDEX_op_movcond",
+  "INDEX_op_qemu_ld",
+  "INDEX_op_qemu_st",
+]) {
   assert.doesNotMatch(
     liveTbCoverageSupportedBody,
-    new RegExp(`case\\s+${unsafeLiveCoverageOp}:`),
+    new RegExp(`case\\s+${directQemuMemoryOp}:`),
   );
 }
 assert.match(liveTbCoverageSupportedBody, /case INDEX_op_tci_movi:/);
@@ -416,6 +445,12 @@ assert.match(
   /tcg_wasm64_execute_available_generated_output_try\(\s*\n\s*env, tb_ptr, metadata, &ret\)/,
 );
 assert.match(tbExecBody, /return ret;/);
+const liveCoverageExecuteBody = runtime.match(
+  /static bool tcg_wasm64_execute_available_generated_output_try\([\s\S]*?\n\}\n\nstatic void tcg_wasm64_live_generated_exec_count_reject/,
+)?.[0] || "";
+assert.match(liveCoverageExecuteBody, /tcg_wasm64_record_live_tb_generated_metrics\(guest_insns\)/);
+assert.match(liveCoverageExecuteBody, /live_tb_coverage_checked = true/);
+assert.match(liveCoverageExecuteBody, /return false;\s*\n\}/);
 assert.doesNotMatch(
   tbExecBody,
   /tcg_wasm64_counters_add_translation\(&translated_counters,\s*counters\)/,
@@ -476,6 +511,8 @@ assert.match(generatedEquivalence, /r4m-stale-output-invalidates-zero-generated-
 assert.match(generatedEquivalence, /r4m-compat-fallback-explicit-and-counted/);
 assert.match(generatedEquivalence, /r7AvailableGeneratedOutputExec/);
 assert.match(generatedEquivalence, /r7-available-generated-output-executes/);
+assert.match(generatedEquivalence, /r7-rv64-helper-prefix-executes-and-counts-before-tci/);
+assert.match(generatedEquivalence, /R7_RV64_HELPER_PREFIX_SHAPE/);
 assert.match(generatedEquivalence, /r7-available-generated-output-unsupported-falls-back/);
 assert.match(generatedEquivalence, /RV64_ENV_RELATIVE_BASE_REG/);
 assert.match(generatedEquivalence, /rv64-env-relative-load-store-family/);

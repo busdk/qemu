@@ -1850,6 +1850,22 @@ run that reaches a weaker marker than normal multi-user readiness.
   `scripts/ci/wasm-generated-output-equivalence-test.mjs` and
   `scripts/ci/wasm64-translate-metadata-test.mjs`. No browser run, artifact
   build, R4c speed claim, or Bus Engine OS proof was run in this slice.
+- [x] R7b - Fix the live coverage execute-and-count path for available RV64
+  generated-output prefixes. DoD: `QEMU_WASM64_LIVE_TB_COVERAGE` no longer
+  rejects translation-available RV64 generated output with the stale ALU-only
+  coverage predicate, executes a bounded scratch-backed generated body for
+  available prefixes including helper-call terminals, records nonzero
+  generated execution/coverage counters on success, emits
+  `guest_state_commit=false`, and leaves TCI as the guest correctness path.
+  Accepted 2026-07-04: `tcg/wasm64.c` broadens the live coverage predicate to
+  the generated-output prefix contract, passes scratch state plus the full
+  opcode set into the probe executor, and always falls through to TCI after
+  the diagnostic execute-and-count probe. Deterministic coverage was extended
+  in `scripts/ci/wasm-generated-output-equivalence-test.mjs` with an RV64
+  helper-prefix fixture where generated output is available for `42` of `44`
+  TB ops, and `scripts/ci/wasm64-translate-metadata-test.mjs` now asserts the
+  scratch-backed execute-and-count contract. No browser run or artifact build
+  was run in this slice.
 - [ ] R5 - Run the final Bus Engine OS proof only after R1-R4 pass. DoD: the
   accepted package-built Bus Engine OS `riscv64` `virtual-server` image boots
   cold in browser-hosted QEMU/WASM with the accelerator and reaches

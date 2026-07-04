@@ -2920,18 +2920,26 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
 });
 
 EM_JS(int, tcg_wasm64_live_tb_coverage_js,
-      (uintptr_t context_arg, uintptr_t counters_arg, uintptr_t exit_arg,
+      (uintptr_t context_arg, uintptr_t scratch_arg,
+       uintptr_t counters_arg, uintptr_t exit_arg,
        uintptr_t result_arg, uintptr_t tb_arg, uint64_t guest_insns_arg,
        uintptr_t generated_output_arg, uint32_t generated_output_size_arg,
-       int op_add_arg, int op_and_arg, int op_exit_tb_arg,
-       int op_goto_tb_arg, int op_mb_arg, int op_mov_arg, int op_or_arg,
-       int op_shl_arg, int op_shr_arg, int op_sub_arg, int op_tci_movi_arg,
-       int op_tci_movl_arg, int op_xor_arg), {
+       int op_add_arg, int op_and_arg, int op_brcond_arg, int op_call_arg,
+       int op_deposit_arg, int op_exit_tb_arg, int op_extract_arg,
+       int op_goto_tb_arg, int op_ld_arg, int op_ld32s_arg,
+       int op_ld32u_arg, int op_mb_arg, int op_mov_arg, int op_mul_arg,
+       int op_neg_arg, int op_or_arg, int op_setcond_arg, int op_sextract_arg,
+       int op_shl_arg, int op_shr_arg, int op_st_arg, int op_st8_arg,
+       int op_st32_arg, int op_sub_arg, int op_tci_movi_arg,
+       int op_tci_movl_arg, int op_tci_qemu_ld_rrr_arg,
+       int op_tci_qemu_st_rrr_arg, int op_tci_setcond32_arg,
+       int op_xor_arg), {
     if (typeof wasmMemory === "undefined" || !wasmMemory) {
         return 1;
     }
 
     const context = Number(context_arg);
+    const scratch = Number(scratch_arg);
     const counters = Number(counters_arg);
     const exit = Number(exit_arg);
     const result = Number(result_arg);
@@ -2941,21 +2949,48 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
     const generatedOutputSize = Number(generated_output_size_arg);
     const statusExit = 1n;
     const statusDispatch = 2n;
+    const statusHelper = 5n;
     const statusUnsupported = 6n;
+    const statusInvalidated = 8n;
+    const valueI32 = 0x7f;
     const valueI64 = 0x7e;
+    const envRelativeBaseReg = 14;
+    const envRelativeMinOffset = -16;
+    const envRelativeMaxExclusive = 0x120;
+    const scratchEnvBase = scratch + 0x100;
+    const scratchWindowBase = scratchEnvBase + envRelativeMinOffset;
+    const scratchWindowSize = envRelativeMaxExclusive - envRelativeMinOffset;
+    const scratchStackBase = scratch + 0x1000;
     const ops = {
         add: Number(op_add_arg),
         and: Number(op_and_arg),
+        brcond: Number(op_brcond_arg),
+        call: Number(op_call_arg),
+        deposit: Number(op_deposit_arg),
         exit_tb: Number(op_exit_tb_arg),
+        extract: Number(op_extract_arg),
         goto_tb: Number(op_goto_tb_arg),
+        ld: Number(op_ld_arg),
+        ld32s: Number(op_ld32s_arg),
+        ld32u: Number(op_ld32u_arg),
         mb: Number(op_mb_arg),
         mov: Number(op_mov_arg),
+        mul: Number(op_mul_arg),
+        neg: Number(op_neg_arg),
         or: Number(op_or_arg),
+        setcond: Number(op_setcond_arg),
+        sextract: Number(op_sextract_arg),
         shl: Number(op_shl_arg),
         shr: Number(op_shr_arg),
+        st: Number(op_st_arg),
+        st8: Number(op_st8_arg),
+        st32: Number(op_st32_arg),
         sub: Number(op_sub_arg),
         tci_movi: Number(op_tci_movi_arg),
         tci_movl: Number(op_tci_movl_arg),
+        tci_qemu_ld_rrr: Number(op_tci_qemu_ld_rrr_arg),
+        tci_qemu_st_rrr: Number(op_tci_qemu_st_rrr_arg),
+        tci_setcond32: Number(op_tci_setcond32_arg),
         xor: Number(op_xor_arg),
     };
 
@@ -3047,6 +3082,42 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
         return [0x42, ...encodeS64(value)];
     }
 
+    function i64Add(lhs, rhs) {
+        return [...lhs, ...rhs, 0x7c];
+    }
+
+    function i32WrapI64(expr) {
+        return [...expr, 0xa7];
+    }
+
+    function i64ExtendI32S(expr) {
+        return [...expr, 0xac];
+    }
+
+    function i64ExtendI32U(expr) {
+        return [...expr, 0xad];
+    }
+
+    function i64Load(address) {
+        return [...address, 0x29, ...memArg(3, 0)];
+    }
+
+    function i32Load(address) {
+        return [...address, 0x28, ...memArg(2, 0)];
+    }
+
+    function i64Store(address, value) {
+        return [...address, ...value, 0x37, ...memArg(3, 0)];
+    }
+
+    function i32Store(address, value) {
+        return [...address, ...value, 0x36, ...memArg(2, 0)];
+    }
+
+    function i32Store8(address, value) {
+        return [...address, ...value, 0x3a, ...memArg(0, 0)];
+    }
+
     function i64LoadAtPtr(ptrLocal, offset) {
         return [...localGet(ptrLocal), 0x29, ...memArg(3, offset)];
     }
@@ -3077,6 +3148,14 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
         return BigInt.asUintN(64, BigInt(value));
     }
 
+    function toI32(value) {
+        return Number(BigInt.asIntN(32, BigInt(value)));
+    }
+
+    function toU32(value) {
+        return Number(BigInt.asUintN(32, BigInt(value)));
+    }
+
     function checksum(values) {
         let hash = 1469598103934665603n;
         for (const item of values) {
@@ -3104,12 +3183,22 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
         return output;
     }
 
-    function supportedOp(opc) {
+    function shapeOpSupported(opc) {
         return opc === ops.add || opc === ops.and ||
-               opc === ops.exit_tb || opc === ops.goto_tb ||
-               opc === ops.mb || opc === ops.mov || opc === ops.or ||
-               opc === ops.shl || opc === ops.shr || opc === ops.sub ||
+               opc === ops.brcond || opc === ops.call ||
+               opc === ops.deposit || opc === ops.exit_tb ||
+               opc === ops.extract || opc === ops.goto_tb ||
+               opc === ops.ld || opc === ops.ld32s || opc === ops.ld32u ||
+               opc === ops.mb || opc === ops.mov || opc === ops.mul ||
+               opc === ops.neg || opc === ops.or ||
+               opc === ops.setcond || opc === ops.sextract ||
+               opc === ops.shl || opc === ops.shr ||
+               opc === ops.st || opc === ops.st8 || opc === ops.st32 ||
+               opc === ops.sub ||
                opc === ops.tci_movi || opc === ops.tci_movl ||
+               opc === ops.tci_qemu_ld_rrr ||
+               opc === ops.tci_qemu_st_rrr ||
+               opc === ops.tci_setcond32 ||
                opc === ops.xor;
     }
 
@@ -3120,10 +3209,13 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
         if (opc === ops.exit_tb) {
             return statusExit;
         }
+        if (opc === ops.call) {
+            return statusHelper;
+        }
         return statusUnsupported;
     }
 
-    function readTerminalValue(opc, ptrOffset) {
+    function readTerminalValue(opc, ptrOffset, index) {
         if (opc === ops.goto_tb) {
             const address = tbPtr + ptrOffset;
             if (address < 0 || address % 8 !== 0) {
@@ -3131,18 +3223,149 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
             }
             return HEAPU64[address / 8];
         }
+        if (opc === ops.call) {
+            return BigInt(tbPtr + index * 4);
+        }
         return BigInt(tbPtr + ptrOffset);
     }
 
-    function applyOp(regs, insn, index) {
+    function compare32(lhs, rhs, condition) {
+        const lhsSigned = toI32(lhs);
+        const rhsSigned = toI32(rhs);
+        const lhsUnsigned = toU32(lhs);
+        const rhsUnsigned = toU32(rhs);
+
+        switch (condition) {
+        case 0: return 0n;
+        case 1: return 1n;
+        case 8: return lhsUnsigned === rhsUnsigned ? 1n : 0n;
+        case 9: return lhsUnsigned !== rhsUnsigned ? 1n : 0n;
+        case 12: return (lhsUnsigned & rhsUnsigned) === 0 ? 1n : 0n;
+        case 13: return (lhsUnsigned & rhsUnsigned) !== 0 ? 1n : 0n;
+        case 2: return lhsSigned < rhsSigned ? 1n : 0n;
+        case 3: return lhsSigned >= rhsSigned ? 1n : 0n;
+        case 6: return lhsSigned > rhsSigned ? 1n : 0n;
+        case 7: return lhsSigned <= rhsSigned ? 1n : 0n;
+        case 10: return lhsUnsigned < rhsUnsigned ? 1n : 0n;
+        case 11: return lhsUnsigned >= rhsUnsigned ? 1n : 0n;
+        case 14: return lhsUnsigned > rhsUnsigned ? 1n : 0n;
+        case 15: return lhsUnsigned <= rhsUnsigned ? 1n : 0n;
+        default:
+            throw new Error(`unsupported live coverage condition ${condition}`);
+        }
+    }
+
+    function compare64(lhs, rhs, condition) {
+        const lhsSigned = BigInt.asIntN(64, BigInt(lhs));
+        const rhsSigned = BigInt.asIntN(64, BigInt(rhs));
+        const lhsUnsigned = BigInt.asUintN(64, BigInt(lhs));
+        const rhsUnsigned = BigInt.asUintN(64, BigInt(rhs));
+
+        switch (condition) {
+        case 0: return 0n;
+        case 1: return 1n;
+        case 8: return lhsUnsigned === rhsUnsigned ? 1n : 0n;
+        case 9: return lhsUnsigned !== rhsUnsigned ? 1n : 0n;
+        case 12: return (lhsUnsigned & rhsUnsigned) === 0n ? 1n : 0n;
+        case 13: return (lhsUnsigned & rhsUnsigned) !== 0n ? 1n : 0n;
+        case 2: return lhsSigned < rhsSigned ? 1n : 0n;
+        case 3: return lhsSigned >= rhsSigned ? 1n : 0n;
+        case 6: return lhsSigned > rhsSigned ? 1n : 0n;
+        case 7: return lhsSigned <= rhsSigned ? 1n : 0n;
+        case 10: return lhsUnsigned < rhsUnsigned ? 1n : 0n;
+        case 11: return lhsUnsigned >= rhsUnsigned ? 1n : 0n;
+        case 14: return lhsUnsigned > rhsUnsigned ? 1n : 0n;
+        case 15: return lhsUnsigned <= rhsUnsigned ? 1n : 0n;
+        default:
+            throw new Error(`unsupported live coverage condition ${condition}`);
+        }
+    }
+
+    function compare32Expr(lhs, rhs, condition) {
+        switch (condition) {
+        case 0: return [0x41, 0x00];
+        case 1: return [0x41, 0x01];
+        case 8: return [...lhs, ...rhs, 0x46];
+        case 9: return [...lhs, ...rhs, 0x47];
+        case 12: return [...lhs, ...rhs, 0x71, 0x45];
+        case 13: return [...lhs, ...rhs, 0x71, 0x45, 0x45];
+        case 2: return [...lhs, ...rhs, 0x48];
+        case 3: return [...lhs, ...rhs, 0x4e];
+        case 6: return [...lhs, ...rhs, 0x4a];
+        case 7: return [...lhs, ...rhs, 0x4c];
+        case 10: return [...lhs, ...rhs, 0x49];
+        case 11: return [...lhs, ...rhs, 0x4f];
+        case 14: return [...lhs, ...rhs, 0x4b];
+        case 15: return [...lhs, ...rhs, 0x4d];
+        default: return null;
+        }
+    }
+
+    function compare64Expr(lhs, rhs, condition) {
+        switch (condition) {
+        case 0: return [0x41, 0x00];
+        case 1: return [0x41, 0x01];
+        case 8: return [...lhs, ...rhs, 0x51];
+        case 9: return [...lhs, ...rhs, 0x52];
+        case 12: return [...lhs, ...rhs, 0x83, 0x50];
+        case 13: return [...lhs, ...rhs, 0x83, 0x50, 0x45];
+        case 2: return [...lhs, ...rhs, 0x53];
+        case 3: return [...lhs, ...rhs, 0x59];
+        case 6: return [...lhs, ...rhs, 0x55];
+        case 7: return [...lhs, ...rhs, 0x57];
+        case 10: return [...lhs, ...rhs, 0x54];
+        case 11: return [...lhs, ...rhs, 0x5a];
+        case 14: return [...lhs, ...rhs, 0x56];
+        case 15: return [...lhs, ...rhs, 0x58];
+        default: return null;
+        }
+    }
+
+    function referenceMemoryAddress(regs, insn, r1, size) {
+        const offset = sextract(insn, 16, 16);
+
+        if (r1 !== envRelativeBaseReg ||
+            offset < envRelativeMinOffset ||
+            offset + size > envRelativeMaxExclusive) {
+            throw new Error("unsupported live coverage env-relative memory");
+        }
+        return Number(regs[r1] + BigInt(offset));
+    }
+
+    function helperMemoryAddress(taddr) {
+        return Number(BigInt.asUintN(64, BigInt(taddr)) & 0xffn);
+    }
+
+    function applyOp(regs, view, insn, index) {
         const opc = bits(insn, 0, 8);
         const r0 = bits(insn, 8, 4);
         const r1 = bits(insn, 12, 4);
         const r2 = bits(insn, 16, 4);
         const currentTbPtr = (index + 1) * 4;
 
-        if (opc === ops.tci_movi || opc === ops.tci_movl) {
+        if (opc === ops.tci_movi) {
             regs[r0] = BigInt(sextract(insn, 12, 20));
+        } else if (opc === ops.tci_movl) {
+            regs[r0] = new DataView(wasmMemory.buffer).getBigUint64(
+                tbPtr + currentTbPtr + sextract(insn, 12, 20), true);
+        } else if (opc === ops.ld32u) {
+            regs[r0] = BigInt(view.getUint32(
+                referenceMemoryAddress(regs, insn, r1, 4), true));
+        } else if (opc === ops.ld32s) {
+            regs[r0] = toU64(BigInt(view.getInt32(
+                referenceMemoryAddress(regs, insn, r1, 4), true)));
+        } else if (opc === ops.ld) {
+            regs[r0] = view.getBigUint64(
+                referenceMemoryAddress(regs, insn, r1, 8), true);
+        } else if (opc === ops.st8) {
+            view.setUint8(referenceMemoryAddress(regs, insn, r1, 1),
+                          Number(regs[r0] & 0xffn));
+        } else if (opc === ops.st32) {
+            view.setUint32(referenceMemoryAddress(regs, insn, r1, 4),
+                           Number(regs[r0] & 0xffffffffn), true);
+        } else if (opc === ops.st) {
+            view.setBigUint64(referenceMemoryAddress(regs, insn, r1, 8),
+                              regs[r0], true);
         } else if (opc === ops.mov) {
             regs[r0] = regs[r1];
         } else if (opc === ops.add) {
@@ -3155,17 +3378,73 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
             regs[r0] = toU64(regs[r1] | regs[r2]);
         } else if (opc === ops.xor) {
             regs[r0] = toU64(regs[r1] ^ regs[r2]);
+        } else if (opc === ops.mul) {
+            regs[r0] = toU64(regs[r1] * regs[r2]);
+        } else if (opc === ops.neg) {
+            regs[r0] = toU64(-regs[r1]);
         } else if (opc === ops.shl) {
             regs[r0] = toU64(regs[r1] << (regs[r2] & 63n));
         } else if (opc === ops.shr) {
             regs[r0] = toU64(regs[r1] >> (regs[r2] & 63n));
+        } else if (opc === ops.extract || opc === ops.sextract) {
+            const pos = bits(insn, 16, 6);
+            const len = bits(insn, 22, 6);
+
+            if (len === 0 || pos + len > 64) {
+                throw new Error("unsupported live coverage extract");
+            }
+            if (opc === ops.extract) {
+                const mask = len === 64 ? -1n : ((1n << BigInt(len)) - 1n);
+                regs[r0] = toU64((regs[r1] >> BigInt(pos)) & mask);
+            } else {
+                const shifted = BigInt.asIntN(
+                    64, regs[r1] << BigInt(64 - pos - len));
+                regs[r0] = toU64(shifted >> BigInt(64 - len));
+            }
+        } else if (opc === ops.deposit) {
+            const pos = bits(insn, 20, 6);
+            const len = bits(insn, 26, 6);
+
+            if (len === 0 || pos + len > 64) {
+                throw new Error("unsupported live coverage deposit");
+            }
+            const mask = len === 64 ? -1n : ((1n << BigInt(len)) - 1n);
+            const clearMask = BigInt.asUintN(
+                64, ~(BigInt.asUintN(64, mask) << BigInt(pos)));
+            regs[r0] = toU64((regs[r1] & clearMask) |
+                             ((regs[r2] & mask) << BigInt(pos)));
+        } else if (opc === ops.tci_setcond32) {
+            regs[r0] = compare32(regs[r1], regs[r2], bits(insn, 20, 4));
+        } else if (opc === ops.setcond) {
+            regs[r0] = compare64(regs[r1], regs[r2], bits(insn, 20, 4));
+        } else if (opc === ops.tci_qemu_ld_rrr) {
+            regs[r0] = view.getBigUint64(helperMemoryAddress(regs[r1]), true);
+        } else if (opc === ops.tci_qemu_st_rrr) {
+            view.setBigUint64(helperMemoryAddress(regs[r1]), regs[r0], true);
+        } else if (opc === ops.brcond) {
+            const ptrOffset = currentTbPtr + sextract(insn, 12, 20);
+            const targetIndex = ptrOffset / 4;
+
+            if (ptrOffset % 4 !== 0 || targetIndex <= index) {
+                throw new Error("unsupported live coverage branch target");
+            }
+            if (regs[r0] !== 0n) {
+                return { nextIndex: targetIndex };
+            }
         } else if (opc === ops.mb) {
             return null;
-        } else if (opc === ops.goto_tb || opc === ops.exit_tb) {
+        } else if (opc === ops.goto_tb || opc === ops.exit_tb ||
+                   opc === ops.call) {
+            const retLen = bits(insn, 8, 4);
             const ptrOffset = currentTbPtr + sextract(insn, 12, 20);
+
+            if (opc === ops.call && (index === 0 || retLen > 2)) {
+                throw new Error("unsupported live coverage helper call");
+            }
             return {
                 status: terminalStatus(opc),
-                value: readTerminalValue(opc, ptrOffset),
+                value: readTerminalValue(opc, ptrOffset, index),
+                executed: BigInt(index + 1),
             };
         } else {
             throw new Error(`unsupported live coverage opcode ${opc}`);
@@ -3175,18 +3454,28 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
 
     function referenceRun(words) {
         const regs = [];
+        const buffer = new ArrayBuffer(scratchWindowSize);
+        const bytes = new Uint8Array(buffer);
+        const view = new DataView(buffer);
+
+        for (let i = 0; i < bytes.length; i++) {
+            bytes[i] = (i * 13 + 17) & 0xff;
+        }
         for (let reg = 0; reg < 16; reg++) {
             regs.push(BigInt(0x1000 + reg));
         }
-        for (let index = 0; index < words.length; index++) {
-            const terminal = applyOp(regs, words[index] >>> 0, index);
-            if (terminal) {
+        regs[14] = BigInt(-envRelativeMinOffset);
+        regs[15] = BigInt(scratchStackBase - scratchWindowBase);
+        for (let index = 0; index < words.length;) {
+            const step = applyOp(regs, view, words[index] >>> 0, index);
+            if (step && step.status !== undefined) {
                 return {
-                    ...terminal,
+                    ...step,
                     checksum: checksum(regs),
-                    executed: BigInt(index + 1),
                 };
             }
+            index = step && step.nextIndex !== undefined
+                ? step.nextIndex : index + 1;
         }
         throw new Error("live coverage generated output has no terminal");
     }
@@ -3198,51 +3487,296 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
         ];
         let terminal = null;
 
-        for (let reg = 0; reg < 16; reg++) {
-            emitted.push(...localSet(3 + reg, i64Const(BigInt(0x1000 + reg))));
+        function regLocal(reg) {
+            return 3 + reg;
         }
 
-        for (let index = 0; index < words.length; index++) {
-            const insn = words[index] >>> 0;
+        function memoryAddress(expr, offset) {
+            return i64Add(expr, i64Const(offset));
+        }
+
+        function envRelativeMemoryAddress(insn, r1, size) {
+            const offset = sextract(insn, 16, 16);
+
+            if (r1 !== envRelativeBaseReg ||
+                offset < envRelativeMinOffset ||
+                offset + size > envRelativeMaxExclusive) {
+                return null;
+            }
+            return memoryAddress(localGet(regLocal(r1)), offset);
+        }
+
+        function returnUnsupported() {
+            return [
+                ...i32StoreAtPtr(2, 0, i32Const(Number(statusUnsupported))),
+                ...i64StoreAtPtr(2, 32, i64Const(0n)),
+                ...i64Const(0n),
+                0x0f,
+            ];
+        }
+
+        function truthy(expr) {
+            return [...expr, 0x50, 0x45];
+        }
+
+        function block(body) {
+            return [0x02, 0x40, ...body, 0x0b];
+        }
+
+        function ifBlock(condition, thenBody) {
+            return [...condition, 0x04, 0x40, ...thenBody, 0x0b];
+        }
+
+        function brIf(depth, condition) {
+            return [...condition, 0x0d, ...encodeU32(depth)];
+        }
+
+        function compareAndExtend32(insn, r1, r2) {
+            const comparison = compare32Expr(
+                i32WrapI64(localGet(regLocal(r1))),
+                i32WrapI64(localGet(regLocal(r2))),
+                bits(insn, 20, 4));
+
+            return comparison ? i64ExtendI32U(comparison) : null;
+        }
+
+        function compareAndExtend64(insn, r1, r2) {
+            const comparison = compare64Expr(
+                localGet(regLocal(r1)),
+                localGet(regLocal(r2)),
+                bits(insn, 20, 4));
+
+            return comparison ? i64ExtendI32U(comparison) : null;
+        }
+
+        function compileOp(index, insn) {
             const opc = bits(insn, 0, 8);
             const r0 = bits(insn, 8, 4);
             const r1 = bits(insn, 12, 4);
             const r2 = bits(insn, 16, 4);
-            const currentTbPtr = (index + 1) * 4;
-            const dst = 3 + r0;
-            const src1 = 3 + r1;
-            const src2 = 3 + r2;
+            const dst = regLocal(r0);
+            const src1 = regLocal(r1);
+            const src2 = regLocal(r2);
+            let address;
 
-            if (!supportedOp(opc)) {
-                throw new Error(`unsupported live coverage opcode ${opc}`);
+            if (!shapeOpSupported(opc)) {
+                return null;
             }
-            if (opc === ops.tci_movi || opc === ops.tci_movl) {
-                emitted.push(...localSet(dst,
-                                         i64Const(sextract(insn, 12, 20))));
-            } else if (opc === ops.mov) {
-                emitted.push(...localSet(dst, localGet(src1)));
-            } else if (opc === ops.add || opc === ops.sub ||
-                       opc === ops.and || opc === ops.or ||
-                       opc === ops.xor || opc === ops.shl ||
-                       opc === ops.shr) {
+            if (opc === ops.tci_movi) {
+                return localSet(dst, i64Const(sextract(insn, 12, 20)));
+            }
+            if (opc === ops.tci_movl) {
+                const currentTbPtr = (index + 1) * 4;
+                return localSet(dst, i64Load(i64Const(
+                    BigInt(tbPtr + currentTbPtr + sextract(insn, 12, 20)))));
+            }
+            if (opc === ops.ld32u || opc === ops.ld32s) {
+                address = envRelativeMemoryAddress(insn, r1, 4);
+                if (address === null) {
+                    return null;
+                }
+                return localSet(dst, opc === ops.ld32u ?
+                    i64ExtendI32U(i32Load(address)) :
+                    i64ExtendI32S(i32Load(address)));
+            }
+            if (opc === ops.ld) {
+                address = envRelativeMemoryAddress(insn, r1, 8);
+                return address === null ? null :
+                    localSet(dst, i64Load(address));
+            }
+            if (opc === ops.st8) {
+                address = envRelativeMemoryAddress(insn, r1, 1);
+                return address === null ? null :
+                    i32Store8(address, i32WrapI64(localGet(dst)));
+            }
+            if (opc === ops.st32) {
+                address = envRelativeMemoryAddress(insn, r1, 4);
+                return address === null ? null :
+                    i32Store(address, i32WrapI64(localGet(dst)));
+            }
+            if (opc === ops.st) {
+                address = envRelativeMemoryAddress(insn, r1, 8);
+                return address === null ? null :
+                    i64Store(address, localGet(dst));
+            }
+            if (opc === ops.mov) {
+                return localSet(dst, localGet(src1));
+            }
+            if (opc === ops.add || opc === ops.sub || opc === ops.mul ||
+                opc === ops.and || opc === ops.or || opc === ops.xor ||
+                opc === ops.shl || opc === ops.shr) {
                 const opByte = opc === ops.add ? 0x7c :
                                opc === ops.sub ? 0x7d :
+                               opc === ops.mul ? 0x7e :
                                opc === ops.and ? 0x83 :
                                opc === ops.or ? 0x84 :
                                opc === ops.xor ? 0x85 :
                                opc === ops.shl ? 0x86 : 0x88;
-                emitted.push(
+                return localSet(dst, [
                     ...localGet(src1),
                     ...localGet(src2),
                     opByte,
-                    ...localSet(dst));
-            } else if (opc === ops.mb) {
-                continue;
-            } else if (opc === ops.goto_tb || opc === ops.exit_tb) {
+                ]);
+            }
+            if (opc === ops.neg) {
+                return localSet(dst, [
+                    ...i64Const(0n),
+                    ...localGet(src1),
+                    0x7d,
+                ]);
+            }
+            if (opc === ops.extract || opc === ops.sextract) {
+                const pos = bits(insn, 16, 6);
+                const len = bits(insn, 22, 6);
+
+                if (len === 0 || pos + len > 64) {
+                    return null;
+                }
+                if (opc === ops.extract) {
+                    const mask = len === 64 ? -1n :
+                        ((1n << BigInt(len)) - 1n);
+                    return localSet(dst, [
+                        ...localGet(src1),
+                        ...i64Const(pos),
+                        0x88,
+                        ...i64Const(mask),
+                        0x83,
+                    ]);
+                }
+                const shift = 64 - pos - len;
+                return localSet(dst, [
+                    ...localGet(src1),
+                    ...i64Const(shift),
+                    0x86,
+                    ...i64Const(shift),
+                    0x87,
+                ]);
+            }
+            if (opc === ops.deposit) {
+                const pos = bits(insn, 20, 6);
+                const len = bits(insn, 26, 6);
+
+                if (len === 0 || pos + len > 64) {
+                    return null;
+                }
+                const mask = len === 64 ? -1n :
+                    ((1n << BigInt(len)) - 1n);
+                const clearMask = BigInt.asUintN(
+                    64, ~(BigInt.asUintN(64, mask) << BigInt(pos)));
+                return localSet(dst, [
+                    ...localGet(src1),
+                    ...i64Const(clearMask),
+                    0x83,
+                    ...localGet(src2),
+                    ...i64Const(mask),
+                    0x83,
+                    ...i64Const(pos),
+                    0x86,
+                    0x84,
+                ]);
+            }
+            if (opc === ops.tci_setcond32) {
+                const value = compareAndExtend32(insn, r1, r2);
+                return value ? localSet(dst, value) : null;
+            }
+            if (opc === ops.setcond) {
+                const value = compareAndExtend64(insn, r1, r2);
+                return value ? localSet(dst, value) : null;
+            }
+            if (opc === ops.tci_qemu_ld_rrr) {
+                return localSet(dst, [
+                    ...localGet(src1),
+                    ...i64Const(0xffn),
+                    0x83,
+                    ...i64Const(BigInt(scratchWindowBase)),
+                    0x7c,
+                    0x29, ...memArg(3, 0),
+                ]);
+            }
+            if (opc === ops.tci_qemu_st_rrr) {
+                return [
+                    ...localGet(src1),
+                    ...i64Const(0xffn),
+                    0x83,
+                    ...i64Const(BigInt(scratchWindowBase)),
+                    0x7c,
+                    ...localGet(dst),
+                    0x37, ...memArg(3, 0),
+                ];
+            }
+            if (opc === ops.mb) {
+                return [];
+            }
+            return null;
+        }
+
+        function compileRange(start, end) {
+            const code = [];
+
+            for (let index = start; index < end;) {
+                const insn = words[index] >>> 0;
+                const opc = bits(insn, 0, 8);
+
+                if (opc === ops.brcond) {
+                    const ptrOffset = (index + 1) * 4 +
+                                      sextract(insn, 12, 20);
+                    const targetIndex = ptrOffset / 4;
+                    if (ptrOffset % 4 !== 0 || targetIndex <= index) {
+                        return null;
+                    }
+                    if (targetIndex > end) {
+                        code.push(...ifBlock(
+                            truthy(localGet(regLocal(bits(insn, 8, 4)))),
+                            returnUnsupported()));
+                        index++;
+                        continue;
+                    }
+                    const body = compileRange(index + 1, targetIndex);
+                    if (body === null) {
+                        return null;
+                    }
+                    code.push(...block([
+                        ...brIf(0, truthy(
+                            localGet(regLocal(bits(insn, 8, 4))))),
+                        ...body,
+                    ]));
+                    index = targetIndex;
+                    continue;
+                }
+                const compiled = compileOp(index, insn);
+                if (compiled === null) {
+                    return null;
+                }
+                code.push(...compiled);
+                index++;
+            }
+            return code;
+        }
+
+        for (let reg = 0; reg < 16; reg++) {
+            emitted.push(...localSet(3 + reg, i64Const(BigInt(0x1000 + reg))));
+        }
+        emitted.push(...localSet(regLocal(14), i64Const(BigInt(scratchEnvBase))));
+        emitted.push(...localSet(regLocal(15), i64Const(BigInt(scratchStackBase))));
+
+        for (let index = 0; index < words.length; index++) {
+            const insn = words[index] >>> 0;
+            const opc = bits(insn, 0, 8);
+            const currentTbPtr = (index + 1) * 4;
+
+            if (!shapeOpSupported(opc)) {
+                throw new Error(`unsupported live coverage opcode ${opc}`);
+            }
+            if (opc === ops.goto_tb || opc === ops.exit_tb ||
+                opc === ops.call) {
+                const retLen = bits(insn, 8, 4);
                 const ptrOffset = currentTbPtr + sextract(insn, 12, 20);
+                if (opc === ops.call && (index === 0 || retLen > 2)) {
+                    throw new Error("unsupported live coverage helper call");
+                }
                 terminal = {
                     opc,
-                    ptrOffset,
+                    ptrOffset: opc === ops.call ? index * 4 : ptrOffset,
                     executed: index + 1,
                 };
                 break;
@@ -3251,6 +3785,13 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
 
         if (!terminal) {
             throw new Error("live coverage generated output has no terminal");
+        }
+        {
+            const body = compileRange(0, terminal.executed - 1);
+            if (body === null) {
+                throw new Error("unsupported live coverage generated-output shape");
+            }
+            emitted.push(...body);
         }
 
         let checksumExpr = i64Const(1469598103934665603n);
@@ -3276,7 +3817,9 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
                 ? [
                     ...i64Const(BigInt(tbPtr + terminal.ptrOffset)),
                     0x29, ...memArg(3, 0),
-                ]
+                  ]
+                : terminal.opc === ops.call
+                ? i64Const(BigInt(tbPtr + terminal.ptrOffset))
                 : i64Const(BigInt(tbPtr + terminal.ptrOffset))));
         emitted.push(...i64StoreAtPtr(2, 40, i64Const(BigInt(terminal.executed))));
         emitted.push(...localGet(19));
@@ -3290,7 +3833,7 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
             return 4;
         }
         for (const word of words) {
-            if (!supportedOp(bits(word >>> 0, 0, 8))) {
+            if (!shapeOpSupported(bits(word >>> 0, 0, 8))) {
                 setResult(0, statusUnsupported);
                 return Number(statusUnsupported);
             }
@@ -3335,6 +3878,9 @@ EM_JS(int, tcg_wasm64_live_tb_coverage_js,
         }
         for (let i = 0; i < 48 / 8; i++) {
             HEAPU64[exit / 8 + i] = 0n;
+        }
+        for (let i = 0; i < scratchWindowSize; i++) {
+            HEAPU8[scratchWindowBase + i] = (i * 13 + 17) & 0xff;
         }
         HEAPU64[context / 8 + 2] = guestInsns;
         HEAPU64[context / 8 + 3] = BigInt(counters);
@@ -4312,16 +4858,33 @@ static bool tcg_wasm64_live_tb_coverage_op_supported(uint32_t op)
     switch ((TCGOpcode)op) {
     case INDEX_op_add:
     case INDEX_op_and:
+    case INDEX_op_brcond:
+    case INDEX_op_call:
+    case INDEX_op_deposit:
     case INDEX_op_exit_tb:
+    case INDEX_op_extract:
     case INDEX_op_goto_tb:
+    case INDEX_op_ld:
+    case INDEX_op_ld32s:
+    case INDEX_op_ld32u:
     case INDEX_op_mb:
     case INDEX_op_mov:
+    case INDEX_op_mul:
+    case INDEX_op_neg:
     case INDEX_op_or:
+    case INDEX_op_setcond:
+    case INDEX_op_sextract:
     case INDEX_op_shl:
     case INDEX_op_shr:
+    case INDEX_op_st:
+    case INDEX_op_st8:
+    case INDEX_op_st32:
     case INDEX_op_sub:
     case INDEX_op_tci_movi:
     case INDEX_op_tci_movl:
+    case INDEX_op_tci_qemu_ld_rrr:
+    case INDEX_op_tci_qemu_st_rrr:
+    case INDEX_op_tci_setcond32:
     case INDEX_op_xor:
         return true;
     default:
@@ -4390,7 +4953,7 @@ static void tcg_wasm64_report_live_tb_coverage(
             "\"js_status\":%" PRIu64 "}\n",
             TCG_WASM64_LIVE_TB_COVERAGE_NAME,
             ok ? "true" : "false",
-            ok ? "true" : "false",
+            "false",
             (uintptr_t)tb->tc.ptr,
             (uint64_t)tb->pc,
             tb->cs_base,
@@ -4550,13 +5113,26 @@ static bool tcg_wasm64_execute_available_generated_output_try(
     context.mode = TCG_WASM64_RUN_MODE_PERF_PROOF;
 
 #ifdef CONFIG_EMSCRIPTEN
-    result[0] = tcg_wasm64_live_tb_coverage_js(
-        (uintptr_t)&context, (uintptr_t)&run_counters, (uintptr_t)&exit,
-        (uintptr_t)result, (uintptr_t)tb_ptr, guest_insns,
-        (uintptr_t)metadata->generated_output, metadata->generated_output_size,
-        INDEX_op_add, INDEX_op_and, INDEX_op_exit_tb, INDEX_op_goto_tb,
-        INDEX_op_mb, INDEX_op_mov, INDEX_op_or, INDEX_op_shl, INDEX_op_shr,
-        INDEX_op_sub, INDEX_op_tci_movi, INDEX_op_tci_movl, INDEX_op_xor);
+    {
+        g_autofree uint8_t *scratch = g_malloc0(
+            TCG_WASM64_ONE_TB_SCRATCH_SIZE);
+
+        result[0] = tcg_wasm64_live_tb_coverage_js(
+            (uintptr_t)&context, (uintptr_t)scratch,
+            (uintptr_t)&run_counters, (uintptr_t)&exit,
+            (uintptr_t)result, (uintptr_t)tb_ptr, guest_insns,
+            (uintptr_t)metadata->generated_output,
+            metadata->generated_output_size,
+            INDEX_op_add, INDEX_op_and, INDEX_op_brcond, INDEX_op_call,
+            INDEX_op_deposit, INDEX_op_exit_tb, INDEX_op_extract,
+            INDEX_op_goto_tb, INDEX_op_ld, INDEX_op_ld32s, INDEX_op_ld32u,
+            INDEX_op_mb, INDEX_op_mov, INDEX_op_mul, INDEX_op_neg,
+            INDEX_op_or, INDEX_op_setcond, INDEX_op_sextract, INDEX_op_shl,
+            INDEX_op_shr, INDEX_op_st, INDEX_op_st8, INDEX_op_st32,
+            INDEX_op_sub, INDEX_op_tci_movi, INDEX_op_tci_movl,
+            INDEX_op_tci_qemu_ld_rrr, INDEX_op_tci_qemu_st_rrr,
+            INDEX_op_tci_setcond32, INDEX_op_xor);
+    }
 #else
     result[0] = 1;
 #endif
@@ -4587,7 +5163,7 @@ static bool tcg_wasm64_execute_available_generated_output_try(
     }
     tcg_wasm64_report_live_tb_coverage(
         tb, metadata, &run_counters, &exit, result, ok);
-    return ok;
+    return false;
 }
 
 static void tcg_wasm64_live_generated_exec_count_reject(

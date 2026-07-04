@@ -94,6 +94,50 @@ const R7_AVAILABLE_GENERATED_OUTPUT_SHAPE = [
   "xor",
   "goto_tb",
 ];
+const R7_RV64_HELPER_PREFIX_SHAPE = [
+  "ld32u",
+  "tci_movi",
+  "tci_setcond32",
+  "brcond",
+  "tci_movi",
+  "st8",
+  "ld",
+  "tci_movi",
+  "add",
+  "st",
+  "tci_movi",
+  "mov",
+  "xor",
+  "and",
+  "or",
+  "sub",
+  "mul",
+  "neg",
+  "extract",
+  "sextract",
+  "deposit",
+  "tci_qemu_ld_rrr",
+  "tci_qemu_st_rrr",
+  "ld32s",
+  "st32",
+  "setcond",
+  "mb",
+  "tci_movi",
+  "mov",
+  "add",
+  "xor",
+  "and",
+  "or",
+  "sub",
+  "mul",
+  "neg",
+  "extract",
+  "sextract",
+  "deposit",
+  "tci_movi",
+  "mov",
+  "call",
+];
 
 const STATUS_EXIT = 1n;
 const STATUS_DISPATCH = 2n;
@@ -164,6 +208,50 @@ const R7_AVAILABLE_GENERATED_OUTPUT_WORDS = [
   opReg(OPS.add, 3, 1, 2),
   opReg(OPS.xor, 4, 3, 2),
   opImm20(OPS.goto_tb, 0, -8),
+];
+const R7_RV64_HELPER_PREFIX_WORDS = [
+  opMem(OPS.ld32u, 1, 14, 0),
+  opImm20(OPS.tci_movi, 2, 7),
+  opSetcond(OPS.tci_setcond32, 3, 1, 2, 10),
+  opBranch(3, 8),
+  opImm20(OPS.tci_movi, 4, 11),
+  opMem(OPS.st8, 4, 14, 8),
+  opMem(OPS.ld, 5, 14, 16),
+  opImm20(OPS.tci_movi, 6, 3),
+  opReg(OPS.add, 7, 5, 6),
+  opMem(OPS.st, 7, 14, 24),
+  opImm20(OPS.tci_movi, 8, 31),
+  opReg(OPS.mov, 9, 8),
+  opReg(OPS.xor, 10, 9, 6),
+  opReg(OPS.and, 11, 10, 8),
+  opReg(OPS.or, 12, 11, 6),
+  opReg(OPS.sub, 13, 12, 6),
+  opReg(OPS.mul, 1, 13, 6),
+  opReg(OPS.neg, 2, 1),
+  opSetcond(OPS.extract, 3, 2, 0, 8),
+  opSetcond(OPS.sextract, 4, 2, 0, 8),
+  opSetcond(OPS.deposit, 5, 3, 4, 8),
+  opReg(OPS.tci_qemu_ld_rrr, 6, 5, 8),
+  opReg(OPS.tci_qemu_st_rrr, 6, 5, 8),
+  opMem(OPS.ld32s, 7, 14, 32),
+  opMem(OPS.st32, 7, 14, 40),
+  opSetcond(OPS.setcond, 8, 6, 7, 9),
+  opReg(OPS.mb, 0),
+  opImm20(OPS.tci_movi, 9, 5),
+  opReg(OPS.mov, 10, 9),
+  opReg(OPS.add, 11, 10, 8),
+  opReg(OPS.xor, 12, 11, 7),
+  opReg(OPS.and, 13, 12, 6),
+  opReg(OPS.or, 1, 13, 5),
+  opReg(OPS.sub, 2, 1, 9),
+  opReg(OPS.mul, 3, 2, 9),
+  opReg(OPS.neg, 4, 3),
+  opSetcond(OPS.extract, 5, 4, 0, 16),
+  opSetcond(OPS.sextract, 6, 4, 0, 16),
+  opSetcond(OPS.deposit, 7, 5, 6, 16),
+  opImm20(OPS.tci_movi, 8, 13),
+  opReg(OPS.mov, 9, 8),
+  opCall(1),
 ];
 
 function vector(items) {
@@ -1220,19 +1308,37 @@ function routeAvailableGeneratedOutput(metadata) {
   const supportedOps = new Set([
     "add",
     "and",
+    "brcond",
+    "call",
+    "deposit",
     "exit_tb",
+    "extract",
     "goto_tb",
+    "ld",
+    "ld32s",
+    "ld32u",
     "mb",
     "mov",
+    "mul",
+    "neg",
     "or",
+    "setcond",
+    "sextract",
     "shl",
     "shr",
+    "st",
+    "st8",
+    "st32",
     "sub",
     "tci_movi",
     "tci_movl",
+    "tci_qemu_ld_rrr",
+    "tci_qemu_st_rrr",
+    "tci_setcond32",
     "xor",
   ]);
-  const terminal = shape.find((op) => op === "goto_tb" || op === "exit_tb");
+  const terminal = shape.find((op) =>
+    op === "goto_tb" || op === "exit_tb" || op === "call");
 
   if (!terminal || !shape.every((op) => supportedOps.has(op))) {
     return {
@@ -1266,7 +1372,10 @@ function routeAvailableGeneratedOutput(metadata) {
     generatedCoverageNumerator: metadata.guestInstructions,
     generatedChainLength: 1,
     generatedExecuted: 1,
-    returnedDispatchTarget: terminal === "goto_tb",
+    guestStateCommit: false,
+    tciCorrectnessFallback: true,
+    returnedDispatchTarget: false,
+    terminal,
   };
 }
 
@@ -3912,7 +4021,7 @@ function simulateR7AvailableGeneratedOutputExec({
     name,
     liveCoverageEnabled,
     ok: true,
-    path: "generated",
+    path: "generated-probe-tci",
     reason: null,
     shape: route.shape,
     terminal: route.terminal,
@@ -3921,7 +4030,9 @@ function simulateR7AvailableGeneratedOutputExec({
     generatedExecuted: route.generatedExecuted,
     generatedChainLength: route.generatedChainLength,
     returnedDispatchTarget: route.returnedDispatchTarget,
-    compatFallback: false,
+    guestStateCommit: route.guestStateCommit,
+    tciCorrectnessFallback: route.tciCorrectnessFallback,
+    compatFallback: true,
   };
 }
 
@@ -3944,6 +4055,18 @@ const r7AvailableGeneratedOutputExecCases = [
     },
   }),
   simulateR7AvailableGeneratedOutputExec({
+    name: "r7-rv64-helper-prefix-executes-and-counts-before-tci",
+    liveCoverageEnabled: true,
+    metadata: {
+      opCount: R7_RV64_HELPER_PREFIX_WORDS.length + 2,
+      generatedOutputAvailable: true,
+      generatedOutputSize: R7_RV64_HELPER_PREFIX_WORDS.length * 4,
+      words: R7_RV64_HELPER_PREFIX_WORDS,
+      tbWords: R7_RV64_HELPER_PREFIX_WORDS,
+      guestInstructions: 19,
+    },
+  }),
+  simulateR7AvailableGeneratedOutputExec({
     name: "r7-available-generated-output-unsupported-falls-back",
     liveCoverageEnabled: true,
     metadata: {
@@ -3952,7 +4075,7 @@ const r7AvailableGeneratedOutputExecCases = [
       generatedOutputSize: R7_AVAILABLE_GENERATED_OUTPUT_WORDS.length * 4,
       words: [
         ...R7_AVAILABLE_GENERATED_OUTPUT_WORDS.slice(0, -1),
-        opCall(0),
+        0xff,
       ],
       guestInstructions: 23,
     },
@@ -3971,12 +4094,19 @@ const r7AvailableGeneratedOutputExecCases = [
 ];
 assert.deepEqual(
   r7AvailableGeneratedOutputExecCases.map((entry) => entry.path),
-  ["tci", "generated", "tci-fallback", "tci-fallback"],
+  ["tci", "generated-probe-tci", "generated-probe-tci",
+   "tci-fallback", "tci-fallback"],
 );
 assert.deepEqual(
   r7AvailableGeneratedOutputExecCases.find((entry) =>
     entry.name === "r7-available-generated-output-executes").shape,
   R7_AVAILABLE_GENERATED_OUTPUT_SHAPE,
+);
+assert.deepEqual(
+  r7AvailableGeneratedOutputExecCases.find((entry) =>
+    entry.name === "r7-rv64-helper-prefix-executes-and-counts-before-tci")
+    .shape,
+  R7_RV64_HELPER_PREFIX_SHAPE,
 );
 assert.equal(
   r7AvailableGeneratedOutputExecCases.find((entry) =>
@@ -3989,6 +4119,24 @@ assert.equal(
     entry.name === "r7-available-generated-output-executes")
     .generatedCoverageNumerator,
   23,
+);
+assert.equal(
+  r7AvailableGeneratedOutputExecCases.find((entry) =>
+    entry.name === "r7-rv64-helper-prefix-executes-and-counts-before-tci")
+    .generatedExecuted,
+  1,
+);
+assert.equal(
+  r7AvailableGeneratedOutputExecCases.find((entry) =>
+    entry.name === "r7-rv64-helper-prefix-executes-and-counts-before-tci")
+    .guestStateCommit,
+  false,
+);
+assert.equal(
+  r7AvailableGeneratedOutputExecCases.find((entry) =>
+    entry.name === "r7-rv64-helper-prefix-executes-and-counts-before-tci")
+    .tciCorrectnessFallback,
+  true,
 );
 assert.equal(
   r7AvailableGeneratedOutputExecCases.find((entry) =>
@@ -4274,7 +4422,7 @@ console.log(JSON.stringify({
     fixtureCount: r7AvailableGeneratedOutputExecCases.length,
     fixtures: r7AvailableGeneratedOutputExecCases,
     generatedFixtures: r7AvailableGeneratedOutputExecCases.filter((entry) =>
-      entry.path === "generated").length,
+      entry.generatedExecuted > 0).length,
     compatFallbackFixtures: r7AvailableGeneratedOutputExecCases.filter(
       (entry) => entry.compatFallback).length,
   },
