@@ -2080,6 +2080,30 @@ run that reaches a weaker marker than normal multi-user readiness.
     TLB-miss/fault, unsupported, and invalidated outcomes, and has
     deterministic tests that prove each fail-closed case is classified
     precisely. This item must land before any new R4s browser preflight.
+    This item is intentionally split into reviewable safety slices after a
+    broad worker attempt did not produce a checkpoint:
+    - [ ] R4s5a - Separate the generated-status namespace from
+      `TCGWasm64RunExitReason`. DoD: live generated status constants use
+      values that cannot alias run-exit reasons; a single explicit mapper
+      converts generated statuses to run-exit reasons where needed;
+      classification no longer relies on numeric coincidence for dispatch,
+      exit, helper, unsupported, invalidated, MMIO, or TLB miss/fault; and
+      deterministic tests prove the namespace separation and mapper.
+    - [ ] R4s5b - Add C-side selected-body memory-operation validation before
+      live x86 SoftMMU execution. DoD: the live path can identify the
+      `MemOpIdx`/`MemOp`/`mmu_idx` for the selected generated-output memory
+      helpers it intends to run, rejects any unproven `oi`, unsupported size,
+      sign/endian/atomic/alignment/high flag, or unexpected `mmu_idx` before
+      inline RAM access, and deterministic tests prove the fail-closed
+      reasons.
+    - [ ] R4s5c - Wire a zero-initialized TLB mirror into live x86 generated
+      execution only after R4s5b proves the memory operation and `mmu_idx`.
+      DoD: `tcg_wasm64_live_generated_exec_try()` zero-initializes local TLB
+      mirror storage, refreshes it from the current CPU/env and proven
+      `mmu_idx`, assigns `context.tlb`, and deterministic tests prove missing,
+      invalid, stale, MMIO/slow-flag, page-crossing, permission, and
+      TLB-miss/fault exits are classified precisely without `qemu_ld` /
+      `qemu_st` helper calls on clean RAM hits.
 - [x] R7 - Dispatch available RISC-V generated output from the live wasm64
   run loop before TCI fallback. DoD: when live TB metadata reports
   `tcg_wasm64_translate_generated_output_available()` and the RV64
