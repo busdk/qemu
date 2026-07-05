@@ -1,0 +1,6 @@
+{
+  "format": "qemu-wasm-build-provenance-v1",
+  "configure_command": "emconfigure ./configure --cc='ccache emcc' --cxx='ccache em++' --disable-docs --static --cpu=wasm64 --disable-tools --enable-sdl --extra-cflags=-sUSE_SDL=2 --extra-ldflags=-sUSE_SDL=2 -Dtcg_wasm64_backend=true --target-list=riscv64-softmmu",
+  "build_command": "make -j8 qemu-system-riscv64.js qemu-system-riscv64.wasm",
+  "emscripten_sdk_version": "emsdk-4.0.10"
+}
