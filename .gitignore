@@ -22,3 +22,4 @@ GTAGS
 *.patch
 *.gcov
 tmp/
+.bus/services/workers
