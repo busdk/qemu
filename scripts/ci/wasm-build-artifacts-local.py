@@ -163,7 +163,10 @@ def shell_script(
     tree_reset = "true" if incremental else "rm -rf /tmp/src /tmp/build"
     if incremental:
         source_sync = """find /tmp/src -mindepth 1 -maxdepth 1 ! -name subprojects -exec rm -rf {} +
-tar -C /host-src --exclude=.git --exclude=build --exclude=build-wasm64-tci --exclude=tmp -cf - . | tar -C /tmp/src -xf -"""
+tar -C /host-src --exclude=.git --exclude=build --exclude=build-wasm64-tci --exclude=tmp -cf - . | tar -C /tmp/src -xf -
+# Tar preserves mtimes, which can make Ninja reuse stale objects when this
+# persistent build directory is shared by different worktrees or commits.
+find /tmp/src -type f \\( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.inc' -o -name '*.S' \\) ! -path '/tmp/src/subprojects/*' -exec touch {} +"""
         configure_step = f"""configure_stamp=/tmp/build/qemu-wasm-configure.sha256
 configure_hash={shlex.quote(configure_hash)}
 if [ -f "$configure_stamp" ] && [ "$(cat "$configure_stamp")" = "$configure_hash" ]; then

@@ -55,6 +55,8 @@ def test_default_docker_command():
             assert want in joined, joined
         assert "rm -rf /tmp/src /tmp/build" not in joined, joined
         assert "find /tmp/src -mindepth 1 -maxdepth 1 ! -name subprojects" in joined, joined
+        assert "-name '*.c' -o -name '*.cc' -o -name '*.cpp'" in joined, joined
+        assert "! -path '/tmp/src/subprojects/*' -exec touch {} +" in joined, joined
         assert "--exclude=tmp" in joined, joined
         assert "qemu-wasm-configure.sha256" in joined, joined
         assert "reusing QEMU wasm configure" in joined, joined
@@ -91,6 +93,7 @@ def test_no_incremental_docker_command():
         assert ":/tmp/build" not in joined, joined
         assert ":/tmp/src" not in joined, joined
         assert "rm -rf /tmp/src /tmp/build" in joined, joined
+        assert "-exec touch {} +" not in joined, joined
         assert "qemu-wasm-configure.sha256" not in joined, joined
 
 
