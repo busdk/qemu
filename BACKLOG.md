@@ -1788,3 +1788,20 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   showing measured guest crypto time replaced by WebCrypto-backed device
   time with a net workload/boot improvement, while the serial marker gate
   still passes; no Bus Engine product logic in upstream QEMU code.
+
+- [ ] Investigate load-dependent wasm64 OOB crash at $func20564 (ordinal
+  20222) - potential real product bug, not just CI noise:
+  Evidence 2026-07-05: identical artifact bytes produced 3x deterministic
+  FAIL (RuntimeError: memory access out of bounds, top frame $func20564,
+  code offset 0x13ba70f, ~27-30s in, before marker, no generated body
+  admitted) while concurrent Docker image builds loaded the 8-core/16GB
+  host, then PASS (marker 77s) with the host idle. Browser version ruled
+  out (HeadlessChrome/150.0.0.0 in both pass and fail JSONs). A crash -
+  rather than mere slowdown - under CPU pressure matters for the browser
+  boot product: end-user devices are slower and busier than this CI host.
+  Work: reproduce deliberately under controlled CPU pressure (e.g. gate run
+  concurrent with a scripted load generator), map ordinal 20222 to a source
+  function via the .symbols artifact, capture the fault with a
+  memory-growth/SAB/timing hypothesis matrix, fix the mechanism. Full
+  failing stacks saved in tmp/qemu-atomic-align-riscv64-determinism-3-cdp/
+  in the registered checkout of lane 2baea161.
