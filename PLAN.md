@@ -3865,6 +3865,122 @@ run that reaches a weaker marker than normal multi-user readiness.
     Therefore R4s22 should be batched with the direct-memory/multi-access
     all-or-nothing guard work instead of being run as a narrow MemOp-only
     browser experiment.
+    - [x] R4s22a - Fix and prove the x86 Emscripten artifact rebuild cache
+      before using rebuilt artifacts for the next comparison. Accepted
+      2026-07-05: QEMU commit `5d9ce37223` updates
+      `scripts/ci/wasm-build-artifacts-local.py` so persistent incremental
+      source trees refresh mtimes for compiled source/header/include/assembly
+      inputs after tar sync. This prevents Ninja from reusing stale objects
+      across different worktrees or commits while preserving ccache and
+      Emscripten cache speedups. The first broader touch attempt triggered a
+      Meson reconfigure outside `emconfigure`; the accepted fix deliberately
+      excludes subprojects and touches only compiled QEMU inputs. Checks:
+      `python3 scripts/ci/wasm-build-artifacts-local-test.py` and
+      `git diff --check`.
+
+      Fresh current-develop x86 backend rebuild command:
+      `python3 scripts/ci/wasm-build-artifacts-local.py --out
+      /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-current-develop-artifacts-5d9ce37-20260705
+      --target x86_64 --tcg-wasm64-backend --build-image --jobs 20
+      --build-dir
+      /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-wasm-build-x86
+      --ccache-dir
+      /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-wasm-ccache-x86
+      --em-cache-dir
+      /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-wasm-emcache-x86`.
+      Artifact hashes: `qemu-system-x86_64.js`
+      `102d16f1a46a52d67ce8629ce803e2acf5a0bc3f96f62247f410448f36de9d7d`,
+      `qemu-system-x86_64.wasm`
+      `1192f7a34314da68336b2d6f9dce13d8894d506fcf6b4c9c66049603a75a3303`,
+      manifest
+      `ec5d7b6a83da864d62d914480fb2834f12f4ee6f9b710ac64441c3cdf66b519d`.
+      The build reported about `79.85%` ccache hits on that run.
+
+      Bounded Chromium `149.0.7827.55` preflight wrote
+      `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-current-develop-preflight-5d9ce37-20260705/wasm-browser-smoke-preflight-result.json`
+      with SHA256
+      `116652a5199916bb0454c34041f2e8e28e5c9dfb823b420da645acc98762ad79`;
+      screenshot SHA256
+      `42417fb5b6face43d6acf98f2e5156b39de86e954f046ebb260a77cba7907da0`.
+      It timed out as expected at `60223` ms without page errors. Final
+      x86 generated coverage remained low at `10424 / 366409`
+      (`~2.84%`), with generated/fallback guest instructions
+      `10424 / 355985`, inline TLB-hit loads/stores `18382 / 27645`, and
+      helper/`qemu_ld`/`qemu_st` calls all zero. This validates the rebuild
+      path and current x86 attribution only; it is not an R4l speed pass.
+    - [x] R4s22b - Reject the clean x86 env-direct widening branch after
+      fixed-builder browser evidence. Branch
+      `qemu/x86-r4s22-envdirect-20260705` at commit `2b8034b01a` added
+      deterministic support for extra x86 env-direct fields and passed:
+      `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+      `node scripts/ci/wasm-generated-output-equivalence-test.mjs`,
+      the corresponding `node --check` commands, and `git diff --check`.
+      Its artifact build used the same ccache/Emscripten cache directories
+      and produced `qemu-system-x86_64.js`
+      `9229580905e63ea11bd61c13ef29e41de30165cd1b48205f0f5a3e34a090be6f`,
+      `qemu-system-x86_64.wasm`
+      `435ece3b53d9af208789be34e772967e6994a9ab5a473fa3c8916ef670ce8bd1`,
+      manifest
+      `62fb6bb8a9b27ccbf176458e2a45b9cd2d786ed45acad0270bb1d09eb5778d3e`.
+
+      The bounded Chromium preflight wrote
+      `/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4s22-envdirect-preflight-2b8034b-20260705/wasm-browser-smoke-preflight-result.json`
+      with SHA256
+      `b09c714b49fabedc26e09d480f0646fcdc3e61d91f33d20cd7f58dfd89402ab8`;
+      screenshot SHA256
+      `9237c708965e167e51a90300a8a8a7f828d4b5443c680651ab72356080a1f4a6`.
+      The browser reported `RuntimeError: operation does not support
+      unaligned accesses` around `2276` ms, before any periodic TCG summary
+      was emitted. This rejects the branch for promotion. The next x86 work
+      must not widen env-direct state writes from deterministic tests alone;
+      it must first isolate the precise unsafe generated access or keep those
+      fields fail-closed in browser proof.
+    - [ ] R4s23 - Apply the reusable RISC-V accelerator lessons to x86
+      through guarded x86 implementation slices, not by copying RISC-V timing
+      or promoting the rejected env-direct branch. DoD: start from current
+      `develop` and implement only the measured x86 blocker that can be made
+      generic and fail-closed: direct-memory/multi-access all-or-nothing
+      bodies, `MO_16` and alignment-checked ordinary load/store MemOps, or
+      precise MMIO/runtime-exit attribution. Before any browser run, add
+      deterministic fixtures proving guard-before-commit, no partial RAM/env
+      writes on later guard failure, zero helper/`qemu_ld`/`qemu_st` calls on
+      clean RAM hits, exact C/header-backed layout constants, and rejection
+      for unsafe atomics, unproven alignment, page crossing, MMIO, TLB
+      miss/fault, stale metadata, unsupported helper/control flow, and
+      unapproved x86 CPU state. Browser proof is limited to a bounded x86
+      Chromium preflight that reports generated coverage and the new blocker
+      distribution; R4l remains blocked until this materially raises x86
+      generated guest-instruction coverage.
+      Current crash-analysis input from the rejected env-direct branch:
+      the leading suspect is the newly admitted 64-bit direct env store to
+      `CPUX86State.segs[R_DS].base` at offset `0x188`, not the visible
+      rejected `st32 [r14+0x138]` tail in the result. Current `develop`
+      rejects both `st32 [r14+0x130]` and `st [r14+0x188]` and runs to a
+      clean timeout; the env-direct branch admits both and crashes after two
+      generated bodies. Therefore the first R4s23 implementation branch
+      should split this broad widening: keep `DS.base` direct env stores
+      fail-closed, test `hflags st32 @0x130` separately, and only re-enable
+      `DS.base st64 @0x188` after a field-specific deterministic fixture and
+      bounded Chromium proof. The proof command should include generated
+      trace flags so a successful body containing `st [r14+0x188]` can be
+      correlated with the early `RuntimeError` if it reproduces.
+
+      RISC-V parity review input: the shared accelerator mechanisms needed
+      by x86 are already present or partially present on `develop`:
+      `TCGWasm64RunContext`, `TCGWasm64RunCounters`,
+      `TCGWasm64RunExitReason`, translation metadata lookup/availability,
+      `tcg_wasm64_live_generated_exec_try()`, `tcg_wasm64_live_generated_exec_js`,
+      `TCGWasm64TLBMirror`, generic SoftMMU/TLB-hit lowering, deterministic
+      two-TB chaining fixtures, and invalidation token fixtures. The remaining
+      x86 gaps are target-specific coverage and correctness: broader but
+      field-exact env/direct memory support, all-or-nothing multi-access
+      direct-memory bodies, `MO_16`/signed/alignment MemOp handling, and
+      still-fail-closed x86 op/state families such as `movcond`, lazy CC,
+      segment, and helper-sensitive state. The first implementation branch
+      should therefore target measured R4s21c blockers with deterministic
+      fixtures for `SSS`, `SS`, `LS`, `SL`, `SSLS`, and `LSS` access orders,
+      especially `st [r14+0x100] size 8`, plus field-split tests for
+      `hflags st32 @0x130` and `DS.base st64 @0x188`.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline

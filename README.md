@@ -30,8 +30,13 @@ qemu-system-riscv64 TCG on an 8-core host):
   `docs/docs/research/wasm-store-commit-strategies.md` in the BusDK docs)
   and is being implemented. Goal: >=1.55x effective speedup for a sub-5-min
   browser boot (463.8s -> <300s); test-guest evidence when engaged: ~1.65x.
-- Developer loop: warm wasm rebuild of this fork 28-86s (ccache +
-  incremental + configure stamp).
+- x86_64 status: current fixed-cache backend artifacts build cleanly and a
+  bounded Chromium preflight reports generated coverage `10424 / 366409`
+  (~2.84%) with zero helper/`qemu_ld`/`qemu_st` calls on clean inline hits.
+  The next x86 work is coverage and safety, not a speed claim yet.
+- Developer loop: warm wasm rebuilds use workspace ccache, Emscripten cache,
+  and incremental build directories; the latest x86 rebuild reported ~80%
+  ccache hits after the source-mtime refresh fix.
 
 Numbers here are only ever updated from accepted, evidence-backed
 measurements (acceptance JSONs / marker gates), never projections.
