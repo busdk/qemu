@@ -441,6 +441,20 @@ evidence alone.  The next x86 implementation slice must keep unsafe fields
 fail-closed or prove exact browser-safe guard-before-commit behavior before
 another preflight.
 
+Follow-up crash analysis narrowed the safety rule further.  The V8 error is
+an atomic-alignment trap shape in static Emscripten-compiled QEMU code, while
+the dynamic generated live-exec path emits plain loads/stores for these
+direct env operations and already rejects guest atomic MemOps.  The likely
+failure mode is that generated execution published unsafe x86 CPU state and
+later static QEMU code hit an unaligned atomic path.  Segment-cache fields are
+not independent bytes: QEMU's x86 segment-load helper updates selector, base,
+limit, flags, and derived ``hflags`` together.  Raw direct env stores to
+``hflags``, ``segs[R_DS].base``, or adjacent segment-cache fields must remain
+fail-closed until that semantic update path is modeled.  The next x86 coverage
+work should prefer ordinary SoftMMU RAM paths such as ``MO_16``,
+alignment-checked RAM loads/stores, and all-or-nothing multi-access RAM
+guarding, while continuing to reject unproven atomic modes.
+
 Pre-R4i x86_64 one-TB fixture scaffold
 --------------------------------------
 

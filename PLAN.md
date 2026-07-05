@@ -3981,6 +3981,25 @@ run that reaches a weaker marker than normal multi-user readiness.
       fixtures for `SSS`, `SS`, `LS`, `SL`, `SSLS`, and `LSS` access orders,
       especially `st [r14+0x100] size 8`, plus field-split tests for
       `hflags st32 @0x130` and `DS.base st64 @0x188`.
+
+      Follow-up crash-analysis input: the Chromium
+      `operation does not support unaligned accesses` error is most likely a
+      WASM atomic-alignment trap in static Emscripten-compiled QEMU code after
+      generated execution published unsafe x86 CPU state, not a trap from the
+      dynamic generated plain load/store itself. `DS.base` is part of the
+      x86 segment-cache invariant: QEMU updates selector, base, limit, flags,
+      and derived `hflags` together through `cpu_x86_load_seg_cache()`.
+      Therefore raw direct env stores to `hflags`, `segs[R_DS].base`, or
+      adjacent segment-cache fields must stay rejected until a semantic
+      update path is modeled. Add negative regression fixtures for
+      `st32 [r14+0x130]`, `st [r14+0x188]`, `st32 [r14+0x138]`, and other
+      segment-cache raw stores before taking non-env coverage work. The next
+      coverage implementation should prefer ordinary SoftMMU RAM paths:
+      `MO_16`, explicit alignment-checked RAM loads/stores, and
+      multi-access all-or-nothing RAM/direct-memory guard work that never
+      commits RAM, env, register, counter, or dispatch state before every
+      later guard passes. Continue rejecting all `MO_ATOM_*` modes except the
+      already proven ordinary `MO_ATOM_NONE` subset.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline
