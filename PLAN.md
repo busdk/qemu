@@ -3719,7 +3719,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `segs[R_DS].selector` only after all guards pass. The no-commit after a
     later SoftMMU guard exit remains covered. Required deterministic checks
     passed again; no Chromium, R4l, or Bus Engine OS proof was run.
-  - [ ] R4s21c - Re-measure the x86 live blocker distribution after the next
+  - [x] R4s21c - Re-measure the x86 live blocker distribution after the next
     promoted env-relative direct-memory implementation. DoD: after the
     external x86 env-relative memory fix lands on QEMU `develop`, fetch and
     fast-forward to that commit, build fresh `x86_64-softmmu` backend
@@ -3741,6 +3741,89 @@ run that reaches a weaker marker than normal multi-user readiness.
     speed gate. If the blocker distribution moves to MemOp alignment, size,
     sign, or multi-access shapes, use this evidence to decide whether R4s22
     becomes the next x86 implementation item.
+
+    Accepted measurement 2026-07-05: QEMU commit
+    `3b63f0a2bd22267b7cbac11b8052d0620a2d81b0` adds deterministic x86
+    generated-output coverage for direct env loads in multi-access bodies.
+    Current `origin/develop` was fetched and still matched the base commit
+    `0035a23b91712fe11d29f45245e8086272ee243f`, so this branch was one
+    accepted test/evidence commit ahead of remote QEMU. Fresh
+    `x86_64-softmmu` backend artifacts were built with:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-wasm-artifacts-3b63f0a-20260705
+    --target x86_64 --tcg-wasm64-backend --build-image --jobs 10
+    --build-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-wasm-build-x86
+    --ccache-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-wasm-ccache-x86
+    --em-cache-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-wasm-emcache-x86`.
+    The QEMU Emscripten Docker image was rebuilt first because the local
+    `qemu/emsdk-wasm64-cross:latest` tag pointed at an upstream Emscripten
+    image without `ccache`; the rebuilt image was
+    `sha256:2ea96627f1b0e5badf3e2a67afab415f5980480165fc42cd86f5157ba37e5eac`.
+    The first ccache-backed x86 build populated the cache with no hits yet,
+    so future rebuilds should be the first meaningful cache-speed check.
+
+    Artifact hashes: `qemu-system-x86_64.js`
+    `102d16f1a46a52d67ce8629ce803e2acf5a0bc3f96f62247f410448f36de9d7d`,
+    `qemu-system-x86_64.wasm`
+    `1192f7a34314da68336b2d6f9dce13d8894d506fcf6b4c9c66049603a75a3303`,
+    artifact manifest `qemu-system-wasm-artifacts.json`
+    `ec5d7b6a83da864d62d914480fb2834f12f4ee6f9b710ac64441c3cdf66b519d`,
+    and `SHA256SUMS`
+    `8d8a2d448e91655fa1b65f3dc87e0a9be8c15302f08ae415acfd1a5760e98290`.
+
+    Bounded Chromium `149.0.7827.55` preflight command:
+    `npm exec --yes --package=playwright -- node
+    scripts/ci/wasm-browser-smoke-runner.mjs --browser chromium --artifact-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-wasm-artifacts-3b63f0a-20260705
+    --firmware-dir
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-rv64-parity-20260705/pc-bios
+    --guest-manifest
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4s8-guest-current/tuxboot-browser-smoke-guest.json
+    --out
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-preflight-3b63f0a-20260705/wasm-browser-smoke-preflight-result.json
+    --screenshot
+    /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-preflight-3b63f0a-20260705/wasm-browser-smoke-preflight.png
+    --port 8131 --timeout-ms 60000 --max-output-bytes 100000
+    --page-text-tail-bytes 100000 --wasm64-live-generated-exec
+    --wasm64-live-generated-exec-preflight
+    --wasm64-live-generated-exec-preflight-limit 100 --wasm64-tcg-summary
+    --wasm64-tcg-summary-interval 1000`.
+    Result JSON SHA-256
+    `0abba7cae8d95bb9efb16d536bac8d297e8fd6a39edfe9da318fb0d71d2da3c2`;
+    screenshot SHA-256
+    `42417fb5b6face43d6acf98f2e5156b39de86e954f046ebb260a77cba7907da0`.
+    The run timed out at `60223` ms without `QEMU_WASM_LINUX_BOOT_OK`, as
+    expected for this bounded preflight.
+
+    Final runloop metrics reported generated/fallback guest instructions
+    `10689 / 364866`, generated coverage `10689 / 375555`, attempts/
+    successes/rejects `37820 / 6383 / 31437`, skips `21825`, generated run
+    entries `6383`, generated guest instructions per entry `1`, inline
+    TLB-hit loads/stores `18849 / 28347`, helper/`qemu_ld`/`qemu_st` calls
+    `0 / 0 / 0`, compile/instantiate times `931850000 / 229225000` ns, TCI
+    dispatch time `2415746000` ns, and generated body time `1045365000` ns.
+    The top reject reasons were `selected-body-direct-memory-unsupported`
+    (`10986`), `selected-body-softmmu-multi-access-unsupported` (`8301`),
+    `mmio-exit` (`5328`), `selected-body-memop-unsupported-alignment`
+    (`2964`), `selected-body-memop-unsupported-size` (`2521`),
+    `unsupported-body-state` (`1189`), and
+    `selected-body-control-flow-unsupported` (`148`). Direct-memory
+    attribution showed the largest route is now
+    `multi-access-deferred-alias st base_reg=14 offset=256 size=8`, led by
+    SoftMMU orders `SSS` (`5491`), `SS` (`1633`), `LS` (`1339`), `SL`
+    (`1038`), `SSLS` (`889`), and `LSS` (`298`), while the remaining
+    immediate unsupported direct env field examples were `st [r14+0x188]`
+    size `8` and `st32 [r14+0x130]` size `4`, each at count `149`.
+
+    This accepts R4s21c as x86 attribution and rebuild evidence only. It does
+    not claim an R4l speed pass or a Bus Engine OS proof. Compared with
+    R4s21a, generated retirement increased from `2312 / 370535` to
+    `10689 / 375555`, but real generated coverage is still only about
+    `2.85%`; the next x86 implementation must therefore attack broad shape
+    coverage, not rerun a generic speed gate.
   - [ ] R4s22 - Expand supported x86 live SoftMMU MemOp families only after
     R4s19/R4s20 identify memory rejects as a remaining dominant blocker.
     DoD: admit alignment flags only with explicit QEMU-equivalent alignment
@@ -3755,11 +3838,12 @@ run that reaches a weaker marker than normal multi-user readiness.
     but not dominant (`selected-body-memop-unsupported-alignment=2436`,
     `selected-body-softmmu-multi-access-unsupported=2223`, size `256`,
     sign `126`), so this item is not the next speed-gate driver unless new
-    evidence changes that ordering. Fresh R4s20a evidence shows
-    `selected-body-memop-unsupported-alignment=2425`, size `223`, and sign
-    `51`, but `selected-body-direct-memory-unsupported=36313`; therefore this
-    item remains secondary until the dominant direct-memory blocker is
-    reduced or a new measurement changes the ordering.
+    evidence changes that ordering. Fresh R4s21c evidence after the x86
+    env-direct work shows alignment `2964` and size `2521` are now material,
+    but direct-memory `10986` and multi-access `8301` still outrank them.
+    Therefore R4s22 should be batched with the direct-memory/multi-access
+    all-or-nothing guard work instead of being run as a narrow MemOp-only
+    browser experiment.
 - [x] R6 - Inline RV64 generated-output SoftMMU TLB-hit RAM load/store
   fast paths in the load/store lowering region. DoD: common RV64
   `tci_qemu_ld_rrr` and `tci_qemu_st_rrr` RAM hits lower to guarded inline

@@ -298,6 +298,82 @@ performance blocker is low generated coverage, dominated in this run by
 alignment/multi-access rejects, module emission/validation failures, and
 unsupported ``movcond``.
 
+R4s21c x86_64 parity preflight after RISC-V accelerator work
+------------------------------------------------------------
+
+On 2026-07-05, the x86 lane was rechecked after the shared RISC-V
+``wasmjit_run()`` run/exit work and the promoted x86 env-direct lowering
+fixes.  The goal of this run was not a speed gate and not a Bus Engine OS
+proof.  It was a bounded x86 attribution pass to verify which parts of the
+RISC-V-shaped accelerator already apply to ``x86_64-softmmu`` and which x86
+shapes still block real coverage.
+
+QEMU commit ``3b63f0a2bd22267b7cbac11b8052d0620a2d81b0`` added deterministic
+x86 generated-output coverage for direct env loads in multi-access bodies.
+Fresh ``x86_64-softmmu`` backend artifacts were built with ccache and the
+backend gate enabled::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-wasm-artifacts-3b63f0a-20260705 \
+      --target x86_64 --tcg-wasm64-backend --build-image --jobs 10 \
+      --build-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-wasm-build-x86 \
+      --ccache-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-wasm-ccache-x86 \
+      --em-cache-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-wasm-emcache-x86
+
+Artifact hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``102d16f1a46a52d67ce8629ce803e2acf5a0bc3f96f62247f410448f36de9d7d``
+* ``qemu-system-x86_64.wasm`` =
+  ``1192f7a34314da68336b2d6f9dce13d8894d506fcf6b4c9c66049603a75a3303``
+* manifest =
+  ``ec5d7b6a83da864d62d914480fb2834f12f4ee6f9b710ac64441c3cdf66b519d``
+* ``SHA256SUMS`` =
+  ``8d8a2d448e91655fa1b65f3dc87e0a9be8c15302f08ae415acfd1a5760e98290``
+
+The bounded Chromium ``149.0.7827.55`` preflight used the existing x86
+TuxBoot manifest and these accelerator flags:
+``--wasm64-live-generated-exec``,
+``--wasm64-live-generated-exec-preflight``,
+``--wasm64-live-generated-exec-preflight-limit 100``, and
+``--wasm64-tcg-summary``.  Result JSON:
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-preflight-3b63f0a-20260705/wasm-browser-smoke-preflight-result.json``,
+SHA-256
+``0abba7cae8d95bb9efb16d536bac8d297e8fd6a39edfe9da318fb0d71d2da3c2``.
+The screenshot SHA-256 was
+``42417fb5b6face43d6acf98f2e5156b39de86e954f046ebb260a77cba7907da0``.
+The run timed out at ``60223`` ms without ``QEMU_WASM_LINUX_BOOT_OK``, as
+expected for this bounded attribution run.
+
+Final run-loop metrics reported generated/fallback guest instructions
+``10689 / 364866`` and generated coverage ``10689 / 375555``.  Attempts,
+successes, rejects, and skips were ``37820 / 6383 / 31437 / 21825``.  The
+generated path retired one guest instruction per generated run entry, but
+inline TLB-hit RAM loads/stores were helper-free at ``18849 / 28347`` with
+helper, ``qemu_ld``, and ``qemu_st`` calls all zero.  Compile and instantiate
+time were ``931850000`` ns and ``229225000`` ns; TCI dispatch and generated
+body time were ``2415746000`` ns and ``1045365000`` ns.
+
+The remaining x86 blockers are coverage blockers, not missing generic runtime
+plumbing.  The top reject reasons were
+``selected-body-direct-memory-unsupported`` (``10986``),
+``selected-body-softmmu-multi-access-unsupported`` (``8301``), ``mmio-exit``
+(``5328``), ``selected-body-memop-unsupported-alignment`` (``2964``),
+``selected-body-memop-unsupported-size`` (``2521``),
+``unsupported-body-state`` (``1189``), and
+``selected-body-control-flow-unsupported`` (``148``).  The largest
+direct-memory route is now ``multi-access-deferred-alias`` for
+``st [r14+0x100]`` with guarded SoftMMU orders such as ``SSS``, ``SS``,
+``LS``, ``SL``, ``SSLS``, and ``LSS``.
+
+Compared with R4s21a, real generated instruction retirement improved from
+``2312 / 370535`` to ``10689 / 375555``, but coverage is still only about
+``2.85%``.  This accepts the R4s21c rebuild and x86 attribution evidence only.
+The next x86 implementation must raise broad generated coverage by addressing
+multi-access guarded bodies, remaining direct env-memory routes, and measured
+MemOp alignment/size forms before any generic speed gate or Bus Engine OS
+browser proof is meaningful.
+
 Pre-R4i x86_64 one-TB fixture scaffold
 --------------------------------------
 
