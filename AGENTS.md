@@ -161,3 +161,12 @@ Authoritative, allowlist-sourced findings for this accelerator live under
   unless the address is provably aligned - fall back instead.
 - `riscv64-atomics-alignment.md` - RV64 A-extension atomics require natural
   alignment; only aligned guest atomics are safe to lower to WASM atomics.
+
+## README.md accelerator section
+
+README.md at the fork root carries a short description of the wasm
+accelerator with CURRENT REAL numbers (operator-requested 2026-07-05).
+Whenever a new measurement is ACCEPTED (browser/native marker tables,
+engagement/speedup gates, loop timings), update README.md in the same
+change set. Real measurements only - no projections; date-stamp the
+numbers section via the date command.
