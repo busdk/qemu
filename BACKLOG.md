@@ -1829,6 +1829,9 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   dirty-page checkpointing (pagehide budget is seconds - one-shot 512MB
   serialization is impossible), navigator.storage.persist() + eviction
   fallback to the shipped snapshot, atomic RAM+disk-overlay checkpoint
-  pairs, Web Locks single-instance handling for multi-tab, entropy reseed
-  on EVERY resume. Design investigation assigned to worker 3e0a591d;
+  pairs, entropy reseed on EVERY resume, and (operator) SHARED-INSTANCE multi-tab:
+  the user boots/restores ONCE and every tab attaches to the same running
+  VM as a view - candidate architectures: SharedWorker-hosted VM (tabs as
+  MessagePort clients; verify SAB/COOP/COEP compat) vs Web-Locks leader
+  election with checkpoint handoff on leader close. Design investigation assigned to worker 3e0a591d;
   accelerator work remains top priority per operator.
