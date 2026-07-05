@@ -1762,3 +1762,29 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   2D display output and deterministic keyboard input while the default
   serial-console marker remains a passing regression gate.
 - [x] No Bus Engine product logic is added to upstream QEMU code.
+
+- [ ] WebCrypto-backed virtio-crypto (cryptodev) slice - gated on offloadable
+  crypto trace evidence:
+  Status 2026-07-05: guest side is already ready (Bus Engine OS riscv64
+  kernel carries CONFIG_CRYPTO_DEV_VIRTIO=y) but no QEMU invocation attaches
+  a virtio-crypto device, so the path is unused end to end. The first
+  trace-backed crypto stall appeared in the NATIVE boot gate: first-boot
+  OpenSSH RSA host-key generation blocks multi-user.target for >100s under
+  TCG (serial log shows crng init done early, so entropy is ruled out; this
+  is raw CPU cost). That specific class CANNOT be fixed by virtio-crypto:
+  the AKCIPHER service offloads encrypt/decrypt/sign/verify with provided
+  keys - RSA keypair generation (prime search) is not an offloadable
+  operation - and ssh-keygen is userspace OpenSSL, which never enters the
+  kernel crypto API by default. Chosen fix for the boot stall lives in Bus
+  Engine OS instead: ed25519-only host keys plus non-blocking keygen
+  ordering, which carries over to the browser boot automatically.
+  Implement this slice only when an attribution run shows guest crypto time
+  that IS offloadable: kernel crypto consumers (kTLS, dm-crypt/fscrypt) or
+  userspace deliberately routed through AF_ALG/an OpenSSL provider in the
+  image profile. Design sketch when triggered: QEMU cryptodev backend
+  bridging to browser SubtleCrypto (async Promise completion maps cleanly to
+  virtio used-ring completion); SubtleCrypto covers AES/SHA/HMAC/RSA/ECDSA
+  and Ed25519 sign/verify in current browsers. DoD: a perf-attribution run
+  showing measured guest crypto time replaced by WebCrypto-backed device
+  time with a net workload/boot improvement, while the serial marker gate
+  still passes; no Bus Engine product logic in upstream QEMU code.
