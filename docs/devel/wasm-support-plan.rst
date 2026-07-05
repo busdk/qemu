@@ -374,6 +374,87 @@ multi-access guarded bodies, remaining direct env-memory routes, and measured
 MemOp alignment/size forms before any generic speed gate or Bus Engine OS
 browser proof is meaningful.
 
+Current x86_64 fixed-cache rebuild and env-direct rejection
+-----------------------------------------------------------
+
+On 2026-07-05, the local artifact builder was fixed so persistent incremental
+source trees refresh mtimes for compiled source/header/include/assembly inputs
+after tar sync.  This prevents Ninja from reusing stale objects when the same
+workspace build directory is reused across commits or worktrees, while keeping
+the ccache and Emscripten cache speedups.  The accepted QEMU commit is
+``5d9ce37223``.  Checks passed:
+``python3 scripts/ci/wasm-build-artifacts-local-test.py`` and
+``git diff --check``.
+
+A fresh current-develop ``x86_64-softmmu`` backend artifact was built with
+the warmed workspace caches::
+
+  python3 scripts/ci/wasm-build-artifacts-local.py \
+      --out /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-current-develop-artifacts-5d9ce37-20260705 \
+      --target x86_64 --tcg-wasm64-backend --build-image --jobs 20 \
+      --build-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-wasm-build-x86 \
+      --ccache-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-wasm-ccache-x86 \
+      --em-cache-dir /home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-wasm-emcache-x86
+
+Artifact hashes:
+
+* ``qemu-system-x86_64.js`` =
+  ``102d16f1a46a52d67ce8629ce803e2acf5a0bc3f96f62247f410448f36de9d7d``
+* ``qemu-system-x86_64.wasm`` =
+  ``1192f7a34314da68336b2d6f9dce13d8894d506fcf6b4c9c66049603a75a3303``
+* manifest =
+  ``ec5d7b6a83da864d62d914480fb2834f12f4ee6f9b710ac64441c3cdf66b519d``
+
+The build reported about ``79.85%`` ccache hits.  A bounded Chromium
+``149.0.7827.55`` preflight wrote
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-current-develop-preflight-5d9ce37-20260705/wasm-browser-smoke-preflight-result.json``
+with SHA-256
+``116652a5199916bb0454c34041f2e8e28e5c9dfb823b420da645acc98762ad79``.
+The screenshot SHA-256 was
+``42417fb5b6face43d6acf98f2e5156b39de86e954f046ebb260a77cba7907da0``.
+The run timed out at ``60223`` ms without page errors.  Final x86 generated
+coverage was still low at ``10424 / 366409`` (about ``2.84%``), with
+generated/fallback guest instructions ``10424 / 355985``, inline TLB-hit
+loads/stores ``18382 / 27645``, and zero helper, ``qemu_ld``, or
+``qemu_st`` calls.
+
+An isolated x86 env-direct widening branch
+``qemu/x86-r4s22-envdirect-20260705`` at commit ``2b8034b01a`` passed the
+deterministic metadata and generated-output tests, but it is rejected for
+promotion.  Its fresh artifact produced:
+
+* ``qemu-system-x86_64.js`` =
+  ``9229580905e63ea11bd61c13ef29e41de30165cd1b48205f0f5a3e34a090be6f``
+* ``qemu-system-x86_64.wasm`` =
+  ``435ece3b53d9af208789be34e772967e6994a9ab5a473fa3c8916ef670ce8bd1``
+* manifest =
+  ``62fb6bb8a9b27ccbf176458e2a45b9cd2d786ed45acad0270bb1d09eb5778d3e``
+
+The bounded Chromium preflight wrote
+``/home/coding-agent/coding-agent/git/busdk/agent-supervisor/tmp/qemu-x86-r4s22-envdirect-preflight-2b8034b-20260705/wasm-browser-smoke-preflight-result.json``
+with SHA-256
+``b09c714b49fabedc26e09d480f0646fcdc3e61d91f33d20cd7f58dfd89402ab8``.
+The browser raised ``RuntimeError: operation does not support unaligned
+accesses`` around ``2276`` ms, before any periodic TCG summary was emitted.
+Therefore x86 env-direct state writes must not be widened from deterministic
+evidence alone.  The next x86 implementation slice must keep unsafe fields
+fail-closed or prove exact browser-safe guard-before-commit behavior before
+another preflight.
+
+Follow-up crash analysis narrowed the safety rule further.  The V8 error is
+an atomic-alignment trap shape in static Emscripten-compiled QEMU code, while
+the dynamic generated live-exec path emits plain loads/stores for these
+direct env operations and already rejects guest atomic MemOps.  The likely
+failure mode is that generated execution published unsafe x86 CPU state and
+later static QEMU code hit an unaligned atomic path.  Segment-cache fields are
+not independent bytes: QEMU's x86 segment-load helper updates selector, base,
+limit, flags, and derived ``hflags`` together.  Raw direct env stores to
+``hflags``, ``segs[R_DS].base``, or adjacent segment-cache fields must remain
+fail-closed until that semantic update path is modeled.  The next x86 coverage
+work should prefer ordinary SoftMMU RAM paths such as ``MO_16``,
+alignment-checked RAM loads/stores, and all-or-nothing multi-access RAM
+guarding, while continuing to reject unproven atomic modes.
+
 Pre-R4i x86_64 one-TB fixture scaffold
 --------------------------------------
 
