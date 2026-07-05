@@ -61,6 +61,27 @@ shortcuts whose correctness depends on the Bus Engine OS image rather than on
 generic translated operations, generic SoftMMU/TLB state, and documented
 synthetic exits/fallback.
 
+## Supervisor evidence reconcile - 2026-07-05 18:25 EEST
+
+Accepted riscv64-environment evidence recorded (per the evidence-recording
+DoD item; the browser-readiness DoD itself remains honestly UNCHECKED
+because it requires multi-user readiness within 300000 ms and the measured
+run is 463843 ms - closing that gap IS the active goal):
+
+- Real accepted Bus Engine OS riscv64 image (kernel Image sha256 12404d4d...,
+  rootfs.raw sha256 21e75cd4..., acceptance status=accepted-evidence,
+  beo-image-g2-20260705n) boots IN CHROME to multi-user heartbeat-ready at
+  463.8s unaccelerated (native 63s, 7.36x); per-marker: kernel 9.1s/2.0s
+  (4.56x), network-online 427.3s/32.0s (13.35x). Result JSONs:
+  tmp/browser-hosted-riscv64-g3-marker-*.json in the image lane worktree.
+- Native boot after guest-side hwdb bake candidate: multi-user 14.4s
+  (validated); browser re-measure pending.
+- Store-commit design settled by verified spec research:
+  BusDK docs/docs/research/wasm-store-commit-strategies.md; engagement
+  proven at generated_run_entries=10 under load+store admission.
+- Fork README.md now carries the current-measured-numbers summary
+  (update rule in AGENTS.md).
+
 ## Exact Definition of Done
 
 The current executor lane is done only when all of the following are true for
