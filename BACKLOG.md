@@ -1823,5 +1823,12 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   question: can native qemu-system-riscv64 (same fork commit, same machine
   config) produce a migration stream the wasm build restores, or must the
   snapshot be produced by the wasm build itself (deterministic but slower
-  bake step). Design investigation assigned to worker 3e0a591d; accelerator
-  work remains top priority per operator.
+  bake step). Extension (operator): suspend/resume is the browser DEFAULT lifecycle -
+  boot once at bake time, restore on first visit, auto-suspend to OPFS on
+  page close, resume the user's own state on every return. Adds: continuous
+  dirty-page checkpointing (pagehide budget is seconds - one-shot 512MB
+  serialization is impossible), navigator.storage.persist() + eviction
+  fallback to the shipped snapshot, atomic RAM+disk-overlay checkpoint
+  pairs, Web Locks single-instance handling for multi-tab, entropy reseed
+  on EVERY resume. Design investigation assigned to worker 3e0a591d;
+  accelerator work remains top priority per operator.
