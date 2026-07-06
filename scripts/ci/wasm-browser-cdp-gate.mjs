@@ -10,6 +10,8 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 
+import { installSignalCleanup } from "./wasm-playwright-loader.mjs";
+
 const DEFAULT_CHROME_PATHS = [
   process.env.QEMU_WASM_CHROMIUM_EXECUTABLE,
   process.env.QEMU_WASM_BROWSER_EXECUTABLE,
@@ -310,6 +312,24 @@ function smokeUrl(options) {
   return url.href;
 }
 
+async function stopProcess(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+  child.kill("SIGTERM");
+  await new Promise((resolveDone) => {
+    child.once("exit", resolveDone);
+    setTimeout(resolveDone, 1000);
+  });
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGKILL");
+    await new Promise((resolveDone) => {
+      child.once("exit", resolveDone);
+      setTimeout(resolveDone, 1000);
+    });
+  }
+}
+
 async function cdpEval(cdp, expression) {
   const result = await cdp.send("Runtime.evaluate", {
     expression,
@@ -365,11 +385,25 @@ async function main() {
   });
   server.stdout.on("data", lineBuffer("[server] "));
   server.stderr.on("data", lineBuffer("[server] "));
+  let chrome = null;
+  let cdp = null;
+  const cleanup = async () => {
+    if (cdp !== null) {
+      cdp.close();
+      cdp = null;
+    }
+    await stopProcess(chrome);
+    chrome = null;
+    await stopProcess(server);
+  };
+  const uninstallSignalCleanup = installSignalCleanup(cleanup);
+
+  try {
   await waitForHttp(`http://${options.host}:${options.port}/wasm-browser-smoke.html`, 10000);
 
   const userDataDir = resolve(dirname(options.out), "chrome-profile");
   await mkdir(userDataDir, { recursive: true });
-  const chrome = spawn(options.chrome, [
+  chrome = spawn(options.chrome, [
     "--headless=new",
     `--remote-debugging-port=${options.cdpPort}`,
     `--user-data-dir=${userDataDir}`,
@@ -396,7 +430,7 @@ async function main() {
     ws.addEventListener("open", resolveOpen, { once: true });
     ws.addEventListener("error", rejectOpen, { once: true });
   });
-  const cdp = new CdpSession(ws);
+  cdp = new CdpSession(ws);
   await cdp.send("Runtime.enable");
   await cdp.send("Page.enable");
 
@@ -475,9 +509,6 @@ async function main() {
     smokeState: finalState,
   };
   await writeFile(options.out, JSON.stringify(result, null, 2));
-  cdp.close();
-  chrome.kill("SIGTERM");
-  server.kill("SIGTERM");
   console.log(JSON.stringify({
     outPath: options.out,
     markerSeen: result.markerSeen,
@@ -491,7 +522,11 @@ async function main() {
     guestLastLine: result.guestLastLine,
   }, null, 2));
   if (!result.success) {
-    process.exit(1);
+    process.exitCode = 1;
+  }
+  } finally {
+    uninstallSignalCleanup();
+    await cleanup();
   }
 }
 

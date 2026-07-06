@@ -77,3 +77,102 @@ export function playwrightLaunchOptions(browserName, env = process.env) {
   }
   return options;
 }
+
+function signalExitCode(signal) {
+  switch (signal) {
+  case "SIGHUP":
+    return 129;
+  case "SIGINT":
+    return 130;
+  case "SIGTERM":
+    return 143;
+  default:
+    return 1;
+  }
+}
+
+async function runWithTimeout(label, fn, timeoutMs) {
+  let timer = null;
+  try {
+    await Promise.race([
+      Promise.resolve().then(fn),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs} ms`));
+        }, timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+  } catch (error) {
+    console.error(`qemu-wasm-playwright: ${label}: ${error && error.message ? error.message : String(error)}`);
+  } finally {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+function browserProcess(browser) {
+  try {
+    return browser && typeof browser.process === "function" ? browser.process() : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function closePlaywrightBrowser({ browser = null, context = null } = {}, options = {}) {
+  const closeTimeoutMs = options.closeTimeoutMs ?? 5000;
+  const browserForProcess = browser || (context && typeof context.browser === "function"
+    ? context.browser()
+    : null);
+  const child = browserProcess(browserForProcess);
+  if (context !== null) {
+    await runWithTimeout("browser context cleanup", () => context.close(), closeTimeoutMs);
+  } else if (browser !== null) {
+    await runWithTimeout("browser cleanup", () => browser.close(), closeTimeoutMs);
+  }
+  if (child !== null && child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGTERM");
+    const hardKill = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+      }
+    }, options.killTimeoutMs ?? 2000);
+    hardKill.unref?.();
+  }
+}
+
+export function installSignalCleanup(cleanup, options = {}) {
+  const signals = options.signals || ["SIGHUP", "SIGINT", "SIGTERM"];
+  const forceExitMs = options.forceExitMs ?? 10000;
+  let cleaning = false;
+  const handlers = new Map();
+  for (const signal of signals) {
+    const handler = () => {
+      if (cleaning) {
+        return;
+      }
+      cleaning = true;
+      const forceExit = setTimeout(() => {
+        process.exit(signalExitCode(signal));
+      }, forceExitMs);
+      forceExit.unref?.();
+      Promise.resolve()
+        .then(() => cleanup(signal))
+        .catch((error) => {
+          console.error(`qemu-wasm-playwright: cleanup after ${signal} failed: ${error && error.stack ? error.stack : String(error)}`);
+        })
+        .finally(() => {
+          clearTimeout(forceExit);
+          process.exit(signalExitCode(signal));
+        });
+    };
+    handlers.set(signal, handler);
+    process.once(signal, handler);
+  }
+  return () => {
+    for (const [signal, handler] of handlers) {
+      process.removeListener(signal, handler);
+    }
+  };
+}

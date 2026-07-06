@@ -13,6 +13,8 @@ import { delimiter, join } from "node:path";
 import {
   browserExecutableEnvName,
   browserExecutablePath,
+  closePlaywrightBrowser,
+  installSignalCleanup,
   loadPlaywrightPackage,
   playwrightLaunchOptions,
 } from "./wasm-playwright-loader.mjs";
@@ -73,8 +75,46 @@ function testLaunchOptions() {
   });
 }
 
+async function testClosePlaywrightBrowserTerminatesBrowserProcess() {
+  const signals = [];
+  const child = {
+    exitCode: null,
+    signalCode: null,
+    killed: false,
+    kill(signal) {
+      signals.push(signal);
+      this.killed = true;
+    },
+  };
+  let closed = false;
+  const browser = {
+    process() {
+      return child;
+    },
+    async close() {
+      closed = true;
+    },
+  };
+  await closePlaywrightBrowser({ browser }, { killTimeoutMs: 10 });
+  assert.equal(closed, true);
+  assert.deepEqual(signals, ["SIGTERM"]);
+}
+
+function testInstallSignalCleanupCanBeUnregistered() {
+  const before = process.listenerCount("SIGTERM");
+  const unregister = installSignalCleanup(async () => {}, {
+    signals: ["SIGTERM"],
+    forceExitMs: 10,
+  });
+  assert.equal(process.listenerCount("SIGTERM"), before + 1);
+  unregister();
+  assert.equal(process.listenerCount("SIGTERM"), before);
+}
+
 testLoadsPlaywrightFromNpmExecPath();
 testBrowserExecutableEnvNames();
 testBrowserExecutableSelection();
 testLaunchOptions();
+await testClosePlaywrightBrowserTerminatesBrowserProcess();
+testInstallSignalCleanupCanBeUnregistered();
 console.log("wasm-playwright-loader-test: ok");

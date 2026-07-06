@@ -12,6 +12,8 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import {
+  closePlaywrightBrowser,
+  installSignalCleanup,
   loadPlaywrightBrowser,
   playwrightLaunchOptions,
 } from "./wasm-playwright-loader.mjs";
@@ -235,22 +237,38 @@ async function run() {
   }
 
   const browserType = await loadPlaywright(options.browser);
-  const server = await startServer(options);
+  let server = null;
+  let context = null;
   const temporaryUserDataDir = options.userDataDir === null;
   const userDataDir = options.userDataDir || await mkdtemp(join(tmpdir(), "qemu-wasm-opfs-"));
   let browserVersion = "unknown";
+  let removedUserDataDir = false;
+  const cleanup = async () => {
+    await closePlaywrightBrowser({ context });
+    context = null;
+    await stopServer(server);
+    server = null;
+    if (temporaryUserDataDir && !removedUserDataDir) {
+      removedUserDataDir = true;
+      await rm(userDataDir, { recursive: true, force: true });
+    }
+  };
+  const uninstallSignalCleanup = installSignalCleanup(cleanup);
 
   try {
-    let context = await launchPersistentContext(browserType, options, userDataDir);
+    server = await startServer(options);
+    context = await launchPersistentContext(browserType, options, userDataDir);
     browserVersion = context.browser() ? context.browser().version() : browserVersion;
     const initial = await runPageProbe(context, options, "write-read");
     const reload = await runPageProbe(context, options, "read-existing");
     await context.close();
+    context = null;
 
     context = await launchPersistentContext(browserType, options, userDataDir);
     browserVersion = context.browser() ? context.browser().version() : browserVersion;
     const browserRestart = await runPageProbe(context, options, "read-existing");
     await context.close();
+    context = null;
 
     const result = annotateResult(
       {
@@ -275,10 +293,8 @@ async function run() {
     console.error(error && error.stack ? error.stack : String(error));
     throw error;
   } finally {
-    await stopServer(server);
-    if (temporaryUserDataDir) {
-      await rm(userDataDir, { recursive: true, force: true });
-    }
+    uninstallSignalCleanup();
+    await cleanup();
   }
 }
 

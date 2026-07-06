@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url";
 
 import { applyGuestManifest } from "./wasm-guest-manifest.mjs";
 import {
+  closePlaywrightBrowser,
+  installSignalCleanup,
   loadPlaywrightBrowser,
   playwrightLaunchOptions,
 } from "./wasm-playwright-loader.mjs";
@@ -2110,14 +2112,31 @@ async function run() {
     throw error;
   }
   const browserType = await loadPlaywright(options.browser);
-  const server = await startServer(options);
-  const launchOptions = playwrightLaunchOptions(options.browser);
-  const context = options.userDataDir === null
-    ? null
-    : await browserType.launchPersistentContext(options.userDataDir, launchOptions);
-  const browser = context === null
-    ? await browserType.launch(launchOptions)
-    : context.browser();
+  let server = null;
+  let context = null;
+  let browser = null;
+  const cleanup = async () => {
+    await closePlaywrightBrowser({ browser, context });
+    browser = null;
+    context = null;
+    await stopServer(server);
+    server = null;
+  };
+  const uninstallSignalCleanup = installSignalCleanup(cleanup);
+  try {
+    server = await startServer(options);
+    const launchOptions = playwrightLaunchOptions(options.browser);
+    context = options.userDataDir === null
+      ? null
+      : await browserType.launchPersistentContext(options.userDataDir, launchOptions);
+    browser = context === null
+      ? await browserType.launch(launchOptions)
+      : context.browser();
+  } catch (error) {
+    uninstallSignalCleanup();
+    await cleanup();
+    throw error;
+  }
   const startTime = Date.now();
   const result = initialSmokeResult(options, browser ? browser.version() : "unknown");
   let page = null;
@@ -2279,12 +2298,8 @@ async function run() {
     console.error(error && error.stack ? error.stack : String(error));
     throw error;
   } finally {
-    if (context !== null) {
-      await context.close();
-    } else if (browser !== null) {
-      await browser.close();
-    }
-    await stopServer(server);
+    uninstallSignalCleanup();
+    await cleanup();
   }
 }
 

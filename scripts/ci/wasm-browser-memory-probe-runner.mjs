@@ -11,6 +11,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  closePlaywrightBrowser,
+  installSignalCleanup,
   loadPlaywrightBrowser,
   playwrightLaunchOptions,
 } from "./wasm-playwright-loader.mjs";
@@ -180,8 +182,23 @@ async function stopServer(child) {
 async function run() {
   const options = parseArgs(process.argv.slice(2));
   const browserType = await loadPlaywright(options.browser);
-  const server = await startServer(options);
-  const browser = await browserType.launch(playwrightLaunchOptions(options.browser));
+  let server = null;
+  let browser = null;
+  const cleanup = async () => {
+    await closePlaywrightBrowser({ browser });
+    browser = null;
+    await stopServer(server);
+    server = null;
+  };
+  const uninstallSignalCleanup = installSignalCleanup(cleanup);
+  try {
+    server = await startServer(options);
+    browser = await browserType.launch(playwrightLaunchOptions(options.browser));
+  } catch (error) {
+    uninstallSignalCleanup();
+    await cleanup();
+    throw error;
+  }
   try {
     const page = await browser.newPage();
     page.on("console", (message) => {
@@ -219,8 +236,8 @@ async function run() {
     console.error(error && error.stack ? error.stack : String(error));
     throw error;
   } finally {
-    await browser.close();
-    await stopServer(server);
+    uninstallSignalCleanup();
+    await cleanup();
   }
 }
 

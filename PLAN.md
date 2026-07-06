@@ -111,6 +111,14 @@ Accepted QEMU build-environment evidence recorded:
   use `pageErrors`, `requestFailures`, and the normal result error fields.
   Focused verification:
   `node scripts/ci/wasm-browser-smoke-args-test.mjs`.
+- [x] Make browser proof runners close their Playwright/CDP browser resources,
+  smoke servers, temporary profiles, and spawned child smoke runners on normal
+  exit, failure, or `SIGHUP`/`SIGINT`/`SIGTERM`. Added after two local
+  Playwright browser families were found consuming roughly 190% CPU each after
+  interrupted Bus Engine OS browser proofs. Focused verification on 07-07
+  01:07: `node scripts/ci/wasm-playwright-loader-test.mjs`, `node
+  scripts/ci/wasm-browser-smoke-runner-test.mjs`, `node --check` on the
+  modified browser runner scripts, and `git diff --check`.
 
 ## Exact Definition of Done
 

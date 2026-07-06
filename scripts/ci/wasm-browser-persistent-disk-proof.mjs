@@ -12,6 +12,8 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
+import { installSignalCleanup } from "./wasm-playwright-loader.mjs";
+
 const THIS_FILE = fileURLToPath(import.meta.url);
 
 function usage(status) {
@@ -143,12 +145,36 @@ async function sha256File(path) {
   return hash.digest("hex");
 }
 
-async function runCommand(argv) {
+async function stopChild(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+  child.kill("SIGTERM");
+  await new Promise((resolveDone) => {
+    child.once("exit", resolveDone);
+    setTimeout(resolveDone, 1000);
+  });
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGKILL");
+    await new Promise((resolveDone) => {
+      child.once("exit", resolveDone);
+      setTimeout(resolveDone, 1000);
+    });
+  }
+}
+
+async function runCommand(argv, activeChild = null) {
   return new Promise((resolveCommand, rejectCommand) => {
     const child = spawn(process.execPath, argv, {
       stdio: ["ignore", "inherit", "inherit"],
     });
+    if (activeChild !== null) {
+      activeChild.child = child;
+    }
     child.on("exit", (code, signal) => {
+      if (activeChild !== null && activeChild.child === child) {
+        activeChild.child = null;
+      }
       if (code === 0) {
         resolveCommand();
       } else {
@@ -165,7 +191,7 @@ function runOutputPath(baseOut, phase) {
   return `${baseOut}.${phase}.json`;
 }
 
-async function runSmokePhase(options, phase, initrd, userDataDir, out) {
+async function runSmokePhase(options, phase, initrd, userDataDir, out, activeChild = null) {
   const scriptDir = dirname(fileURLToPath(import.meta.url));
   const runner = resolve(scriptDir, "wasm-browser-smoke-runner.mjs");
   const expectedText = phase === "write"
@@ -192,7 +218,7 @@ async function runSmokePhase(options, phase, initrd, userDataDir, out) {
     "--user-data-dir", userDataDir,
     "--expect-text", expectedText,
   ];
-  await runCommand(argv);
+  await runCommand(argv, activeChild);
   return JSON.parse(await readFile(out, "utf8"));
 }
 
@@ -228,10 +254,21 @@ async function run() {
   const writeOut = runOutputPath(options.out, "write");
   const verifyOut = runOutputPath(options.out, "verify");
   const rootfsBefore = await sha256File(options.rootfs);
+  const activeChild = { child: null };
+  let removedUserDataDir = false;
+  const cleanup = async () => {
+    await stopChild(activeChild.child);
+    activeChild.child = null;
+    if (temporaryUserDataDir && !removedUserDataDir) {
+      removedUserDataDir = true;
+      await rm(userDataDir, { recursive: true, force: true });
+    }
+  };
+  const uninstallSignalCleanup = installSignalCleanup(cleanup);
 
   try {
-    const write = await runSmokePhase(options, "write", options.writeInitrd, userDataDir, writeOut);
-    const verify = await runSmokePhase(options, "verify", options.verifyInitrd, userDataDir, verifyOut);
+    const write = await runSmokePhase(options, "write", options.writeInitrd, userDataDir, writeOut, activeChild);
+    const verify = await runSmokePhase(options, "verify", options.verifyInitrd, userDataDir, verifyOut, activeChild);
     const rootfsAfter = await sha256File(options.rootfs);
     const result = {
       format: 1,
@@ -261,9 +298,8 @@ async function run() {
       process.exitCode = 1;
     }
   } finally {
-    if (temporaryUserDataDir) {
-      await rm(userDataDir, { recursive: true, force: true });
-    }
+    uninstallSignalCleanup();
+    await cleanup();
   }
 }
 
