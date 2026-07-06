@@ -141,6 +141,17 @@ run that reaches a weaker marker than normal multi-user readiness.
 
 ## Active Work Items
 
+- [ ] R1f - Treat the Bus Engine OS page readiness status as a runner
+  success instead of a post-marker failure. DoD: when the browser page status
+  reaches `Bus Engine OS is ready`, the runner exits zero, writes a success
+  result JSON, and preserves the existing exact `marker reached: ...` success
+  path for generic smoke guests; regression tests cover both accepted status
+  strings and a negative status. Added 2026-07-06 22:36 EEST after a corrected
+  Bus Engine OS heartbeat-marker proof wrote `phase=success`,
+  `elapsedMs=397700`, and `lastLine=bus-engine-os-heartbeat: seq=10
+  event=ready state=multi-user`, but the process exited `1` because the
+  runner threw `Bus Engine OS is ready` after the wait predicate had already
+  accepted it.
 - [x] R1e - Make the browser smoke runner consume browser-hosted manifests
   directly before spending more Bus Engine OS proof runs. DoD:
   `--guest-manifest` accepts the nested browser-hosted manifest shape emitted
