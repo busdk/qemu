@@ -1837,7 +1837,7 @@ async function run() {
     mounts.push({
       optional: true,
       path: `/firmware/${name}`,
-      url: `/firmware/${name}`,
+      url: `firmware/${name}`,
     });
   }
   if (config.initrd) {

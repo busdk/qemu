@@ -84,6 +84,8 @@ assert.match(
   browserSmokeSource,
   /QEMU_WASM64_LIVE_GENERATED_EXEC_PREFLIGHT_LIMIT/,
 );
+assert.match(browserSmokeSource, /url: `firmware\/\$\{name\}`/);
+assert.doesNotMatch(browserSmokeSource, /url: `\/firmware\/\$\{name\}`/);
 assert.match(
   browserSmokeSource,
   /config\.tciProgress \|\|\s*config\.tciWasmGeneratedTrace \|\|\s*config\.wasm64RunloopSmoke \|\|\s*config\.wasm64OneTbDifferential \|\|\s*config\.wasm64LiveOneTbDifferential \|\|\s*config\.wasm64LiveTbCoverage \|\|\s*config\.wasm64LiveGeneratedExec \|\|\s*config\.wasm64LiveGeneratedExecPreflight \|\|\s*config\.wasm64TcgSummary/,
