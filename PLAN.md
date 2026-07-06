@@ -82,6 +82,24 @@ run is 463843 ms - closing that gap IS the active goal):
 - Fork README.md now carries the current-measured-numbers summary
   (update rule in AGENTS.md).
 
+## Supervisor evidence reconcile - 2026-07-06 17:28 EEST
+
+Accepted QEMU build-environment evidence recorded:
+
+- `aeb202fa2d` removes mutable `latest` Docker tags from the local WASM build
+  path. Default artifact builds now use
+  `qemu/emsdk-wasm64-cross:emsdk-4.0.10`, the Docker Makefile emits the same
+  versioned tag, and the Python test container uses `fedora:43`.
+- Verification passed with
+  `python3 scripts/ci/wasm-build-artifacts-local-test.py`, a Docker-image
+  dry-run showing `-t qemu/emsdk-wasm64-cross:emsdk-4.0.10`, a scoped search
+  with no remaining `:latest` references in the touched QEMU build paths, and
+  `git diff --check`.
+- The real local builder image rebuild for
+  `qemu/emsdk-wasm64-cross:emsdk-4.0.10` is currently running and is tracked
+  in the supervisor status file; this plan entry records the accepted source
+  change, not the completed image build.
+
 ## Exact Definition of Done
 
 The current executor lane is done only when all of the following are true for
@@ -784,6 +802,20 @@ run that reaches a weaker marker than normal multi-user readiness.
     work, or Bus Engine OS proof was run or enabled; R4d remains open for the
     supervisor-run Chrome proof of nonzero real RV64 generated coverage and
     remaining fallback attribution.
+  - [ ] R4d-g - Diagnose and repair the current RV64 generated-exec
+    load/store runtime blocker before another speed-gate run. DoD: identify
+    the exact generated path that raises the unaligned-access runtime error,
+    add durable diagnostics or focused deterministic coverage for that path,
+    fix only the proven cause, and then run a Chrome generic RISC-V proof that
+    reports nonzero real generated execution before `Welcome to TuxTest`
+    without the unaligned-access failure. The proof must record artifact
+    hashes, browser version, result JSON, generated/fallback counters, and top
+    remaining fallback attribution. Active 2026-07-06 20:43 EEST: worker
+    evidence says the load+store candidate reached `10` generated run entries
+    but failed with an unaligned-access runtime error; marker-passing runs
+    still report `0` generated entries. Accepted QEMU accelerator speed wins
+    from this state remain `0`. A Claude/Fable review worker was requested for
+    diagnosis, but no accepted answer or patch has landed yet.
   - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
