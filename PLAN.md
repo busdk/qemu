@@ -141,6 +141,18 @@ run that reaches a weaker marker than normal multi-user readiness.
 
 ## Active Work Items
 
+- [ ] R1e - Make the browser smoke runner consume browser-hosted manifests
+  directly before spending more Bus Engine OS proof runs. DoD:
+  `--guest-manifest` accepts the nested browser-hosted manifest shape emitted
+  by downstream release exports, propagates `targetArch=riscv64`,
+  `machine=virt`, blank CPU, display/device, rootfs device, persistent disk,
+  firmware, and kernel append into `browserSmokeUrl`, preserves the existing
+  flat guest-manifest behavior, covers both manifest shapes in tests, and a
+  short RISC-V browser probe reaches OpenSBI without manually supplying
+  `--machine`, `--cpu`, `--qemu-arg -bios`, or duplicate `-append` overrides.
+  Added 2026-07-06 after the Bus Engine OS timing proof lost multiple cycles
+  to x86/default runner arguments despite the exported manifest containing the
+  correct RISC-V browser parameters.
 - [x] R0 - Rebase the active QEMU/WASM plan from the older x86_64 throughput
   lane to the RISC-V 64 accelerator lane from `GOAL.md`. DoD: `PLAN.md`
   names `riscv64-softmmu` artifacts and Bus Engine OS `riscv64`
