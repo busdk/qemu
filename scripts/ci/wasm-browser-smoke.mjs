@@ -18,15 +18,18 @@ const QEMU_WASM_POWER_ACTIONS = {
   "force-reset": 2,
   "force-poweroff": 3,
 };
-const OPTIONAL_FIRMWARE_FILES = [
-  "bios-256k.bin",
-  "kvmvapic.bin",
-  "vgabios.bin",
-  "vgabios-stdvga.bin",
-  "efi-virtio.rom",
-  "opensbi-riscv32-generic-fw_dynamic.bin",
-  "opensbi-riscv64-generic-fw_dynamic.bin",
-];
+const OPTIONAL_FIRMWARE_FILES_BY_TARGET = {
+  x86_64: [
+    "bios-256k.bin",
+    "kvmvapic.bin",
+    "vgabios.bin",
+    "vgabios-stdvga.bin",
+    "efi-virtio.rom",
+  ],
+  riscv64: [
+    "opensbi-riscv64-generic-fw_dynamic.bin",
+  ],
+};
 const DEFAULT_ROOTFS_OPFS_NAME = "qemu-wasm-rootfs.raw";
 const OPFS_ROOTFS_DIRECTORY = "qemu-wasm-rootfs";
 const DEFAULT_PERSISTENT_DISK_OPFS_NAME = "qemu-wasm-persistent.raw";
@@ -36,6 +39,10 @@ const OPFS_PERSISTENT_DISK_DIRECTORY = "qemu-wasm-persistent-disk";
 function option(name, fallback) {
   const value = new URLSearchParams(window.location.search).get(name);
   return value === null || value === "" ? fallback : value;
+}
+
+function optionalFirmwareFiles(targetArch) {
+  return OPTIONAL_FIRMWARE_FILES_BY_TARGET[targetArch] || [];
 }
 
 function blankableOption(name, fallback) {
@@ -1517,6 +1524,7 @@ function buildConfig() {
     tcgHotblocksOpLimit: numberOption("tcgHotblocksOpLimit", 134217728),
     tcgHotblocksOpSample: numberOption("tcgHotblocksOpSample", 1),
     tcgHotblocksTop: numberOption("tcgHotblocksTop", 12),
+    targetArch: option("targetArch", "x86_64"),
     tciFastGates: boolOption("tciFastGates", false),
     tciProgress: boolOption("tciProgress", false),
     tciProgressInterval: numberOption("tciProgressInterval", 100000),
@@ -1833,7 +1841,7 @@ async function run() {
     { url: config.qboot, path: "/firmware/qboot.rom" },
     { url: config.linuxboot, path: "/firmware/linuxboot_dma.bin" },
   ];
-  for (const name of OPTIONAL_FIRMWARE_FILES) {
+  for (const name of optionalFirmwareFiles(config.targetArch)) {
     mounts.push({
       optional: true,
       path: `/firmware/${name}`,
