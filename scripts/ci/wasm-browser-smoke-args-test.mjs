@@ -360,7 +360,7 @@ assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
   assert.equal(policy.pointerFocus, "focus-on-pointer-down");
   assert.equal(policy.pointerLock, false);
   assert.equal(canvas.dataset.inputActive, "false");
-  assert.equal(canvas.title, "QEMU display. Escape releases keyboard focus.");
+  assert.equal(canvas.title, "Bus Engine OS display. Escape releases keyboard focus.");
 
   canvas.dispatch("pointerdown");
   assert.equal(displayState.pointerFocusEvents, 1);
@@ -724,9 +724,10 @@ assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
 assert.equal(recordHarnessFailure(null, new Error("ignored"), 1), null);
 
 {
+  let probedDescriptor = null;
   class Memory {
     constructor(descriptor) {
-      this.descriptor = descriptor;
+      probedDescriptor = descriptor;
     }
   }
   assert.deepEqual(browserRuntimeSnapshot({
@@ -749,13 +750,18 @@ assert.equal(recordHarnessFailure(null, new Error("ignored"), 1), null);
     webAssembly: true,
     wasmMemory64: {
       supported: true,
-      errorName: null,
-      errorMessage: null,
+      status: "supported",
+      detail: null,
     },
     userAgent: "HeadlessChrome/141.0.7390.37",
     hardwareConcurrency: 20,
     deviceMemory: 8,
     jsHeapSizeLimit: 4294705152,
+  });
+  assert.deepEqual(probedDescriptor, {
+    initial: 1n,
+    maximum: 1n,
+    address: "i64",
   });
 }
 
@@ -776,8 +782,11 @@ assert.equal(recordHarnessFailure(null, new Error("ignored"), 1), null);
     webAssembly: true,
     wasmMemory64: {
       supported: false,
-      errorName: "TypeError",
-      errorMessage: "Cannot convert a BigInt value to a number",
+      status: "unsupported",
+      detail: {
+        name: "TypeError",
+        message: "Cannot convert a BigInt value to a number",
+      },
     },
     userAgent: null,
     hardwareConcurrency: null,
@@ -785,3 +794,24 @@ assert.equal(recordHarnessFailure(null, new Error("ignored"), 1), null);
     jsHeapSizeLimit: null,
   });
 }
+
+assert.deepEqual(browserRuntimeSnapshot({
+  navigator: {},
+  performance: {},
+}), {
+  crossOriginIsolated: false,
+  sharedArrayBuffer: false,
+  webAssembly: false,
+  wasmMemory64: {
+    supported: false,
+    status: "unavailable",
+    detail: {
+      name: "Error",
+      message: "WebAssembly.Memory is not available",
+    },
+  },
+  userAgent: null,
+  hardwareConcurrency: null,
+  deviceMemory: null,
+  jsHeapSizeLimit: null,
+});

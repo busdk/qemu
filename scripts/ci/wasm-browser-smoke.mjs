@@ -1111,22 +1111,28 @@ function wasmMemory64Probe(wasm) {
   if (!wasm || typeof wasm.Memory !== "function") {
     return {
       supported: false,
-      errorName: "Error",
-      errorMessage: "WebAssembly.Memory is not available",
+      status: "unavailable",
+      detail: {
+        name: "Error",
+        message: "WebAssembly.Memory is not available",
+      },
     };
   }
   try {
-    new wasm.Memory({ initial: 1, maximum: 1, address: "i64" });
+    new wasm.Memory({ initial: 1n, maximum: 1n, address: "i64" });
     return {
       supported: true,
-      errorName: null,
-      errorMessage: null,
+      status: "supported",
+      detail: null,
     };
   } catch (error) {
     return {
       supported: false,
-      errorName: error && error.name ? error.name : "Error",
-      errorMessage: error && error.message ? error.message : String(error),
+      status: "unsupported",
+      detail: {
+        name: error && error.name ? error.name : "Error",
+        message: error && error.message ? error.message : String(error),
+      },
     };
   }
 }

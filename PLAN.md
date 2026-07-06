@@ -100,6 +100,18 @@ Accepted QEMU build-environment evidence recorded:
   in the supervisor status file; this plan entry records the accepted source
   change, not the completed image build.
 
+## Browser proof diagnostics cleanup - 2026-07-07
+
+- [x] Classify the browser harness `wasmMemory64` feature probe as runtime
+  capability evidence. The probe now uses BigInt page counts for
+  `WebAssembly.Memory({ address: "i64" })`, so a supporting browser no longer
+  records the self-inflicted `Cannot convert 1 to a BigInt` result.
+  Unsupported or unavailable memory64 still preserves the runtime's diagnostic
+  under `wasmMemory64.detail`, while real harness/page failures continue to
+  use `pageErrors`, `requestFailures`, and the normal result error fields.
+  Focused verification:
+  `node scripts/ci/wasm-browser-smoke-args-test.mjs`.
+
 ## Exact Definition of Done
 
 The current executor lane is done only when all of the following are true for
