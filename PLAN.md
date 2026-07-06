@@ -141,7 +141,7 @@ run that reaches a weaker marker than normal multi-user readiness.
 
 ## Active Work Items
 
-- [ ] R1f - Treat the Bus Engine OS page readiness status as a runner
+- [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
   reaches `Bus Engine OS is ready`, the runner exits zero, writes a success
   result JSON, and preserves the existing exact `marker reached: ...` success
@@ -152,6 +152,15 @@ run that reaches a weaker marker than normal multi-user readiness.
   event=ready state=multi-user`, but the process exited `1` because the
   runner threw `Bus Engine OS is ready` after the wait predicate had already
   accepted it.
+  Accepted 2026-07-06 22:39 EEST: commit `4ca3d0e06d` shares the
+  ready-status success contract between the wait predicate and post-check
+  while keeping the injected terminal-status predicate self-contained. Checks
+  passed: `node --check scripts/ci/wasm-browser-smoke-runner.mjs`, `node
+  scripts/ci/wasm-browser-smoke-runner-test.mjs`, `git diff --check`, and a
+  Playwright harness self-test that wrote
+  `/private/tmp/qemu-runner-ready-status-harness-self-test.json` with
+  `success=true`, `phase=success`, `pageStatus=Bus Engine OS is ready`,
+  `markerSeen=true`, and `elapsedMs=102`, exiting zero.
 - [x] R1e - Make the browser smoke runner consume browser-hosted manifests
   directly before spending more Bus Engine OS proof runs. DoD:
   `--guest-manifest` accepts the nested browser-hosted manifest shape emitted
