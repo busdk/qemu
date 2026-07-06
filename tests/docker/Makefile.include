@@ -24,6 +24,8 @@ CUR_TIME := $(shell date +%Y-%m-%d-%H.%M.%S.$$$$)
 DOCKER_SRC_COPY := $(BUILD_DIR)/docker-src.$(CUR_TIME)
 
 DOCKER_V ?= $(V)
+DOCKER_IMAGE_TAG_emsdk-wasm64-cross ?= emsdk-4.0.10
+docker-image-tag = qemu/$1$(if $(DOCKER_IMAGE_TAG_$1),:$(DOCKER_IMAGE_TAG_$1))
 
 .DELETE_ON_ERROR: $(DOCKER_SRC_COPY)
 $(DOCKER_SRC_COPY):
@@ -49,7 +51,7 @@ docker-image-%: $(DOCKER_FILES_DIR)/%.docker
 		$(if $(NOUSER),,			\
 			--build-arg USER=$(USER)	\
 			--build-arg UID=$(UID))		\
-		-t qemu/$* - < $< $(if $(DOCKER_V),,> /dev/null),\
+		-t $(call docker-image-tag,$*) - < $< $(if $(DOCKER_V),,> /dev/null),\
 		"BUILD", $*)
 
 # General rule for inspecting registry images.

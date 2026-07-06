@@ -29,7 +29,7 @@ def test_default_docker_command():
         command = module.docker_run_command(args)
         joined = "\n".join(command)
         for want in [
-            "qemu/emsdk-wasm64-cross:latest",
+            "qemu/emsdk-wasm64-cross:emsdk-4.0.10",
             f"{source / 'tmp' / 'qemu-wasm-build' / 'x86_64-tci-ccache' / 'src'}:/tmp/src",
             f"{source / 'tmp' / 'qemu-wasm-build' / 'x86_64-tci-ccache' / 'build'}:/tmp/build",
             f"{Path.home() / '.cache' / 'qemu-wasm-ccache'}:/ccache",

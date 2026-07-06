@@ -18,7 +18,7 @@ from pathlib import Path
 import re
 
 
-DEFAULT_IMAGE = "qemu/emsdk-wasm64-cross:latest"
+DEFAULT_IMAGE = "qemu/emsdk-wasm64-cross:emsdk-4.0.10"
 DEFAULT_BUILD_DIR = Path("tmp") / "qemu-wasm-build"
 DEFAULT_CCACHE_DIR = Path.home() / ".cache" / "qemu-wasm-ccache"
 DEFAULT_EM_CACHE_DIR = Path.home() / ".cache" / "qemu-wasm-emcache"
