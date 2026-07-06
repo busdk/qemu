@@ -19,6 +19,7 @@ import {
   displayContextErrorEvidence,
   displayPixelSummary,
   initialSmokeResult,
+  isSuccessfulPageStatus,
   isTerminalPageStatus,
   guestSerialIdleDiagnostic,
   pageErrorDiagnostic,
@@ -118,6 +119,23 @@ for (const internalRuntimePhrase of [
 for (const status of [
   `marker reached: ${marker}`,
   "Bus Engine OS is ready",
+]) {
+  assert.equal(isSuccessfulPageStatus(status, marker), true, `${status} should be successful`);
+}
+
+for (const status of [
+  "marker reached: some-other-marker",
+  "program exited before marker: status 1",
+  "Bus Engine OS stopped before becoming ready: status 1",
+  "timeout waiting for marker: QEMU_WASM_LINUX_BOOT_OK",
+  "failed",
+]) {
+  assert.equal(isSuccessfulPageStatus(status, marker), false, `${status} should not be successful`);
+}
+
+for (const status of [
+  `marker reached: ${marker}`,
+  "Bus Engine OS is ready",
   "program exited before marker: status 1",
   "Bus Engine OS stopped before becoming ready: status 1",
   "timeout waiting for marker: QEMU_WASM_LINUX_BOOT_OK",
@@ -147,6 +165,15 @@ for (const status of [
   "program exited after marker: status 0",
 ]) {
   assert.equal(isTerminalPageStatus(status, marker), false, `${status} should not be terminal`);
+}
+
+{
+  const standaloneIsTerminalPageStatus = Function(`return ${isTerminalPageStatus.toString()}`)();
+  assert.equal(
+    standaloneIsTerminalPageStatus("Bus Engine OS is ready", marker),
+    true,
+    "serialized terminal-status helper should accept Bus Engine OS ready status",
+  );
 }
 
 {

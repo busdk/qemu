@@ -990,6 +990,11 @@ export function isTerminalPageStatus(status, marker) {
     status === "failed";
 }
 
+export function isSuccessfulPageStatus(status, marker) {
+  return status === `marker reached: ${marker}` ||
+    status === "Bus Engine OS is ready";
+}
+
 export function consoleMessageDiagnostic(message, elapsedMs) {
   return {
     elapsedMs,
@@ -2227,7 +2232,8 @@ async function run() {
       idleFailure,
     ]);
     const pageStatus = await page.evaluate(() => document.querySelector("#status")?.textContent || "");
-    if (pageStatus !== `marker reached: ${options.marker}`) {
+    result.pageStatus = pageStatus;
+    if (!isSuccessfulPageStatus(pageStatus, options.marker)) {
       throw new Error(pageStatus);
     }
     if (options.postKeyboardWaitMs > 0) {
@@ -2255,7 +2261,7 @@ async function run() {
     await captureScreenshot(page, options, result);
     result.success = true;
     await writeResult(options, result);
-    console.log(`wasm-browser-smoke-runner: marker reached: ${options.marker}`);
+    console.log(`wasm-browser-smoke-runner: ${pageStatus}`);
   } catch (error) {
     if (progressTimer !== null) {
       clearInterval(progressTimer);
