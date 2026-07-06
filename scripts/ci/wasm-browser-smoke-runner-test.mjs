@@ -90,12 +90,33 @@ assert.match(
   browserSmokeSource,
   /config\.tciProgress \|\|\s*config\.tciWasmGeneratedTrace \|\|\s*config\.wasm64RunloopSmoke \|\|\s*config\.wasm64OneTbDifferential \|\|\s*config\.wasm64LiveOneTbDifferential \|\|\s*config\.wasm64LiveTbCoverage \|\|\s*config\.wasm64LiveGeneratedExec \|\|\s*config\.wasm64LiveGeneratedExecPreflight \|\|\s*config\.wasm64TcgSummary/,
 );
+for (const publicRuntimePhrase of [
+  "Loading Bus Engine OS...",
+  "Loading virtualization runtime...",
+  "Starting Bus Engine OS...",
+  "Bus Engine OS is starting",
+]) {
+  assert.ok(browserSmokeSource.includes(publicRuntimePhrase), `runtime source should include ${publicRuntimePhrase}`);
+}
+for (const internalRuntimePhrase of [
+  "Loading Bus Engine OS guest...",
+  "loading smoke guest inputs",
+  "loading QEMU WebAssembly module",
+  "Starting QEMU...",
+  "QEMU started; waiting for marker",
+]) {
+  assert.equal(browserSmokeSource.includes(internalRuntimePhrase), false, `runtime source should not include ${internalRuntimePhrase}`);
+}
 
 for (const status of [
   `marker reached: ${marker}`,
+  "Bus Engine OS is ready",
   "program exited before marker: status 1",
+  "Bus Engine OS stopped before becoming ready: status 1",
   "timeout waiting for marker: QEMU_WASM_LINUX_BOOT_OK",
+  "Startup timed out waiting for Bus Engine OS",
   "timeout waiting for marker or expected text: Example Linux",
+  "Startup timed out waiting for expected output: Example Linux",
   "failed",
 ]) {
   assert.equal(isTerminalPageStatus(status, marker), true, `${status} should be terminal`);
@@ -109,6 +130,12 @@ for (const status of [
   "loading QEMU WebAssembly module",
   "starting QEMU",
   "QEMU started; waiting for marker",
+  "Preparing Bus Engine OS",
+  "Checking browser support",
+  "loading boot assets",
+  "Loading virtualization runtime",
+  "Starting Bus Engine OS",
+  "Bus Engine OS is starting",
   "marker reached: some-other-marker",
   "program exited after marker: status 0",
 ]) {

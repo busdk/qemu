@@ -937,10 +937,10 @@ export function createPowerControl(config, smokeState, serviceBridge = null) {
       const qemuOperation = operation === "shutdown" ? "guest-powerdown" : operation;
       const action = qemuPowerAction(qemuOperation);
       if (action === 0) {
-        throw new Error("unsupported QEMU power operation");
+        throw new Error("Unsupported power operation");
       }
       if (!module || typeof module._qemu_wasm_power_request !== "function") {
-        throw new Error("QEMU WebAssembly power control is not available");
+        throw new Error("Power control is not available");
       }
       state.deliveryPath = qemuOperation === "guest-powerdown"
         ? "qemu-guest-powerdown"
@@ -948,7 +948,7 @@ export function createPowerControl(config, smokeState, serviceBridge = null) {
       state.qemuAction = qemuOperation;
       state.qemuStatus = Number(module._qemu_wasm_power_request(action));
       if (!Number.isInteger(state.qemuStatus) || state.qemuStatus < 0) {
-        throw new Error(`QEMU WebAssembly power request failed: ${state.qemuStatus}`);
+        throw new Error(`Power request failed: ${state.qemuStatus}`);
       }
       state.completed = true;
       return state;
@@ -1304,7 +1304,7 @@ export function installDisplayInputPolicy(canvas, displayState, inputSink = null
   canvas.dataset.inputActive = canvas.ownerDocument && canvas.ownerDocument.activeElement === canvas
     ? "true"
     : "false";
-  canvas.title = "QEMU display. Escape releases keyboard focus.";
+  canvas.title = "Bus Engine OS display. Escape releases keyboard focus.";
   canvas.addEventListener("focus", () => {
     displayState.focused = true;
     displayState.focusEvents += 1;
@@ -1792,7 +1792,7 @@ async function run() {
     });
     status.textContent = message;
   };
-  setPhase("init", "initializing smoke harness");
+  setPhase("init", "Preparing Bus Engine OS");
   if (config.display === "sdl" || config.display === "wasm") {
     canvas.hidden = false;
     canvas.setAttribute("aria-hidden", "false");
@@ -1809,7 +1809,7 @@ async function run() {
     if (config.focusDisplay) {
       canvas.focus();
     }
-    drawBrowserStatusFrame(canvas, "Loading Bus Engine OS guest...");
+    drawBrowserStatusFrame(canvas, "Loading Bus Engine OS...");
     smokeState.display.focused = document.activeElement === canvas;
     smokeState.display.canvasWidth = canvas.width;
     smokeState.display.canvasHeight = canvas.height;
@@ -1850,7 +1850,7 @@ async function run() {
     mounts.push({ path: config.persistentDiskPath, persistentDisk: true });
   }
 
-  setPhase("validate-browser", "validating browser WebAssembly features");
+  setPhase("validate-browser", "Checking browser support");
   if (!crossOriginIsolated) {
     throw new Error("cross-origin isolation is required for pthread WebAssembly");
   }
@@ -1873,7 +1873,7 @@ async function run() {
       if (keyEvents.length >= config.harnessExpectedKeyEvents) {
         smokeState.markerSeen = true;
         clearTimeout(timeout);
-        setPhase("success", `marker reached: ${config.marker}`);
+        setPhase("success", "Bus Engine OS is ready");
       }
     };
     drawHarnessSelfTestFrame(canvas);
@@ -1885,7 +1885,7 @@ async function run() {
     if (config.harnessExpectedKeyEvents === 0) {
       smokeState.markerSeen = true;
       clearTimeout(timeout);
-      setPhase("success", `marker reached: ${config.marker}`);
+      setPhase("success", "Bus Engine OS is ready");
     }
     return;
   }
@@ -1896,8 +1896,8 @@ async function run() {
         .filter((expected) => !expected.seen)
         .map((expected) => expected.text);
       setPhase("timeout", missing.length === 0
-        ? `timeout waiting for marker: ${config.marker}`
-        : `timeout waiting for marker or expected text: ${missing.join(", ")}`);
+        ? "Startup timed out waiting for Bus Engine OS"
+        : `Startup timed out waiting for expected output: ${missing.join(", ")}`);
     }
   }, config.timeoutMs);
 
@@ -1906,14 +1906,14 @@ async function run() {
 
   let completionStarted = false;
   const completeSuccess = () => {
-    setPhase("success", `marker reached: ${config.marker}`);
+    setPhase("success", "Bus Engine OS is ready");
   };
   const persistRootfsSnapshot = async () => {
     if (config.rootfsStorage !== "opfs-snapshot") {
       return;
     }
     if (!activeModule || !activeModule.FS) {
-      throw new Error("QEMU module FS is not available for OPFS persistence");
+      throw new Error("Runtime file system is not available for browser storage");
     }
     const rootfs = activeModule.FS.readFile("/rootfs.raw");
     await writeRootfsOpfsSnapshot(config.rootfsOpfsName, rootfs);
@@ -1925,7 +1925,7 @@ async function run() {
       return;
     }
     if (!activeModule || !activeModule.FS) {
-      throw new Error("QEMU module FS is not available for persistent disk OPFS persistence");
+      throw new Error("Runtime file system is not available for persistent disk storage");
     }
     const disk = activeModule.FS.readFile(config.persistentDiskPath);
     await writeOpfsSnapshot(
@@ -1948,7 +1948,7 @@ async function run() {
         completeSuccess();
         return;
       }
-      setPhase("persist-browser-storage", "persisting browser disk snapshots to OPFS");
+      setPhase("persist-browser-storage", "Saving browser disk state");
       Promise.all([
         persistRootfsSnapshot(),
         persistPersistentDiskSnapshot(),
@@ -2055,7 +2055,7 @@ async function run() {
     }
     if (smokeState.outputBytes >= config.maxOutputBytes && !smokeState.outputSuppressed) {
       smokeState.outputSuppressed = true;
-      appendLine(output, `wasm-browser-smoke: output suppressed after ${config.maxOutputBytes} bytes`);
+      appendLine(output, `bus-engine-os: console output truncated after ${config.maxOutputBytes} bytes`);
     }
     if (line.includes(config.marker)) {
       smokeState.markerSeen = true;
@@ -2076,12 +2076,12 @@ async function run() {
     ) {
       smokeState.programExitStatus = exitStatus;
       clearTimeout(timeout);
-      setPhase("program-exit", `program exited before marker: status ${exitStatus}`);
+      setPhase("program-exit", `Bus Engine OS stopped before becoming ready: status ${exitStatus}`);
     }
   };
 
-  setPhase("fetch-guest-inputs", "loading smoke guest inputs");
-  drawBrowserStatusFrame(canvas, "Loading Bus Engine OS guest...");
+  setPhase("fetch-guest-inputs", "loading boot assets");
+  drawBrowserStatusFrame(canvas, "Loading Bus Engine OS...");
   if (config.persistentDisk) {
     smokeState.persistentDisk.browserStorage = await browserStorageSnapshot();
   }
@@ -2098,11 +2098,11 @@ async function run() {
   }
   const availableMounts = mounts.filter((mount) => mount.data !== null);
 
-  setPhase("import-qemu-module", "loading QEMU WebAssembly module");
-  drawBrowserStatusFrame(canvas, "Loading QEMU WebAssembly runtime...");
+  setPhase("import-qemu-module", "Loading virtualization runtime");
+  drawBrowserStatusFrame(canvas, "Loading virtualization runtime...");
   const moduleFactory = (await import(programUrl.href)).default;
-  setPhase("start-qemu", "starting QEMU");
-  drawBrowserStatusFrame(canvas, "Starting QEMU...");
+  setPhase("start-qemu", "Starting Bus Engine OS");
+  drawBrowserStatusFrame(canvas, "Starting Bus Engine OS...");
   const hotBlocksEnv = config.tcgHotblocks ? {
     QEMU_TCG_HOTBLOCKS: "1",
     QEMU_TCG_HOTBLOCKS_INTERVAL: String(config.tcgHotblocksInterval),
@@ -2257,7 +2257,7 @@ async function run() {
     }, 250);
   }
   if (!smokeState.markerSeen || !allExpectedTextSeen()) {
-    setPhase("guest-boot", "QEMU started; waiting for marker");
+    setPhase("guest-boot", "Bus Engine OS is starting");
   }
 }
 

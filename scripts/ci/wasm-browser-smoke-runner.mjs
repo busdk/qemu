@@ -973,8 +973,11 @@ export function appendBoundedLimit(list, entry, limit) {
 
 export function isTerminalPageStatus(status, marker) {
   return status === `marker reached: ${marker}` ||
+    status === "Bus Engine OS is ready" ||
     status.startsWith("program exited before marker:") ||
+    status.startsWith("Bus Engine OS stopped before becoming ready:") ||
     status.startsWith("timeout waiting for ") ||
+    status.startsWith("Startup timed out waiting for ") ||
     status === "failed";
 }
 
