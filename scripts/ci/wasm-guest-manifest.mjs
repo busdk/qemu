@@ -59,6 +59,32 @@ function manifestBoolean(manifest, name) {
   return value;
 }
 
+function manifestBooleanLike(value, name) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no", "off"].includes(normalized)) {
+      return false;
+    }
+  }
+  fail(`guest manifest field ${name} must be a boolean`);
+}
+
+function manifestIntegerLike(value, name) {
+  if (Number.isInteger(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value)) {
+    return Number(value);
+  }
+  fail(`guest manifest field ${name} must be a non-negative integer`);
+}
+
 function manifestStringList(manifest, name) {
   const value = manifest[name];
   if (value === undefined || value === null) {
@@ -169,13 +195,52 @@ function resolveManifestPath(manifestDir, value) {
   return resolve(manifestDir, value);
 }
 
+function normalizeBrowserHostedManifest(manifest, schema) {
+  const params = manifest.default_parameters;
+  if (params === undefined || params === null) {
+    return manifest;
+  }
+  if (typeof params !== "object" || Array.isArray(params)) {
+    fail("guest manifest field default_parameters must be an object");
+  }
+
+  const normalized = {
+    ...manifest,
+    ...params,
+  };
+  if (normalized.targetArch === undefined && typeof manifest.target_arch === "string") {
+    normalized.targetArch = manifest.target_arch;
+  }
+  if (normalized.artifactDir === undefined && typeof normalized.program === "string") {
+    normalized.artifactDir = dirname(normalized.program);
+  }
+  if (normalized.firmwareDir === undefined && typeof normalized.qboot === "string") {
+    normalized.firmwareDir = dirname(normalized.qboot);
+  }
+  if (normalized.firmwareDir === undefined && typeof normalized.linuxboot === "string") {
+    normalized.firmwareDir = dirname(normalized.linuxboot);
+  }
+
+  for (const field of schema.booleanFields || []) {
+    if (normalized[field] !== undefined && normalized[field] !== null) {
+      normalized[field] = manifestBooleanLike(normalized[field], field);
+    }
+  }
+  for (const field of schema.integerFields || []) {
+    if (normalized[field] !== undefined && normalized[field] !== null) {
+      normalized[field] = manifestIntegerLike(normalized[field], field);
+    }
+  }
+  return normalized;
+}
+
 export function applyGuestManifest(options, explicit, schema) {
   if (options.guestManifest === null) {
     return;
   }
   const manifestPath = resolve(options.guestManifest);
   const manifestDir = dirname(manifestPath);
-  const manifest = readGuestManifest(manifestPath);
+  const manifest = normalizeBrowserHostedManifest(readGuestManifest(manifestPath), schema);
   const applied = new Set();
   const pathFields = new Set(schema.pathFields || []);
   for (const field of schema.stringFields || []) {

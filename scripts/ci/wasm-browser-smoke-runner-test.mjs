@@ -7,7 +7,9 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -1133,6 +1135,7 @@ for (const status of [
     rootfsDevice: "virtio-pci",
     rootfsOpfsName: "virtual-server.raw",
     rootfsStorage: "opfs-snapshot",
+    targetArch: "riscv64",
     timeoutMs: 180000,
     visualMarker: "login",
     wasm: "qemu-system-riscv64.wasm",
@@ -1161,6 +1164,7 @@ for (const status of [
     "persistentDiskStorage=opfs&" +
     "powerOperation=shutdown&" +
     "powerTimeoutMs=15000&" +
+    "targetArch=riscv64&" +
     "rootfsDevice=virtio-pci&" +
     "rootfsStorage=opfs-snapshot&" +
     "rootfsOpfsName=virtual-server.raw&" +
@@ -1618,6 +1622,7 @@ for (const status of [
       maxPayloadBytes: 4096,
       interactiveOnly: false,
     },
+    targetArch: "riscv64",
     timeoutMs: 180000,
     tciFastGates: true,
     wasm64TcgGenerated: true,
@@ -1672,6 +1677,7 @@ for (const status of [
   assert.equal(result.requireDisplayOutput, true);
   assert.equal(result.displayMinNonblackPixels, 4);
   assert.equal(result.rootfsDevice, "virtio-pci");
+  assert.equal(result.targetArch, "riscv64");
   assert.equal(result.tciFastGates, true);
   assert.equal(Object.hasOwn(result, "wasm64TcgGenerated"), false);
   assert.equal(result.tciProgress, true);
@@ -1713,6 +1719,94 @@ for (const status of [
   assert.deepEqual(result.progressSampleErrors, []);
   assert.deepEqual(result.progressSamples, []);
   assert.deepEqual(result.requestFailures, []);
+}
+
+{
+  const dir = mkdtempSync(join(tmpdir(), "qemu-wasm-browser-hosted-manifest-"));
+  const manifestPath = join(dir, "browser-hosted-manifest.json");
+  writeFileSync(manifestPath, `${JSON.stringify({
+    format: "bus-engine-os-browser-hosted-bundle-v1",
+    target_arch: "riscv64",
+    default_parameters: {
+      allowSerialFallback: "1",
+      cpu: "",
+      display: "wasm",
+      displayDevice: "virtio-gpu-pci",
+      focusDisplay: "true",
+      initrd: "",
+      kernel: "guest/kernel",
+      kernelAppend: "console=tty0 console=ttyS0 root=/dev/vda rw",
+      linuxboot: "firmware/linuxboot_dma.bin",
+      machine: "virt",
+      marker: "Bus Engine OS",
+      maxOutputBytes: "4000000",
+      memory: "512M",
+      persistentDisk: "1",
+      persistentDiskDevice: "virtio-pci",
+      persistentDiskOpfsName: "beo-g3-riscv64-virtual-server.raw",
+      persistentDiskPath: "/persistent.raw",
+      persistentDiskSizeBytes: "268435456",
+      persistentDiskStorage: "opfs",
+      program: "artifacts/qemu-system-riscv64.js",
+      qboot: "firmware/qboot.rom",
+      rootfs: "guest/rootfs.raw",
+      rootfsDevice: "virtio-pci",
+      targetArch: "riscv64",
+      wasm: "artifacts/qemu-system-riscv64.wasm",
+    },
+  }, null, 2)}\n`, "utf8");
+
+  const options = parseArgs([
+    "--guest-manifest", manifestPath,
+    "--marker", "Reached target Multi-User System.",
+  ]);
+  assert.equal(options.artifactDir, join(dir, "artifacts"));
+  assert.equal(options.firmwareDir, join(dir, "firmware"));
+  assert.equal(options.kernel, join(dir, "guest/kernel"));
+  assert.equal(options.rootfs, join(dir, "guest/rootfs.raw"));
+  assert.equal(options.program, "artifacts/qemu-system-riscv64.js");
+  assert.equal(options.wasm, "artifacts/qemu-system-riscv64.wasm");
+  assert.equal(options.targetArch, "riscv64");
+  assert.equal(options.machine, "virt");
+  assert.equal(options.cpu, "");
+  assert.equal(options.display, "wasm");
+  assert.equal(options.displayDevice, "virtio-gpu-pci");
+  assert.equal(options.focusDisplay, true);
+  assert.equal(options.initrd, null);
+  assert.equal(options.kernelAppend, "console=tty0 console=ttyS0 root=/dev/vda rw");
+  assert.equal(options.marker, "Reached target Multi-User System.");
+  assert.equal(options.maxOutputBytes, 4000000);
+  assert.equal(options.persistentDisk, true);
+  assert.equal(options.persistentDiskDevice, "virtio-pci");
+  assert.equal(options.persistentDiskOpfsName, "beo-g3-riscv64-virtual-server.raw");
+  assert.equal(options.persistentDiskPath, "/persistent.raw");
+  assert.equal(options.persistentDiskSizeBytes, 268435456);
+  assert.equal(options.rootfsDevice, "virtio-pci");
+
+  const url = browserSmokeUrl({
+    ...options,
+    host: "127.0.0.1",
+    port: 8010,
+    appendExtra: "",
+    expectText: [],
+    expectedResolution: "",
+    focusDisplay: true,
+    harnessSelfTest: false,
+    maxOutputBytes: 4000000,
+    network: "none",
+    powerOperation: "",
+    powerTimeoutMs: 30000,
+    qemuArgs: [],
+    timeoutMs: 600000,
+    visualMarker: "",
+  });
+  assert.equal(url.searchParams.get("targetArch"), "riscv64");
+  assert.equal(url.searchParams.get("machine"), "virt");
+  assert.equal(url.searchParams.get("cpu"), "");
+  assert.equal(url.searchParams.get("kernelAppend"), "console=tty0 console=ttyS0 root=/dev/vda rw");
+  assert.equal(url.searchParams.get("initrd"), "");
+  assert.equal(url.searchParams.get("rootfsDevice"), "virtio-pci");
+  assert.equal(url.searchParams.get("persistentDisk"), "1");
 }
 
 {

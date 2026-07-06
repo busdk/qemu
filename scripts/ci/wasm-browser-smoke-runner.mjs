@@ -113,6 +113,7 @@ Options:
   --port PORT         Local smoke server port
   --program FILE      JavaScript launcher inside artifact dir
   --wasm FILE         WebAssembly module inside artifact dir
+  --target-arch ARCH  Guest target architecture for browser firmware mounts
   --persistent-disk  Add an OPFS-backed writable virtio disk
   --persistent-disk-device KIND
                      Persistent disk device kind: virtio-mmio or virtio-pci
@@ -294,6 +295,7 @@ export function parseArgs(argv) {
     screenshot: null,
     screenshotFullPage: false,
     serviceBridge: null,
+    targetArch: "x86_64",
     tcgHotblocks: false,
     tcgHotblocksOpLimit: 134217728,
     tcgHotblocksInterval: 10000,
@@ -501,6 +503,9 @@ export function parseArgs(argv) {
     } else if (arg === "--screenshot-full-page") {
       options.screenshotFullPage = true;
       explicit.add("screenshotFullPage");
+    } else if (arg === "--target-arch") {
+      options.targetArch = argv[++i];
+      explicit.add("targetArch");
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number(argv[++i]);
       explicit.add("timeoutMs");
@@ -692,12 +697,16 @@ export function parseArgs(argv) {
       "rootfsOpfsName",
       "rootfsStorage",
       "screenshot",
+      "targetArch",
       "visualMarker",
       "wasm",
     ],
     stringListFields: ["expectText", "qemuArgs"],
     serviceBridgeField: "serviceBridge",
   });
+  if (options.initrd === "") {
+    options.initrd = null;
+  }
 
   if (options.harnessSelfTest) {
     if (!explicit.has("display")) {
@@ -1615,6 +1624,9 @@ export function browserSmokeUrl(options) {
   }
   url.searchParams.set("powerOperation", options.powerOperation);
   url.searchParams.set("powerTimeoutMs", String(options.powerTimeoutMs));
+  if (options.targetArch) {
+    url.searchParams.set("targetArch", options.targetArch);
+  }
   if (options.performanceAttribution) {
     url.searchParams.set("performanceAttribution", "1");
     url.searchParams.set(
@@ -1776,6 +1788,7 @@ export function initialSmokeResult(options, browserVersion) {
     rootfsOpfsName: options.rootfsOpfsName,
     rootfsStorage: options.rootfsStorage,
     serviceBridge: options.serviceBridge,
+    targetArch: options.targetArch,
     tcgHotblocks: Boolean(options.tcgHotblocks),
     tcgHotblocksInterval: Number.isInteger(options.tcgHotblocksInterval)
       ? options.tcgHotblocksInterval

@@ -58,6 +58,36 @@ function manifestSchema() {
   };
 }
 
+function browserHostedSchema() {
+  return {
+    stringFields: [
+      "artifactDir",
+      "cpu",
+      "display",
+      "displayDevice",
+      "firmwareDir",
+      "initrd",
+      "kernel",
+      "kernelAppend",
+      "machine",
+      "marker",
+      "memory",
+      "persistentDiskDevice",
+      "persistentDiskOpfsName",
+      "persistentDiskPath",
+      "persistentDiskStorage",
+      "program",
+      "rootfs",
+      "rootfsDevice",
+      "targetArch",
+      "wasm",
+    ],
+    integerFields: ["maxOutputBytes", "persistentDiskSizeBytes"],
+    booleanFields: ["allowSerialFallback", "focusDisplay", "persistentDisk"],
+    pathFields: ["artifactDir", "firmwareDir", "kernel", "rootfs"],
+  };
+}
+
 {
   const dir = mkdtempSync(join(tmpdir(), "qemu-wasm-guest-manifest-"));
   const kernelData = Buffer.from("kernel\n");
@@ -168,6 +198,94 @@ function manifestSchema() {
   });
   assert.deepEqual(options.expectText, ["manifest text"]);
   assert.deepEqual(options.qemuArgs, ["-name", "manifest-smoke", "-trace", "wasm"]);
+}
+
+{
+  const dir = mkdtempSync(join(tmpdir(), "qemu-wasm-browser-hosted-manifest-"));
+  const manifestPath = join(dir, "browser-hosted-manifest.json");
+  writeJson(manifestPath, {
+    format: "bus-engine-os-browser-hosted-bundle-v1",
+    target_arch: "riscv64",
+    default_parameters: {
+      allowSerialFallback: "1",
+      cpu: "",
+      display: "wasm",
+      displayDevice: "virtio-gpu-pci",
+      focusDisplay: "true",
+      initrd: "",
+      kernel: "guest/kernel",
+      kernelAppend: "console=tty0 console=ttyS0 root=/dev/vda rw",
+      machine: "virt",
+      marker: "Bus Engine OS",
+      maxOutputBytes: "4000000",
+      memory: "512M",
+      persistentDisk: "1",
+      persistentDiskDevice: "virtio-pci",
+      persistentDiskOpfsName: "beo-g3-riscv64-virtual-server.raw",
+      persistentDiskPath: "/persistent.raw",
+      persistentDiskSizeBytes: "268435456",
+      persistentDiskStorage: "opfs",
+      program: "artifacts/qemu-system-riscv64.js",
+      qboot: "firmware/qboot.rom",
+      rootfs: "guest/rootfs.raw",
+      rootfsDevice: "virtio-pci",
+      wasm: "artifacts/qemu-system-riscv64.wasm",
+    },
+  });
+
+  const options = {
+    guestManifest: manifestPath,
+    allowSerialFallback: false,
+    artifactDir: null,
+    cpu: "Nehalem",
+    display: "none",
+    displayDevice: "default",
+    firmwareDir: "pc-bios",
+    focusDisplay: false,
+    initrd: null,
+    kernel: null,
+    kernelAppend: null,
+    machine: "microvm,acpi=off",
+    marker: "QEMU_WASM_LINUX_BOOT_OK",
+    maxOutputBytes: 60000,
+    memory: "512M",
+    persistentDisk: false,
+    persistentDiskDevice: "virtio-mmio",
+    persistentDiskOpfsName: "qemu-wasm-persistent.raw",
+    persistentDiskPath: "/persistent.raw",
+    persistentDiskSizeBytes: 1048576,
+    persistentDiskStorage: "opfs",
+    program: "qemu-system-x86_64.js",
+    rootfs: null,
+    rootfsDevice: "virtio-mmio",
+    targetArch: "x86_64",
+    wasm: null,
+  };
+  applyGuestManifest(options, new Set(), browserHostedSchema());
+
+  assert.equal(options.allowSerialFallback, true);
+  assert.equal(options.artifactDir, join(dir, "artifacts"));
+  assert.equal(options.cpu, "");
+  assert.equal(options.display, "wasm");
+  assert.equal(options.displayDevice, "virtio-gpu-pci");
+  assert.equal(options.firmwareDir, join(dir, "firmware"));
+  assert.equal(options.focusDisplay, true);
+  assert.equal(options.initrd, "");
+  assert.equal(options.kernel, join(dir, "guest/kernel"));
+  assert.equal(options.kernelAppend, "console=tty0 console=ttyS0 root=/dev/vda rw");
+  assert.equal(options.machine, "virt");
+  assert.equal(options.marker, "Bus Engine OS");
+  assert.equal(options.maxOutputBytes, 4000000);
+  assert.equal(options.persistentDisk, true);
+  assert.equal(options.persistentDiskDevice, "virtio-pci");
+  assert.equal(options.persistentDiskOpfsName, "beo-g3-riscv64-virtual-server.raw");
+  assert.equal(options.persistentDiskPath, "/persistent.raw");
+  assert.equal(options.persistentDiskSizeBytes, 268435456);
+  assert.equal(options.program, "artifacts/qemu-system-riscv64.js");
+  assert.equal(options.rootfs, join(dir, "guest/rootfs.raw"));
+  assert.equal(options.rootfsDevice, "virtio-pci");
+  assert.equal(options.targetArch, "riscv64");
+  assert.equal(options.wasm, "artifacts/qemu-system-riscv64.wasm");
 }
 
 {
