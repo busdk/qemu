@@ -1163,6 +1163,17 @@ readiness.
     build was run. Next unblock command is the same request against
     `worker-platform-manager-20260707a` until it returns the controlled-host
     create surface or proof slot.
+    Follow-up 2026-07-07: rechecked supervisor-local controlled-host
+    provisioning from `/Users/test/git/busdk/agent-supervisor/projects/busdk`.
+    `.bus/remote/config.json` does define `dev.hg.fi` as an SSH-Docker remote
+    with remote workdir `/home/coding-agent/coding-agent/git/busdk/busdk`, but
+    `.bus/events/relay/status.json` reports the `local_dev_hg_events` route
+    unhealthy because the SSH local forward to `dev.hg.fi` exits with public-key
+    denial. `.bus/worker/templates.json` contains only templates whose
+    `eligible_environments` are `local`, so this manager still has no
+    controlled `dev.hg.fi` template to use for a `repo_id=busdk/qemu,module=.`
+    proof worker. This remains a dispatch/provisioning blocker, not a QEMU
+    source or repo-id materialization blocker.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
