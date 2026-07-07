@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * Validate browser smoke metrics payloads.
+ * Validate the x86 browser smoke metrics payload.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -246,8 +246,11 @@ const TCG_GENERATED_EXITS_FIELDS = [
   ["fatal", isInteger],
 ];
 
-function usage() {
-  return `Usage: wasm-browser-smoke-metrics-gate.mjs --result FILE [options]
+const DEFAULT_PURPOSE = "qemu-browser-smoke-x86-metrics-gate";
+const DEFAULT_COMMAND_NAME = "wasm-browser-smoke-x86-metrics-gate.mjs";
+
+function usage(commandName = DEFAULT_COMMAND_NAME) {
+  return `Usage: ${commandName} --result FILE [options]
 
 Options:
   --require-tcg   Fail when the result does not include a wasm64Tcg summary
@@ -918,7 +921,7 @@ export function x86BrowserSmokeMetricsGate(result, options = {}) {
 
   return {
     format: 1,
-    purpose: "qemu-browser-smoke-metrics-gate",
+    purpose: options.purpose || DEFAULT_PURPOSE,
     version: X86_BROWSER_SMOKE_METRICS_GATE_VERSION,
     ok,
     runloop,
@@ -932,8 +935,9 @@ function printResult(gate, json) {
     return;
   }
   const tcgState = gate.tcg;
+  const label = gate.purpose || DEFAULT_PURPOSE;
   process.stdout.write(
-    `qemu-browser-smoke-metrics-gate: ` +
+    `${label}: ` +
     `runloop_ok=${gate.runloop.ok} ` +
     `runloop_event=${gate.runloop.lastSummary?.event || "missing"} ` +
     `runloop_acceptance=${gate.runloop.acceptanceAllowed} ` +
@@ -964,10 +968,10 @@ function printResult(gate, json) {
   }
 }
 
-export async function run(argv = process.argv) {
+export async function run(argv = process.argv, runOptions = {}) {
   const options = parseArgs(argv);
   if (options.help) {
-    process.stdout.write(usage());
+    process.stdout.write(usage(runOptions.commandName));
     return;
   }
   if (!options.result) {
@@ -975,7 +979,10 @@ export async function run(argv = process.argv) {
   }
 
   const result = JSON.parse(fs.readFileSync(options.result, "utf8"));
-  const gate = x86BrowserSmokeMetricsGate(result, options);
+  const gate = x86BrowserSmokeMetricsGate(result, {
+    ...options,
+    purpose: runOptions.purpose,
+  });
   printResult(gate, options.json);
   if (!gate.ok) {
     process.exit(1);

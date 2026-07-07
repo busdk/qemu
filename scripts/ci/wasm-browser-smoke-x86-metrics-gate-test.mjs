@@ -6,6 +6,10 @@
  */
 
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   X86_BROWSER_SMOKE_METRICS_GATE_VERSION,
@@ -663,6 +667,7 @@ assert.equal(X86_BROWSER_SMOKE_METRICS_GATE_VERSION, 4);
 
 {
   const gate = x86BrowserSmokeMetricsGate(runtimeSmokeResult);
+  assert.equal(gate.purpose, "qemu-browser-smoke-x86-metrics-gate");
   assert.equal(gate.ok, true);
   assert.equal(gate.runloop.ok, true);
   assert.equal(gate.runloop.summaryCount, 1);
@@ -685,6 +690,54 @@ assert.equal(X86_BROWSER_SMOKE_METRICS_GATE_VERSION, 4);
   assert.equal(gate.tcg.lastSummary.fallback_guest_instructions, 720);
   assert.equal(gate.tcg.lastSummary.generated_body_time_ns, 123456);
   assert.deepEqual(gate.tcg.lastSummary.generated_exits.missingFields, []);
+}
+
+{
+  const output = execFileSync(process.execPath, [
+    "scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs",
+    "--help",
+  ], { encoding: "utf8" });
+  assert.match(output, /Usage: wasm-browser-smoke-x86-metrics-gate\.mjs --result FILE/);
+}
+
+{
+  const output = execFileSync(process.execPath, [
+    "scripts/ci/wasm-browser-smoke-metrics-gate.mjs",
+    "--help",
+  ], { encoding: "utf8" });
+  assert.match(output, /Usage: wasm-browser-smoke-metrics-gate\.mjs --result FILE/);
+}
+
+{
+  const resultDir = mkdtempSync(join(tmpdir(), "qemu-smoke-metrics-gate-"));
+  const resultPath = join(resultDir, "result.json");
+  writeFileSync(resultPath, JSON.stringify(runtimeSmokeResult));
+
+  const x86Json = execFileSync(process.execPath, [
+    "scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs",
+    "--result", resultPath,
+    "--json",
+  ], { encoding: "utf8" });
+  assert.equal(JSON.parse(x86Json).purpose, "qemu-browser-smoke-x86-metrics-gate");
+
+  const genericJson = execFileSync(process.execPath, [
+    "scripts/ci/wasm-browser-smoke-metrics-gate.mjs",
+    "--result", resultPath,
+    "--json",
+  ], { encoding: "utf8" });
+  assert.equal(JSON.parse(genericJson).purpose, "qemu-browser-smoke-metrics-gate");
+
+  const x86Text = execFileSync(process.execPath, [
+    "scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs",
+    "--result", resultPath,
+  ], { encoding: "utf8" });
+  assert.match(x86Text, /^qemu-browser-smoke-x86-metrics-gate:/);
+
+  const genericText = execFileSync(process.execPath, [
+    "scripts/ci/wasm-browser-smoke-metrics-gate.mjs",
+    "--result", resultPath,
+  ], { encoding: "utf8" });
+  assert.match(genericText, /^qemu-browser-smoke-metrics-gate:/);
 }
 
 for (const field of [
