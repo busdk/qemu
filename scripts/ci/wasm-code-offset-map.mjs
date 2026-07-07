@@ -17,6 +17,12 @@ Options:
   --wasm FILE    WebAssembly module to inspect
   --offset N     Absolute module byte offset, decimal or 0x-prefixed hex
   --json         Print JSON only
+
+When the offset falls inside a code-section function body, the result also
+decodes the instruction at that exact offset and reports whether it is a
+plain (never traps on misalignment) or atomic (traps as "operation does not
+support unaligned accesses" when misaligned) memory access, matching the
+V8 diagnosis workflow used for the R4z load-dependent OOB investigation.
 `;
 }
 
@@ -129,6 +135,191 @@ function validateHeader(buffer) {
   }
 }
 
+const ATOMIC_PREFIX_OPCODE = 0xfe;
+const ATOMIC_FENCE_SUBOPCODE = 0x03;
+
+// Plain (non-atomic) numeric memory instructions never trap on misaligned
+// addresses; the align immediate is only a performance hint. Table per the
+// WebAssembly core spec binary encoding (bytecode.ch/binary/instructions).
+const PLAIN_MEMORY_OPS = {
+  0x28: { mnemonic: "i32.load", naturalAlign: 2 },
+  0x29: { mnemonic: "i64.load", naturalAlign: 3 },
+  0x2a: { mnemonic: "f32.load", naturalAlign: 2 },
+  0x2b: { mnemonic: "f64.load", naturalAlign: 3 },
+  0x2c: { mnemonic: "i32.load8_s", naturalAlign: 0 },
+  0x2d: { mnemonic: "i32.load8_u", naturalAlign: 0 },
+  0x2e: { mnemonic: "i32.load16_s", naturalAlign: 1 },
+  0x2f: { mnemonic: "i32.load16_u", naturalAlign: 1 },
+  0x30: { mnemonic: "i64.load8_s", naturalAlign: 0 },
+  0x31: { mnemonic: "i64.load8_u", naturalAlign: 0 },
+  0x32: { mnemonic: "i64.load16_s", naturalAlign: 1 },
+  0x33: { mnemonic: "i64.load16_u", naturalAlign: 1 },
+  0x34: { mnemonic: "i64.load32_s", naturalAlign: 2 },
+  0x35: { mnemonic: "i64.load32_u", naturalAlign: 2 },
+  0x36: { mnemonic: "i32.store", naturalAlign: 2 },
+  0x37: { mnemonic: "i64.store", naturalAlign: 3 },
+  0x38: { mnemonic: "f32.store", naturalAlign: 2 },
+  0x39: { mnemonic: "f64.store", naturalAlign: 3 },
+  0x3a: { mnemonic: "i32.store8", naturalAlign: 0 },
+  0x3b: { mnemonic: "i32.store16", naturalAlign: 1 },
+  0x3c: { mnemonic: "i64.store8", naturalAlign: 0 },
+  0x3d: { mnemonic: "i64.store16", naturalAlign: 1 },
+  0x3e: { mnemonic: "i64.store32", naturalAlign: 2 },
+};
+
+// Atomic memory instructions (0xFE prefix) require natural alignment and
+// raise the V8 "operation does not support unaligned accesses" trap
+// otherwise. Table per the threads/atomics proposal binary encoding.
+const ATOMIC_MEMORY_OPS = {
+  0x00: { mnemonic: "memory.atomic.notify", naturalAlign: 2 },
+  0x01: { mnemonic: "memory.atomic.wait32", naturalAlign: 2 },
+  0x02: { mnemonic: "memory.atomic.wait64", naturalAlign: 3 },
+  0x10: { mnemonic: "i32.atomic.load", naturalAlign: 2 },
+  0x11: { mnemonic: "i64.atomic.load", naturalAlign: 3 },
+  0x12: { mnemonic: "i32.atomic.load8_u", naturalAlign: 0 },
+  0x13: { mnemonic: "i32.atomic.load16_u", naturalAlign: 1 },
+  0x14: { mnemonic: "i64.atomic.load8_u", naturalAlign: 0 },
+  0x15: { mnemonic: "i64.atomic.load16_u", naturalAlign: 1 },
+  0x16: { mnemonic: "i64.atomic.load32_u", naturalAlign: 2 },
+  0x17: { mnemonic: "i32.atomic.store", naturalAlign: 2 },
+  0x18: { mnemonic: "i64.atomic.store", naturalAlign: 3 },
+  0x19: { mnemonic: "i32.atomic.store8", naturalAlign: 0 },
+  0x1a: { mnemonic: "i32.atomic.store16", naturalAlign: 1 },
+  0x1b: { mnemonic: "i64.atomic.store8", naturalAlign: 0 },
+  0x1c: { mnemonic: "i64.atomic.store16", naturalAlign: 1 },
+  0x1d: { mnemonic: "i64.atomic.store32", naturalAlign: 2 },
+  0x1e: { mnemonic: "i32.atomic.rmw.add", naturalAlign: 2 },
+  0x1f: { mnemonic: "i64.atomic.rmw.add", naturalAlign: 3 },
+  0x20: { mnemonic: "i32.atomic.rmw8.add_u", naturalAlign: 0 },
+  0x21: { mnemonic: "i32.atomic.rmw16.add_u", naturalAlign: 1 },
+  0x22: { mnemonic: "i64.atomic.rmw8.add_u", naturalAlign: 0 },
+  0x23: { mnemonic: "i64.atomic.rmw16.add_u", naturalAlign: 1 },
+  0x24: { mnemonic: "i64.atomic.rmw32.add_u", naturalAlign: 2 },
+  0x25: { mnemonic: "i32.atomic.rmw.sub", naturalAlign: 2 },
+  0x26: { mnemonic: "i64.atomic.rmw.sub", naturalAlign: 3 },
+  0x27: { mnemonic: "i32.atomic.rmw8.sub_u", naturalAlign: 0 },
+  0x28: { mnemonic: "i32.atomic.rmw16.sub_u", naturalAlign: 1 },
+  0x29: { mnemonic: "i64.atomic.rmw8.sub_u", naturalAlign: 0 },
+  0x2a: { mnemonic: "i64.atomic.rmw16.sub_u", naturalAlign: 1 },
+  0x2b: { mnemonic: "i64.atomic.rmw32.sub_u", naturalAlign: 2 },
+  0x2c: { mnemonic: "i32.atomic.rmw.and", naturalAlign: 2 },
+  0x2d: { mnemonic: "i64.atomic.rmw.and", naturalAlign: 3 },
+  0x2e: { mnemonic: "i32.atomic.rmw8.and_u", naturalAlign: 0 },
+  0x2f: { mnemonic: "i32.atomic.rmw16.and_u", naturalAlign: 1 },
+  0x30: { mnemonic: "i64.atomic.rmw8.and_u", naturalAlign: 0 },
+  0x31: { mnemonic: "i64.atomic.rmw16.and_u", naturalAlign: 1 },
+  0x32: { mnemonic: "i64.atomic.rmw32.and_u", naturalAlign: 2 },
+  0x33: { mnemonic: "i32.atomic.rmw.or", naturalAlign: 2 },
+  0x34: { mnemonic: "i64.atomic.rmw.or", naturalAlign: 3 },
+  0x35: { mnemonic: "i32.atomic.rmw8.or_u", naturalAlign: 0 },
+  0x36: { mnemonic: "i32.atomic.rmw16.or_u", naturalAlign: 1 },
+  0x37: { mnemonic: "i64.atomic.rmw8.or_u", naturalAlign: 0 },
+  0x38: { mnemonic: "i64.atomic.rmw16.or_u", naturalAlign: 1 },
+  0x39: { mnemonic: "i64.atomic.rmw32.or_u", naturalAlign: 2 },
+  0x3a: { mnemonic: "i32.atomic.rmw.xor", naturalAlign: 2 },
+  0x3b: { mnemonic: "i64.atomic.rmw.xor", naturalAlign: 3 },
+  0x3c: { mnemonic: "i32.atomic.rmw8.xor_u", naturalAlign: 0 },
+  0x3d: { mnemonic: "i32.atomic.rmw16.xor_u", naturalAlign: 1 },
+  0x3e: { mnemonic: "i64.atomic.rmw8.xor_u", naturalAlign: 0 },
+  0x3f: { mnemonic: "i64.atomic.rmw16.xor_u", naturalAlign: 1 },
+  0x40: { mnemonic: "i64.atomic.rmw32.xor_u", naturalAlign: 2 },
+  0x41: { mnemonic: "i32.atomic.rmw.xchg", naturalAlign: 2 },
+  0x42: { mnemonic: "i64.atomic.rmw.xchg", naturalAlign: 3 },
+  0x43: { mnemonic: "i32.atomic.rmw8.xchg_u", naturalAlign: 0 },
+  0x44: { mnemonic: "i32.atomic.rmw16.xchg_u", naturalAlign: 1 },
+  0x45: { mnemonic: "i64.atomic.rmw8.xchg_u", naturalAlign: 0 },
+  0x46: { mnemonic: "i64.atomic.rmw16.xchg_u", naturalAlign: 1 },
+  0x47: { mnemonic: "i64.atomic.rmw32.xchg_u", naturalAlign: 2 },
+  0x48: { mnemonic: "i32.atomic.rmw.cmpxchg", naturalAlign: 2 },
+  0x49: { mnemonic: "i64.atomic.rmw.cmpxchg", naturalAlign: 3 },
+  0x4a: { mnemonic: "i32.atomic.rmw8.cmpxchg_u", naturalAlign: 0 },
+  0x4b: { mnemonic: "i32.atomic.rmw16.cmpxchg_u", naturalAlign: 1 },
+  0x4c: { mnemonic: "i64.atomic.rmw8.cmpxchg_u", naturalAlign: 0 },
+  0x4d: { mnemonic: "i64.atomic.rmw16.cmpxchg_u", naturalAlign: 1 },
+  0x4e: { mnemonic: "i64.atomic.rmw32.cmpxchg_u", naturalAlign: 2 },
+};
+
+// Decode the single instruction starting at an absolute module byte offset,
+// classifying whether it is a plain or atomic memory access. This turns the
+// previously manual "is the trapped instruction atomic or plain" step (used
+// to diagnose the R4z load-dependent OOB/unaligned-access crash) into a
+// repeatable, deterministic check against the exact shipped artifact.
+export function decodeInstructionAt(buffer, offset) {
+  ensureAvailable(buffer, offset, 1, "instruction opcode");
+  const opcode = buffer[offset];
+
+  if (opcode === ATOMIC_PREFIX_OPCODE) {
+    const subOpcodeInfo = readUleb(buffer, offset + 1, "atomic sub-opcode");
+    const subOpcode = subOpcodeInfo.value;
+    if (subOpcode === ATOMIC_FENCE_SUBOPCODE) {
+      ensureAvailable(buffer, subOpcodeInfo.nextOffset, 1, "atomic.fence reserved byte");
+      return {
+        offset,
+        opcode,
+        subOpcode,
+        mnemonic: "atomic.fence",
+        isMemoryOp: false,
+        isAtomic: true,
+        recognized: true,
+        byteLength: subOpcodeInfo.nextOffset + 1 - offset,
+      };
+    }
+    const entry = ATOMIC_MEMORY_OPS[subOpcode];
+    if (!entry) {
+      return {
+        offset,
+        opcode,
+        subOpcode,
+        isMemoryOp: false,
+        isAtomic: true,
+        recognized: false,
+      };
+    }
+    const align = readUleb(buffer, subOpcodeInfo.nextOffset, "atomic memarg align");
+    const memoryOffset = readUleb(buffer, align.nextOffset, "atomic memarg offset");
+    return {
+      offset,
+      opcode,
+      subOpcode,
+      mnemonic: entry.mnemonic,
+      isMemoryOp: true,
+      isAtomic: true,
+      recognized: true,
+      align: align.value,
+      naturalAlign: entry.naturalAlign,
+      alignExceedsNatural: align.value > entry.naturalAlign,
+      memoryOffset: memoryOffset.value,
+      byteLength: memoryOffset.nextOffset - offset,
+    };
+  }
+
+  const entry = PLAIN_MEMORY_OPS[opcode];
+  if (!entry) {
+    return {
+      offset,
+      opcode,
+      isMemoryOp: false,
+      isAtomic: false,
+      recognized: false,
+    };
+  }
+  const align = readUleb(buffer, offset + 1, "memarg align");
+  const memoryOffset = readUleb(buffer, align.nextOffset, "memarg offset");
+  return {
+    offset,
+    opcode,
+    mnemonic: entry.mnemonic,
+    isMemoryOp: true,
+    isAtomic: false,
+    recognized: true,
+    align: align.value,
+    naturalAlign: entry.naturalAlign,
+    alignExceedsNatural: align.value > entry.naturalAlign,
+    memoryOffset: memoryOffset.value,
+    byteLength: memoryOffset.nextOffset - offset,
+  };
+}
+
 export function inspectWasmCodeOffset(buffer, moduleOffset) {
   validateHeader(buffer);
 
@@ -239,6 +430,18 @@ export function inspectWasmCodeOffset(buffer, moduleOffset) {
   }
 
   const matchedBody = bodies.find((body) => body.bodyOffset !== null) ?? null;
+  let instruction = null;
+  if (matchedBody !== null) {
+    try {
+      instruction = decodeInstructionAt(buffer, moduleOffset);
+    } catch (error) {
+      instruction = {
+        offset: moduleOffset,
+        recognized: false,
+        error: error.message,
+      };
+    }
+  }
   return {
     bodyCount: bodies.length,
     codeSection,
@@ -247,7 +450,7 @@ export function inspectWasmCodeOffset(buffer, moduleOffset) {
     matched: matchedBody !== null,
     moduleBytes: buffer.length,
     moduleOffset,
-    result: matchedBody,
+    result: matchedBody === null ? null : { ...matchedBody, instruction },
   };
 }
 
@@ -265,10 +468,18 @@ function main() {
   if (options.json) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   } else if (result.matched) {
+    const insn = result.result.instruction;
+    const insnSummary = insn && insn.recognized
+      ? `instruction=${insn.mnemonic} isAtomic=${insn.isAtomic} ` +
+        (insn.isMemoryOp
+          ? `align=${insn.align} naturalAlign=${insn.naturalAlign} ` +
+            `alignExceedsNatural=${insn.alignExceedsNatural} memoryOffset=${insn.memoryOffset}`
+          : "")
+      : `instruction=unrecognized opcode=0x${insn ? insn.opcode.toString(16) : "??"}`;
     process.stdout.write(
       `offset=${result.moduleOffset} functionIndex=${result.result.functionIndex} ` +
       `definedOrdinal=${result.result.definedOrdinal} bodyOffset=${result.result.bodyOffset} ` +
-      `bodySize=${result.result.bodySize}\n`,
+      `bodySize=${result.result.bodySize} ${insnSummary}\n`,
     );
   } else {
     process.stdout.write(`offset=${result.moduleOffset} matched=false\n`);

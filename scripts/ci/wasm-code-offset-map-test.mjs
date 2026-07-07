@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  decodeInstructionAt,
   inspectWasmCodeOffset,
 } from "./wasm-code-offset-map.mjs";
 
@@ -193,6 +194,95 @@ assert.throws(
     "--help",
   ], { encoding: "utf8" });
   assert.match(output, /Usage: wasm-code-offset-map\.mjs --wasm FILE --offset OFFSET/);
+}
+
+// The R4z trapped instruction was reported as plain `i64.load align=3
+// offset=8` (not an atomic). Decode that exact byte pattern directly.
+{
+  const insn = decodeInstructionAt(
+    Buffer.from([0x29, ...uleb(3), ...uleb(8)]),
+    0,
+  );
+  assert.equal(insn.recognized, true);
+  assert.equal(insn.mnemonic, "i64.load");
+  assert.equal(insn.isMemoryOp, true);
+  assert.equal(insn.isAtomic, false);
+  assert.equal(insn.align, 3);
+  assert.equal(insn.naturalAlign, 3);
+  assert.equal(insn.alignExceedsNatural, false);
+  assert.equal(insn.memoryOffset, 8);
+  assert.equal(insn.byteLength, 3);
+}
+
+// An over-aligned plain load is still a plain load: the align immediate is
+// only a hint and never causes a trap, unlike the atomic case below.
+{
+  const insn = decodeInstructionAt(
+    Buffer.from([0x2d, ...uleb(1), ...uleb(0)]),
+    0,
+  );
+  assert.equal(insn.mnemonic, "i32.load8_u");
+  assert.equal(insn.isAtomic, false);
+  assert.equal(insn.naturalAlign, 0);
+  assert.equal(insn.alignExceedsNatural, true);
+}
+
+// The atomic counterpart of the same load width traps on misalignment.
+{
+  const insn = decodeInstructionAt(
+    Buffer.from([0xfe, 0x11, ...uleb(3), ...uleb(8)]),
+    0,
+  );
+  assert.equal(insn.recognized, true);
+  assert.equal(insn.mnemonic, "i64.atomic.load");
+  assert.equal(insn.isMemoryOp, true);
+  assert.equal(insn.isAtomic, true);
+  assert.equal(insn.align, 3);
+  assert.equal(insn.memoryOffset, 8);
+  assert.equal(insn.byteLength, 4);
+}
+
+// atomic.fence has no memarg, only a reserved zero byte after the sub-opcode.
+{
+  const insn = decodeInstructionAt(Buffer.from([0xfe, 0x03, 0x00]), 0);
+  assert.equal(insn.mnemonic, "atomic.fence");
+  assert.equal(insn.isMemoryOp, false);
+  assert.equal(insn.isAtomic, true);
+  assert.equal(insn.byteLength, 3);
+}
+
+// Unknown opcodes (plain and atomic-prefixed) are reported, not thrown.
+{
+  const insn = decodeInstructionAt(Buffer.from([0x01]), 0);
+  assert.equal(insn.recognized, false);
+  assert.equal(insn.isMemoryOp, false);
+  assert.equal(insn.isAtomic, false);
+}
+{
+  const insn = decodeInstructionAt(Buffer.from([0xfe, 0x7f]), 0);
+  assert.equal(insn.recognized, false);
+  assert.equal(insn.isAtomic, true);
+}
+
+// End-to-end: a function body whose byte offset is the exact opcode of an
+// `i64.load align=3 offset=8` reports the instruction through
+// inspectWasmCodeOffset, the same call site the R4z investigation uses.
+{
+  const loadBody = [0x00, 0x29, ...uleb(3), ...uleb(8), 0x1a, 0x0b];
+  const loadWasm = wasmWithSections([
+    ...section(3, [0x01, 0x00]),
+    ...section(10, [
+      0x01,
+      ...uleb(loadBody.length), ...loadBody,
+    ]),
+  ]);
+  const loadOpcodeOffset = loadWasm.indexOf(0x29, loadWasm.indexOf(Buffer.from(loadBody)));
+  const mapped = inspectWasmCodeOffset(loadWasm, loadOpcodeOffset);
+  assert.equal(mapped.matched, true);
+  assert.equal(mapped.result.instruction.mnemonic, "i64.load");
+  assert.equal(mapped.result.instruction.isAtomic, false);
+  assert.equal(mapped.result.instruction.align, 3);
+  assert.equal(mapped.result.instruction.memoryOffset, 8);
 }
 
 console.log("wasm-code-offset-map-test: ok");
