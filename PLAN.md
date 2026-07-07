@@ -1068,6 +1068,10 @@ readiness.
     `node scripts/ci/wasm-browser-smoke-metrics-gate.mjs --result
     <result.json> --require-tcg --json`, then report the generated coverage
     numerator/denominator or ppm from the emitted gate JSON.
+    Progress 2026-07-07: the CDP gate now records normalized `/json/version`
+    browser metadata in result JSON as `browserVersion` and includes the
+    browser name/version in the stdout summary, so controlled RISC-V proofs
+    do not depend on external log scraping for exact browser version evidence.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster

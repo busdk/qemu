@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  browserVersionDiagnostic,
   cdpConsoleMessageDiagnostic,
   cdpResourceErrorDiagnostic,
   parseArgs,
@@ -92,6 +93,33 @@ assert.equal(manifestOptions.firmwareDir, join(manifestDir, "firmware"));
 assert.equal(manifestOptions.kernel, join(manifestDir, "Image"));
 assert.equal(manifestOptions.rootfs, join(manifestDir, "rootfs.raw"));
 assert.equal(manifestOptions.targetArch, "riscv64");
+
+{
+  assert.deepEqual(browserVersionDiagnostic({
+    Browser: "HeadlessChrome/150.0.0.0",
+    "Protocol-Version": "1.3",
+    "User-Agent": "Mozilla/5.0 HeadlessChrome/150.0.0.0",
+    "V8-Version": "15.0.0",
+    "WebKit-Version": "537.36",
+    extra: "ignored",
+  }), {
+    browser: "HeadlessChrome/150.0.0.0",
+    protocolVersion: "1.3",
+    userAgent: "Mozilla/5.0 HeadlessChrome/150.0.0.0",
+    v8Version: "15.0.0",
+    webkitVersion: "537.36",
+  });
+}
+
+{
+  assert.deepEqual(browserVersionDiagnostic({}), {
+    browser: null,
+    protocolVersion: null,
+    userAgent: null,
+    v8Version: null,
+    webkitVersion: null,
+  });
+}
 
 {
   const requestInfo = {

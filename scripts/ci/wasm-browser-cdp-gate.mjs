@@ -442,6 +442,20 @@ export function cdpConsoleMessageDiagnostic(params, elapsedMs, resourceErrors = 
   };
 }
 
+export function browserVersionDiagnostic(version) {
+  return {
+    browser: typeof version?.Browser === "string" ? version.Browser : null,
+    protocolVersion: typeof version?.["Protocol-Version"] === "string"
+      ? version["Protocol-Version"]
+      : null,
+    userAgent: typeof version?.["User-Agent"] === "string" ? version["User-Agent"] : null,
+    v8Version: typeof version?.["V8-Version"] === "string" ? version["V8-Version"] : null,
+    webkitVersion: typeof version?.["WebKit-Version"] === "string"
+      ? version["WebKit-Version"]
+      : null,
+  };
+}
+
 function requireReadable(path, label) {
   if (!existsSync(path)) {
     throw new Error(`${label} not found: ${path}`);
@@ -500,7 +514,11 @@ async function main() {
   ], { stdio: ["ignore", "pipe", "pipe"] });
   chrome.stdout.on("data", lineBuffer("[chrome] "));
   chrome.stderr.on("data", lineBuffer("[chrome] "));
-  await waitForHttp(`http://127.0.0.1:${options.cdpPort}/json/version`, 10000);
+  const versionResponse = await waitForHttp(
+    `http://127.0.0.1:${options.cdpPort}/json/version`,
+    10000,
+  );
+  const browserVersion = browserVersionDiagnostic(await versionResponse.json());
 
   const targetResponse = await fetch(
     `http://127.0.0.1:${options.cdpPort}/json/new?${encodeURIComponent(smokeUrl(options))}`,
@@ -602,6 +620,7 @@ async function main() {
     marker: options.marker,
     markerSeen: Boolean(finalState?.markerSeen) || pageStatus === `marker reached: ${options.marker}`,
     elapsedMs,
+    browserVersion,
     pageStatus,
     smokeUrl: smokeUrl(options),
     pageErrors,
@@ -622,6 +641,7 @@ async function main() {
     elapsedMs: result.elapsedMs,
     generated_run_entries: result.wasm64Tcg?.lastSummary?.generated_run_entries ??
       result.wasm64Runloop?.lastSummary?.generated_run_entries ?? null,
+    browserVersion: result.browserVersion?.browser || null,
     pageStatus: result.pageStatus,
     pageErrors: result.pageErrors.length,
     serialBlocker: result.serialBlocker,
