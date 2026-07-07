@@ -4399,6 +4399,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         let directMemoryStoreLoadAliasOffset = 0;
         let directMemoryStoreLoadAliasSize = 0;
         let multiAccessBranchIndex = -1;
+        let multiAccessBranchTargetIndex = -1;
         let multiAccessBranchOp = 0xffffffff;
         let multiAccessBranchCount = 0;
 
@@ -4410,7 +4411,13 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
             if (opc === ops.brcond) {
                 multiAccessBranchCount++;
                 if (multiAccessBranchIndex < 0) {
+                    const targetOffset = (index + 1) * 4 +
+                                         sextract(insn, 12, 20);
+
                     multiAccessBranchIndex = index;
+                    if (targetOffset % 4 === 0) {
+                        multiAccessBranchTargetIndex = targetOffset / 4;
+                    }
                     multiAccessBranchOp = opc;
                 }
             }
@@ -4478,6 +4485,7 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                 multiAccessBranchCount === 1 &&
                 firstSoftmmuAccessIndex >= 0 &&
                 multiAccessBranchIndex < firstSoftmmuAccessIndex &&
+                multiAccessBranchTargetIndex > softmmuAccessIndices.at(-1) &&
                 allSoftmmuAccessesAreLoads &&
                 directStoreRanges.length === 0;
 
@@ -8760,6 +8768,7 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
             branch_count == 1 &&
             first_access_index >= 0 &&
             first_branch_index < first_access_index &&
+            first_branch_target_index > last_access_index &&
             store_count == 0 &&
             direct_store_count == 0;
 

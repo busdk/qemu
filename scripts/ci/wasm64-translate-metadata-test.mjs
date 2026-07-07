@@ -745,6 +745,7 @@ assert.match(runtime, /bool branch_before_load_only_relaxation =/);
 // widened or inverted condition would fail this test.
 assert.match(runtime, /branch_count == 1 &&/);
 assert.match(runtime, /first_branch_index < first_access_index &&/);
+assert.match(runtime, /first_branch_target_index > last_access_index &&/);
 assert.match(runtime, /store_count == 0 &&/);
 assert.match(runtime, /direct_store_count == 0;/);
 assert.match(runtime, /if \(!branch_before_load_only_relaxation\) \{/);
@@ -752,6 +753,7 @@ assert.match(runtime, /if \(!branch_before_load_only_relaxation\) \{/);
 // admission gate scopes acceptance - both sides read the same flag name.
 assert.match(runtime, /let narrowBranchBeforeLoadOnlyRelaxation = false;/);
 assert.match(runtime, /if \(narrowBranchBeforeLoadOnlyRelaxation\) \{/);
+assert.match(runtime, /multiAccessBranchTargetIndex > softmmuAccessIndices\.at\(-1\) &&/);
 assert.match(
   runtime,
   /const guardedCommits = deferredSoftmmuCommits\.splice\(/,

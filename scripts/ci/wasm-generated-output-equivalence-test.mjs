@@ -3870,7 +3870,7 @@ function runR4zBranchAfterAccessesStillRejectsFixture() {
 function runR4zInterleavedAccessBranchStillRejectsFixture() {
   return assertBranchBeforeAccessStillRejected(
     "r4z-interleaved-load-branch-load-still-rejects",
-    0x6180,
+    0x6190,
     [
       opReg(OPS.tci_qemu_ld_rrr, 1, 14, 13),
       opBranch(4, 4),

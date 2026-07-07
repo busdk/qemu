@@ -616,6 +616,21 @@ readiness.
   (register/memory checksums still match reference TCI execution, this
   project's existing differential-testing convention) and some reduction
   in control-flow-unsupported rejects - not a marker-pass or speed claim.
+  Focused review-branch implementation 2026-07-08: the branch-before/load-only
+  SoftMMU slice is isolated on top of canonical QEMU `81b0a81d5f`. Tests came
+  first in `scripts/ci/wasm-generated-output-equivalence-test.mjs`: the
+  independent JS mirror covers branch-not-taken, branch-taken, second-load
+  TLB fault, store-bearing rejection, direct-store rejection, branch-after
+  rejection, interleaved-access rejection, and target-between-loads rejection.
+  Production then admits only the proven shape: exactly one branch before the
+  first SoftMMU access, branch target strictly after the last SoftMMU access,
+  every SoftMMU access is a load, and no direct store exists in the body. The
+  C validator in `tcg/wasm64.c` and the production JS emitter predicate both
+  require the target-dominance term, and
+  `scripts/ci/wasm64-translate-metadata-test.mjs` asserts the matching C/JS
+  predicate text. This is source-progress only: no browser proof was run, no
+  speed claim is made, and R4d-g/R4z remain open until a controlled proof
+  re-measures generated execution and reject buckets from this source state.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
