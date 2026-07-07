@@ -8515,6 +8515,7 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
     char access_order[TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES + 1] = { 0 };
     MemOp access_memops[TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES] = { 0 };
     int32_t first_branch_index = -1;
+    int32_t first_branch_target_index = -1;
     int32_t first_access_index = -1;
     int32_t last_access_index = -1;
     uint32_t branch_count = 0;
@@ -8717,14 +8718,18 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
         case INDEX_op_brcond:
             control_flow_unsupported = true;
             branch_count++;
-            if (first_branch_index < 0) {
-                first_branch_index = (int32_t)i;
-            }
             if (!tcg_wasm64_live_generated_exec_control_flow_supported(
                     i, word)) {
                 tcg_wasm64_live_generated_exec_count_control_flow_reject_for_word(
                     i, word);
                 return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_CONTROL_FLOW_UNSUPPORTED;
+            }
+            if (first_branch_index < 0) {
+                int32_t target_offset = (int32_t)((i + 1) * 4) +
+                                        sextract32(word, 12, 20);
+
+                first_branch_index = (int32_t)i;
+                first_branch_target_index = target_offset / 4;
             }
             break;
         default:

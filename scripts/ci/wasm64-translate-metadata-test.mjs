@@ -731,6 +731,7 @@ assert.match(runtime, /\\"branch_position\\":\\"%s\\"/);
 assert.match(runtime, /\\"branch_index\\":%d/);
 assert.match(runtime, /\\"last_access_index\\":%d/);
 assert.match(runtime, /int32_t first_branch_index = -1/);
+assert.match(runtime, /int32_t first_branch_target_index = -1/);
 assert.match(runtime, /int32_t first_access_index = -1/);
 assert.match(runtime, /int32_t last_access_index = -1/);
 
@@ -740,6 +741,8 @@ assert.match(runtime, /int32_t last_access_index = -1/);
 // direct store) instead of unconditionally rejecting any branch presence.
 assert.match(runtime, /uint32_t branch_count = 0/);
 assert.match(runtime, /branch_count\+\+/);
+assert.match(runtime, /int32_t target_offset = \(int32_t\)\(\(i \+ 1\) \* 4\) \+/);
+assert.match(runtime, /first_branch_target_index = target_offset \/ 4;/);
 assert.match(runtime, /bool branch_before_load_only_relaxation =/);
 // Lock in the actual admission predicate, not just its presence, so a
 // widened or inverted condition would fail this test.
