@@ -7,11 +7,14 @@
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
+import { applyGuestManifest } from "./wasm-guest-manifest.mjs";
 import { installSignalCleanup } from "./wasm-playwright-loader.mjs";
 
+const THIS_FILE = fileURLToPath(import.meta.url);
 const DEFAULT_CHROME_PATHS = [
   process.env.QEMU_WASM_CHROMIUM_EXECUTABLE,
   process.env.QEMU_WASM_BROWSER_EXECUTABLE,
@@ -23,7 +26,7 @@ const DEFAULT_CHROME_PATHS = [
 
 function usage(status = 0) {
   const stream = status === 0 ? process.stdout : process.stderr;
-  stream.write(`usage: wasm-browser-cdp-gate.mjs --artifact-dir DIR --kernel FILE [--initrd FILE | --rootfs FILE] --out FILE [OPTIONS]\n\nRuns the QEMU WebAssembly browser smoke page through Chrome DevTools Protocol, without Playwright.\n\nOptions:\n  --artifact-dir DIR       Directory containing qemu-system-*.js/.wasm artifacts\n  --guest-manifest FILE    Load guest defaults such as kernel/rootfs/marker\n  --kernel FILE            Guest kernel served as /guest/kernel\n  --initrd FILE            Guest initramfs served as /guest/initramfs.cpio.gz\n  --rootfs FILE            Guest rootfs served as /guest/rootfs.raw\n  --out FILE               Write result JSON\n  --chrome FILE            Chrome/Chromium executable\n  --host HOST              Smoke server host (default: 127.0.0.1)\n  --port N                 Smoke server port (default: 8151)\n  --cdp-port N             Chrome remote-debugging port (default: 9223)\n  --program FILE           QEMU JS artifact basename (default: manifest or qemu-system-riscv64.js)\n  --wasm FILE              QEMU WASM artifact basename (default: derived from program)\n  --marker TEXT            Required marker text (default: manifest or Welcome to TuxTest)\n  --timeout-ms N           Smoke timeout (default: manifest or 180000)\n  --max-output-bytes N     Smoke output byte cap (default: 160000)\n  --memory SIZE            Guest memory (default: manifest or 512M)\n  --machine NAME           QEMU machine (default: manifest or virt)\n  --cpu MODEL              QEMU CPU model (default: manifest or empty)\n  --rootfs-device KIND     Rootfs block device (default: manifest or virtio-mmio)\n  --kernel-append TEXT     Kernel command line\n  --diagnostics-limit N    Live-generated-exec diagnostics limit (default: 24)\n  --no-live-generated-exec Disable live generated exec query flags\n  --help                   Show this help\n`);
+  stream.write(`usage: wasm-browser-cdp-gate.mjs --artifact-dir DIR --kernel FILE [--initrd FILE | --rootfs FILE] --out FILE [OPTIONS]\n\nRuns the QEMU WebAssembly browser smoke page through Chrome DevTools Protocol, without Playwright.\n\nOptions:\n  --artifact-dir DIR       Directory containing qemu-system-*.js/.wasm artifacts\n  --guest-manifest FILE    Load guest defaults such as kernel/rootfs/marker\n  --kernel FILE            Guest kernel served as /guest/kernel\n  --initrd FILE            Guest initramfs served as /guest/initramfs.cpio.gz\n  --rootfs FILE            Guest rootfs served as /guest/rootfs.raw\n  --out FILE               Write result JSON\n  --chrome FILE            Chrome/Chromium executable\n  --firmware-dir DIR       Directory containing QEMU firmware blobs\n  --host HOST              Smoke server host (default: 127.0.0.1)\n  --port N                 Smoke server port (default: 8151)\n  --cdp-port N             Chrome remote-debugging port (default: 9223)\n  --program FILE           QEMU JS artifact basename (default: manifest or qemu-system-riscv64.js)\n  --wasm FILE              QEMU WASM artifact basename (default: derived from program)\n  --marker TEXT            Required marker text (default: manifest or Welcome to TuxTest)\n  --timeout-ms N           Smoke timeout (default: manifest or 180000)\n  --max-output-bytes N     Smoke output byte cap (default: 160000)\n  --memory SIZE            Guest memory (default: manifest or 512M)\n  --machine NAME           QEMU machine (default: manifest or virt)\n  --cpu MODEL              QEMU CPU model (default: manifest or empty)\n  --rootfs-device KIND     Rootfs block device (default: manifest or virtio-mmio)\n  --target-arch ARCH       Guest target architecture for firmware mounts\n  --kernel-append TEXT     Kernel command line\n  --diagnostics-limit N    Live-generated-exec diagnostics limit (default: 24)\n  --no-live-generated-exec Disable live generated exec query flags\n  --help                   Show this help\n`);
   process.exit(status);
 }
 
@@ -59,30 +62,8 @@ function lineBuffer(prefix) {
   };
 }
 
-function resolveMaybeRelative(baseDir, value) {
-  if (value === null || value === undefined || value === "") {
-    return value;
-  }
-  if (String(value).startsWith("/")) {
-    return String(value);
-  }
-  return resolve(baseDir, String(value));
-}
-
-async function loadGuestManifest(path) {
-  const manifestPath = resolve(path);
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  const baseDir = dirname(manifestPath);
-
-  return {
-    ...manifest,
-    kernel: resolveMaybeRelative(baseDir, manifest.kernel),
-    initrd: resolveMaybeRelative(baseDir, manifest.initrd),
-    rootfs: resolveMaybeRelative(baseDir, manifest.rootfs),
-  };
-}
-
-async function parseArgs(argv) {
+export async function parseArgs(argv) {
+  const explicit = new Set();
   const options = {
     artifactDir: null,
     cdpPort: 9223,
@@ -91,6 +72,7 @@ async function parseArgs(argv) {
     diagnosticsLimit: 24,
     display: "none",
     displayDevice: "default",
+    firmwareDir: "pc-bios",
     guestManifest: null,
     host: "127.0.0.1",
     initrd: null,
@@ -107,6 +89,7 @@ async function parseArgs(argv) {
     program: "qemu-system-riscv64.js",
     rootfs: null,
     rootfsDevice: "virtio-mmio",
+    targetArch: "riscv64",
     timeoutMs: 180000,
     wasm: null,
   };
@@ -115,34 +98,46 @@ async function parseArgs(argv) {
     const arg = argv[i];
     if (arg === "--artifact-dir") {
       options.artifactDir = argv[++i];
+      explicit.add("artifactDir");
     } else if (arg === "--cdp-port") {
       options.cdpPort = Number(argv[++i]);
     } else if (arg === "--chrome") {
       options.chrome = argv[++i];
     } else if (arg === "--cpu") {
       options.cpu = argv[++i];
+      explicit.add("cpu");
     } else if (arg === "--diagnostics-limit") {
       options.diagnosticsLimit = Number(argv[++i]);
+    } else if (arg === "--firmware-dir") {
+      options.firmwareDir = argv[++i];
+      explicit.add("firmwareDir");
     } else if (arg === "--guest-manifest") {
       options.guestManifest = argv[++i];
     } else if (arg === "--host") {
       options.host = argv[++i];
     } else if (arg === "--initrd") {
       options.initrd = argv[++i];
+      explicit.add("initrd");
     } else if (arg === "--kernel") {
       options.kernel = argv[++i];
+      explicit.add("kernel");
     } else if (arg === "--kernel-append") {
       options.kernelAppend = argv[++i];
+      explicit.add("kernelAppend");
     } else if (arg === "--machine") {
       options.machine = argv[++i];
+      explicit.add("machine");
     } else if (arg === "--marker") {
       options.marker = argv[++i];
+      explicit.add("marker");
     } else if (arg === "--max-output-bytes") {
       options.maxOutputBytes = Number(argv[++i]);
     } else if (arg === "--memory") {
       options.memory = argv[++i];
+      explicit.add("memory");
     } else if (arg === "--network") {
       options.network = argv[++i];
+      explicit.add("network");
     } else if (arg === "--no-live-generated-exec") {
       options.liveGeneratedExec = false;
     } else if (arg === "--out") {
@@ -151,14 +146,22 @@ async function parseArgs(argv) {
       options.port = Number(argv[++i]);
     } else if (arg === "--program") {
       options.program = argv[++i];
+      explicit.add("program");
     } else if (arg === "--rootfs") {
       options.rootfs = argv[++i];
+      explicit.add("rootfs");
     } else if (arg === "--rootfs-device") {
       options.rootfsDevice = argv[++i];
+      explicit.add("rootfsDevice");
+    } else if (arg === "--target-arch") {
+      options.targetArch = argv[++i];
+      explicit.add("targetArch");
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number(argv[++i]);
+      explicit.add("timeoutMs");
     } else if (arg === "--wasm") {
       options.wasm = argv[++i];
+      explicit.add("wasm");
     } else if (arg === "--help") {
       usage(0);
     } else {
@@ -167,20 +170,27 @@ async function parseArgs(argv) {
     }
   }
 
-  if (options.guestManifest !== null) {
-    const manifest = await loadGuestManifest(options.guestManifest);
-    for (const key of [
-      "cpu", "kernel", "kernelAppend", "machine", "marker", "memory",
-      "network", "program", "rootfs", "rootfsDevice", "timeoutMs", "wasm",
-    ]) {
-      if (manifest[key] !== undefined && manifest[key] !== null) {
-        options[key] = manifest[key];
-      }
-    }
-    if (manifest.initrd !== undefined) {
-      options.initrd = manifest.initrd;
-    }
-  }
+  applyGuestManifest(options, explicit, {
+    integerFields: ["timeoutMs"],
+    pathFields: ["artifactDir", "firmwareDir", "initrd", "kernel", "rootfs"],
+    stringFields: [
+      "artifactDir",
+      "cpu",
+      "firmwareDir",
+      "initrd",
+      "kernel",
+      "kernelAppend",
+      "machine",
+      "marker",
+      "memory",
+      "network",
+      "program",
+      "rootfs",
+      "rootfsDevice",
+      "targetArch",
+      "wasm",
+    ],
+  });
 
   if (options.artifactDir === null) {
     console.error("--artifact-dir is required");
@@ -212,6 +222,7 @@ async function parseArgs(argv) {
   }
 
   options.artifactDir = resolve(options.artifactDir);
+  options.firmwareDir = resolve(options.firmwareDir);
   options.kernel = resolve(options.kernel);
   options.initrd = options.initrd === null ? null : resolve(options.initrd);
   options.rootfs = options.rootfs === null ? null : resolve(options.rootfs);
@@ -276,7 +287,7 @@ class CdpSession {
   }
 }
 
-function smokeUrl(options) {
+export function smokeUrl(options) {
   const url = new URL(`http://${options.host}:${options.port}/`);
   url.searchParams.set("appendExtra", "");
   url.searchParams.set("allowSerialFallback", "1");
@@ -302,6 +313,7 @@ function smokeUrl(options) {
     url.searchParams.set("wasm64TcgSummaryInterval", "1000");
   }
   url.searchParams.set("rootfsDevice", options.rootfsDevice);
+  url.searchParams.set("targetArch", options.targetArch);
   url.searchParams.set("kernelAppend", options.kernelAppend);
   url.searchParams.set("initrd", options.initrd === null ? "" : "/guest/initramfs.cpio.gz");
   if (options.rootfs !== null) {
@@ -310,6 +322,26 @@ function smokeUrl(options) {
   url.searchParams.set("timeoutMs", String(options.timeoutMs));
   url.searchParams.set("visualMarker", "");
   return url.href;
+}
+
+export function smokeServerArgs(options) {
+  const args = [
+    "scripts/ci/wasm-browser-smoke-server.mjs",
+    "--artifact-dir", options.artifactDir,
+    "--firmware-dir", options.firmwareDir,
+    "--kernel", options.kernel,
+    "--program", basename(options.program),
+    "--wasm", basename(options.wasm),
+    "--host", options.host,
+    "--port", String(options.port),
+  ];
+  if (options.initrd !== null) {
+    args.push("--initrd", options.initrd);
+  }
+  if (options.rootfs !== null) {
+    args.push("--rootfs", options.rootfs);
+  }
+  return args;
 }
 
 async function stopProcess(child) {
@@ -364,21 +396,7 @@ async function main() {
   requireReadable(resolve(options.artifactDir, basename(options.wasm)), "wasm artifact");
   await mkdir(dirname(options.out), { recursive: true });
 
-  const serverArgs = [
-    "scripts/ci/wasm-browser-smoke-server.mjs",
-    "--artifact-dir", options.artifactDir,
-    "--kernel", options.kernel,
-    "--program", basename(options.program),
-    "--wasm", basename(options.wasm),
-    "--host", options.host,
-    "--port", String(options.port),
-  ];
-  if (options.initrd !== null) {
-    serverArgs.push("--initrd", options.initrd);
-  }
-  if (options.rootfs !== null) {
-    serverArgs.push("--rootfs", options.rootfs);
-  }
+  const serverArgs = smokeServerArgs(options);
   const server = spawn(process.execPath, serverArgs, {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
@@ -530,23 +548,25 @@ async function main() {
   }
 }
 
-main().catch(async (error) => {
-  const message = error && error.message ? error.message : String(error);
-  try {
-    const fallbackOut = process.argv.includes("--out")
-      ? process.argv[process.argv.indexOf("--out") + 1]
-      : null;
-    if (fallbackOut) {
-      await mkdir(dirname(resolve(fallbackOut)), { recursive: true });
-      await writeFile(resolve(fallbackOut), JSON.stringify({
-        success: false,
-        errorMessage: message,
-        stack: error && error.stack ? error.stack : null,
-      }, null, 2));
+if (process.argv[1] && resolve(process.argv[1]) === THIS_FILE) {
+  main().catch(async (error) => {
+    const message = error && error.message ? error.message : String(error);
+    try {
+      const fallbackOut = process.argv.includes("--out")
+        ? process.argv[process.argv.indexOf("--out") + 1]
+        : null;
+      if (fallbackOut) {
+        await mkdir(dirname(resolve(fallbackOut)), { recursive: true });
+        await writeFile(resolve(fallbackOut), JSON.stringify({
+          success: false,
+          errorMessage: message,
+          stack: error && error.stack ? error.stack : null,
+        }, null, 2));
+      }
+    } catch {
+      /* best-effort failure report */
     }
-  } catch {
-    /* best-effort failure report */
-  }
-  console.error(error && error.stack ? error.stack : message);
-  process.exit(1);
-});
+    console.error(error && error.stack ? error.stack : message);
+    process.exit(1);
+  });
+}

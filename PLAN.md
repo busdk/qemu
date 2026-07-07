@@ -119,6 +119,21 @@ Accepted QEMU build-environment evidence recorded:
   01:07: `node scripts/ci/wasm-playwright-loader-test.mjs`, `node
   scripts/ci/wasm-browser-smoke-runner-test.mjs`, `node --check` on the
   modified browser runner scripts, and `git diff --check`.
+- [x] Repair the dependency-free Chrome/CDP generated-exec proof firmware
+  route for RISC-V. The CDP gate now accepts and forwards `--firmware-dir` to
+  `wasm-browser-smoke-server.mjs`, defaults the CDP RISC-V path to
+  `targetArch=riscv64`, carries manifest `target_arch`, and includes
+  `targetArch` in the smoke URL so the browser page mounts
+  `opensbi-riscv64-generic-fw_dynamic.bin` under `/firmware/` before QEMU
+  starts. Added after the remote generated-exec proof exited before boot
+  because the CDP route did not expose the RISC-V OpenSBI firmware path.
+  Focused verification on 07-07 10: `node --check
+  scripts/ci/wasm-browser-cdp-gate.mjs`, `node --check
+  scripts/ci/wasm-browser-cdp-gate-test.mjs`, `node
+  scripts/ci/wasm-browser-cdp-gate-test.mjs`, `node --check
+  scripts/ci/wasm-browser-smoke-server.mjs`, `node --check
+  scripts/ci/wasm-browser-smoke.mjs`, `node
+  scripts/ci/wasm-browser-smoke-runner-test.mjs`, and `git diff --check`.
 
 ## Exact Definition of Done
 
@@ -921,6 +936,21 @@ run that reaches a weaker marker than normal multi-user readiness.
     WASM SHA256
     `c5c29bd49aa160ef220e6f70db3ac459ee23b2751852f149cf37bc4740627c56`.
     Remote ccache was cold (`0/1319` hits).
+    Progress 2026-07-07 10:40 EEST: repaired the dependency-free Chrome/CDP
+    gate invocation path so it matches the runner's RISC-V firmware contract.
+    `scripts/ci/wasm-browser-cdp-gate.mjs` now accepts and forwards
+    `--firmware-dir` to the smoke server, emits `targetArch=riscv64` in the
+    smoke URL, carries `firmwareDir` and `targetArch` through guest manifests
+    including `target_arch`, and exposes helper functions for deterministic
+    coverage. Added `scripts/ci/wasm-browser-cdp-gate-test.mjs` to prove the
+    CDP server args include the firmware directory and the smoke URL selects
+    the RISC-V target architecture. Verification passed without launching a
+    browser: `node --check scripts/ci/wasm-browser-cdp-gate.mjs`, `node
+    scripts/ci/wasm-browser-cdp-gate-test.mjs`, `node
+    scripts/ci/wasm-browser-smoke-runner-test.mjs`, and `git diff --check`.
+    This is only a proof-route repair; R4d-g remains open until a controlled
+    Chrome generic RISC-V proof reports nonzero generated execution before
+    `Welcome to TuxTest`.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
