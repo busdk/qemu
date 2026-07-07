@@ -25,9 +25,11 @@ Each lane is complete only against its own accepted Bus Engine OS
 `virtual-server` kernel/rootfs pair. The proof must use Chrome or Chromium,
 the QEMU WebAssembly artifacts produced by this branch, and the standard
 `virtual-server` boot path. Shell-only init bypasses, synthetic guests, stale
-artifacts, native-QEMU-only boots, snapshots, hibernate/restore,
-preinitialized RAM, and heavily reduced product profiles do not satisfy either
-lane.
+artifacts, native-QEMU-only boots, and heavily reduced product profiles do not
+satisfy either lane. Snapshot/restore is allowed only through the explicit
+R4suspend browser fast-path item below, with a sanitized pre-secret state,
+restore compatibility proof, entropy reseed proof, and a recorded cold-boot
+fallback measurement.
 
 Keep unrelated downstream work out of scope. Do not take over bus-pkg, OPFS
 persistence, virtio-net, virtual-desktop packaging, Codex packaging, or Engine
@@ -45,11 +47,14 @@ This boot goal is expected to close through cumulative, deterministic
 improvements rather than one isolated speedup. Smaller QEMU/WASM wins may be
 accepted as progress when they are measured on the active lane, preserve
 correctness and fallback behavior, and improve the real cold-boot execution
-path or the generic gate that guards it. Record the before/after timings,
-generated-vs-fallback counters, artifact hashes, browser version, commands,
-and remaining gap here. Such wins do not satisfy the final proof until the
+path, the browser suspend/resume fast path, or the generic gate that guards
+either one. Record the before/after timings, generated-vs-fallback counters
+when relevant, artifact hashes, browser version, commands, and remaining gap
+here. Cold-boot wins do not satisfy the final cold-boot proof until the
 accepted Bus Engine OS image reaches normal multi-user readiness within
-`300000` ms.
+`300000` ms. Suspend/resume wins do not satisfy the product fast-path proof
+until the sanitized restore path reaches the same readiness marker within the
+accepted browser elapsed-time gate and records the cold-boot fallback timing.
 
 Bus Engine OS is the downstream acceptance workload, not a hard-coding target.
 Boot traces from Bus Engine OS or generic Linux may select which translated
@@ -150,10 +155,13 @@ non-regression checks unless the operator opens a separate x86 lane.
 - [ ] The proof runs in Chrome or Chromium and records the exact browser
   version, command line, timeout, QEMU arguments, kernel arguments, and result
   JSON path.
-- [ ] The browser-hosted QEMU/WASM run reaches normal multi-user readiness
-  within `300000` ms of harness start, using the same elapsed-ms clock the
-  harness already records for boot milestones. Normal multi-user readiness
-  means the guest serial output contains the systemd line
+- [ ] Either the browser-hosted QEMU/WASM cold-boot run reaches normal
+  multi-user readiness within `300000` ms of harness start, or the
+  operator-promoted browser suspend/resume path restores from a sanitized
+  pre-boot snapshot and reaches the same readiness marker within `300000` ms
+  while also recording a same-artifact cold-boot fallback timing. Use the same
+  elapsed-ms clock the harness already records for boot milestones. Normal
+  multi-user readiness means the guest serial output contains the systemd line
   `Reached target Multi-User System.` followed by a getty login prompt line,
   or the documented `QEMU_WASM_SERVICE_READY` marker. Weaker markers such as
   hostname, journald, or basic target do not satisfy this item.
@@ -171,10 +179,56 @@ non-regression checks unless the operator opens a separate x86 lane.
   pushed.
 
 The goal is not done if the only passing proof is native QEMU, a generic smoke
-guest, a shell-only boot, a stale artifact, a snapshot/restore shortcut, or a
-run that reaches a weaker marker than normal multi-user readiness.
+guest, a shell-only boot, a stale artifact, an unsanitized snapshot/restore
+shortcut, or a run that reaches a weaker marker than normal multi-user
+readiness.
 
 ## Active Work Items
+
+- [ ] R4suspend - Prove browser pre-boot suspend/resume as the public
+  fast-path for the RISC-V `virtual-server` goal:
+  active 2026-07-07 from operator direction. QEMU owns the generic VM-state
+  mechanics, browser restore path, and browser lifecycle persistence; Bus
+  Engine OS owns the snapshot-safe guest boundary and Linux-kernel
+  suspend/hibernate feasibility in its own PLAN. Preferred architecture:
+  guest-assisted suspend/resume, where QEMU provides the browser-safe tools
+  and storage contract, and Linux produces/restores the hibernation image with
+  kernel knowledge of live pages, devices, and resume ordering. DoD starts
+  with a comparison matrix and one measured prototype for each viable path:
+  guest-assisted Linux hibernate/resume, full-QEMU-state restore, and any
+  hybrid where QEMU accelerates loading a guest-managed hibernation image.
+  The primary QEMU deliverable is a generic tool/API shape for browser-hosted
+  guests: create a resume-capable storage device or image, pass the correct
+  resume kernel arguments, emit a compatibility manifest, atomically pair the
+  immutable release disk with mutable resume/overlay state, restore from HTTP
+  or OPFS, report timing phases, and reject incompatible state before boot.
+  The full-QEMU-state prototype remains a fallback/probe: boot the accepted
+  `virtual-server` kernel/rootfs to a pre-secret milestone, snapshot CPU, RAM,
+  and device state, restore it in Chrome/Chromium through the WASM QEMU build,
+  and record download, decompression, restore, and ready-marker timings against
+  the current `373.989s` clean cold boot and `300.000s` goal. The Linux-kernel
+  path is preferred if evidence shows it stores materially less state, restores
+  faster, or avoids serializing unused guest RAM, because the guest kernel can
+  know which pages and devices must survive while the virtualizer generally
+  cannot. The proof must define the exact producer/consumer shape: native
+  `qemu-system-riscv64` migration stream, WASM-produced QEMU state,
+  guest-produced hibernation image, or hybrid; compatibility keys including
+  QEMU commit, WASM artifact hashes, machine model, CPU, device list, memory
+  size, kernel SHA-256, rootfs SHA-256, package-set digest, profile, resume
+  device identity, and hibernation image format; and rejection behavior when
+  any key changes.
+  Security gates: the snapshot/hibernation image must be taken before SSH host
+  keys, machine-id, DHCP lease, random seed, or user-specific data exist, or
+  the Bus Engine OS resume service must prove those values are regenerated
+  before exposure; restore must reseed guest entropy every time before any
+  key/nonce generation; and evidence must prove that two restored instances do
+  not share generated machine identity or SSH host keys. Browser lifecycle
+  gates: initial restore may fall back to the shipped pre-boot state, later
+  page-close/pagehide suspend may persist state to OPFS, RAM and disk overlay
+  checkpoints must be atomic as a pair, and the design must state whether
+  multi-tab sharing uses a SharedWorker-hosted VM or a Web Locks
+  leader-election handoff. Preserve cold-boot as the measured fallback path
+  until the operator accepts the snapshot route as the public default.
 
 - [ ] R4z - Investigate load-dependent wasm64 OOB crash at $func20564 (ordinal
   20222) - potential real product bug, not just CI noise:

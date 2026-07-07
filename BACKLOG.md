@@ -1789,36 +1789,6 @@ Keep the default TCI path unchanged. DoD for this narrow goal is:
   time with a net workload/boot improvement, while the serial marker gate
   still passes; no Bus Engine product logic in upstream QEMU code.
 
-- [ ] Pre-booted suspend/resume image for the browser (operator, 2026-07-05):
-  boot the image once at BUILD time to a pre-secret milestone, snapshot the
-  full VM state (QEMU migration stream: CPU+RAM+device state), ship the
-  snapshot with the browser bundle, and RESTORE instead of cold-booting -
-  browser boot time becomes download+restore. Also enables browser-side
-  suspend/unsuspend (serialize wasm QEMU state to OPFS on tab close, resume
-  later). Two sharp edges that gate the design: (1) SNAPSHOT HYGIENE - the
-  snapshot must precede ALL per-instance generated material (ssh host keys,
-  machine-id, DHCP lease, random seed); a first-resume service generates
-  them after restore (ed25519 keygen is instant). (2) ENTROPY REUSE - every
-  instance restored from one snapshot has IDENTICAL kernel RNG state; the
-  guest MUST reseed on resume (virtio-rng injection + kernel reseed) or all
-  instances generate identical keys/nonces - classic VM-snapshot security
-  failure, treat as a blocker requirement not a nice-to-have. Design
-  question: can native qemu-system-riscv64 (same fork commit, same machine
-  config) produce a migration stream the wasm build restores, or must the
-  snapshot be produced by the wasm build itself (deterministic but slower
-  bake step). Extension (operator): suspend/resume is the browser DEFAULT lifecycle -
-  boot once at bake time, restore on first visit, auto-suspend to OPFS on
-  page close, resume the user's own state on every return. Adds: continuous
-  dirty-page checkpointing (pagehide budget is seconds - one-shot 512MB
-  serialization is impossible), navigator.storage.persist() + eviction
-  fallback to the shipped snapshot, atomic RAM+disk-overlay checkpoint
-  pairs, entropy reseed on EVERY resume, and (operator) SHARED-INSTANCE multi-tab:
-  the user boots/restores ONCE and every tab attaches to the same running
-  VM as a view - candidate architectures: SharedWorker-hosted VM (tabs as
-  MessagePort clients; verify SAB/COOP/COEP compat) vs Web-Locks leader
-  election with checkpoint handoff on leader close. Design investigation assigned to worker 3e0a591d;
-  accelerator work remains top priority per operator.
-
 ## Deferred x86/W historical accelerator items moved from PLAN.md on 2026-07-07
 
 These unchecked items are useful future accelerator work, but they are not part of the current active RISC-V five-minute Bus Engine OS browser boot goal. The active QEMU PLAN stays focused on the RISC-V lane and final proof/non-regression gates.
