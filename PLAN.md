@@ -1259,6 +1259,25 @@ readiness.
     `node scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, `node
     scripts/ci/wasm-browser-smoke-runner-test.mjs`, and `git diff --check
     HEAD~1..HEAD`.
+    Follow-up 2026-07-07 (commit `d90a9699a4`): fixed the richer zero-summary
+    optional TCG placeholder shape from the saved `5fd5d214e9` result. The
+    real result used `{enabled, interval, maxSummaries, summaryCount: 0,
+    summaries: [], lastSummary: null}`, not a bare `{}`; this now counts as
+    no TCG evidence unless `--require-tcg` is set. Primary-check verification
+    passed: `node --check scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`,
+    `node scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke-metrics-gate.mjs`,
+    `node --check scripts/ci/wasm-browser-cdp-proof-gate.mjs`, `node
+    scripts/ci/wasm-browser-cdp-proof-gate-test.mjs`, `node
+    scripts/ci/wasm-browser-smoke-runner-test.mjs`, and `git diff --check
+    HEAD~1..HEAD`. Replaying
+    `/Users/test/git/busdk/agent-supervisor/tmp/qemu-r4dg-5fd5d214e9-cdp-generated-exec.json`
+    through the primary metrics gate now reports `ok=true`,
+    `acceptanceMode=runloop`, and `runloop.ok=true` without `--require-tcg`;
+    the `--require-tcg` variant still fails as intended with missing
+    `wasm64Tcg.summaryCount` and `wasm64Tcg.lastSummary`. This is a gate
+    repair only, not a speed or readiness claim.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
