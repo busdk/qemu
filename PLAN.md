@@ -519,6 +519,103 @@ readiness.
   whether the compiler can split a body at a branch-before-accesses point into
   a safe generated prefix plus fallback/continuation, or whether another
   blocker class is cheaper to move first.
+  Design analysis 2026-07-07 (source-reading only, no code change, no
+  browser proof - per instruction not to implement yet):
+  "Generated prefix plus fallback/continuation" (resume the SAME TB's
+  remaining ops via TCI after a partial generated-exec run) is not viable
+  without inventing new shared-infrastructure capability and breaking an
+  existing invariant. `tcg_qemu_tb_exec`'s documented contract
+  (`include/tcg/tcg.h:887`-`930`) is TB-atomic: the only "gave up" outcome
+  it defines is "we did not start executing this TB" (icount case 2,
+  `:908`-`912`) or "stopped before/at entry due to exit_request" (case 3,
+  `:913`-`916`); "partially executed this TB, please resume mid-body" is
+  not a return path this interface has ever supported, for wasm64 or any
+  other TCG backend. Consistent with that contract, the wasm64 JS compiler
+  never allows a partial-success outcome: `emitted.push(...body); if
+  (allOrNothingSoftmmu) { emitted.push(...deferredSoftmmuCommits); }`
+  (`tcg/wasm64.c:4497`-`4500`) appends every accumulated softmmu commit
+  *after* the fully-compiled body, unconditionally, regardless of which
+  nested WASM blocks the recursive compile placed those commits' guards
+  inside - i.e. today's generated bodies either run to completion and
+  commit everything, or are rejected before any code is generated at all;
+  there is no partial-commit-then-bail outcome to resume from. Building
+  "resume via TCI partway through" would need a new TCI entry point
+  (`tcg/tci.c`) accepting a starting op offset and synced register state -
+  a cross-cutting change to interpreter infrastructure shared by every TCG
+  target that uses it, not scoped to wasm64. Not recommended.
+  Why the "before" shape is rejected at all, confirmed by direct code
+  read: `allOrNothingSoftmmu = softmmuAccessCount > 1`
+  (`tcg/wasm64.c:3551`) flat-counts every softmmu access in the whole body
+  before any compilation happens; `multiAccessBranchIndex >= 0` combined
+  with `allOrNothingSoftmmu` throws (`tcg/wasm64.c:4425`, mirrored on the C
+  side by `memop_count > 1 && control_flow_unsupported` at
+  `tcg/wasm64.c:8683`). The measured shape - branch at index 3, first
+  access at index 13+ - means every guarded access lives inside the
+  recursively-compiled guarded range (`compileRange(index + 1,
+  targetIndex)`, the JS `body` wrapped in `block([brIf(0, cond), ...body])`
+  that skips it when the branch's condition is truthy). Since
+  `deferredSoftmmuCommits` is one flat array flushed once *after* that
+  block already closed (`:4499`), an unconditionally-run commit for an
+  access whose guard never executed (because the block's `br_if` skipped
+  it) would write whatever garbage was left in that access's pre-assigned
+  local slot into guest-visible state - a real correctness bug, not
+  over-caution. The rejection is protecting a genuine invariant (no
+  guest-visible side effect before every access in the same reachable
+  range has been TLB-guarded), which "prefix + fallback" would also have
+  had to preserve and does not have supporting infrastructure for either.
+  Smallest realistic patch, not implemented: make the commit flush
+  scope-aware instead of global. Since the measured population has zero
+  accesses before the branch (`branch_position === "before"` means
+  `branch_index < first_access_index` by construction), the narrowest safe
+  version doesn't need general nested-scope tracking - it only needs: when
+  there is exactly one top-level `brcond` and zero softmmu accesses before
+  it, flush the accumulated `deferredSoftmmuCommits` *inside* that
+  branch's own `block(...)` (right after its `body`, before the block's
+  closing `0x0b`) instead of after the whole top-level body at `:4499`,
+  and relax the C-side gate at `:8683` to check
+  `branch_position === "before" && first_access_index above branch_index`
+  instead of an unconditional `memop_count > 1 && control_flow_unsupported`
+  reject. `after` and `interleaved` (and any future-observed shape with
+  accesses *before* the branch) must keep rejecting - this is a narrow,
+  shape-specific relaxation gated exactly on what the data proves, not a
+  general fix.
+  Risks: (1) the guard-then-commit ordering *within* the guarded block
+  must still guard every access before committing any of them, preserving
+  no-partial-state-before-a-fault inside that scope - narrowing the flush
+  point's scope must not accidentally narrow the guard-before-commit
+  ordering too. (2) untested against a TLB-miss/fault on the second of two
+  guarded accesses - must confirm the first access's commit still does not
+  become visible before the second's guard is checked. (3) only proven for
+  the exact observed shape (zero pre-branch accesses, one top-level
+  branch); must not be written as a blanket removal of the `memop_count >
+  1` gate. (4) larger/more deeply nested shapes than currently observed
+  (multiple branches, accesses before and after) still need the fully
+  general scope-aware design this patch deliberately does not build.
+  Alternative considered: moving `unsupported-body-state` (14 instances,
+  the next-largest bucket) first instead. Not cheaper: it comes from
+  `tcg_wasm64_live_generated_exec_classify_reject`'s runtime catch-all
+  (`exits_unsupported`/`TCG_WASM64_RUN_EXIT_UNSUPPORTED` with none of the
+  more specific mismatch checks matching), the same "needs JS/WASM runtime
+  boundary plumbing to add any per-instance detail" gap flagged and
+  deliberately not built in the `662fe43d46`/`48963f79b0` diagnostic entry
+  above; unlike the multi-access+branch population, it has zero positional
+  data yet, is smaller in count, and pursuing it would restart the same
+  "diagnose before touching" cycle for less potential payoff.
+  Tests/proof that would be needed before any implementation: new
+  `wasm-generated-output-equivalence-test.mjs` fixtures covering (a) the
+  exact branch-then-two-guarded-loads shape compiling and executing
+  correctly both when the branch is taken (accesses skipped, no commit)
+  and not taken (accesses run, both committed); (b) a TLB-miss/fault on
+  the second of two guarded accesses proving the first's commit is not
+  yet visible; (c) `after`/`interleaved`/pre-branch-access shapes still
+  rejected (no silent widening); updated
+  `wasm64-translate-metadata-test.mjs` source-contract assertions on the
+  narrowed gate condition; then, only after those pass, a controlled
+  browser proof re-measuring `reject_reasons` and `generated_run_entries`
+  against the same early-boot population to confirm no regression
+  (register/memory checksums still match reference TCI execution, this
+  project's existing differential-testing convention) and some reduction
+  in control-flow-unsupported rejects - not a marker-pass or speed claim.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
