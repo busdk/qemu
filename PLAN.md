@@ -1126,12 +1126,17 @@ readiness.
     generated coverage before `Welcome to TuxTest`.
     Dispatch status 2026-07-07: existing worker
     `qemu-repo-materialization-proof-20260707b` is a real `busdk/qemu`
-    checkout, and direct readback now reports HEAD `802dd8692e`. The
-    proof-prep message `qemu-r4dg-802dd-proof-prep-20260707a` was delivered to
-    its live App Server, but the worker has not yet reported the aligned state
-    or proof commands back through `bus workers messages`. Do not accept an
-    R4d-g/R4z proof from that worker until the new CDP proof gate plus the
-    generic metrics gate both pass.
+    checkout, and direct readback plus worker report both confirm HEAD
+    `802dd8692e`. The proof-prep message
+    `qemu-r4dg-802dd-proof-prep-20260707a` completed without running a browser
+    proof or WASM build. The worker found no checkout-level blocker: required
+    scripts exist, the Node gate scripts parse, `git diff --check` passed, and
+    `scripts/ci/wasm-build-artifacts-local.py` compiles when Python bytecode
+    cache is redirected into the worktree. Caveat: configured SSH `origin`
+    fetch fails with public-key auth, while HTTPS fetch works but returned an
+    older public `develop`; use the accepted local `802dd8692e` or newer base.
+    Do not accept an R4d-g/R4z proof from that worker until the new CDP proof
+    gate plus the generic metrics gate both pass.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
