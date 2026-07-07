@@ -293,6 +293,20 @@ readiness.
   runtime state or an earlier fault that reaches that runtime path. R4z still
   requires controlled-load reproduction and a fix; this source-map refresh is
   diagnostic evidence only.
+  Progress 2026-07-07: added `scripts/ci/wasm-code-offset-map.mjs`, a
+  dependency-free wasm binary parser that maps an absolute module byte offset
+  to the enclosing code-section body, imported-function count, defined ordinal,
+  function index, body size, and body-relative offset. This makes the R4z
+  `$func20564`/ordinal attribution repeatable for future controlled-load OOB
+  captures instead of relying on ad hoc code-section parsing. The mapper fails
+  closed if the function section count does not match the code body count or
+  if parsed import/function/code sections leave trailing bytes, so an
+  attribution cannot silently use a corrupted import count. Verification:
+  `node --check scripts/ci/wasm-code-offset-map.mjs`, `node --check
+  scripts/ci/wasm-code-offset-map-test.mjs`, `node
+  scripts/ci/wasm-code-offset-map-test.mjs`, and `git diff --check`. This is
+  diagnostic tooling only; R4z remains open pending controlled-load
+  reproduction and mechanism fix.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
