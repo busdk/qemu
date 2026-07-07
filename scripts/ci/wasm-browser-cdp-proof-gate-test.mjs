@@ -118,6 +118,25 @@ const result = {
 }
 
 {
+  const tcgOnly = JSON.parse(JSON.stringify(result));
+  delete tcgOnly.wasm64Runloop;
+  tcgOnly.wasm64Tcg = {
+    lastSummary: {
+      event: "summary",
+      generated_coverage_denominator: 2000,
+      generated_coverage_numerator: 5,
+      generated_coverage_ppm: 2500,
+      generated_run_entries: 3,
+    },
+  };
+  const gate = cdpProofEvidenceGate(tcgOnly, { requireGeneratedExec: true });
+  assert.equal(gate.ok, true);
+  assert.equal(gate.generatedExec.source, "wasm64Tcg");
+  assert.equal(gate.generatedExec.generatedRunEntries, 3);
+  assert.equal(gate.generatedExec.generatedCoverageNumerator, 5);
+}
+
+{
   const gate = cdpProofEvidenceGate(result, { maxElapsedMs: 1000 });
   assert.equal(gate.ok, false);
   assert.equal(gate.elapsedOk, false);
