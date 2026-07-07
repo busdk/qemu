@@ -1088,6 +1088,28 @@ readiness.
     Progress 2026-07-07: the CDP proof gate now supports `--max-elapsed-ms`,
     allowing the same post-result gate to enforce the `300000` ms browser
     proof budget for Bus Engine OS readiness evidence.
+    Current next controlled R4d-g command sequence for accepted primary QEMU
+    `802dd8692e` or newer on a load-controlled `dev.hg.fi` host, not the overloaded
+    local host:
+    `python3 scripts/ci/wasm-build-artifacts-local.py --out
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-r4dg-802dd8692e-riscv64-wasm
+    --target riscv64 --tcg-wasm64-backend --build-image`; then
+    `node scripts/ci/wasm-browser-cdp-gate.mjs --artifact-dir
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-r4dg-802dd8692e-riscv64-wasm
+    --firmware-dir pc-bios --guest-manifest
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-riscv64-official-guest/tuxboot-browser-smoke-guest.json
+    --out
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-r4dg-802dd8692e-cdp-generated-exec.json
+    --timeout-ms 180000 --diagnostics-limit 64`; then
+    `node scripts/ci/wasm-browser-cdp-proof-gate.mjs --result
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-r4dg-802dd8692e-cdp-generated-exec.json
+    --require-guest-manifest --require-generated-exec --max-elapsed-ms 300000
+    --json`; then `node scripts/ci/wasm-browser-smoke-metrics-gate.mjs
+    --result
+    /Users/test/git/busdk/agent-supervisor/tmp/qemu-r4dg-802dd8692e-cdp-generated-exec.json
+    --require-tcg --json`. Promotion still requires artifact hashes from the
+    CDP result `inputEvidence`, browser version, elapsed timing, and nonzero
+    generated coverage before `Welcome to TuxTest`.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
