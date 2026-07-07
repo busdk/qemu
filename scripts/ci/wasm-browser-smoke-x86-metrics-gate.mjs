@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * Validate the x86 browser smoke metrics payload.
+ * Validate browser smoke metrics payloads.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -247,7 +247,7 @@ const TCG_GENERATED_EXITS_FIELDS = [
 ];
 
 function usage() {
-  return `Usage: wasm-browser-smoke-x86-metrics-gate.mjs --result FILE [options]
+  return `Usage: wasm-browser-smoke-metrics-gate.mjs --result FILE [options]
 
 Options:
   --require-tcg   Fail when the result does not include a wasm64Tcg summary
@@ -918,7 +918,7 @@ export function x86BrowserSmokeMetricsGate(result, options = {}) {
 
   return {
     format: 1,
-    purpose: "qemu-browser-smoke-x86-metrics-gate",
+    purpose: "qemu-browser-smoke-metrics-gate",
     version: X86_BROWSER_SMOKE_METRICS_GATE_VERSION,
     ok,
     runloop,
@@ -933,7 +933,7 @@ function printResult(gate, json) {
   }
   const tcgState = gate.tcg;
   process.stdout.write(
-    `qemu-browser-smoke-x86-metrics-gate: ` +
+    `qemu-browser-smoke-metrics-gate: ` +
     `runloop_ok=${gate.runloop.ok} ` +
     `runloop_event=${gate.runloop.lastSummary?.event || "missing"} ` +
     `runloop_acceptance=${gate.runloop.acceptanceAllowed} ` +

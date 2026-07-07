@@ -1060,6 +1060,14 @@ readiness.
     is no longer blocked on repository materialization; it remains gated on
     controlled browser load placement and exact artifact/command/counter
     capture.
+    Progress 2026-07-07 after commit `951f8e1d4b`: added
+    `scripts/ci/wasm-browser-smoke-metrics-gate.mjs` as a generic alias for
+    the existing browser smoke metrics validator so the RISC-V generated-exec
+    proof can run a post-result metrics gate without using the x86-specific
+    command name. Use it after the CDP proof as:
+    `node scripts/ci/wasm-browser-smoke-metrics-gate.mjs --result
+    <result.json> --require-tcg --json`, then report the generated coverage
+    numerator/denominator or ppm from the emitted gate JSON.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
