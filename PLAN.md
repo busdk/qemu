@@ -1174,6 +1174,50 @@ readiness.
     controlled `dev.hg.fi` template to use for a `repo_id=busdk/qemu,module=.`
     proof worker. This remains a dispatch/provisioning blocker, not a QEMU
     source or repo-id materialization blocker.
+    Remote proof result 2026-07-07: supervisor used direct `nor-agent` SSH
+    while worker relay provisioning remains blocked. Imported accepted QEMU
+    `5fd5d214e9` into remote worktree
+    `~/git/busdk/agent-supervisor/tmp/qemu-proof-tooling-5fd5d214e9` via
+    bundle; remote lightweight checks passed with Node `v24.18.0`: `node
+    --check scripts/ci/wasm-code-offset-map.mjs`, `node
+    scripts/ci/wasm-code-offset-map-test.mjs`, `node
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, `node --check
+    scripts/ci/wasm-browser-smoke-metrics-gate.mjs`, `node --check
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs`, and
+    `git diff --check 802dd8692e..HEAD`. The controlled CDP run reused
+    existing WASM artifacts because `b596d0b869..5fd5d214e9` changes only
+    scripts and plan files. Command used Chrome for Testing `149.0.7827.55`,
+    artifact dir
+    `~/git/busdk/agent-supervisor/tmp/qemu-remote-riscv64-accelerator-20260707a`,
+    `--firmware-dir pc-bios`, and guest manifest
+    `~/git/busdk/agent-supervisor/tmp/qemu-riscv64-official-guest/tuxboot-browser-smoke-guest.json`.
+    Result JSON:
+    `~/git/busdk/agent-supervisor/tmp/qemu-r4dg-5fd5d214e9-cdp-generated-exec.json`.
+    Firmware routing is fixed and generated execution is nonzero:
+    `generated_run_entries=58`, `generated_coverage_numerator=163`,
+    `generated_coverage_denominator=964`, `generated_guest_instructions=163`,
+    `fallback_guest_instructions=801`, `pageErrors=0`, and
+    `requestFailures=0`. The guest marker did not pass:
+    `markerSeen=false`, `elapsedMs=185672`, and page status
+    `Startup timed out waiting for Bus Engine OS`, so this is not a speed or
+    readiness acceptance. Input evidence hashes from the result: program
+    `7fa406692c8a4238acc0607d3ec18ab518bdb639c77f7a223bb1ff2bf95b19a0`,
+    wasm
+    `c5c29bd49aa160ef220e6f70db3ac459ee23b2751852f149cf37bc4740627c56`,
+    kernel
+    `2bd8132a3bf21570290042324fff48c987f42f2a00c08de979f43f0662ebadba`,
+    rootfs
+    `bdae7f7e022592800442b73eb32ec7631f43a4c13dd8621051204f7e482fbd2b`,
+    and guest manifest
+    `9e1c03f74f71de42dbfda3bb4b9bbc093081aed18435cfa8e034a3a30da5d32b`.
+    Gate blockers found from that result: `wasm-browser-cdp-proof-gate.mjs`
+    currently rejects generated-exec evidence because it requires
+    `wasm64Runloop.lastSummary.generated_coverage_ppm` even when numerator and
+    denominator are present, and `wasm-browser-smoke-metrics-gate.mjs` fails
+    even without `--require-tcg` because an empty `wasm64Tcg` object makes
+    `tcg.ok=false` and forces the overall gate false despite `runloop.ok=true`.
+    Fix those gate contracts with tests before rerunning the long browser
+    proof.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
