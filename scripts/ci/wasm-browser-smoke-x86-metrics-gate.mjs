@@ -917,13 +917,21 @@ export function x86BrowserSmokeMetricsGate(result, options = {}) {
 
   const tcgRequired = Boolean(options.requireTcg);
   const tcgOk = tcg === null ? !tcgRequired : tcg.ok;
-  const ok = runloop.ok && runloop.acceptanceAllowed !== false && tcgOk;
+  const runloopOk = runloop.ok && runloop.acceptanceAllowed !== false;
+  const tcgOnlyOk =
+    options.allowTcgOnly === true &&
+    tcgRequired &&
+    runloop.present === false &&
+    tcg !== null &&
+    tcg.ok;
+  const ok = (runloopOk || tcgOnlyOk) && tcgOk;
 
   return {
     format: 1,
     purpose: options.purpose || DEFAULT_PURPOSE,
     version: X86_BROWSER_SMOKE_METRICS_GATE_VERSION,
     ok,
+    acceptanceMode: tcgOnlyOk ? "tcg-only" : "runloop",
     runloop,
     tcg,
   };
@@ -981,6 +989,7 @@ export async function run(argv = process.argv, runOptions = {}) {
   const result = JSON.parse(fs.readFileSync(options.result, "utf8"));
   const gate = x86BrowserSmokeMetricsGate(result, {
     ...options,
+    allowTcgOnly: runOptions.allowTcgOnly === true,
     purpose: runOptions.purpose,
   });
   printResult(gate, options.json);

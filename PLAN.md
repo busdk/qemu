@@ -1141,6 +1141,16 @@ readiness.
     result must report success before any acceptance claim. Do not accept an
     R4d-g/R4z proof from that worker until the new CDP proof gate plus the
     generic metrics gate both pass.
+    Progress 2026-07-07: the generic metrics gate now accepts a TCG-only
+    result when invoked as `wasm-browser-smoke-metrics-gate.mjs --require-tcg`,
+    while the x86-specific command still requires runloop evidence. This keeps
+    the metrics gate compatible with the accepted CDP proof-gate fallback that
+    can validate generated-exec evidence from `wasm64Tcg.lastSummary` when no
+    `wasm64Runloop.lastSummary` exists. Verification: `node --check
+    scripts/ci/wasm-browser-smoke-metrics-gate.mjs`, `node --check
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs`, `node
+    scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, and
+    `git diff --check`.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster

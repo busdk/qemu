@@ -377,6 +377,9 @@ const liveGeneratedExecSummaryZeroResult = {
 liveGeneratedExecSummaryZeroResult.wasm64Runloop.lastSummary =
   liveGeneratedExecSummaryZeroResult.wasm64Runloop.summaries[0];
 
+const tcgOnlyResult = JSON.parse(JSON.stringify(runtimeSmokeResult));
+delete tcgOnlyResult.wasm64Runloop;
+
 const liveGeneratedExecSummaryReadyResult = JSON.parse(
   JSON.stringify(liveGeneratedExecSummaryZeroResult),
 );
@@ -669,6 +672,7 @@ assert.equal(X86_BROWSER_SMOKE_METRICS_GATE_VERSION, 4);
   const gate = x86BrowserSmokeMetricsGate(runtimeSmokeResult);
   assert.equal(gate.purpose, "qemu-browser-smoke-x86-metrics-gate");
   assert.equal(gate.ok, true);
+  assert.equal(gate.acceptanceMode, "runloop");
   assert.equal(gate.runloop.ok, true);
   assert.equal(gate.runloop.summaryCount, 1);
   assert.equal(gate.runloop.summariesLength, 1);
@@ -690,6 +694,26 @@ assert.equal(X86_BROWSER_SMOKE_METRICS_GATE_VERSION, 4);
   assert.equal(gate.tcg.lastSummary.fallback_guest_instructions, 720);
   assert.equal(gate.tcg.lastSummary.generated_body_time_ns, 123456);
   assert.deepEqual(gate.tcg.lastSummary.generated_exits.missingFields, []);
+}
+
+{
+  const gate = x86BrowserSmokeMetricsGate(tcgOnlyResult, { requireTcg: true });
+  assert.equal(gate.ok, false);
+  assert.equal(gate.acceptanceMode, "runloop");
+  assert.equal(gate.runloop.present, false);
+  assert.equal(gate.tcg.ok, true);
+}
+
+{
+  const gate = x86BrowserSmokeMetricsGate(tcgOnlyResult, {
+    allowTcgOnly: true,
+    requireTcg: true,
+  });
+  assert.equal(gate.ok, true);
+  assert.equal(gate.acceptanceMode, "tcg-only");
+  assert.equal(gate.runloop.present, false);
+  assert.equal(gate.tcg.ok, true);
+  assert.equal(gate.tcg.lastSummary.generated_coverage_ppm, 21000);
 }
 
 {
@@ -738,6 +762,34 @@ assert.equal(X86_BROWSER_SMOKE_METRICS_GATE_VERSION, 4);
     "--result", resultPath,
   ], { encoding: "utf8" });
   assert.match(genericText, /^qemu-browser-smoke-metrics-gate:/);
+}
+
+{
+  const resultDir = mkdtempSync(join(tmpdir(), "qemu-smoke-metrics-gate-tcg-only-"));
+  const resultPath = join(resultDir, "result.json");
+  writeFileSync(resultPath, JSON.stringify(tcgOnlyResult));
+
+  assert.throws(
+    () => execFileSync(process.execPath, [
+      "scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs",
+      "--result", resultPath,
+      "--require-tcg",
+      "--json",
+    ], { encoding: "utf8" }),
+    /Command failed/,
+  );
+
+  const genericJson = execFileSync(process.execPath, [
+    "scripts/ci/wasm-browser-smoke-metrics-gate.mjs",
+    "--result", resultPath,
+    "--require-tcg",
+    "--json",
+  ], { encoding: "utf8" });
+  const gate = JSON.parse(genericJson);
+  assert.equal(gate.purpose, "qemu-browser-smoke-metrics-gate");
+  assert.equal(gate.ok, true);
+  assert.equal(gate.acceptanceMode, "tcg-only");
+  assert.equal(gate.tcg.lastSummary.generated_coverage_ppm, 21000);
 }
 
 for (const field of [
