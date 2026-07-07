@@ -1110,6 +1110,14 @@ readiness.
     --require-tcg --json`. Promotion still requires artifact hashes from the
     CDP result `inputEvidence`, browser version, elapsed timing, and nonzero
     generated coverage before `Welcome to TuxTest`.
+    Dispatch status 2026-07-07: existing worker
+    `qemu-repo-materialization-proof-20260707b` is a real `busdk/qemu`
+    checkout, and direct readback now reports HEAD `802dd8692e`. The
+    proof-prep message `qemu-r4dg-802dd-proof-prep-20260707a` was delivered to
+    its live App Server, but the worker has not yet reported the aligned state
+    or proof commands back through `bus workers messages`. Do not accept an
+    R4d-g/R4z proof from that worker until the new CDP proof gate plus the
+    generic metrics gate both pass.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
