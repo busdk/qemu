@@ -117,6 +117,24 @@ const result = {
   ));
 }
 
+// R4d-g: the wasm64Runloop "live-generated-exec-summary" event
+// (tcg/wasm64.c tcg_wasm64_report_live_generated_exec_summary) never emits
+// generated_coverage_ppm, only the numerator/denominator. A real controlled
+// proof (58 generated_run_entries, 163/964 coverage) reported this exact
+// shape and was wrongly rejected before the gate derived ppm itself.
+{
+  const runloopNoPpm = JSON.parse(JSON.stringify(result));
+  delete runloopNoPpm.wasm64Runloop.lastSummary.generated_coverage_ppm;
+  runloopNoPpm.wasm64Runloop.lastSummary.generated_run_entries = 58;
+  runloopNoPpm.wasm64Runloop.lastSummary.generated_coverage_numerator = 163;
+  runloopNoPpm.wasm64Runloop.lastSummary.generated_coverage_denominator = 964;
+  const gate = cdpProofEvidenceGate(runloopNoPpm, { requireGeneratedExec: true });
+  assert.equal(gate.ok, true);
+  assert.equal(gate.generatedExec.ok, true);
+  assert.equal(gate.generatedExec.generatedCoveragePpmReported, false);
+  assert.equal(gate.generatedExec.generatedCoveragePpm, 169087);
+}
+
 {
   const tcgOnly = JSON.parse(JSON.stringify(result));
   delete tcgOnly.wasm64Runloop;

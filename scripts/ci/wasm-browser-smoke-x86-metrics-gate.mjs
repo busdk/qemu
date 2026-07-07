@@ -900,13 +900,26 @@ function validateMetricsState(state, validator, label) {
   };
 }
 
+// A result can carry a `wasm64Tcg` key that is a plain `{}` placeholder with
+// none of summaryCount/summaries/lastSummary set, rather than genuine (if
+// incomplete) tcg summary data. Treat that placeholder the same as tcg being
+// absent, so it defers to `requireTcg` instead of always vetoing acceptance;
+// real (even broken) tcg summary data still vetoes regardless of requireTcg.
+function hasMetricsStateData(state) {
+  return isObject(state) && (
+    state.summaryCount !== undefined ||
+    state.summaries !== undefined ||
+    state.lastSummary !== undefined
+  );
+}
+
 export function x86BrowserSmokeMetricsGate(result, options = {}) {
   const runloop = validateMetricsState(
     result?.wasm64Runloop,
     validateRunloopSummaryByEvent,
     "wasm64Runloop",
   );
-  const tcgPresent = isObject(result?.wasm64Tcg);
+  const tcgPresent = hasMetricsStateData(result?.wasm64Tcg);
   const tcg = tcgPresent
     ? validateMetricsState(
         result.wasm64Tcg,

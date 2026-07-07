@@ -838,6 +838,27 @@ for (const field of [
   assert.equal(gate.runloop.lastSummary.reject_reason_total_matches, true);
 }
 
+// R4d-g: a real controlled proof carried an ok runloop-only
+// live-generated-exec-summary alongside an incomplete/empty wasm64Tcg
+// object. Without --require-tcg, that placeholder must not veto acceptance.
+{
+  const readyRunloopOnlyWithEmptyTcg = JSON.parse(
+    JSON.stringify(liveGeneratedExecSummaryReadyResult),
+  );
+  readyRunloopOnlyWithEmptyTcg.wasm64Tcg = {};
+
+  const gate = x86BrowserSmokeMetricsGate(readyRunloopOnlyWithEmptyTcg);
+  assert.equal(gate.runloop.ok, true);
+  assert.equal(gate.tcg, null);
+  assert.equal(gate.ok, true);
+  assert.equal(gate.acceptanceMode, "runloop");
+
+  const requiredGate = x86BrowserSmokeMetricsGate(readyRunloopOnlyWithEmptyTcg, {
+    requireTcg: true,
+  });
+  assert.equal(requiredGate.ok, false);
+}
+
 {
   const gate = x86BrowserSmokeMetricsGate(scaffoldOneTbDifferentialResult);
   assert.equal(gate.ok, false);

@@ -132,6 +132,20 @@ function generatedSummary(result) {
   };
 }
 
+// The wasm64Tcg "summary" event reports generated_coverage_ppm directly, but
+// the wasm64Runloop "live-generated-exec-summary" event (tcg/wasm64.c
+// tcg_wasm64_report_live_generated_exec_summary) never emits that field, only
+// the numerator/denominator. Requiring the literal field rejected real
+// nonzero generated-exec evidence from that event; derive it instead,
+// matching the same numerator*1e6/denominator integer math the "summary"
+// event uses (tcg_wasm64_report_summary).
+function computeCoveragePpm(numerator, denominator) {
+  if (!isPositiveInteger(numerator) || !isPositiveInteger(denominator)) {
+    return null;
+  }
+  return Number((BigInt(numerator) * 1000000n) / BigInt(denominator));
+}
+
 function validateGeneratedExec(result, required) {
   const { source, summary } = generatedSummary(result);
   const missingFields = [];
@@ -149,7 +163,13 @@ function validateGeneratedExec(result, required) {
   const generatedRunEntries = summary.generated_run_entries;
   const generatedCoverageNumerator = summary.generated_coverage_numerator;
   const generatedCoverageDenominator = summary.generated_coverage_denominator;
-  const generatedCoveragePpm = summary.generated_coverage_ppm;
+  const generatedCoveragePpmComputed = computeCoveragePpm(
+    generatedCoverageNumerator,
+    generatedCoverageDenominator,
+  );
+  const generatedCoveragePpm = Number.isInteger(summary.generated_coverage_ppm)
+    ? summary.generated_coverage_ppm
+    : generatedCoveragePpmComputed;
 
   if (!isPositiveInteger(generatedRunEntries)) {
     missingFields.push(`${source}.lastSummary.generated_run_entries`);
@@ -177,6 +197,7 @@ function validateGeneratedExec(result, required) {
     generatedCoveragePpm: Number.isInteger(generatedCoveragePpm)
       ? generatedCoveragePpm
       : null,
+    generatedCoveragePpmReported: Number.isInteger(summary.generated_coverage_ppm),
     missingFields,
     ok: missingFields.length === 0,
   };
