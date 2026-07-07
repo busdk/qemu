@@ -900,18 +900,23 @@ function validateMetricsState(state, validator, label) {
   };
 }
 
-// A result can carry a `wasm64Tcg` key that is a plain `{}` placeholder with
-// none of summaryCount/summaries/lastSummary set, rather than genuine (if
-// incomplete) tcg summary data. That placeholder must not veto an otherwise
-// valid wasm64Runloop result unless the caller actually requires tcg
-// evidence (`--require-tcg`/`options.requireTcg`); once required, or once
-// real (even broken) tcg data is present, tcg validity always matters and
-// `tcg.missingFields` reports exactly what is missing.
+// A result can carry a `wasm64Tcg` key that is an optional-instrumentation
+// placeholder rather than genuine (if incomplete) tcg summary data: either a
+// bare `{}`, or the real shape the browser runner emits when tcg summary
+// reporting is enabled but never produced a summary -
+// `{enabled, interval, maxSummaries, summaryCount: 0, summaries: [],
+// lastSummary: null}`. Neither carries any actual tcg evidence, so neither
+// must veto an otherwise valid wasm64Runloop result unless the caller
+// actually requires tcg evidence (`--require-tcg`/`options.requireTcg`);
+// once required, or once real (even broken) tcg data is present - a positive
+// summaryCount, a non-empty summaries array, or an object lastSummary - tcg
+// validity always matters and `tcg.missingFields` reports exactly what is
+// missing.
 function hasMetricsStateData(state) {
   return isObject(state) && (
-    state.summaryCount !== undefined ||
-    state.summaries !== undefined ||
-    state.lastSummary !== undefined
+    isPositiveInteger(state.summaryCount) ||
+    (isArray(state.summaries) && state.summaries.length > 0) ||
+    isObject(state.lastSummary)
   );
 }
 

@@ -872,6 +872,48 @@ for (const field of [
   ]);
 }
 
+// R4d-g: the real 5fd5d214e9 saved CDP proof result carries a richer
+// zero-summary placeholder, not a bare `{}` - tcg summary reporting was
+// enabled but never produced a summary:
+// {enabled, interval, maxSummaries, summaryCount: 0, summaries: [],
+// lastSummary: null}. Its summaryCount/summaries/lastSummary keys are all
+// *present* (unlike the bare-`{}` case above), so a presence-only check
+// would wrongly treat this as real tcg data and veto the gate even without
+// --require-tcg. It must behave exactly like the bare `{}` placeholder.
+{
+  const readyRunloopOnlyWithZeroSummaryTcg = JSON.parse(
+    JSON.stringify(liveGeneratedExecSummaryReadyResult),
+  );
+  readyRunloopOnlyWithZeroSummaryTcg.wasm64Tcg = {
+    enabled: true,
+    interval: 1000,
+    maxSummaries: 16,
+    summaryCount: 0,
+    summaries: [],
+    lastSummary: null,
+  };
+
+  const gate = x86BrowserSmokeMetricsGate(readyRunloopOnlyWithZeroSummaryTcg);
+  assert.equal(gate.runloop.ok, true);
+  assert.equal(gate.tcg.ok, false);
+  assert.deepEqual(gate.tcg.missingFields, [
+    "wasm64Tcg.summaryCount",
+    "wasm64Tcg.lastSummary",
+  ]);
+  assert.equal(gate.ok, true);
+  assert.equal(gate.acceptanceMode, "runloop");
+
+  const requiredGate = x86BrowserSmokeMetricsGate(readyRunloopOnlyWithZeroSummaryTcg, {
+    requireTcg: true,
+  });
+  assert.equal(requiredGate.ok, false);
+  assert.equal(requiredGate.tcg.ok, false);
+  assert.deepEqual(requiredGate.tcg.missingFields, [
+    "wasm64Tcg.summaryCount",
+    "wasm64Tcg.lastSummary",
+  ]);
+}
+
 // Fully absent wasm64Tcg (no key at all) is distinct from an empty
 // placeholder: with no data to validate, tcg stays null in both modes, and
 // --require-tcg alone is enough to fail the gate.
