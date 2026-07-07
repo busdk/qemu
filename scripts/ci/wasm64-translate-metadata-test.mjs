@@ -699,6 +699,40 @@ assert.match(runtime, /MO_ATOM_NONE/);
 assert.match(runtime, /MO_ATOM_MASK/);
 assert.match(runtime, /TCG_WASM64_LIVE_GENERATED_EXEC_RESULT_CACHE_HIT/);
 assert.match(runtime, /tcg_wasm64_live_generated_exec_count_attempt/);
+
+// Branch-position sampling for the multi-access softmmu reject population
+// (R4d-g): classifies whether the first brcond in a rejected body sits
+// before, after, or interleaved with the body's softmmu accesses.
+assert.match(runtime, /typedef enum TCGWasm64LiveMultiAccessBranchPosition/);
+for (const branchPositionEnumerator of [
+  "TCG_WASM64_LIVE_MULTI_ACCESS_BRANCH_NONE",
+  "TCG_WASM64_LIVE_MULTI_ACCESS_BRANCH_BEFORE",
+  "TCG_WASM64_LIVE_MULTI_ACCESS_BRANCH_AFTER",
+  "TCG_WASM64_LIVE_MULTI_ACCESS_BRANCH_INTERLEAVED",
+]) {
+  assert.match(runtime, new RegExp(branchPositionEnumerator));
+}
+assert.match(
+  runtime,
+  /tcg_wasm64_live_generated_exec_multi_access_branch_position\(/,
+);
+// Lock in the actual comparison direction, not just field presence, so an
+// inverted before/after check would fail this test.
+assert.match(runtime, /branch_index < first_access_index/);
+assert.match(runtime, /branch_index > last_access_index/);
+assert.match(
+  runtime,
+  /tcg_wasm64_live_generated_exec_multi_access_branch_position_name/,
+);
+for (const branchPositionName of ["none", "before", "after", "interleaved"]) {
+  assert.match(runtime, new RegExp(`return "${branchPositionName}";`));
+}
+assert.match(runtime, /\\"branch_position\\":\\"%s\\"/);
+assert.match(runtime, /\\"branch_index\\":%d/);
+assert.match(runtime, /\\"last_access_index\\":%d/);
+assert.match(runtime, /int32_t first_branch_index = -1/);
+assert.match(runtime, /int32_t first_access_index = -1/);
+assert.match(runtime, /int32_t last_access_index = -1/);
 const liveGeneratedExecTryBody = runtime.match(
   /static bool tcg_wasm64_live_generated_exec_try\([\s\S]*?\n\}\n\nstatic bool tcg_wasm64_translate_op_supported/,
 )?.[0] || "";

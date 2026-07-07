@@ -298,6 +298,23 @@ typedef struct TCGWasm64ModuleFailure {
     uint64_t detail_size;
 } TCGWasm64ModuleFailure;
 
+/*
+ * Where the first brcond in a rejected multi-softmmu-access body sits
+ * relative to the softmmu accesses it was rejected alongside: strictly
+ * before the first access, strictly after the last access, or interleaved
+ * among/between them. NONE means the body had no brcond at all (the
+ * softmmu-multi-access-unsupported reason can fire on access shape alone,
+ * e.g. load-after-store, without any branch present). This does not by
+ * itself prove a "branch strictly after all accesses" body is safe to
+ * relax - it only measures how common each shape is.
+ */
+typedef enum TCGWasm64LiveMultiAccessBranchPosition {
+    TCG_WASM64_LIVE_MULTI_ACCESS_BRANCH_NONE,
+    TCG_WASM64_LIVE_MULTI_ACCESS_BRANCH_BEFORE,
+    TCG_WASM64_LIVE_MULTI_ACCESS_BRANCH_AFTER,
+    TCG_WASM64_LIVE_MULTI_ACCESS_BRANCH_INTERLEAVED,
+} TCGWasm64LiveMultiAccessBranchPosition;
+
 typedef struct TCGWasm64LiveMultiAccessRejectStat {
     uint32_t access_count;
     uint32_t load_count;
@@ -305,6 +322,9 @@ typedef struct TCGWasm64LiveMultiAccessRejectStat {
     char order[TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES + 1];
     MemOp memops[TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES];
     bool store_before_later_guard;
+    int32_t branch_index;
+    int32_t last_access_index;
+    TCGWasm64LiveMultiAccessBranchPosition branch_position;
     uint64_t count;
 } TCGWasm64LiveMultiAccessRejectStat;
 
@@ -7908,16 +7928,42 @@ static void tcg_wasm64_live_generated_exec_count_memop_reject(
     stats[TCG_WASM64_LIVE_MEMOP_REJECT_SLOTS - 1].count++;
 }
 
+/*
+ * Classifies where a rejected body's first brcond sits relative to its
+ * softmmu accesses. branch_index < 0 means no brcond was seen at all.
+ * first_access_index < 0 (no accesses yet) cannot happen for a multi-access
+ * reject in practice, but is treated as "branch before" defensively rather
+ * than dividing by an absent range.
+ */
+static TCGWasm64LiveMultiAccessBranchPosition
+tcg_wasm64_live_generated_exec_multi_access_branch_position(
+    int32_t branch_index, int32_t first_access_index,
+    int32_t last_access_index)
+{
+    if (branch_index < 0) {
+        return TCG_WASM64_LIVE_MULTI_ACCESS_BRANCH_NONE;
+    }
+    if (first_access_index < 0 || branch_index < first_access_index) {
+        return TCG_WASM64_LIVE_MULTI_ACCESS_BRANCH_BEFORE;
+    }
+    if (branch_index > last_access_index) {
+        return TCG_WASM64_LIVE_MULTI_ACCESS_BRANCH_AFTER;
+    }
+    return TCG_WASM64_LIVE_MULTI_ACCESS_BRANCH_INTERLEAVED;
+}
+
 static bool tcg_wasm64_live_generated_exec_multi_access_stat_matches(
     const TCGWasm64LiveMultiAccessRejectStat *stat, uint32_t access_count,
     uint32_t load_count, uint32_t store_count, const char *order,
-    const MemOp *memops, bool store_before_later_guard)
+    const MemOp *memops, bool store_before_later_guard,
+    TCGWasm64LiveMultiAccessBranchPosition branch_position)
 {
     if (stat->count == 0 ||
         stat->access_count != access_count ||
         stat->load_count != load_count ||
         stat->store_count != store_count ||
         stat->store_before_later_guard != store_before_later_guard ||
+        stat->branch_position != branch_position ||
         strncmp(stat->order, order, sizeof(stat->order)) != 0) {
         return false;
     }
@@ -7934,12 +7980,17 @@ static bool tcg_wasm64_live_generated_exec_multi_access_stat_matches(
 static void tcg_wasm64_live_generated_exec_store_multi_access_stat(
     TCGWasm64LiveMultiAccessRejectStat *stat, uint32_t access_count,
     uint32_t load_count, uint32_t store_count, const char *order,
-    const MemOp *memops, bool store_before_later_guard)
+    const MemOp *memops, bool store_before_later_guard,
+    int32_t branch_index, int32_t last_access_index,
+    TCGWasm64LiveMultiAccessBranchPosition branch_position)
 {
     stat->access_count = access_count;
     stat->load_count = load_count;
     stat->store_count = store_count;
     stat->store_before_later_guard = store_before_later_guard;
+    stat->branch_index = branch_index;
+    stat->last_access_index = last_access_index;
+    stat->branch_position = branch_position;
     memset(stat->order, 0, sizeof(stat->order));
     memcpy(stat->order, order, MIN(strlen(order), sizeof(stat->order) - 1));
     memset(stat->memops, 0, sizeof(stat->memops));
@@ -7953,15 +8004,21 @@ static void tcg_wasm64_live_generated_exec_store_multi_access_stat(
 
 static void tcg_wasm64_live_generated_exec_count_multi_access_reject(
     uint32_t access_count, uint32_t load_count, uint32_t store_count,
-    const char *order, const MemOp *memops, bool store_before_later_guard)
+    const char *order, const MemOp *memops, bool store_before_later_guard,
+    int32_t branch_index, int32_t first_access_index,
+    int32_t last_access_index)
 {
+    TCGWasm64LiveMultiAccessBranchPosition branch_position =
+        tcg_wasm64_live_generated_exec_multi_access_branch_position(
+            branch_index, first_access_index, last_access_index);
+
     for (size_t i = 0; i < TCG_WASM64_LIVE_MULTI_ACCESS_REJECT_SLOTS; i++) {
         TCGWasm64LiveMultiAccessRejectStat *stat =
             &live_generated_exec_reject_multi_accesses[i];
 
         if (tcg_wasm64_live_generated_exec_multi_access_stat_matches(
                 stat, access_count, load_count, store_count, order, memops,
-                store_before_later_guard)) {
+                store_before_later_guard, branch_position)) {
             stat->count++;
             return;
         }
@@ -7973,7 +8030,8 @@ static void tcg_wasm64_live_generated_exec_count_multi_access_reject(
         if (stat->count == 0) {
             tcg_wasm64_live_generated_exec_store_multi_access_stat(
                 stat, access_count, load_count, store_count, order, memops,
-                store_before_later_guard);
+                store_before_later_guard, branch_index, last_access_index,
+                branch_position);
             return;
         }
     }
@@ -8388,6 +8446,9 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
     int32_t direct_store_sizes[TCG_WASM64_LIVE_DIRECT_STORE_MAX] = { 0 };
     char access_order[TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES + 1] = { 0 };
     MemOp access_memops[TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES] = { 0 };
+    int32_t first_branch_index = -1;
+    int32_t first_access_index = -1;
+    int32_t last_access_index = -1;
 
     *has_memop = false;
     *mmu_idx_out = 0;
@@ -8437,6 +8498,10 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
 
             *has_memop = true;
             memop_count++;
+            if (first_access_index < 0) {
+                first_access_index = (int32_t)i;
+            }
+            last_access_index = (int32_t)i;
             if (oi_reg >= ARRAY_SIZE(state.known) || !state.known[oi_reg]) {
                 return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_MEMOP_UNPROVEN;
             }
@@ -8466,7 +8531,9 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
             } else {
                 tcg_wasm64_live_generated_exec_count_multi_access_reject(
                     memop_count, load_count, store_count, access_order,
-                    access_memops, store_before_later_guard);
+                    access_memops, store_before_later_guard,
+                    first_branch_index, first_access_index,
+                    last_access_index);
                 return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_MULTI_ACCESS_UNSUPPORTED;
             }
 #if defined(CONFIG_USER_ONLY)
@@ -8580,6 +8647,9 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
         }
         case INDEX_op_brcond:
             control_flow_unsupported = true;
+            if (first_branch_index < 0) {
+                first_branch_index = (int32_t)i;
+            }
             if (!tcg_wasm64_live_generated_exec_control_flow_supported(
                     i, word)) {
                 tcg_wasm64_live_generated_exec_count_control_flow_reject_for_word(
@@ -8606,19 +8676,22 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
             direct_store_offsets, direct_store_sizes);
         tcg_wasm64_live_generated_exec_count_multi_access_reject(
             memop_count, load_count, store_count, access_order,
-            access_memops, store_before_later_guard);
+            access_memops, store_before_later_guard,
+            first_branch_index, first_access_index, last_access_index);
         return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_DIRECT_MEMORY_UNSUPPORTED;
     }
     if (memop_count > 1 && control_flow_unsupported) {
         tcg_wasm64_live_generated_exec_count_multi_access_reject(
             memop_count, load_count, store_count, access_order,
-            access_memops, store_before_later_guard);
+            access_memops, store_before_later_guard,
+            first_branch_index, first_access_index, last_access_index);
         return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_CONTROL_FLOW_UNSUPPORTED;
     }
     if (memop_count > 1 && load_after_store) {
         tcg_wasm64_live_generated_exec_count_multi_access_reject(
             memop_count, load_count, store_count, access_order,
-            access_memops, store_before_later_guard);
+            access_memops, store_before_later_guard,
+            first_branch_index, first_access_index, last_access_index);
         return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_MULTI_ACCESS_UNSUPPORTED;
     }
     if (have_mmu_idx) {
@@ -8674,6 +8747,23 @@ static void tcg_wasm64_print_live_generated_exec_reject_memops(void)
     }
 }
 
+static const char *tcg_wasm64_live_generated_exec_multi_access_branch_position_name(
+    TCGWasm64LiveMultiAccessBranchPosition position)
+{
+    switch (position) {
+    case TCG_WASM64_LIVE_MULTI_ACCESS_BRANCH_NONE:
+        return "none";
+    case TCG_WASM64_LIVE_MULTI_ACCESS_BRANCH_BEFORE:
+        return "before";
+    case TCG_WASM64_LIVE_MULTI_ACCESS_BRANCH_AFTER:
+        return "after";
+    case TCG_WASM64_LIVE_MULTI_ACCESS_BRANCH_INTERLEAVED:
+        return "interleaved";
+    default:
+        return "unknown";
+    }
+}
+
 static void tcg_wasm64_print_live_generated_exec_reject_multi_accesses(void)
 {
     bool first = true;
@@ -8690,11 +8780,17 @@ static void tcg_wasm64_print_live_generated_exec_reject_multi_accesses(void)
                 "%s{\"reason\":\"selected-body-softmmu-multi-access-unsupported\","
                 "\"access_count\":%u,\"order\":\"%s\","
                 "\"loads\":%u,\"stores\":%u,"
-                "\"store_before_later_guard\":%s,\"memops\":[",
+                "\"store_before_later_guard\":%s,"
+                "\"branch_position\":\"%s\","
+                "\"branch_index\":%d,"
+                "\"last_access_index\":%d,\"memops\":[",
                 first ? "" : ",",
                 stat->access_count, stat->order,
                 stat->load_count, stat->store_count,
-                stat->store_before_later_guard ? "true" : "false");
+                stat->store_before_later_guard ? "true" : "false",
+                tcg_wasm64_live_generated_exec_multi_access_branch_position_name(
+                    stat->branch_position),
+                stat->branch_index, stat->last_access_index);
         for (uint32_t i = 0; i < MIN(stat->access_count,
                                      TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES);
              i++) {
