@@ -15,6 +15,7 @@ function usage() {
 Options:
   --require-success         Fail when the proof result did not succeed
   --require-guest-manifest  Fail when inputEvidence.guestManifest is missing
+  --require-generated-exec  Fail without nonzero generated-exec coverage
   --json                    Print JSON only
 `;
 }
@@ -34,6 +35,7 @@ function isPositiveInteger(value) {
 function parseArgs(argv) {
   const options = {
     json: false,
+    requireGeneratedExec: false,
     requireGuestManifest: false,
     requireSuccess: false,
     result: null,
@@ -43,6 +45,8 @@ function parseArgs(argv) {
     const arg = argv[index];
     if (arg === "--result") {
       options.result = argv[++index];
+    } else if (arg === "--require-generated-exec") {
+      options.requireGeneratedExec = true;
     } else if (arg === "--require-guest-manifest") {
       options.requireGuestManifest = true;
     } else if (arg === "--require-success") {
@@ -103,6 +107,77 @@ function validateFileEvidence(inputEvidence, role, required) {
   };
 }
 
+function generatedSummary(result) {
+  const runloop = result?.wasm64Runloop?.lastSummary;
+  if (isObject(runloop) && runloop.event === "live-generated-exec-summary") {
+    return {
+      source: "wasm64Runloop",
+      summary: runloop,
+    };
+  }
+  const tcg = result?.wasm64Tcg?.lastSummary;
+  if (isObject(tcg)) {
+    return {
+      source: "wasm64Tcg",
+      summary: tcg,
+    };
+  }
+  return {
+    source: null,
+    summary: null,
+  };
+}
+
+function validateGeneratedExec(result, required) {
+  const { source, summary } = generatedSummary(result);
+  const missingFields = [];
+  if (summary === null) {
+    if (required) {
+      missingFields.push("wasm64Runloop.lastSummary|wasm64Tcg.lastSummary");
+    }
+    return {
+      present: false,
+      source: null,
+      missingFields,
+      ok: !required,
+    };
+  }
+  const generatedRunEntries = summary.generated_run_entries;
+  const generatedCoverageNumerator = summary.generated_coverage_numerator;
+  const generatedCoverageDenominator = summary.generated_coverage_denominator;
+  const generatedCoveragePpm = summary.generated_coverage_ppm;
+
+  if (!isPositiveInteger(generatedRunEntries)) {
+    missingFields.push(`${source}.lastSummary.generated_run_entries`);
+  }
+  if (!isPositiveInteger(generatedCoverageNumerator)) {
+    missingFields.push(`${source}.lastSummary.generated_coverage_numerator`);
+  }
+  if (!isPositiveInteger(generatedCoverageDenominator)) {
+    missingFields.push(`${source}.lastSummary.generated_coverage_denominator`);
+  }
+  if (!Number.isInteger(generatedCoveragePpm) || generatedCoveragePpm <= 0) {
+    missingFields.push(`${source}.lastSummary.generated_coverage_ppm`);
+  }
+  return {
+    present: true,
+    source,
+    event: summary.event || null,
+    generatedRunEntries: Number.isInteger(generatedRunEntries) ? generatedRunEntries : null,
+    generatedCoverageNumerator: Number.isInteger(generatedCoverageNumerator)
+      ? generatedCoverageNumerator
+      : null,
+    generatedCoverageDenominator: Number.isInteger(generatedCoverageDenominator)
+      ? generatedCoverageDenominator
+      : null,
+    generatedCoveragePpm: Number.isInteger(generatedCoveragePpm)
+      ? generatedCoveragePpm
+      : null,
+    missingFields,
+    ok: missingFields.length === 0,
+  };
+}
+
 export function cdpProofEvidenceGate(result, options = {}) {
   const missingFields = [];
   const browserVersion = result?.browserVersion;
@@ -139,6 +214,11 @@ export function cdpProofEvidenceGate(result, options = {}) {
   if (options.requireSuccess && result?.success !== true) {
     missingFields.push("success");
   }
+  const generatedExec = validateGeneratedExec(
+    result,
+    Boolean(options.requireGeneratedExec),
+  );
+  missingFields.push(...generatedExec.missingFields);
 
   const ok = missingFields.length === 0;
   return {
@@ -151,6 +231,7 @@ export function cdpProofEvidenceGate(result, options = {}) {
     browserVersion: browserVersion?.browser || null,
     inputEvidencePresent: isObject(inputEvidence),
     files,
+    generatedExec,
     missingFields,
     pageErrorCount: Array.isArray(result?.pageErrors) ? result.pageErrors.length : null,
     resourceErrorCount: Array.isArray(result?.resourceErrors)
@@ -167,6 +248,7 @@ function printResult(gate, json) {
   process.stdout.write(
     `qemu-browser-cdp-proof-gate: ok=${gate.ok} ` +
     `success=${gate.success} markerSeen=${gate.markerSeen} ` +
+    `generatedExec=${gate.generatedExec.ok} ` +
     `browser=${gate.browserVersion || "missing"} ` +
     `missing=${gate.missingFields.length} ` +
     `resourceErrors=${gate.resourceErrorCount ?? "n/a"}\n`,

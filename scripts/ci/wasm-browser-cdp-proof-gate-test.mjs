@@ -60,17 +60,30 @@ const result = {
   pageErrors: [],
   resourceErrors: [],
   success: true,
+  wasm64Runloop: {
+    lastSummary: {
+      event: "live-generated-exec-summary",
+      generated_coverage_denominator: 1000,
+      generated_coverage_numerator: 21,
+      generated_coverage_ppm: 21000,
+      generated_run_entries: 7,
+    },
+  },
 };
 
 {
   const gate = cdpProofEvidenceGate(result, {
     requireGuestManifest: true,
+    requireGeneratedExec: true,
     requireSuccess: true,
   });
   assert.equal(gate.ok, true);
   assert.equal(gate.purpose, "qemu-browser-cdp-proof-gate");
   assert.equal(gate.browserVersion, "HeadlessChrome/150.0.0.0");
   assert.equal(gate.files.program.ok, true);
+  assert.equal(gate.generatedExec.ok, true);
+  assert.equal(gate.generatedExec.source, "wasm64Runloop");
+  assert.equal(gate.generatedExec.generatedRunEntries, 7);
   assert.equal(gate.files.rootfs.present, true);
   assert.deepEqual(gate.missingFields, []);
 }
@@ -85,6 +98,20 @@ const result = {
   assert.ok(gate.missingFields.includes("browserVersion.browser"));
   assert.ok(gate.missingFields.includes("inputEvidence.wasm.sha256"));
   assert.ok(gate.missingFields.includes("inputEvidence.initrd|rootfs"));
+}
+
+{
+  const broken = JSON.parse(JSON.stringify(result));
+  broken.wasm64Runloop.lastSummary.generated_run_entries = 0;
+  broken.wasm64Runloop.lastSummary.generated_coverage_numerator = 0;
+  const gate = cdpProofEvidenceGate(broken, { requireGeneratedExec: true });
+  assert.equal(gate.ok, false);
+  assert.ok(gate.missingFields.includes(
+    "wasm64Runloop.lastSummary.generated_run_entries",
+  ));
+  assert.ok(gate.missingFields.includes(
+    "wasm64Runloop.lastSummary.generated_coverage_numerator",
+  ));
 }
 
 {
@@ -111,6 +138,7 @@ const result = {
   const output = execFileSync(process.execPath, [
     "scripts/ci/wasm-browser-cdp-proof-gate.mjs",
     "--result", resultPath,
+    "--require-generated-exec",
     "--require-guest-manifest",
     "--require-success",
     "--json",

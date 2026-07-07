@@ -1081,6 +1081,10 @@ readiness.
     check. Run it after the CDP proof with `--require-guest-manifest --json`
     to assert `browserVersion`, program/WASM/kernel/rootfs or initrd hashes,
     and guest-manifest hash evidence before promoting a proof result.
+    Progress 2026-07-07: the CDP proof gate now also supports
+    `--require-generated-exec`, which rejects a result unless it contains
+    nonzero generated run entries plus generated coverage numerator,
+    denominator, and ppm from `wasm64Runloop` or `wasm64Tcg`.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
