@@ -202,6 +202,9 @@ const X86_ENV_DIRECT_DS_SELECTOR_OFFSET = 0x180;
 const X86_ENV_DIRECT_INITIAL_CC_OP = 0x1128128;
 const X86_ENV_DIRECT_INITIAL_HFLAGS = 0x1130130;
 const X86_ENV_DIRECT_INITIAL_DS_SELECTOR = 0x1180180;
+const RISCV64_ENV_DIRECT_PC_OFFSET = 0x1218;
+const RISCV64_ENV_DIRECT_INITIAL_PC = 0x123451218n;
+const RISCV64_ENV_DIRECT_PC_DELTA = 0x40n;
 const MO_8 = 0;
 const MO_16 = 1;
 const MO_32 = 2;
@@ -210,6 +213,8 @@ const MO_SIZE = 0x07;
 const MO_SIGN = 0x08;
 const MO_BSWAP = 0x10;
 const MO_AMASK = 0x7 << 5;
+const MO_UNALN = 0;
+const MO_ALIGN = MO_AMASK;
 const MO_ALIGN_4 = 2 << 5;
 const MO_ALIGN_TLB_ONLY = 1 << 8;
 const MO_ATOM_SHIFT = 9;
@@ -669,12 +674,28 @@ function moduleFailureAttribution({
   words,
   memoryImportDescriptor,
   error = null,
+  runtimeUnsupportedGuards = [],
 }) {
+  const guard = runtimeUnsupportedGuards[0] || null;
+
   return {
     reason,
     phase,
     statusName,
     error,
+    detail: {
+      error,
+      guard: guard === null ? null : {
+        reason: guard.reason,
+        index: guard.index,
+        op: guard.op,
+        count: guard.count ?? null,
+        targetIndex: guard.targetIndex ?? null,
+        ...(guard.baseReg === undefined ? {} : { baseReg: guard.baseReg }),
+        ...(guard.offset === undefined ? {} : { offset: guard.offset }),
+        ...(guard.size === undefined ? {} : { size: guard.size }),
+      },
+    },
     shape: decodedShape(words),
     shapeOpCount: words.length,
     firstOp: words.length > 0 ? decodedShape(words)[0] : "none",
@@ -891,7 +912,9 @@ function envRelativeAccessSupported(op, size) {
          (op.opc === OPS.ld32u && size === 4 &&
           offset === X86_ENV_DIRECT_HFLAGS_OFFSET) ||
          (op.opc === OPS.st32 && size === 4 &&
-          offset === X86_ENV_DIRECT_DS_SELECTOR_OFFSET);
+          offset === X86_ENV_DIRECT_DS_SELECTOR_OFFSET) ||
+         ((op.opc === OPS.ld || op.opc === OPS.st) && size === 8 &&
+          offset === RISCV64_ENV_DIRECT_PC_OFFSET);
 }
 
 function envRelativeMemoryAddress(op, size, memory64 = false) {
@@ -956,11 +979,12 @@ function splitGeneratedOutput(words, relativeBase) {
       break;
     }
     if (opc === OPS.exit_tb || opc === OPS.goto_tb) {
-      const ptr = tbPtr + sextract(insn, 12, 20);
+      const ptrDiff = sextract(insn, 12, 20);
+      const ptr = tbPtr + ptrDiff;
 
       terminal = {
         kind: opc === OPS.goto_tb ? "goto_tb" : "exit_tb",
-        ret: ptr,
+        ret: opc === OPS.exit_tb && ptrDiff === 0 ? 0 : ptr,
         status: opc === OPS.goto_tb ? STATUS_DISPATCH : STATUS_EXIT,
       };
       break;
@@ -997,9 +1021,9 @@ const SHARED_SOFTMMU_LOCAL_FULL_PTR = 41;
 const SHARED_SOFTMMU_LOCAL_COMPARATOR = 42;
 const SHARED_SOFTMMU_LOCAL_ADDEND = 43;
 const SHARED_SOFTMMU_LOCAL_HOST_ADDR = 44;
-const SHARED_SOFTMMU_MAX_DEFERRED_ACCESSES = 4;
+const SHARED_SOFTMMU_MAX_DEFERRED_ACCESSES = 8;
 const SHARED_SOFTMMU_ACCESS_LOCAL_BASE = 45;
-const SHARED_DIRECT_MEMORY_MAX_DEFERRED_STORES = 4;
+const SHARED_DIRECT_MEMORY_MAX_DEFERRED_STORES = 40;
 const SHARED_DIRECT_MEMORY_STORE_VALUE_LOCAL_BASE =
   SHARED_SOFTMMU_ACCESS_LOCAL_BASE + SHARED_SOFTMMU_MAX_DEFERRED_ACCESSES * 4;
 const SHARED_DIRECT_MEMORY_STORE_ADDRESS_LOCAL_BASE =
@@ -1038,6 +1062,32 @@ function directMemoryIsStore(opc) {
 function directMemoryRangesOverlap(lhs, rhs) {
   return lhs.offset < rhs.offset + rhs.size &&
          rhs.offset < lhs.offset + lhs.size;
+}
+
+function directMemoryRangesIdentical(lhs, rhs) {
+  return lhs.offset === rhs.offset && lhs.size === rhs.size;
+}
+
+function findDeferredDirectStore(stores, op, size) {
+  const range = {
+    offset: sextract(op.insn, 16, 16),
+    size,
+  };
+
+  for (let index = stores.length - 1; index >= 0; index--) {
+    const store = stores[index];
+
+    if (directMemoryRangesIdentical(store, range)) {
+      return store;
+    }
+  }
+  return null;
+}
+
+function findDeferredDirectStoreValue(stores, op, size) {
+  const store = findDeferredDirectStore(stores, op, size);
+
+  return store === null ? null : localGet(store.valueLocal);
 }
 
 function i64ConstFromContract(value) {
@@ -1216,7 +1266,7 @@ function compileSharedSoftmmuAccessParts(
       i64Const(0n)),
     unsupportedReturn,
   ));
-  for (const flag of [MO_SIGN, MO_BSWAP, MO_AMASK, MO_ALIGN_TLB_ONLY]) {
+  for (const flag of [MO_BSWAP]) {
     code.push(...ifBlock(
       i64NeExpr(
         i64AndExpr(localGet(SHARED_SOFTMMU_LOCAL_MEMOP),
@@ -1225,6 +1275,36 @@ function compileSharedSoftmmuAccessParts(
       unsupportedReturn,
     ));
   }
+  code.push(...ifBlock(
+    i64NeExpr(
+      i64AndExpr(localGet(SHARED_SOFTMMU_LOCAL_MEMOP),
+                 i64Const(BigInt(MO_SIGN))),
+      i64Const(0n)),
+    isStore ? unsupportedReturn : [
+      ...ifBlock(
+        i64NeExpr(
+          i64AndExpr(localGet(SHARED_SOFTMMU_LOCAL_MEMOP),
+                     i64Const(BigInt(MO_SIZE))),
+          i64Const(BigInt(MO_32))),
+        unsupportedReturn,
+      ),
+    ],
+  ));
+  code.push(...ifBlock(
+    i64NeExpr(
+      i64AndExpr(localGet(SHARED_SOFTMMU_LOCAL_MEMOP),
+                 i64Const(BigInt(MO_AMASK))),
+      i64Const(0n)),
+    [
+      ...ifBlock(
+        i64NeExpr(
+          i64AndExpr(localGet(SHARED_SOFTMMU_LOCAL_MEMOP),
+                     i64Const(BigInt(MO_AMASK))),
+          i64Const(BigInt(MO_ALIGN))),
+        unsupportedReturn,
+      ),
+    ],
+  ));
   code.push(...ifBlock(
     i64NeExpr(
       i64AndExpr(localGet(SHARED_SOFTMMU_LOCAL_MEMOP),
@@ -1243,6 +1323,24 @@ function compileSharedSoftmmuAccessParts(
   }
   code.push(...ifBlock(i32Eqz(localGet(SHARED_SOFTMMU_LOCAL_ACCESS_SIZE)),
                        unsupportedReturn));
+  code.push(...ifBlock(
+    i64EqExpr(
+      i64AndExpr(localGet(SHARED_SOFTMMU_LOCAL_MEMOP),
+                 i64Const(BigInt(MO_AMASK))),
+      i64Const(BigInt(MO_ALIGN))),
+    [
+      ...ifBlock(
+        i64NeExpr(
+          i64AndExpr(
+            localGet(SHARED_SOFTMMU_LOCAL_TADDR),
+            i64SubExpr(
+              i64ExtendI32U(localGet(SHARED_SOFTMMU_LOCAL_ACCESS_SIZE)),
+              i64Const(1n))),
+          i64Const(0n)),
+        unsupportedReturn,
+      ),
+    ],
+  ));
   code.push(...ifBlock(
     i64NeExpr(
       i64AndExpr(
@@ -1347,8 +1445,24 @@ function compileSharedSoftmmuAccessParts(
         i64AndExpr(localGet(SHARED_SOFTMMU_LOCAL_MEMOP),
                    i64Const(BigInt(MO_SIZE))),
         i64Const(BigInt(MO_32))),
-      localSet(regLocal(r0), i64ExtendI32U(i32Load(
-        computedMemoryAddress(localGet(SHARED_SOFTMMU_LOCAL_HOST_ADDR))))),
+      [
+        ...ifBlock(
+          i64EqExpr(
+            i64AndExpr(localGet(SHARED_SOFTMMU_LOCAL_MEMOP),
+                       i64Const(BigInt(MO_SIGN))),
+            i64Const(0n)),
+          localSet(regLocal(r0), i64ExtendI32U(i32Load(
+            computedMemoryAddress(localGet(SHARED_SOFTMMU_LOCAL_HOST_ADDR))))),
+        ),
+        ...ifBlock(
+          i64NeExpr(
+            i64AndExpr(localGet(SHARED_SOFTMMU_LOCAL_MEMOP),
+                       i64Const(BigInt(MO_SIGN))),
+            i64Const(0n)),
+          localSet(regLocal(r0), i64ExtendI32S(i32Load(
+            computedMemoryAddress(localGet(SHARED_SOFTMMU_LOCAL_HOST_ADDR))))),
+        ),
+      ],
     ));
     code.push(...ifBlock(
       i64EqExpr(
@@ -1563,6 +1677,7 @@ function compileSharedDirectMemoryAccessParts(op, storeIndex, options = {}) {
   const { opc, r0 } = op;
   const size = directMemoryAccessSize(opc);
   const memory64 = options.memoryImportDescriptor?.memory64 === true;
+  const deferredDirectStores = options.deferredDirectStores || [];
   const address = envRelativeMemoryAddressI64(op, size);
   const pointerAddress = address === null
     ? null : memoryAddressFromI64(address, memory64);
@@ -1571,6 +1686,18 @@ function compileSharedDirectMemoryAccessParts(op, storeIndex, options = {}) {
     return null;
   }
   if (opc === OPS.ld32u || opc === OPS.ld32s) {
+    const forwarded = findDeferredDirectStoreValue(
+      deferredDirectStores, op, size);
+
+    if (forwarded !== null) {
+      const loaded = i32WrapI64(forwarded);
+
+      return {
+        code: localSet(regLocal(r0), opc === OPS.ld32u
+          ? i64ExtendI32U(loaded) : i64ExtendI32S(loaded)),
+        commit: [],
+      };
+    }
     const loaded = i32Load(pointerAddress);
 
     return {
@@ -1580,25 +1707,48 @@ function compileSharedDirectMemoryAccessParts(op, storeIndex, options = {}) {
     };
   }
   if (opc === OPS.ld) {
+    const forwarded = findDeferredDirectStoreValue(
+      deferredDirectStores, op, size);
+
+    if (forwarded !== null) {
+      return {
+        code: localSet(regLocal(r0), forwarded),
+        commit: [],
+      };
+    }
     return {
       code: localSet(regLocal(r0), i64Load(pointerAddress)),
       commit: [],
     };
   }
 
-  if (storeIndex >= SHARED_DIRECT_MEMORY_MAX_DEFERRED_STORES) {
+  const existingStore = findDeferredDirectStore(deferredDirectStores, op, size);
+  if (existingStore === null &&
+      storeIndex >= SHARED_DIRECT_MEMORY_MAX_DEFERRED_STORES) {
     return null;
   }
-
-  const addressLocal = sharedDirectMemoryStoreAddressLocal(storeIndex);
-  const valueLocal = sharedDirectMemoryStoreValueLocal(storeIndex);
+  const addressLocal = existingStore === null
+    ? sharedDirectMemoryStoreAddressLocal(storeIndex)
+    : existingStore.addressLocal;
+  const valueLocal = existingStore === null
+    ? sharedDirectMemoryStoreValueLocal(storeIndex)
+    : existingStore.valueLocal;
   const value = localGet(valueLocal);
   const addressValue = memoryAddressFromI64(localGet(addressLocal), memory64);
   const store = opc === OPS.st8
     ? i32Store8(addressValue, i32WrapI64(value))
     : opc === OPS.st32
       ? i32Store(addressValue, i32WrapI64(value))
-      : i64Store(addressValue, value);
+    : i64Store(addressValue, value);
+
+  if (existingStore === null) {
+    deferredDirectStores.push({
+      offset: sextract(op.insn, 16, 16),
+      size,
+      addressLocal,
+      valueLocal,
+    });
+  }
 
   return {
     code: [
@@ -1624,16 +1774,23 @@ function compileSharedGeneratedOutputBody(
   ]);
   const deferredSoftmmuCommits = [];
   const deferredDirectStores = [];
+  const directMemoryAliasStoreRanges = [];
   let nextSoftmmuAccessIndex = 0;
   let nextDirectStoreIndex = 0;
 
   function unsupportedMultiAccess(reason, op = softmmuOps.at(-1)) {
     if (diagnostics) {
+      const size = op ? directMemoryAccessSize(op.opc) : null;
       diagnostics.runtimeUnsupportedGuards.push({
         index: op ? op.index : -1,
         op: op ? (OP_NAMES[op.opc] || `opcode-${op.opc}`) : "unknown",
         reason,
         count: softmmuOps.length,
+        ...(size === null ? {} : {
+          baseReg: op.r1,
+          offset: sextract(op.insn, 16, 16),
+          size,
+        }),
       });
     }
     throw new Error("fixture contains unsupported generated-output shape");
@@ -1654,11 +1811,15 @@ function compileSharedGeneratedOutputBody(
       const range = { offset: sextract(op.insn, 16, 16), size };
 
       if (directMemoryIsStore(op.opc)) {
-        deferredDirectStores.push(range);
+        if (!directMemoryAliasStoreRanges.some((store) =>
+          directMemoryRangesIdentical(store, range))) {
+          directMemoryAliasStoreRanges.push(range);
+        }
         return false;
       }
-      return deferredDirectStores.some((store) =>
-        directMemoryRangesOverlap(store, range));
+      return directMemoryAliasStoreRanges.some((store) =>
+        directMemoryRangesOverlap(store, range) &&
+        !directMemoryRangesIdentical(store, range));
     });
     const unsupportedBranch = ops.find((op) => op.opc === OPS.brcond);
     let sawStore = false;
@@ -1759,7 +1920,10 @@ function compileSharedGeneratedOutputBody(
       }
       if (allOrNothingSoftmmu && directMemoryOps.has(op.opc)) {
         const parts = compileSharedDirectMemoryAccessParts(
-          op, nextDirectStoreIndex, options);
+          op, nextDirectStoreIndex, {
+            ...options,
+            deferredDirectStores,
+          });
 
         if (parts === null) {
           return null;
@@ -1867,7 +2031,7 @@ function compileGeneratedOutputModule(
         { count: 3, type: VALUE_I32 },
         { count: 2, type: pointerType },
         { count: 2, type: VALUE_I32 },
-        { count: 43, type: VALUE_I64 },
+        { count: 131, type: VALUE_I64 },
       ],
     )])),
   ]);
@@ -2104,6 +2268,7 @@ function emitPerTBFunctionBody(words, relativeBase, options = {}) {
           memoryImportDescriptor:
             diagnostics.memoryImportDescriptor || memoryImportDescriptor,
           error: error instanceof Error ? error.message : String(error),
+          runtimeUnsupportedGuards: diagnostics.runtimeUnsupportedGuards,
         }),
         moduleBytes,
         moduleValid: false,
@@ -2131,6 +2296,7 @@ function emitPerTBFunctionBody(words, relativeBase, options = {}) {
           memoryImportDescriptor:
             diagnostics.memoryImportDescriptor || memoryImportDescriptor,
           error,
+          runtimeUnsupportedGuards: diagnostics.runtimeUnsupportedGuards,
         }),
         moduleBytes,
         moduleValid,
@@ -2170,6 +2336,7 @@ function emitPerTBFunctionBody(words, relativeBase, options = {}) {
         memoryImportDescriptor:
           diagnostics.memoryImportDescriptor || memoryImportDescriptor,
         error: error instanceof Error ? error.message : String(error),
+        runtimeUnsupportedGuards: diagnostics.runtimeUnsupportedGuards || [],
       }),
       moduleValid: false,
       runtimeUnsupportedGuards: diagnostics.runtimeUnsupportedGuards || [],
@@ -2680,7 +2847,8 @@ function interpretGeneratedOutput(words, state, relativeBase) {
         callReturnLength: retLen,
       };
     } else if (opc === OPS.exit_tb) {
-      const ptr = BigInt(tbPtr + sextract(insn, 12, 20));
+      const ptrDiff = sextract(insn, 12, 20);
+      const ptr = ptrDiff === 0 ? 0n : BigInt(tbPtr + ptrDiff);
       return {
         status: STATUS_EXIT, ret: ptr, regs, executed,
         memoryLoads, memoryWrites,
@@ -2831,6 +2999,11 @@ function createState(relativeBase, words, seed) {
     X86_ENV_DIRECT_INITIAL_DS_SELECTOR,
     true,
   );
+  view.setBigUint64(
+    dataBase + 16 + RISCV64_ENV_DIRECT_PC_OFFSET,
+    RISCV64_ENV_DIRECT_INITIAL_PC,
+    true,
+  );
   for (let index = 0; index < words.length; index++) {
     const insn = words[index] >>> 0;
     const opc = bits(insn, 0, 8);
@@ -2879,6 +3052,9 @@ function captureState(view, regsPtr, retPtr, dataBase, helpers) {
       dsSelector:
         view.getUint32(envBase + X86_ENV_DIRECT_DS_SELECTOR_OFFSET, true),
     },
+    riscv64EnvDirectPc:
+      view.getBigUint64(envBase + RISCV64_ENV_DIRECT_PC_OFFSET, true)
+        .toString(),
     helpers: {
       calls: helpers.calls,
       loads: helpers.calls.filter((call) => call.kind === "ld").length,
@@ -3063,6 +3239,8 @@ async function runFixture(fixture, seed) {
     memoryWrites: expected.memoryWrites,
     x86EnvDirectFields: generatedState.x86EnvDirectFields,
     x86EnvDirectReadReg4: generatedState.regs[4],
+    riscv64EnvDirectReadReg4: generatedState.regs[4],
+    riscv64EnvDirectPc: generatedState.riscv64EnvDirectPc,
     emitter: emission.emitter,
     moduleValid: emission.moduleValid,
     moduleByteLength: emission.moduleByteLength,
@@ -3264,6 +3442,94 @@ async function runR4s21bLaterAccessFailsFixture() {
     exitsTlbMissOrFault: counters.exitsTlbMissOrFault.toString(),
     envFieldBefore: beforeEnv32.toString(),
     envFieldAfter: afterEnv32.toString(),
+    ramBefore: beforeRam64.toString(),
+    ramAfter: afterRam64.toString(),
+  };
+}
+
+async function runR4s21cLaterAccessFailsFixture() {
+  const fixture = {
+    name: "r4s21c-riscv64-env-direct-pc-store-later-softmmu-guard-fails-no-commit",
+    relativeBase: 0x60f0,
+    words: [
+      opImm20(OPS.tci_movi, 5, 0x66),
+      opMem(OPS.st, 5, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      opReg(OPS.tci_qemu_st_rrr, 0, 14, 13),
+      opReg(OPS.tci_qemu_st_rrr, 6, 12, 13),
+      OPS.exit_tb,
+    ],
+  };
+  const generated = createState(fixture.relativeBase, fixture.words, 1);
+  const failingStoreAddress =
+    BigInt(generated.dataBase + 0x10) +
+    (1n << BigInt(WASMJIT_TLB_CONSTANTS.targetPageBits));
+  const envBase = Number(
+    generated.view.getBigUint64(
+      generated.regsPtr + RV64_ENV_RELATIVE_BASE_REG * 8, true));
+  const pcAddress = envBase + RISCV64_ENV_DIRECT_PC_OFFSET;
+
+  generated.view.setBigUint64(generated.regsPtr + 12 * 8,
+                              failingStoreAddress, true);
+  const beforeRam64 =
+    generated.view.getBigUint64(generated.dataBase + 0x10, true);
+  const beforePc = generated.view.getBigUint64(pcAddress, true);
+  const beforeRegs = Array.from({ length: 16 }, (_, reg) =>
+    generated.view.getBigUint64(generated.regsPtr + reg * 8, true));
+  const emission = emitPerTBFunctionBody(fixture.words, fixture.relativeBase);
+
+  assert.equal(emission.ok, true, `${fixture.name} emitter failed closed`);
+  assert.equal(emission.softmmuLowering, SHARED_SOFTMMU_LOWERING_NAME);
+  assert.equal(emission.softmmuLoweredOps, 2);
+
+  const compiled = await WebAssembly.compile(emission.moduleBytes);
+  const instance = await WebAssembly.instantiate(compiled, {
+    env: {
+      memory: generated.memory,
+      qemu_ld_rrr: generated.helpers.qemuLd,
+      qemu_st_rrr: generated.helpers.qemuSt,
+    },
+  });
+  const status = instance.exports.run(generated.ctxPtr);
+  const counters = softmmuCounterSnapshot(
+    generated.view, generated.countersPtr);
+  const exit = readSoftmmuExit(generated.view, generated.retPtr);
+  const afterRam64 =
+    generated.view.getBigUint64(generated.dataBase + 0x10, true);
+  const afterPc = generated.view.getBigUint64(pcAddress, true);
+  const afterRegs = Array.from({ length: 16 }, (_, reg) =>
+    generated.view.getBigUint64(generated.regsPtr + reg * 8, true));
+
+  assert.equal(status, STATUS_TLB_MISS_OR_FAULT);
+  assert.equal(exit.reasonName, "tlb-miss-or-fault");
+  assert.equal(afterRam64, beforeRam64);
+  assert.equal(afterPc, beforePc);
+  assert.deepEqual(afterRegs, beforeRegs);
+  assert.equal(counters.generatedGuestInstructions, 0n);
+  assert.equal(counters.inlineTlbHitLoads, 0n);
+  assert.equal(counters.inlineTlbHitStores, 0n);
+  assert.equal(counters.helperCalls, 0n);
+  assert.equal(counters.qemuLdCalls, 0n);
+  assert.equal(counters.qemuStCalls, 0n);
+  assert.equal(counters.exitsTlbMissOrFault, 1n);
+
+  return {
+    name: fixture.name,
+    status: status.toString(),
+    runExitReason: exit.reasonName,
+    directPcStoreCommitted: false,
+    partialStoreCommitted: false,
+    registerFlushCommitted: false,
+    dispatchTargetCommitted: false,
+    generatedGuestInstructions: counters.generatedGuestInstructions.toString(),
+    inlineTlbHitLoads: counters.inlineTlbHitLoads.toString(),
+    inlineTlbHitStores: counters.inlineTlbHitStores.toString(),
+    helperCalls: counters.helperCalls.toString(),
+    qemuLdCalls: counters.qemuLdCalls.toString(),
+    qemuStCalls: counters.qemuStCalls.toString(),
+    exitsTlbMissOrFault: counters.exitsTlbMissOrFault.toString(),
+    pcBefore: beforePc.toString(),
+    pcAfter: afterPc.toString(),
     ramBefore: beforeRam64.toString(),
     ramAfter: afterRam64.toString(),
   };
@@ -4730,9 +4996,11 @@ function applySoftmmuReferenceRamAccess(state, fixture) {
       state.view.setBigUint64(
         state.regsPtr, BigInt(state.view.getUint8(state.hostAddr)), true);
     } else if (generatedSize === MO_32) {
+      const value = (fixture.generatedMemop & MO_SIGN) !== 0
+        ? BigInt.asUintN(64, BigInt(state.view.getInt32(state.hostAddr, true)))
+        : BigInt(state.view.getUint32(state.hostAddr, true));
       state.view.setBigUint64(
-        state.regsPtr, BigInt(state.view.getUint32(state.hostAddr, true)),
-        true);
+        state.regsPtr, value, true);
     } else if (generatedSize === MO_64) {
       state.view.setBigUint64(
         state.regsPtr, state.view.getBigUint64(state.hostAddr, true), true);
@@ -5173,6 +5441,37 @@ const fixtures = [
     ],
   },
   {
+    name: "r4s21d-direct-memory-nine-unique-stores-with-qemu-all-or-nothing",
+    terminal: "exit_tb",
+    relativeBase: 0x5fe0,
+    seeds: [1],
+    guestInstructions: 1,
+    words: [
+      opImm20(OPS.tci_movi, 5, 0x01),
+      opMem(OPS.st8, 5, RV64_ENV_RELATIVE_BASE_REG, 0x80),
+      opImm20(OPS.tci_movi, 5, 0x02),
+      opMem(OPS.st8, 5, RV64_ENV_RELATIVE_BASE_REG, 0x81),
+      opImm20(OPS.tci_movi, 5, 0x03),
+      opMem(OPS.st8, 5, RV64_ENV_RELATIVE_BASE_REG, 0x82),
+      opImm20(OPS.tci_movi, 5, 0x04),
+      opMem(OPS.st8, 5, RV64_ENV_RELATIVE_BASE_REG, 0x83),
+      opImm20(OPS.tci_movi, 5, 0x05),
+      opMem(OPS.st8, 5, RV64_ENV_RELATIVE_BASE_REG, 0x84),
+      opImm20(OPS.tci_movi, 5, 0x06),
+      opMem(OPS.st8, 5, RV64_ENV_RELATIVE_BASE_REG, 0x85),
+      opImm20(OPS.tci_movi, 5, 0x07),
+      opMem(OPS.st8, 5, RV64_ENV_RELATIVE_BASE_REG, 0x86),
+      opImm20(OPS.tci_movi, 5, 0x08),
+      opMem(OPS.st8, 5, RV64_ENV_RELATIVE_BASE_REG, 0x87),
+      opImm20(OPS.tci_movi, 5, 0x09),
+      opMem(OPS.st8, 5, RV64_ENV_RELATIVE_BASE_REG, 0x88),
+      opImm20(OPS.tci_movi, 7, 0x3110),
+      opReg(OPS.tci_qemu_ld_rrr, 3, 7, 13),
+      opReg(OPS.tci_qemu_st_rrr, 3, 7, 13),
+      OPS.exit_tb,
+    ],
+  },
+  {
     name: "r4s21-direct-memory-store-address-captured-before-r14-clobber",
     terminal: "exit_tb",
     relativeBase: 0x6040,
@@ -5236,6 +5535,85 @@ const fixtures = [
       opImm20(OPS.tci_movi, 7, 0x3110),
       opReg(OPS.tci_qemu_ld_rrr, 3, 7, 13),
       opReg(OPS.tci_qemu_st_rrr, 3, 7, 13),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4s21c-riscv64-env-direct-pc-with-qemu-load-store-all-or-nothing",
+    terminal: "exit_tb",
+    relativeBase: 0x60c0,
+    seeds: [1],
+    guestInstructions: 1,
+    words: [
+      opMem(OPS.ld, 4, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      opImm20(OPS.tci_movi, 5, Number(RISCV64_ENV_DIRECT_PC_DELTA)),
+      opReg(OPS.add, 5, 4, 5),
+      opMem(OPS.st, 5, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      opReg(OPS.tci_qemu_ld_rrr, 3, 14, 13),
+      opReg(OPS.add, 5, 4, 3),
+      opReg(OPS.tci_qemu_st_rrr, 5, 14, 13),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4s21c-riscv64-env-direct-pc-with-qemu-store-load-all-or-nothing",
+    terminal: "exit_tb",
+    relativeBase: 0x60d0,
+    seeds: [1],
+    guestInstructions: 1,
+    words: [
+      opImm20(OPS.tci_movi, 5, Number(RISCV64_ENV_DIRECT_PC_DELTA)),
+      opMem(OPS.st, 5, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      opMem(OPS.ld, 4, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      opReg(OPS.tci_qemu_ld_rrr, 3, 14, 13),
+      opReg(OPS.add, 6, 4, 3),
+      opReg(OPS.tci_qemu_st_rrr, 6, 14, 13),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4s21c-riscv64-env-direct-pc-with-qemu-nine-stores-all-or-nothing",
+    terminal: "exit_tb",
+    relativeBase: 0x60e0,
+    seeds: [1],
+    guestInstructions: 1,
+    words: [
+      opImm20(OPS.tci_movi, 5, 0x10),
+      opMem(OPS.st, 5, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      opImm20(OPS.tci_movi, 5, 0x20),
+      opMem(OPS.st, 5, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      opImm20(OPS.tci_movi, 5, 0x30),
+      opMem(OPS.st, 5, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      opImm20(OPS.tci_movi, 5, 0x40),
+      opMem(OPS.st, 5, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      opImm20(OPS.tci_movi, 5, 0x50),
+      opMem(OPS.st, 5, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      opImm20(OPS.tci_movi, 5, 0x60),
+      opMem(OPS.st, 5, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      opImm20(OPS.tci_movi, 5, 0x70),
+      opMem(OPS.st, 5, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      opImm20(OPS.tci_movi, 5, 0x80),
+      opMem(OPS.st, 5, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      opImm20(OPS.tci_movi, 5, 0x90),
+      opMem(OPS.st, 5, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      opMem(OPS.ld, 4, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      opReg(OPS.tci_qemu_ld_rrr, 3, 14, 13),
+      opReg(OPS.add, 6, 4, 3),
+      opReg(OPS.tci_qemu_st_rrr, 6, 14, 13),
       OPS.exit_tb,
     ],
   },
@@ -5498,6 +5876,23 @@ const r4kSoftmmuFixtures = [
     ],
   },
   {
+    name: "r4k-softmmu-ld32s-natural-align-tlb-hit-ram",
+    access: "load",
+    fallbackReason: null,
+    generatedMemop: MO_32 | MO_SIGN | MO_ALIGN | MO_ATOM_NONE,
+    initialRam32: 0xf2345678,
+    expectedSuccess: true,
+    expectedStatus: STATUS_EXIT,
+    expectedRunExitReason: "none",
+    expectedInlineLoads: 1,
+    expectedInlineStores: 0,
+    expectedReg0: 0xfffffffff2345678n,
+    words: [
+      OPS.tci_qemu_ld_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  },
+  {
     name: "r4k-softmmu-ld-tlb-hit-ram",
     access: "load",
     fallbackReason: null,
@@ -5545,6 +5940,21 @@ const r4kSoftmmuFixtures = [
     expectedRam64: 0x0102030405060708n,
     words: [
       OPS.tci_qemu_st_rrr | (0 << 8) | (1 << 12) | (2 << 16),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4k-softmmu-natural-align-unaligned-fallback",
+    access: "load",
+    fallbackReason: "unaligned-natural-align",
+    generatedMemop: MO_32 | MO_ALIGN | MO_ATOM_NONE,
+    taddr: 0x1239n,
+    expectedSuccess: false,
+    expectedStatus: STATUS_UNSUPPORTED,
+    expectedRunExitReason: "unsupported",
+    expectedExitsUnsupported: 1,
+    words: [
+      OPS.tci_qemu_ld_rrr | (0 << 8) | (1 << 12) | (2 << 16),
       OPS.exit_tb,
     ],
   },
@@ -5874,6 +6284,13 @@ const unsupportedFixtures = [
     expectedRuntimeUnsupportedGuards: [
       "softmmu-multi-access-store-before-load-unsupported",
     ],
+    expectedModuleFailureDetailGuard: {
+      reason: "softmmu-multi-access-store-before-load-unsupported",
+      index: 1,
+      op: "tci_qemu_ld_rrr",
+      count: 2,
+      targetIndex: null,
+    },
     words: [
       OPS.tci_qemu_st_rrr | (3 << 8) | (14 << 12) | (13 << 16),
       OPS.tci_qemu_ld_rrr | (4 << 8) | (14 << 12) | (13 << 16),
@@ -5894,6 +6311,16 @@ const unsupportedFixtures = [
     expectedRuntimeUnsupportedGuards: [
       "softmmu-multi-access-direct-memory-alias-unsupported",
     ],
+    expectedModuleFailureDetailGuard: {
+      reason: "softmmu-multi-access-direct-memory-alias-unsupported",
+      index: 2,
+      op: "ld32u",
+      count: 2,
+      targetIndex: null,
+      baseReg: RV64_ENV_RELATIVE_BASE_REG,
+      offset: -12,
+      size: 4,
+    },
     words: [
       opImm20(OPS.tci_movi, 5, 0x55),
       opMem(OPS.st8, 5, RV64_ENV_RELATIVE_BASE_REG, -12),
@@ -5927,6 +6354,24 @@ const unsupportedFixtures = [
     words: [
       opMem(OPS.ld32u, 4, RV64_ENV_RELATIVE_BASE_REG,
             X86_ENV_DIRECT_CC_OP_OFFSET),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4s21c-riscv64-env-direct-pc-wrong-size-fails-closed",
+    relativeBase: 0x60d0,
+    words: [
+      opMem(OPS.ld32u, 4, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      OPS.exit_tb,
+    ],
+  },
+  {
+    name: "r4s21c-riscv64-env-direct-pc-wrong-store-size-fails-closed",
+    relativeBase: 0x60e0,
+    words: [
+      opMem(OPS.st32, 5, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
       OPS.exit_tb,
     ],
   },
@@ -6010,6 +6455,12 @@ for (const fixture of unsupportedFixtures) {
     emission.runtimeUnsupportedGuards.map((guard) => guard.reason),
     fixture.expectedRuntimeUnsupportedGuards || [],
   );
+  if (fixture.expectedModuleFailureDetailGuard) {
+    assert.deepEqual(
+      emission.moduleFailureAttribution.detail.guard,
+      fixture.expectedModuleFailureDetailGuard,
+    );
+  }
   unsupportedResults.push(fixture.name);
 }
 
@@ -6042,10 +6493,11 @@ for (const fixture of r6Rv64SoftmmuFixtures) {
 
 const r4s8LaterAccessFails = await runR4s8LaterAccessFailsFixture();
 const r4s21bLaterAccessFails = await runR4s21bLaterAccessFailsFixture();
+const r4s21cLaterAccessFails = await runR4s21cLaterAccessFailsFixture();
 
-assert.equal(results.length, 27);
+assert.equal(results.length, 31);
 assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 8);
-assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 17);
+assert.equal(results.filter((entry) => entry.terminal === "exit_tb").length, 21);
 assert.equal(results.filter((entry) => entry.terminal === "helper").length, 2);
 const helperBoundaryResults = results.filter((entry) =>
   entry.helpers.loads > 0 || entry.helpers.stores > 0);
@@ -6073,6 +6525,8 @@ const r4s21bX86EnvDirectResults = results.filter((entry) =>
 const r4s21bX86EnvDirectAddressCaptureResults = results.filter((entry) =>
   entry.name ===
     "r4s21b-x86-env-direct-store-address-captured-before-r14-clobber");
+const r4s21cRiscv64EnvDirectPcResults = results.filter((entry) =>
+  entry.name.startsWith("r4s21c-riscv64-env-direct-pc-with-qemu-"));
 assert.equal(liveX86Results.length, 2);
 assert.equal(
   liveX86Results.filter((entry) =>
@@ -6271,6 +6725,75 @@ assert.deepEqual(
     ],
   ],
 );
+assert.deepEqual(
+  r4s21cRiscv64EnvDirectPcResults.map((entry) => [
+    entry.name,
+    entry.inlineTlbHitLoads,
+    entry.inlineTlbHitStores,
+    entry.memoryWrites,
+    entry.helpers.loads,
+    entry.helpers.stores,
+    entry.registerStateMatched,
+    entry.memoryStateMatched,
+  ]),
+  [
+    [
+      "r4s21c-riscv64-env-direct-pc-with-qemu-load-store-all-or-nothing",
+      2,
+      2,
+      2,
+      0,
+      0,
+      true,
+      true,
+    ],
+    [
+      "r4s21c-riscv64-env-direct-pc-with-qemu-store-load-all-or-nothing",
+      2,
+      2,
+      2,
+      0,
+      0,
+      true,
+      true,
+    ],
+    [
+      "r4s21c-riscv64-env-direct-pc-with-qemu-nine-stores-all-or-nothing",
+      2,
+      10,
+      10,
+      0,
+      0,
+      true,
+      true,
+    ],
+  ],
+);
+assert.deepEqual(
+  r4s21cRiscv64EnvDirectPcResults.map((entry) => [
+    entry.name,
+    entry.riscv64EnvDirectReadReg4,
+    entry.riscv64EnvDirectPc,
+  ]),
+  [
+    [
+      "r4s21c-riscv64-env-direct-pc-with-qemu-load-store-all-or-nothing",
+      RISCV64_ENV_DIRECT_INITIAL_PC.toString(),
+      (RISCV64_ENV_DIRECT_INITIAL_PC +
+       RISCV64_ENV_DIRECT_PC_DELTA).toString(),
+    ],
+    [
+      "r4s21c-riscv64-env-direct-pc-with-qemu-store-load-all-or-nothing",
+      RISCV64_ENV_DIRECT_PC_DELTA.toString(),
+      RISCV64_ENV_DIRECT_PC_DELTA.toString(),
+    ],
+    [
+      "r4s21c-riscv64-env-direct-pc-with-qemu-nine-stores-all-or-nothing",
+      0x90n.toString(),
+      0x90n.toString(),
+    ],
+  ],
+);
 assert.equal(r4s8LaterAccessFails.runExitReason, "tlb-miss-or-fault");
 assert.equal(r4s8LaterAccessFails.partialStoreCommitted, false);
 assert.equal(r4s8LaterAccessFails.registerFlushCommitted, false);
@@ -6299,6 +6822,21 @@ assert.equal(r4s21bLaterAccessFails.envFieldAfter,
              r4s21bLaterAccessFails.envFieldBefore);
 assert.equal(r4s21bLaterAccessFails.ramAfter,
              r4s21bLaterAccessFails.ramBefore);
+assert.equal(r4s21cLaterAccessFails.runExitReason, "tlb-miss-or-fault");
+assert.equal(r4s21cLaterAccessFails.directPcStoreCommitted, false);
+assert.equal(r4s21cLaterAccessFails.partialStoreCommitted, false);
+assert.equal(r4s21cLaterAccessFails.registerFlushCommitted, false);
+assert.equal(r4s21cLaterAccessFails.dispatchTargetCommitted, false);
+assert.equal(r4s21cLaterAccessFails.generatedGuestInstructions, "0");
+assert.equal(r4s21cLaterAccessFails.inlineTlbHitLoads, "0");
+assert.equal(r4s21cLaterAccessFails.inlineTlbHitStores, "0");
+assert.equal(r4s21cLaterAccessFails.helperCalls, "0");
+assert.equal(r4s21cLaterAccessFails.qemuLdCalls, "0");
+assert.equal(r4s21cLaterAccessFails.qemuStCalls, "0");
+assert.equal(r4s21cLaterAccessFails.exitsTlbMissOrFault, "1");
+assert.equal(r4s21cLaterAccessFails.pcAfter, r4s21cLaterAccessFails.pcBefore);
+assert.equal(r4s21cLaterAccessFails.ramAfter,
+             r4s21cLaterAccessFails.ramBefore);
 assert.equal(rv64BootPathResults.length, 4);
 assert.deepEqual(
   [...new Set(rv64BootPathResults.map((entry) => entry.name))],
@@ -6850,7 +7388,7 @@ function r4s5bOpWritesR0(op) {
   ].includes(op);
 }
 
-function r4s5bValidateMemop(memop) {
+function r4s5bValidateMemop(memop, isStore = false) {
   const supportedFlags =
     MO_SIZE | MO_SIGN | MO_BSWAP | MO_AMASK |
     MO_ALIGN_TLB_ONLY | MO_ATOM_MASK;
@@ -6861,13 +7399,19 @@ function r4s5bValidateMemop(memop) {
   if (![MO_8, MO_32, MO_64].includes(memop & MO_SIZE)) {
     return "selected-body-memop-unsupported-size";
   }
-  if ((memop & MO_SIGN) !== 0) {
+  if ((memop & MO_SIGN) !== 0 &&
+      (isStore || (memop & MO_SIZE) !== MO_32)) {
     return "selected-body-memop-unsupported-sign";
   }
   if ((memop & MO_BSWAP) !== 0) {
     return "selected-body-memop-unsupported-endian";
   }
-  if ((memop & (MO_AMASK | MO_ALIGN_TLB_ONLY)) !== 0) {
+  if ((memop & MO_ALIGN_TLB_ONLY) !== 0 &&
+      (memop & MO_AMASK) !== MO_UNALN) {
+    return "selected-body-memop-unsupported-alignment";
+  }
+  if ((memop & MO_AMASK) !== MO_UNALN &&
+      (memop & MO_AMASK) !== MO_ALIGN) {
     return "selected-body-memop-unsupported-alignment";
   }
   if ((memop & MO_ATOM_MASK) !== MO_ATOM_NONE) {
@@ -6980,7 +7524,8 @@ function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_I
       const oi = values[r2];
       const memop = oi >>> TCG_WASM64_MEMOPIDX_SHIFT;
       const mmuIdx = oi & TCG_WASM64_MEMOPIDX_MMU_MASK;
-      const memopReason = r4s5bValidateMemop(memop);
+      const memopReason = r4s5bValidateMemop(
+        memop, op === OPS.tci_qemu_st_rrr);
       if (memopReason !== null) {
         return { reason: memopReason, hasMemop, memop };
       }
@@ -7034,7 +7579,8 @@ function r4s5bValidateSelectedMemops(metadata, currentMmuIdx = R4K_SOFTMMU_MMU_I
       if (directMemoryIsStore(op)) {
         directStoreRanges.push(range);
       } else if (directStoreRanges.some((store) =>
-        directMemoryRangesOverlap(store, range))) {
+        directMemoryRangesOverlap(store, range) &&
+        !directMemoryRangesIdentical(store, range))) {
         directMemoryUnsupported = true;
       }
     }
@@ -7543,6 +8089,10 @@ assert.deepEqual(r4mModuleEmissionFailure.moduleFailureAttribution, {
   phase: "body-build",
   statusName: "module-emission-failed",
   error: "injected deterministic live module emission failure",
+  detail: {
+    error: "injected deterministic live module emission failure",
+    guard: null,
+  },
   shape: R4I_LIVE_X86_SHAPE,
   shapeOpCount: R4I_LIVE_X86_SHAPE.length,
   firstOp: "ld32u",
@@ -7902,6 +8452,42 @@ const r4s5bCases = [
     metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_ATOM_NONE }),
   },
   {
+    name: "r4s22-signed-word-load-admitted-ram-hit",
+    expectedReason: null,
+    expectedPath: "generated",
+    expectedInlineTlbHitLoads: 1,
+    expectedInlineTlbHitStores: 0,
+    metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_SIGN | MO_ATOM_NONE }),
+  },
+  {
+    name: "r4s22-byte-natural-align-admitted-ram-hit",
+    expectedReason: null,
+    expectedPath: "generated",
+    expectedInlineTlbHitLoads: 1,
+    expectedInlineTlbHitStores: 0,
+    metadata: r4s5bMemoryMetadata({ memop: MO_8 | MO_ALIGN | MO_ATOM_NONE }),
+  },
+  {
+    name: "r4s22-signed-word-natural-align-admitted-ram-hit",
+    expectedReason: null,
+    expectedPath: "generated",
+    expectedInlineTlbHitLoads: 1,
+    expectedInlineTlbHitStores: 0,
+    metadata: r4s5bMemoryMetadata({
+      memop: MO_32 | MO_SIGN | MO_ALIGN | MO_ATOM_NONE,
+    }),
+  },
+  {
+    name: "r4s22-tlb-only-align-flag-admitted-ram-hit",
+    expectedReason: null,
+    expectedPath: "generated",
+    expectedInlineTlbHitLoads: 1,
+    expectedInlineTlbHitStores: 0,
+    metadata: r4s5bMemoryMetadata({
+      memop: MO_32 | MO_ALIGN_TLB_ONLY | MO_ATOM_NONE,
+    }),
+  },
+  {
     name: "r4s7-atom-none-store-admitted-ram-hit",
     expectedReason: null,
     expectedPath: "generated",
@@ -7954,6 +8540,17 @@ const r4s5bCases = [
     metadata: r4s8MultiMemoryMetadata(["store", "store"]),
   },
   {
+    name: "r4s22-five-store-softmmu-admitted-all-guards-before-commit",
+    expectedReason: null,
+    expectedPath: "generated",
+    expectedInlineTlbHitLoads: 0,
+    expectedInlineTlbHitStores: 5,
+    expectedSoftmmuLoweredOps: 5,
+    metadata: r4s8MultiMemoryMetadata([
+      "store", "store", "store", "store", "store",
+    ]),
+  },
+  {
     name: "r4s21-direct-memory-multi-access-admitted",
     expectedReason: null,
     expectedPath: "generated",
@@ -8002,6 +8599,24 @@ const r4s5bCases = [
     }),
   },
   {
+    name: "r4s21c-riscv64-env-direct-pc-multi-access-admitted",
+    expectedReason: null,
+    expectedPath: "generated",
+    expectedInlineTlbHitLoads: 2,
+    expectedInlineTlbHitStores: 2,
+    expectedSoftmmuLoweredOps: 2,
+    metadata: r4s8MultiMemoryMetadata(["load", "store"], {
+      prefixWords: [
+        opMem(OPS.ld, 4, RV64_ENV_RELATIVE_BASE_REG,
+              RISCV64_ENV_DIRECT_PC_OFFSET),
+        opImm20(OPS.tci_movi, 5, Number(RISCV64_ENV_DIRECT_PC_DELTA)),
+        opReg(OPS.add, 5, 4, 5),
+        opMem(OPS.st, 5, RV64_ENV_RELATIVE_BASE_REG,
+              RISCV64_ENV_DIRECT_PC_OFFSET),
+      ],
+    }),
+  },
+  {
     name: "r4s21b-x86-env-direct-padding-offset-rejects",
     expectedReason: "selected-body-direct-memory-unsupported",
     metadata: r4s20GeneratedOutputMetadata([
@@ -8025,6 +8640,24 @@ const r4s5bCases = [
     metadata: r4s20GeneratedOutputMetadata([
       opMem(OPS.ld32u, 4, RV64_ENV_RELATIVE_BASE_REG,
             X86_ENV_DIRECT_CC_OP_OFFSET),
+      OPS.exit_tb,
+    ]),
+  },
+  {
+    name: "r4s21c-riscv64-env-direct-pc-wrong-size-rejects",
+    expectedReason: "selected-body-direct-memory-unsupported",
+    metadata: r4s20GeneratedOutputMetadata([
+      opMem(OPS.ld32u, 4, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
+      OPS.exit_tb,
+    ]),
+  },
+  {
+    name: "r4s21c-riscv64-env-direct-pc-wrong-store-size-rejects",
+    expectedReason: "selected-body-direct-memory-unsupported",
+    metadata: r4s20GeneratedOutputMetadata([
+      opMem(OPS.st32, 5, RV64_ENV_RELATIVE_BASE_REG,
+            RISCV64_ENV_DIRECT_PC_OFFSET),
       OPS.exit_tb,
     ]),
   },
@@ -8091,9 +8724,12 @@ const r4s5bCases = [
     metadata: r4s5bMemoryMetadata({ memop: MO_16 | MO_ATOM_NONE }),
   },
   {
-    name: "r4s5b-sign-flag-rejects-before-inline-ram",
+    name: "r4s5b-sign-store-rejects-before-inline-ram",
     expectedReason: "selected-body-memop-unsupported-sign",
-    metadata: r4s5bMemoryMetadata({ memop: MO_32 | MO_SIGN | MO_ATOM_NONE }),
+    metadata: r4s5bMemoryMetadata({
+      memop: MO_32 | MO_SIGN | MO_ATOM_NONE,
+      op: OPS.tci_qemu_st_rrr,
+    }),
   },
   {
     name: "r4s5b-endian-flag-rejects-before-inline-ram",
@@ -8597,9 +9233,11 @@ assert.deepEqual(
   r4kSoftmmuNames,
   [
     "r4k-softmmu-ld32u-tlb-hit-ram",
+    "r4k-softmmu-ld32s-natural-align-tlb-hit-ram",
     "r4k-softmmu-ld-tlb-hit-ram",
     "r4k-softmmu-st8-tlb-hit-ram",
     "r4k-softmmu-st-tlb-hit-ram",
+    "r4k-softmmu-natural-align-unaligned-fallback",
     "r4k-softmmu-tlb-miss",
     "r4k-softmmu-mmio",
     "r4k-softmmu-permission-fault",
@@ -8625,10 +9263,10 @@ assert.deepEqual(
 );
 const r4kSoftmmuRamHits = r4kSoftmmuResults.filter((entry) =>
   entry.name.endsWith("tlb-hit-ram"));
-assert.equal(r4kSoftmmuRamHits.length, 4);
+assert.equal(r4kSoftmmuRamHits.length, 5);
 assert.deepEqual(
   r4kSoftmmuRamHits.map((entry) => entry.runExitReason),
-  ["none", "none", "none", "none"],
+  ["none", "none", "none", "none", "none"],
 );
 assert.deepEqual(
   r4kSoftmmuRamHits.map((entry) => [
@@ -8641,6 +9279,7 @@ assert.deepEqual(
   [
     ["1", "0", "0", "0", "0"],
     ["1", "0", "0", "0", "0"],
+    ["1", "0", "0", "0", "0"],
     ["0", "1", "0", "0", "0"],
     ["0", "1", "0", "0", "0"],
   ],
@@ -8650,6 +9289,7 @@ const r4kSoftmmuFailClosed = r4kSoftmmuResults.filter((entry) =>
 assert.deepEqual(
   r4kSoftmmuFailClosed.map((entry) => entry.fallbackReason),
   [
+    "unaligned-natural-align",
     "tlb-miss",
     "mmio",
     "permission-fault",
@@ -8702,6 +9342,12 @@ assert.equal(
 assert.equal(
   r4kSoftmmuResults.find((entry) =>
     entry.name === "r4k-softmmu-unsupported-memop").exits.unsupported,
+  "1",
+);
+assert.equal(
+  r4kSoftmmuResults.find((entry) =>
+    entry.name ===
+      "r4k-softmmu-natural-align-unaligned-fallback").exits.unsupported,
   "1",
 );
 assert.equal(
@@ -8969,6 +9615,15 @@ console.log(JSON.stringify({
     failClosedFixtures: unsupportedResults.filter((name) =>
       name.startsWith("r4s21b-x86-env-direct-")),
     laterAccessFailsNoCommit: r4s21bLaterAccessFails,
+  },
+  r4s21cRiscv64EnvDirectPc: {
+    admittedFields: [
+      "CPURISCVState.pc ld/st offset 0x1218",
+    ],
+    executableFixtures: r4s21cRiscv64EnvDirectPcResults,
+    failClosedFixtures: unsupportedResults.filter((name) =>
+      name.startsWith("r4s21c-riscv64-env-direct-pc-")),
+    laterAccessFailsNoCommit: r4s21cLaterAccessFails,
   },
   r4mLiveGeneratedExec: {
     fixtureCount: r4mLiveGeneratedExecCases.length,

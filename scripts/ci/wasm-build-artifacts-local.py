@@ -59,6 +59,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="disable the persistent build directory and use a throwaway container build directory",
     )
     parser.add_argument(
+        "--trust-source-mtimes",
+        action="store_true",
+        help=(
+            "for incremental same-worktree rebuilds, preserve source mtimes "
+            "instead of touching all C/C++ sources after sync"
+        ),
+    )
+    parser.add_argument(
         "--ccache-dir",
         type=Path,
         default=DEFAULT_CCACHE_DIR,
@@ -145,6 +153,7 @@ def shell_script(
     clean: bool,
     target: str,
     incremental: bool,
+    trust_source_mtimes: bool,
     ccache: bool,
     em_cache: bool,
 ) -> str:
@@ -162,11 +171,18 @@ def shell_script(
     em_cache_setup = "true"
     tree_reset = "true" if incremental else "rm -rf /tmp/src /tmp/build"
     if incremental:
+        source_refresh = "true" if trust_source_mtimes else (
+            "find /tmp/src -type f \\( -name '*.c' -o -name '*.cc' -o "
+            "-name '*.cpp' -o -name '*.h' -o -name '*.inc' -o -name '*.S' "
+            "\\) ! -path '/tmp/src/subprojects/*' -exec touch {} +"
+        )
         source_sync = """find /tmp/src -mindepth 1 -maxdepth 1 ! -name subprojects -exec rm -rf {} +
 tar -C /host-src --exclude=.git --exclude=build --exclude=build-wasm64-tci --exclude=tmp -cf - . | tar -C /tmp/src -xf -
 # Tar preserves mtimes, which can make Ninja reuse stale objects when this
-# persistent build directory is shared by different worktrees or commits.
-find /tmp/src -type f \\( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.inc' -o -name '*.S' \\) ! -path '/tmp/src/subprojects/*' -exec touch {} +"""
+# persistent build directory is shared by different worktrees or commits. The
+# hot same-worktree path can opt out with --trust-source-mtimes so Ninja only
+# rebuilds files whose source mtimes actually changed.
+""" + source_refresh
         configure_step = f"""configure_stamp=/tmp/build/qemu-wasm-configure.sha256
 configure_hash={shlex.quote(configure_hash)}
 if [ -f "$configure_stamp" ] && [ "$(cat "$configure_stamp")" = "$configure_hash" ]; then
@@ -275,6 +291,7 @@ def docker_run_command(args: argparse.Namespace) -> list[str]:
             not args.no_clean,
             args.target,
             not args.no_incremental,
+            args.trust_source_mtimes,
             not args.no_ccache,
             not args.no_em_cache,
         ),

@@ -883,6 +883,27 @@ run that reaches a weaker marker than normal multi-user readiness.
     still report `0` generated entries. Accepted QEMU accelerator speed wins
     from this state remain `0`. A Claude/Fable review worker was requested for
     diagnosis, but no accepted answer or patch has landed yet.
+    Progress 2026-07-07 09:02 EEST on branch
+    `worker/qemu-r4d-g-rv64-diagnostics-20260707a`: local deterministic
+    checks now cover the next R4d-g diagnostic/enabler slice. The patch adds
+    RV64 `CPURISCVState.pc` direct env-field admission for generated
+    load/store prefixes, expands bounded all-or-nothing softmmu/direct-store
+    lowering, records detailed module-failure and metadata-lookup diagnostics,
+    and adds return-validation reporting for generated exits. This is not yet
+    a speed win and does not close R4d-g because no controlled Chrome proof
+    has shown nonzero real generated execution on the generic RISC-V boot
+    path. Verification passed locally without launching browsers:
+    `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+    `python3 scripts/ci/wasm-build-artifacts-local-test.py`, `node
+    scripts/ci/wasm-generated-output-equivalence-test.mjs` (`fixtures=31`,
+    `emittedModuleFixtures=31`), and `git diff --check`. Remote build proof
+    on `dev.hg.fi` branch `worker/qemu-accelerator-remote-proof-20260707a`
+    built the code patch as commit `b596d0b869` with pinned image
+    `qemu/emsdk-wasm64-cross:emsdk-4.0.10` in `498.60s`; output was
+    `qemu-system-riscv64.js` (`747K`) and `qemu-system-riscv64.wasm` (`33M`),
+    WASM SHA256
+    `c5c29bd49aa160ef220e6f70db3ac459ee23b2751852f149cf37bc4740627c56`.
+    Remote ccache was cold (`0/1319` hits).
   - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
