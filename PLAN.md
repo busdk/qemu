@@ -374,6 +374,52 @@ readiness.
   scripts/ci/wasm-build-artifacts-local-test.py`, and `git diff --check`.
   R4z remains open; the next proof against a build with this patch will show
   exactly which loop shapes dominate the control-flow rejects.
+  Source-level blocker finding 2026-07-07 (no code change; no browser proof
+  run, per instruction to reason from source before spending proof budget):
+  read whether implementing generated-exec support for the dominant
+  `selected-body-control-flow-unsupported` rejects (backward/self-branch
+  `brcond`s, i.e. loops in the selected TB body) is a safe smallest-change
+  candidate. It is not, for two independent, already-in-source reasons:
+  (1) Architectural: the actual WASM code generator - the JS `compileRange`
+  function inside the `tcg_wasm64_live_generated_exec_js` EM_JS block
+  (`tcg/wasm64.c:4259`), duplicated near-verbatim in the coverage/probe path
+  inside `tcg_wasm64_live_tb_coverage_js` (`tcg/wasm64.c:6001`) - lowers a
+  forward `brcond` as a WASM `block`+`br_if` "skip forward over the
+  not-taken range" (`block()`/`brIf()` at `tcg/wasm64.c:4251-4257`,
+  recursing as `compileRange(index + 1, targetIndex)` which requires
+  `targetIndex > index`) and explicitly `return null`s (refuses to compile)
+  whenever `targetIndex <= index`, i.e. exactly the backward/self-branch
+  case - independently matching the C-side pre-check
+  `tcg_wasm64_live_generated_exec_control_flow_supported`
+  (`tcg/wasm64.c:8309`). Both the pre-check and the real compiler agree:
+  this is a deliberate, load-bearing "forward-only" limit of the current
+  block-nesting strategy, not an oversight in one path. Emitting a backward
+  branch safely needs a WASM `loop`/`br` construct mixed with the existing
+  `block`/`br_if` nesting and correct static label-depth tracking across the
+  mix - a real code-generation strategy change, not a small patch.
+  (2) Safety: neither `compileRange` nor its EM_JS driver (~1834 lines,
+  `tcg/wasm64.c:2940`-`4774`) contains any budget, interrupt, or iteration-cap
+  check (`grep -c` for `budget|interrupt|icount` over that range is 0); every
+  existing budget/interrupt check (`chain_budget`, `exits_budget`) operates
+  at whole-TB-chain granularity in the outer runloop, not inside a single
+  generated body. A guest loop compiled as a native backward-branching WASM
+  loop would run to its own natural exit with zero opportunity for the host
+  to interrupt it mid-loop; if that loop's exit condition depends on an
+  asynchronous event (timer tick, IRQ flag) that itself requires the runloop
+  to keep dispatching, the guest would hang rather than crash - a
+  correctness risk in the same family as R4z's load-dependent trap, just
+  with no crash signal to notice it by. No such per-iteration
+  interruptibility mechanism exists anywhere in this file today.
+  Conclusion: implementing backward-branch/loop support is not a safe
+  "smallest change" until both (1) a loop-capable extension to the code
+  generator and (2) a new per-iteration budget/interrupt-check mechanism
+  exist - prerequisites, not a one-patch fix. The next useful step is a
+  proof run with the `662fe43d46`/`48963f79b0` `reject_control_flow`
+  sampling enabled to learn the real distribution (self-branch vs.
+  larger backward jumps) before committing to a specific loop
+  representation; no such run has been made yet, so the distribution is
+  still unknown. R4z/R4d-g control-flow rejects remain open pending that
+  design work, not pending this analysis.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
