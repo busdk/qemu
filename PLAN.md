@@ -322,6 +322,58 @@ readiness.
   scripts/ci/wasm-code-offset-map-test.mjs`, and
   `git diff --check HEAD~1..HEAD`. This improves deterministic R4z diagnosis;
   controlled-load reproduction and a product mechanism fix remain open.
+  Fresh controlled-load reproduction attempt 2026-07-07 (Claude worker
+  `qemu-r4z-claude-consult-20260707a`, local host, no dev.hg.fi proof
+  needed): built current-HEAD `qemu-system-riscv64.js`/`.wasm` via
+  `python3 scripts/ci/wasm-build-artifacts-local.py --target riscv64
+  --tcg-wasm64-backend` (incremental, reusing the existing
+  `riscv64-wasm64-tcg-ccache` build dir, 94% ccache hit), then ran
+  `node scripts/ci/wasm-browser-cdp-gate.mjs --artifact-dir <fresh build>
+  --guest-manifest tmp/qemu-riscv64-official-guest/tuxboot-browser-smoke-guest.json
+  --firmware-dir pc-bios --target-arch riscv64 --timeout-ms 180000` twice:
+  once idle, once concurrent with a 6x `yes > /dev/null` CPU load generator
+  (8-core local host, `scripts` saved alongside this evidence are not
+  committed). Both runs were statistically identical, not merely similar:
+  `markerSeen=false`, `pageStatus="Startup timed out waiting for Bus Engine
+  OS"`, zero `pageErrors`, and the exact same frozen
+  `wasm64Runloop.lastSummary` for the full ~180s - `generated_run_entries=58`,
+  `attempts=122`, `successes=58`, `rejects=64`, `skips=28`,
+  `generated_coverage_numerator=163`, `generated_coverage_denominator=964`,
+  `reason="chain-interrupted"` - matching the accepted `5fd5d214e9` remote
+  proof's numbers exactly. No `RuntimeError: memory access out of bounds`
+  was observed in either run; CPU load changed nothing observable. This is
+  evidence the current HEAD's generated-exec ceiling (the open R4d-g
+  "generated exec stalls before `Welcome to TuxTest`" condition) is reached
+  and plateaus well before the ~27-30s guest-boot region where the original
+  R4z func20564 trap was recorded, on this host/build, so neither idle nor
+  load conditions could reach that code region to reproduce or reclassify
+  the original trap. R4z reproduction is blocked on R4d-g's generated-exec
+  ceiling, not on load-generation technique; retrying once R4d-g's ceiling
+  moves is the smallest unblock, on this host or `dev.hg.fi` once its SSH
+  relay/template access is restored (see R4d-g blocker entries above).
+  Diagnostic follow-on (commit `662fe43d46`): both runs' top reject buckets
+  were `selected-body-control-flow-unsupported=46` (72% of 64 rejects) and
+  `unsupported-body-state=14`, with zero per-instance detail on either.
+  Source read of `tcg_wasm64_live_generated_exec_control_flow_supported`
+  showed the control-flow reason is fully deterministic (a `brcond` with a
+  misaligned target, or one that does not strictly branch forward -
+  `target_index <= index`, i.e. a self/backward branch/loop in the selected
+  TB body) but was previously recorded with a bare counter only. Added a
+  bounded 8-slot dedup-by-shape sample table (matching the existing
+  `reject_multi_accesses`/`reject_direct_memory` pattern) capturing
+  misaligned vs. backward-branch-distance at the reject site, surfaced as a
+  new additive `reject_control_flow` array in the live-generated-exec-summary
+  JSON; does not change which `brcond`s are accepted. `unsupported-body-state`
+  was left alone: it originates from the generated WASM body's own runtime
+  exit status and would need JS/WASM runtime boundary plumbing to add detail,
+  a larger change than this diagnostic patch. Verification (no browser
+  launched): a real incremental Docker build compiled and linked cleanly (94%
+  ccache hit, only `tcg/wasm64.c` recompiled, no new warnings), plus `node
+  scripts/ci/wasm64-translate-metadata-test.mjs`, `node
+  scripts/ci/wasm-generated-output-equivalence-test.mjs`, `python3
+  scripts/ci/wasm-build-artifacts-local-test.py`, and `git diff --check`.
+  R4z remains open; the next proof against a build with this patch will show
+  exactly which loop shapes dominate the control-flow rejects.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
