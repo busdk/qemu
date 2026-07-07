@@ -420,6 +420,83 @@ readiness.
   representation; no such run has been made yet, so the distribution is
   still unknown. R4z/R4d-g control-flow rejects remain open pending that
   design work, not pending this analysis.
+  Distribution measurement 2026-07-07 (single controlled run, current HEAD
+  `7db74a381e`, no blind multi-run loop, no CPU-load generator - the earlier
+  idle-vs-load evidence above already showed load makes no observable
+  difference at this same stall point): reused the existing local
+  `riscv64-wasm64-tcg-ccache` build (already at current HEAD; confirmed via
+  its recorded `SHA256SUMS`, no rebuild needed) and ran
+  `node scripts/ci/wasm-browser-cdp-gate.mjs --artifact-dir <build>
+  --guest-manifest tmp/qemu-riscv64-official-guest/tuxboot-browser-smoke-guest.json
+  --firmware-dir pc-bios --target-arch riscv64 --timeout-ms 60000` once,
+  wrapped in a script with an EXIT/INT/TERM trap that kills the gate process
+  and any stray Chrome/CDP processes; confirmed zero Chrome processes
+  remained after the run. Result:
+  `.bus/services/workers/runtime/qemu-r4z-claude-consult-20260707a/scratch/r4z-repro/control-flow-sample.json`
+  (log alongside as `control-flow-sample.log`; wrapper script
+  `run-control-flow-sample.sh`, not committed - worker scratch only). Reached
+  the same deterministic stall as every prior run on this build
+  (`attempts=122`, `successes=58`, `rejects=64`, `skips=28`,
+  `generated_coverage_numerator=163`, `generated_coverage_denominator=964`,
+  `reason="chain-interrupted"`), so the 64-reject sample is exactly the same
+  reproducible population measured before, now with the new field read.
+  **Corrected finding: `reject_control_flow` is `[]` (empty) - none of the
+  46 `selected-body-control-flow-unsupported` rejects in this reachable
+  population are backward/self-branches or misaligned targets.** The
+  question this measurement was meant to answer ("mostly self-branches,
+  short backward loops, or larger jumps") does not apply to this data: the
+  `662fe43d46`/`48963f79b0` sampler targets
+  `tcg_wasm64_live_generated_exec_control_flow_supported`
+  (`tcg/wasm64.c:8309`, the direct early-return path at `:8582`-`:8587`),
+  and it fired zero times. Cross-checking `reject_multi_accesses` (shared
+  with this reason, see below) sums to 47 = 46 control-flow + 1
+  `selected-body-softmmu-multi-access-unsupported`, accounting for the
+  entire 64-reject population's control-flow/multi-access share exactly.
+  So every one of these 46 rejects instead came from the *other*
+  control-flow-unsupported return site,
+  `memop_count > 1 && control_flow_unsupported` (`tcg/wasm64.c:8612`,
+  mirrored on the JS side by `allOrNothingSoftmmu && multiAccessBranchIndex
+  >= 0` at `tcg/wasm64.c:4405`): a TB with more than one softmmu (TLB-checked
+  guest-memory) access that also contains *any* `brcond`, including an
+  individually-valid forward one, is unconditionally rejected. The
+  `reject_multi_accesses` sample for this run is dominated by two-load
+  bodies - `{"order":"LL","loads":2,"stores":0,"count":28}` is by far the
+  largest bucket, then `{"order":"LLLL","count":8}`, `{"order":"SS","count":5}`,
+  and five singleton shapes (`LS`, `LLS`, 8-access `SLSLSLSL`, `SSL`, `SL`).
+  Read together with the JS/C source (`tcg/wasm64.c:3531` `const
+  allOrNothingSoftmmu = softmmuAccessCount > 1`, and the surrounding
+  guard/deferred-commit split at `:3998`-`:4098`), the mechanism this data
+  actually points at is the multi-access "all-or-nothing" softmmu strategy:
+  when a body performs more than one guest-memory access, the compiler
+  pre-scans the whole body once (`bodyWords.filter(...)` at `:3525`) to
+  count accesses and statically pre-assigns fixed local-variable slots for
+  deferred TLB-guard results and commits, on the assumption that every
+  scanned access unconditionally executes in a fixed order. A `brcond`
+  breaks that assumption - if the branch can skip some of those accesses at
+  runtime, the flat pre-scan/fixed-slot bookkeeping no longer matches which
+  accesses actually run, so the current code refuses the whole body rather
+  than risk committing the wrong accesses. This is a real correctness
+  constraint (TB-atomicity-preserving deferred commit vs. conditionally-
+  executed accesses), not evidence of backward branches at all, and not
+  something proven safe to relax without knowing whether the rejected
+  branch always follows every access in program order (which the current
+  sample does not record) or can precede/interleave them (source above
+  gives no such guarantee, and none is checked). No implementation was
+  attempted, per instruction not to raw-lower branches until this is
+  explicit; the loop-interruptibility framing from the prior analysis
+  entry is now known not to be the operative mechanism for this
+  reachable population - it remains a valid concern only if/when backward
+  branches are actually observed (none were, here). Caveat: this
+  population is still bounded by the same pre-`Welcome to TuxTest`
+  "chain-interrupted" stall as every prior run, i.e. only early-boot TB
+  shapes were sampled; loop-shaped bodies may still appear later in boot
+  once R4d-g's stall is resolved and were not and could not be sampled by
+  this run. Smallest next step, still diagnostic-only: extend the existing
+  `reject_multi_accesses` sample (or a new field) to record whether the
+  branch index precedes or follows the last softmmu access in the body,
+  which would show whether "branch strictly after all accesses" is common
+  enough to be a narrow, safe relaxation candidate - not yet done, no
+  browser proof needed to add it, only one would be needed to read it.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
