@@ -1151,6 +1151,18 @@ readiness.
     scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs`, `node
     scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, and
     `git diff --check`.
+    Dispatch blocker 2026-07-07 16:54 EEST: repo-id materialization and
+    checkout proof are accepted, but this manager does not have a visible
+    controlled `dev.hg.fi` worker template (`bus workers template list
+    --environment dev-hg` returned no templates), so it cannot safely launch
+    the long browser proof itself. Sent existing worker-platform manager
+    request `qemu-r4dg-devhg-slot-request-20260707a` asking for either the
+    exact `bus workers create` template/environment command for a
+    `repo_id=busdk/qemu,module=.` worker on controlled `dev.hg.fi`, or a
+    provisioned proof slot/worker id. No local long browser proof or WASM
+    build was run. Next unblock command is the same request against
+    `worker-platform-manager-20260707a` until it returns the controlled-host
+    create surface or proof slot.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
