@@ -1085,6 +1085,9 @@ readiness.
     `--require-generated-exec`, which rejects a result unless it contains
     nonzero generated run entries plus generated coverage numerator,
     denominator, and ppm from `wasm64Runloop` or `wasm64Tcg`.
+    Progress 2026-07-07: the CDP proof gate now supports `--max-elapsed-ms`,
+    allowing the same post-result gate to enforce the `300000` ms browser
+    proof budget for Bus Engine OS readiness evidence.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster

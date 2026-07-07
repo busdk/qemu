@@ -16,6 +16,7 @@ Options:
   --require-success         Fail when the proof result did not succeed
   --require-guest-manifest  Fail when inputEvidence.guestManifest is missing
   --require-generated-exec  Fail without nonzero generated-exec coverage
+  --max-elapsed-ms MS       Fail when result elapsedMs exceeds MS
   --json                    Print JSON only
 `;
 }
@@ -35,6 +36,7 @@ function isPositiveInteger(value) {
 function parseArgs(argv) {
   const options = {
     json: false,
+    maxElapsedMs: null,
     requireGeneratedExec: false,
     requireGuestManifest: false,
     requireSuccess: false,
@@ -51,6 +53,8 @@ function parseArgs(argv) {
       options.requireGuestManifest = true;
     } else if (arg === "--require-success") {
       options.requireSuccess = true;
+    } else if (arg === "--max-elapsed-ms") {
+      options.maxElapsedMs = Number(argv[++index]);
     } else if (arg === "--json") {
       options.json = true;
     } else if (arg === "--help" || arg === "-h") {
@@ -219,6 +223,20 @@ export function cdpProofEvidenceGate(result, options = {}) {
     Boolean(options.requireGeneratedExec),
   );
   missingFields.push(...generatedExec.missingFields);
+  const elapsedMs = Number.isInteger(result?.elapsedMs) ? result.elapsedMs : null;
+  const maxElapsedMs = options.maxElapsedMs ?? null;
+  let elapsedOk = elapsedMs !== null;
+  if (elapsedMs === null) {
+    missingFields.push("elapsedMs");
+  }
+  if (maxElapsedMs !== null) {
+    if (!isPositiveInteger(maxElapsedMs)) {
+      missingFields.push("maxElapsedMs");
+    } else if (elapsedMs === null || elapsedMs > maxElapsedMs) {
+      elapsedOk = false;
+      missingFields.push("elapsedMs<=maxElapsedMs");
+    }
+  }
 
   const ok = missingFields.length === 0;
   return {
@@ -227,7 +245,11 @@ export function cdpProofEvidenceGate(result, options = {}) {
     ok,
     success: result?.success === true,
     markerSeen: result?.markerSeen === true,
-    elapsedMs: Number.isInteger(result?.elapsedMs) ? result.elapsedMs : null,
+    elapsedMs,
+    elapsedOk,
+    maxElapsedMs: isPositiveInteger(maxElapsedMs)
+      ? maxElapsedMs
+      : null,
     browserVersion: browserVersion?.browser || null,
     inputEvidencePresent: isObject(inputEvidence),
     files,
@@ -248,6 +270,7 @@ function printResult(gate, json) {
   process.stdout.write(
     `qemu-browser-cdp-proof-gate: ok=${gate.ok} ` +
     `success=${gate.success} markerSeen=${gate.markerSeen} ` +
+    `elapsedMs=${gate.elapsedMs ?? "missing"} ` +
     `generatedExec=${gate.generatedExec.ok} ` +
     `browser=${gate.browserVersion || "missing"} ` +
     `missing=${gate.missingFields.length} ` +

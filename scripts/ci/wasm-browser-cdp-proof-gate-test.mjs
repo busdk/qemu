@@ -76,6 +76,7 @@ const result = {
     requireGuestManifest: true,
     requireGeneratedExec: true,
     requireSuccess: true,
+    maxElapsedMs: 300000,
   });
   assert.equal(gate.ok, true);
   assert.equal(gate.purpose, "qemu-browser-cdp-proof-gate");
@@ -84,6 +85,8 @@ const result = {
   assert.equal(gate.generatedExec.ok, true);
   assert.equal(gate.generatedExec.source, "wasm64Runloop");
   assert.equal(gate.generatedExec.generatedRunEntries, 7);
+  assert.equal(gate.elapsedOk, true);
+  assert.equal(gate.maxElapsedMs, 300000);
   assert.equal(gate.files.rootfs.present, true);
   assert.deepEqual(gate.missingFields, []);
 }
@@ -115,6 +118,13 @@ const result = {
 }
 
 {
+  const gate = cdpProofEvidenceGate(result, { maxElapsedMs: 1000 });
+  assert.equal(gate.ok, false);
+  assert.equal(gate.elapsedOk, false);
+  assert.ok(gate.missingFields.includes("elapsedMs<=maxElapsedMs"));
+}
+
+{
   const failedProof = {
     ...result,
     success: false,
@@ -141,6 +151,7 @@ const result = {
     "--require-generated-exec",
     "--require-guest-manifest",
     "--require-success",
+    "--max-elapsed-ms", "300000",
     "--json",
   ], { encoding: "utf8" });
   const gate = JSON.parse(output);
