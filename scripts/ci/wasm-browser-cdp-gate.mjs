@@ -6,7 +6,8 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { createReadStream, existsSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -227,6 +228,7 @@ export async function parseArgs(argv) {
   options.initrd = options.initrd === null ? null : resolve(options.initrd);
   options.rootfs = options.rootfs === null ? null : resolve(options.rootfs);
   options.out = resolve(options.out);
+  options.guestManifest = options.guestManifest === null ? null : resolve(options.guestManifest);
   options.wasm = options.wasm || defaultWasmForProgram(options.program);
   options.chrome = options.chrome || DEFAULT_CHROME_PATHS.find((path) => existsSync(path));
   if (!options.chrome) {
@@ -462,6 +464,48 @@ function requireReadable(path, label) {
   }
 }
 
+async function sha256File(path) {
+  const hash = createHash("sha256");
+  await new Promise((resolveDone, rejectDone) => {
+    const stream = createReadStream(path);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("error", rejectDone);
+    stream.on("end", resolveDone);
+  });
+  return hash.digest("hex");
+}
+
+async function fileEvidence(role, path) {
+  if (path === null || path === undefined || path === "") {
+    return null;
+  }
+  return {
+    role,
+    path,
+    bytes: statSync(path).size,
+    sha256: await sha256File(path),
+  };
+}
+
+export async function proofInputEvidence(options) {
+  return {
+    artifactDir: options.artifactDir,
+    firmwareDir: options.firmwareDir,
+    program: await fileEvidence(
+      "program",
+      resolve(options.artifactDir, basename(options.program)),
+    ),
+    wasm: await fileEvidence(
+      "wasm",
+      resolve(options.artifactDir, basename(options.wasm)),
+    ),
+    kernel: await fileEvidence("kernel", options.kernel),
+    initrd: await fileEvidence("initrd", options.initrd),
+    rootfs: await fileEvidence("rootfs", options.rootfs),
+    guestManifest: await fileEvidence("guestManifest", options.guestManifest),
+  };
+}
+
 async function main() {
   const options = await parseArgs(process.argv.slice(2));
   const root = process.cwd();
@@ -475,6 +519,7 @@ async function main() {
   }
   requireReadable(resolve(options.artifactDir, basename(options.program)), "program artifact");
   requireReadable(resolve(options.artifactDir, basename(options.wasm)), "wasm artifact");
+  const inputEvidence = await proofInputEvidence(options);
   await mkdir(dirname(options.out), { recursive: true });
 
   const serverArgs = smokeServerArgs(options);
@@ -621,6 +666,7 @@ async function main() {
     markerSeen: Boolean(finalState?.markerSeen) || pageStatus === `marker reached: ${options.marker}`,
     elapsedMs,
     browserVersion,
+    inputEvidence,
     pageStatus,
     smokeUrl: smokeUrl(options),
     pageErrors,

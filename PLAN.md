@@ -1072,6 +1072,10 @@ readiness.
     browser metadata in result JSON as `browserVersion` and includes the
     browser name/version in the stdout summary, so controlled RISC-V proofs
     do not depend on external log scraping for exact browser version evidence.
+    Progress 2026-07-07: the CDP gate now records streamed SHA-256 evidence
+    for the served JavaScript/WASM artifacts, kernel, initrd or rootfs, and
+    guest manifest under `inputEvidence`, so the controlled proof result JSON
+    directly carries the artifact and guest-input hashes required by the gate.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster

@@ -6,7 +6,8 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -15,6 +16,7 @@ import {
   cdpConsoleMessageDiagnostic,
   cdpResourceErrorDiagnostic,
   parseArgs,
+  proofInputEvidence,
   smokeServerArgs,
   smokeUrl,
 } from "./wasm-browser-cdp-gate.mjs";
@@ -93,6 +95,48 @@ assert.equal(manifestOptions.firmwareDir, join(manifestDir, "firmware"));
 assert.equal(manifestOptions.kernel, join(manifestDir, "Image"));
 assert.equal(manifestOptions.rootfs, join(manifestDir, "rootfs.raw"));
 assert.equal(manifestOptions.targetArch, "riscv64");
+assert.equal(manifestOptions.guestManifest, manifestPath);
+
+function sha256(text) {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+{
+  const evidenceDir = mkdtempSync(join(tmpdir(), "qemu-cdp-gate-evidence-"));
+  const artifactDir = join(evidenceDir, "artifacts");
+  const firmwareDir = join(evidenceDir, "pc-bios");
+  const kernel = join(evidenceDir, "Image");
+  const rootfs = join(evidenceDir, "rootfs.raw");
+  const manifest = join(evidenceDir, "guest.json");
+  mkdirSync(artifactDir);
+  mkdirSync(firmwareDir);
+  writeFileSync(join(artifactDir, "qemu-system-riscv64.js"), "js artifact\n");
+  writeFileSync(join(artifactDir, "qemu-system-riscv64.wasm"), "wasm artifact\n");
+  writeFileSync(kernel, "kernel\n");
+  writeFileSync(rootfs, "rootfs\n");
+  writeFileSync(manifest, "manifest\n");
+
+  const evidence = await proofInputEvidence({
+    artifactDir,
+    firmwareDir,
+    guestManifest: manifest,
+    initrd: null,
+    kernel,
+    program: "qemu-system-riscv64.js",
+    rootfs,
+    wasm: "qemu-system-riscv64.wasm",
+  });
+
+  assert.equal(evidence.artifactDir, artifactDir);
+  assert.equal(evidence.firmwareDir, firmwareDir);
+  assert.equal(evidence.program.bytes, "js artifact\n".length);
+  assert.equal(evidence.program.sha256, sha256("js artifact\n"));
+  assert.equal(evidence.wasm.sha256, sha256("wasm artifact\n"));
+  assert.equal(evidence.kernel.sha256, sha256("kernel\n"));
+  assert.equal(evidence.rootfs.sha256, sha256("rootfs\n"));
+  assert.equal(evidence.guestManifest.sha256, sha256("manifest\n"));
+  assert.equal(evidence.initrd, null);
+}
 
 {
   assert.deepEqual(browserVersionDiagnostic({
