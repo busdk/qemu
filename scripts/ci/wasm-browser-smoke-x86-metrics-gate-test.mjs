@@ -840,7 +840,9 @@ for (const field of [
 
 // R4d-g: a real controlled proof carried an ok runloop-only
 // live-generated-exec-summary alongside an incomplete/empty wasm64Tcg
-// object. Without --require-tcg, that placeholder must not veto acceptance.
+// object. Without --require-tcg, that placeholder must not veto acceptance,
+// but the tcg diagnostics stay visible; with --require-tcg, the gate must
+// still fail and explain exactly what is missing.
 {
   const readyRunloopOnlyWithEmptyTcg = JSON.parse(
     JSON.stringify(liveGeneratedExecSummaryReadyResult),
@@ -849,7 +851,12 @@ for (const field of [
 
   const gate = x86BrowserSmokeMetricsGate(readyRunloopOnlyWithEmptyTcg);
   assert.equal(gate.runloop.ok, true);
-  assert.equal(gate.tcg, null);
+  assert.equal(gate.tcg.ok, false);
+  assert.deepEqual(gate.tcg.missingFields, [
+    "wasm64Tcg.summaryCount",
+    "wasm64Tcg.summaries",
+    "wasm64Tcg.lastSummary",
+  ]);
   assert.equal(gate.ok, true);
   assert.equal(gate.acceptanceMode, "runloop");
 
@@ -857,6 +864,28 @@ for (const field of [
     requireTcg: true,
   });
   assert.equal(requiredGate.ok, false);
+  assert.equal(requiredGate.tcg.ok, false);
+  assert.deepEqual(requiredGate.tcg.missingFields, [
+    "wasm64Tcg.summaryCount",
+    "wasm64Tcg.summaries",
+    "wasm64Tcg.lastSummary",
+  ]);
+}
+
+// Fully absent wasm64Tcg (no key at all) is distinct from an empty
+// placeholder: with no data to validate, tcg stays null in both modes, and
+// --require-tcg alone is enough to fail the gate.
+{
+  assert.equal(
+    x86BrowserSmokeMetricsGate(liveGeneratedExecSummaryReadyResult).tcg,
+    null,
+  );
+  const requiredGate = x86BrowserSmokeMetricsGate(
+    liveGeneratedExecSummaryReadyResult,
+    { requireTcg: true },
+  );
+  assert.equal(requiredGate.ok, false);
+  assert.equal(requiredGate.tcg, null);
 }
 
 {

@@ -902,9 +902,11 @@ function validateMetricsState(state, validator, label) {
 
 // A result can carry a `wasm64Tcg` key that is a plain `{}` placeholder with
 // none of summaryCount/summaries/lastSummary set, rather than genuine (if
-// incomplete) tcg summary data. Treat that placeholder the same as tcg being
-// absent, so it defers to `requireTcg` instead of always vetoing acceptance;
-// real (even broken) tcg summary data still vetoes regardless of requireTcg.
+// incomplete) tcg summary data. That placeholder must not veto an otherwise
+// valid wasm64Runloop result unless the caller actually requires tcg
+// evidence (`--require-tcg`/`options.requireTcg`); once required, or once
+// real (even broken) tcg data is present, tcg validity always matters and
+// `tcg.missingFields` reports exactly what is missing.
 function hasMetricsStateData(state) {
   return isObject(state) && (
     state.summaryCount !== undefined ||
@@ -919,8 +921,7 @@ export function x86BrowserSmokeMetricsGate(result, options = {}) {
     validateRunloopSummaryByEvent,
     "wasm64Runloop",
   );
-  const tcgPresent = hasMetricsStateData(result?.wasm64Tcg);
-  const tcg = tcgPresent
+  const tcg = isObject(result?.wasm64Tcg)
     ? validateMetricsState(
         result.wasm64Tcg,
         validateTcgSummary,
@@ -929,7 +930,8 @@ export function x86BrowserSmokeMetricsGate(result, options = {}) {
     : null;
 
   const tcgRequired = Boolean(options.requireTcg);
-  const tcgOk = tcg === null ? !tcgRequired : tcg.ok;
+  const tcgMustBeValid = tcgRequired || hasMetricsStateData(result?.wasm64Tcg);
+  const tcgOk = !tcgMustBeValid || (tcg !== null && tcg.ok);
   const runloopOk = runloop.ok && runloop.acceptanceAllowed !== false;
   const tcgOnlyOk =
     options.allowTcgOnly === true &&
