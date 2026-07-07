@@ -307,6 +307,21 @@ readiness.
   scripts/ci/wasm-code-offset-map-test.mjs`, and `git diff --check`. This is
   diagnostic tooling only; R4z remains open pending controlled-load
   reproduction and mechanism fix.
+  Progress 2026-07-07 20:05 EEST: Claude worker
+  `qemu-r4z-claude-consult-20260707a` produced and supervisor-promoted commit
+  `a89969ea4c`, extending `scripts/ci/wasm-code-offset-map.mjs` so a mapped
+  function-body byte offset also decodes the exact instruction and reports
+  plain-vs-atomic memory classification, memarg alignment, natural alignment,
+  memory offset, and whether the encoded alignment exceeds the instruction
+  width. The focused test now covers the R4z `i64.load align=3 offset=8`
+  signature, a plain over-aligned load byte pattern, the atomic counterpart,
+  `atomic.fence`, unknown plain/atomic opcodes, and an end-to-end
+  `inspectWasmCodeOffset` report. Supervisor verification passed
+  `node --check scripts/ci/wasm-code-offset-map.mjs`, `node --check
+  scripts/ci/wasm-code-offset-map-test.mjs`, `node
+  scripts/ci/wasm-code-offset-map-test.mjs`, and
+  `git diff --check HEAD~1..HEAD`. This improves deterministic R4z diagnosis;
+  controlled-load reproduction and a product mechanism fix remain open.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
