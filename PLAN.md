@@ -1251,6 +1251,14 @@ readiness.
     HEAD~1..HEAD`. This is not a speed or readiness claim. R4d-g remains open
     until a controlled browser proof rerun passes the fixed gates and explains
     the separate `markerSeen=false` / startup-timeout result.
+    Follow-up 2026-07-07 (commit `e842dc2588`): kept empty optional
+    `wasm64Tcg={}` diagnostics visible when `--require-tcg` fails, while
+    preserving the non-veto behavior when TCG is not required. Verification
+    passed: `node --check scripts/ci/wasm-browser-smoke-x86-metrics-gate.mjs`,
+    `node --check scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`,
+    `node scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, `node
+    scripts/ci/wasm-browser-smoke-runner-test.mjs`, and `git diff --check
+    HEAD~1..HEAD`.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
