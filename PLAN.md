@@ -1117,8 +1117,9 @@ readiness.
     --timeout-ms 180000 --diagnostics-limit 64`; then
     `node scripts/ci/wasm-browser-cdp-proof-gate.mjs --result
     /Users/test/git/busdk/agent-supervisor/tmp/qemu-r4dg-802dd8692e-cdp-generated-exec.json
-    --require-guest-manifest --require-generated-exec --max-elapsed-ms 300000
-    --json`; then `node scripts/ci/wasm-browser-smoke-metrics-gate.mjs
+    --require-guest-manifest --require-generated-exec --require-success
+    --max-elapsed-ms 300000 --json`; then
+    `node scripts/ci/wasm-browser-smoke-metrics-gate.mjs
     --result
     /Users/test/git/busdk/agent-supervisor/tmp/qemu-r4dg-802dd8692e-cdp-generated-exec.json
     --require-tcg --json`. Promotion still requires artifact hashes from the
@@ -1135,8 +1136,11 @@ readiness.
     cache is redirected into the worktree. Caveat: configured SSH `origin`
     fetch fails with public-key auth, while HTTPS fetch works but returned an
     older public `develop`; use the accepted local `802dd8692e` or newer base.
-    Do not accept an R4d-g/R4z proof from that worker until the new CDP proof
-    gate plus the generic metrics gate both pass.
+    Follow-up 2026-07-07: corrected the recorded proof-gate command to include
+    `--require-success`, matching the accepted gate contract that the CDP
+    result must report success before any acceptance claim. Do not accept an
+    R4d-g/R4z proof from that worker until the new CDP proof gate plus the
+    generic metrics gate both pass.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
