@@ -139,6 +139,32 @@ Accepted QEMU build-environment evidence recorded:
   scripts/ci/wasm-browser-smoke-server.mjs`, `node --check
   scripts/ci/wasm-browser-smoke.mjs`, `node
   scripts/ci/wasm-browser-smoke-runner-test.mjs`, and `git diff --check`.
+- [x] Add a source-level browser-writable primary serial input path for
+  `ttyS0` proof work without requiring a display/canvas keyboard route. The
+  smoke page can replace the default `-serial mon:stdio` path with a primary
+  `-chardev wasm` serial endpoint when the runner supplies raw serial input,
+  and the runner records a separate `serialInput` result block rather than
+  conflating it with display keyboard evidence. This is harness plumbing only;
+  no long Bus Engine OS browser proof was run. Focused verification on 07-07:
+  `node --check scripts/ci/wasm-browser-smoke.mjs`, `node --check
+  scripts/ci/wasm-browser-smoke-runner.mjs`, `node
+  scripts/ci/wasm-browser-smoke-args-test.mjs`, `node
+  scripts/ci/wasm-browser-smoke-runner-test.mjs`, and `git diff --check`.
+- [x] Record failed resource URL and initiator attribution for browser public
+  release console failures. The Playwright runner now stores bounded
+  `resourceErrors` entries from failed requests and HTTP `>=400` responses,
+  attaches the latest matching resource error to generic console messages such
+  as `Failed to load resource` or COEP/CORS errors, and includes resource
+  counts in the summary. The dependency-free CDP gate now enables the Network
+  domain, records response/load-failure URL, status, failure text, resource
+  type, and CDP initiator, and emits the same console-resource association in
+  its result JSON. This is diagnostic harness work only; no long browser proof
+  was run. Focused verification on 07-07: `node --check
+  scripts/ci/wasm-browser-smoke-runner.mjs`, `node --check
+  scripts/ci/wasm-browser-cdp-gate.mjs`, `node
+  scripts/ci/wasm-browser-smoke-runner-test.mjs`, `node
+  scripts/ci/wasm-browser-cdp-gate-test.mjs`, `node
+  scripts/ci/wasm-browser-smoke-args-test.mjs`, and `git diff --check`.
 
 ## Exact Definition of Done
 
@@ -1026,6 +1052,14 @@ readiness.
     This is only a proof-route repair; R4d-g remains open until a controlled
     Chrome generic RISC-V proof reports nonzero generated execution before
     `Welcome to TuxTest`.
+    Supervisor checkpoint 2026-07-07 16:10 EEST cleared the repo-id
+    materialization hold: `qemu-materialization-proof-20260707a` proved
+    `bus workers create --repo-id busdk/qemu --module .` lands at the real
+    QEMU root on commit `a03dc6a255` with remote
+    `git@github.com:busdk/qemu.git` and a clean tree. R4d-g/R4z proof dispatch
+    is no longer blocked on repository materialization; it remains gated on
+    controlled browser load placement and exact artifact/command/counter
+    capture.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster

@@ -28,6 +28,7 @@ import {
   promoteSmokeState,
   requestFailureDiagnostic,
   requestPowerOperation,
+  responseErrorDiagnostic,
   serialIdleDiagnostic,
   smokeResultSummary,
   wasm64TcgMetricGate,
@@ -1210,6 +1211,42 @@ for (const status of [
   const url = browserSmokeUrl({
     allowSerialFallback: true,
     appendExtra: "",
+    cpu: "Nehalem",
+    display: "none",
+    displayDevice: "default",
+    expectedResolution: "",
+    expectText: [],
+    focusDisplay: false,
+    host: "127.0.0.1",
+    initrd: "/tmp/initramfs.cpio.gz",
+    keyboardAfterText: "",
+    keyboardText: "",
+    kernelAppend: null,
+    machine: "microvm,acpi=off",
+    marker,
+    maxOutputBytes: 60000,
+    memory: "512M",
+    network: "none",
+    port: 8010,
+    powerOperation: "",
+    powerTimeoutMs: 30000,
+    qemuArgs: [],
+    rootfs: null,
+    rootfsDevice: "virtio-mmio",
+    serialInputAfterText: "login:",
+    serialInputText: "root\n",
+    timeoutMs: 30000,
+    visualMarker: "",
+  });
+
+  assert.equal(url.searchParams.get("primarySerialInput"), "1");
+  assert.equal(url.searchParams.get("display"), "none");
+}
+
+{
+  const url = browserSmokeUrl({
+    allowSerialFallback: true,
+    appendExtra: "",
     cpu: "",
     display: "none",
     displayDevice: "default",
@@ -2107,7 +2144,31 @@ for (const status of [
       lineNumber: 12,
       columnNumber: 34,
     },
+    resourceError: null,
   });
+}
+
+{
+  const diagnostic = consoleMessageDiagnostic({
+    type: () => "error",
+    text: () => "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    location: () => ({ url: "", lineNumber: 0, columnNumber: 0 }),
+  }, 42, [{
+    event: "response",
+    elapsedMs: 41,
+    method: "GET",
+    url: "http://127.0.0.1:8010/missing.wasm",
+    status: 404,
+    statusText: "Not Found",
+    initiator: {
+      frameUrl: "http://127.0.0.1:8010/",
+      resourceType: "fetch",
+    },
+  }]);
+
+  assert.equal(diagnostic.resourceError.url, "http://127.0.0.1:8010/missing.wasm");
+  assert.equal(diagnostic.resourceError.status, 404);
+  assert.equal(diagnostic.resourceError.initiator.frameUrl, "http://127.0.0.1:8010/");
 }
 
 {
@@ -2133,6 +2194,8 @@ for (const status of [
     method: () => "GET",
     url: () => "http://127.0.0.1:8010/qemu-system-x86_64.wasm",
     failure: () => ({ errorText: "net::ERR_FAILED" }),
+    frame: () => ({ url: () => "http://127.0.0.1:8010/" }),
+    resourceType: () => "fetch",
   }, 99);
 
   assert.deepEqual(diagnostic, {
@@ -2140,6 +2203,35 @@ for (const status of [
     method: "GET",
     url: "http://127.0.0.1:8010/qemu-system-x86_64.wasm",
     failureText: "net::ERR_FAILED",
+    initiator: {
+      frameUrl: "http://127.0.0.1:8010/",
+      resourceType: "fetch",
+    },
+  });
+}
+
+{
+  const diagnostic = responseErrorDiagnostic({
+    request: () => ({
+      method: () => "GET",
+      frame: () => ({ url: () => "http://127.0.0.1:8010/" }),
+      resourceType: () => "script",
+    }),
+    status: () => 404,
+    statusText: () => "Not Found",
+    url: () => "http://127.0.0.1:8010/missing.js",
+  }, 100);
+
+  assert.deepEqual(diagnostic, {
+    elapsedMs: 100,
+    method: "GET",
+    url: "http://127.0.0.1:8010/missing.js",
+    status: 404,
+    statusText: "Not Found",
+    initiator: {
+      frameUrl: "http://127.0.0.1:8010/",
+      resourceType: "script",
+    },
   });
 }
 
@@ -2489,6 +2581,8 @@ for (const status of [
     },
     requestFailureCount: 0,
     firstRequestFailure: null,
+    resourceErrorCount: 0,
+    firstResourceError: null,
     idleTimeout: {
       idle: true,
       idleAfterText: "x87 FPU will use FXSAVE",

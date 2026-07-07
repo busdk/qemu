@@ -375,6 +375,73 @@ async function cdpEval(cdp, expression) {
   return result.result?.value;
 }
 
+function compactCdpInitiator(initiator) {
+  if (!initiator) {
+    return null;
+  }
+  return {
+    type: initiator.type || null,
+    url: initiator.url || null,
+    lineNumber: initiator.lineNumber ?? null,
+    columnNumber: initiator.columnNumber ?? null,
+    stack: initiator.stack || null,
+  };
+}
+
+export function cdpResourceErrorDiagnostic(event, requestInfo, elapsedMs) {
+  const params = event.params || {};
+  const response = params.response || {};
+  const request = requestInfo?.request || {};
+  return {
+    elapsedMs,
+    event: event.method,
+    requestId: params.requestId || requestInfo?.requestId || null,
+    method: request.method || null,
+    url: response.url || request.url || null,
+    status: response.status ?? null,
+    statusText: response.statusText || null,
+    failureText: params.errorText || null,
+    resourceType: params.type || requestInfo?.type || null,
+    initiator: compactCdpInitiator(requestInfo?.initiator || null),
+  };
+}
+
+function recentResourceError(resourceErrors) {
+  if (!Array.isArray(resourceErrors) || resourceErrors.length === 0) {
+    return null;
+  }
+  const entry = resourceErrors[resourceErrors.length - 1];
+  return {
+    elapsedMs: entry.elapsedMs,
+    event: entry.event,
+    method: entry.method,
+    url: entry.url,
+    status: entry.status ?? null,
+    statusText: entry.statusText ?? null,
+    failureText: entry.failureText ?? null,
+    resourceType: entry.resourceType || null,
+    initiator: entry.initiator || null,
+  };
+}
+
+function consoleLooksLikeResourceError(text) {
+  return /Failed to load resource|Cross-Origin-Embedder-Policy|COEP|CORS|404|403|net::ERR_/i.test(text);
+}
+
+export function cdpConsoleMessageDiagnostic(params, elapsedMs, resourceErrors = []) {
+  const text = (params?.args || [])
+    .map((arg) => arg.value ?? arg.description ?? "")
+    .join(" ");
+  return {
+    elapsedMs,
+    type: params?.type || null,
+    text,
+    resourceError: consoleLooksLikeResourceError(text)
+      ? recentResourceError(resourceErrors)
+      : null,
+  };
+}
+
 function requireReadable(path, label) {
   if (!existsSync(path)) {
     throw new Error(`${label} not found: ${path}`);
@@ -451,10 +518,13 @@ async function main() {
   cdp = new CdpSession(ws);
   await cdp.send("Runtime.enable");
   await cdp.send("Page.enable");
+  await cdp.send("Network.enable");
 
   const started = Date.now();
   const pageErrors = [];
   const consoleMessages = [];
+  const resourceErrors = [];
+  const requests = new Map();
   let finalState = null;
   let pageStatus = "";
   let pageTextTail = "";
@@ -468,14 +538,32 @@ async function main() {
           exceptionDetails: event.params?.exceptionDetails || null,
         });
       } else if (event.method === "Runtime.consoleAPICalled") {
-        const text = (event.params?.args || [])
-          .map((arg) => arg.value ?? arg.description ?? "")
-          .join(" ");
-        consoleMessages.push({
-          elapsedMs: Date.now() - started,
-          type: event.params?.type,
-          text,
+        consoleMessages.push(cdpConsoleMessageDiagnostic(
+          event.params,
+          Date.now() - started,
+          resourceErrors,
+        ));
+      } else if (event.method === "Network.requestWillBeSent") {
+        requests.set(event.params?.requestId, {
+          requestId: event.params?.requestId,
+          request: event.params?.request || null,
+          initiator: event.params?.initiator || null,
+          type: event.params?.type || null,
         });
+      } else if (event.method === "Network.responseReceived") {
+        if ((event.params?.response?.status || 0) >= 400) {
+          resourceErrors.push(cdpResourceErrorDiagnostic(
+            event,
+            requests.get(event.params?.requestId),
+            Date.now() - started,
+          ));
+        }
+      } else if (event.method === "Network.loadingFailed") {
+        resourceErrors.push(cdpResourceErrorDiagnostic(
+          event,
+          requests.get(event.params?.requestId),
+          Date.now() - started,
+        ));
       }
     }
     const snapshotJson = await cdpEval(cdp, `(() => JSON.stringify({
@@ -518,6 +606,7 @@ async function main() {
     smokeUrl: smokeUrl(options),
     pageErrors,
     consoleMessages: consoleMessages.slice(-200),
+    resourceErrors: resourceErrors.slice(-200),
     pageTextTail,
     lastLine: finalState?.lastLine || null,
     guestLastLine: finalState?.guestLastLine || null,

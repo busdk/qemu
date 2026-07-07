@@ -21,6 +21,7 @@ import {
   installDisplayInputPolicy,
   qemuArgs,
   recordHarnessFailure,
+  writeWasmChardevText,
 } from "./wasm-browser-smoke.mjs";
 
 function baseConfig(overrides = {}) {
@@ -40,6 +41,9 @@ function baseConfig(overrides = {}) {
     persistentDisk: false,
     persistentDiskDevice: "virtio-mmio",
     persistentDiskPath: "/persistent.raw",
+    primarySerialInput: false,
+    primarySerialInputChannel: "org.qemu.wasm.primary-serial",
+    primarySerialInputMaxPayloadBytes: 4096,
     qemuArgs: [],
     rootfs: "",
     rootfsDevice: "virtio-mmio",
@@ -207,6 +211,34 @@ function serviceBridgeConfig(overrides = {}) {
   assert.equal(args.includes("-display"), false);
   assert.ok(valueAfter(args, "-append").includes("rdinit=/init"));
   assert.equal(args.includes("-drive"), false);
+}
+
+{
+  const args = qemuArgs(baseConfig({ primarySerialInput: true }));
+  const chardevs = valuesAfter(args, "-chardev");
+
+  assert.ok(chardevs.includes("wasm,id=qemu-wasm-primary-serial,channel=org.qemu.wasm.primary-serial,max-payload=4096"));
+  assert.equal(valueAfter(args, "-serial"), "chardev:qemu-wasm-primary-serial");
+  assert.equal(valueAfter(args, "-monitor"), "none");
+}
+
+{
+  const writes = [];
+  const status = writeWasmChardevText({
+    _qemu_wasm_chardev_write_pending() {
+      writes.push({
+        channel: this.qemuWasmChardevPendingChannel,
+        text: this.qemuWasmChardevPendingText,
+      });
+      return this.qemuWasmChardevPendingText.length;
+    },
+  }, "org.qemu.wasm.primary-serial", "uname -a\n", 4096);
+
+  assert.equal(status, "uname -a\n".length);
+  assert.deepEqual(writes, [{
+    channel: "org.qemu.wasm.primary-serial",
+    text: "uname -a\n",
+  }]);
 }
 
 {

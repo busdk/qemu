@@ -661,12 +661,77 @@ function serviceBridgeError(state, error) {
   return message;
 }
 
+export function writeWasmChardevText(module, channel, text, maxPayloadBytes = 4096) {
+  if (!module || typeof module._qemu_wasm_chardev_write_pending !== "function") {
+    throw new Error("QEMU WebAssembly chardev is not available");
+  }
+  const payloadBytes = new TextEncoder().encode(text).length;
+  if (payloadBytes > maxPayloadBytes) {
+    throw new Error("QEMU WebAssembly chardev payload exceeds maxPayloadBytes");
+  }
+  module.qemuWasmChardevPendingChannel = channel;
+  module.qemuWasmChardevPendingText = text;
+  const status = Number(module._qemu_wasm_chardev_write_pending());
+  if (!Number.isInteger(status) || status < 0) {
+    throw new Error(`QEMU WebAssembly chardev write failed: ${status}`);
+  }
+  return status;
+}
+
+export function createPrimarySerialInput(config, smokeState, scope = globalThis) {
+  if (!config.primarySerialInput) {
+    return null;
+  }
+  const state = {
+    channel: config.primarySerialInputChannel,
+    maxPayloadBytes: config.primarySerialInputMaxPayloadBytes,
+    moduleAttached: false,
+    writes: 0,
+    bytes: 0,
+    errors: 0,
+    lastWriteStatus: null,
+    lastTextLength: 0,
+    lastError: null,
+  };
+  smokeState.primarySerialInput = state;
+  let module = null;
+  const writeText = (text) => {
+    try {
+      const status = writeWasmChardevText(
+        module,
+        state.channel,
+        text,
+        state.maxPayloadBytes,
+      );
+      state.writes += 1;
+      state.bytes += new TextEncoder().encode(text).length;
+      state.lastWriteStatus = status;
+      state.lastTextLength = text.length;
+      state.lastError = null;
+      return status;
+    } catch (error) {
+      state.errors += 1;
+      state.lastError = error && error.message ? error.message : String(error);
+      throw error;
+    }
+  };
+  const input = {
+    attachModule(nextModule) {
+      module = nextModule;
+      state.moduleAttached = Boolean(module);
+    },
+    state,
+    writeText,
+  };
+  scope.qemuWasmPrimarySerialInput = input;
+  return input;
+}
+
 export function createServiceBridge(config, smokeState, scope = globalThis) {
   const bridgeConfig = config.serviceBridge;
   if (bridgeConfig === null) {
     return null;
   }
-  const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   const pending = new Map();
   let module = null;
@@ -733,20 +798,13 @@ export function createServiceBridge(config, smokeState, scope = globalThis) {
   };
 
   const sendFrame = (frame) => {
-    if (!module || typeof module._qemu_wasm_chardev_write_pending !== "function") {
-      throw new Error("QEMU WebAssembly service chardev is not available");
-    }
     const text = `${JSON.stringify(frame)}\n`;
-    const payloadBytes = encoder.encode(text).length;
-    if (payloadBytes > bridgeConfig.maxPayloadBytes) {
-      throw new Error("service bridge request exceeds maxPayloadBytes");
-    }
-    module.qemuWasmChardevPendingChannel = bridgeConfig.requestChannel;
-    module.qemuWasmChardevPendingText = text;
-    const status = Number(module._qemu_wasm_chardev_write_pending());
-    if (!Number.isInteger(status) || status < 0) {
-      throw new Error(`service bridge write failed: ${status}`);
-    }
+    const status = writeWasmChardevText(
+      module,
+      bridgeConfig.requestChannel,
+      text,
+      bridgeConfig.maxPayloadBytes,
+    );
     state.sent += 1;
     state.lastRequestId = String(frame.id);
     return status;
@@ -1016,8 +1074,17 @@ export function qemuArgs(config) {
   } else {
     throw new Error("display must be none, sdl, or wasm");
   }
+  if (config.primarySerialInput) {
+    args.push(
+      "-chardev",
+      `wasm,id=qemu-wasm-primary-serial,channel=${config.primarySerialInputChannel},max-payload=${config.primarySerialInputMaxPayloadBytes}`,
+      "-serial",
+      "chardev:qemu-wasm-primary-serial",
+    );
+  } else {
+    args.push("-serial", "mon:stdio");
+  }
   args.push(
-    "-serial", "mon:stdio",
     "-monitor", "none",
     "-kernel", "/kernel",
   );
@@ -1510,6 +1577,9 @@ function buildConfig() {
     persistentDiskPath: pathOption("persistentDiskPath", "/persistent.raw"),
     persistentDiskSizeBytes: numberOption("persistentDiskSizeBytes", DEFAULT_PERSISTENT_DISK_SIZE_BYTES),
     persistentDiskStorage: option("persistentDiskStorage", "opfs"),
+    primarySerialInput: boolOption("primarySerialInput", false),
+    primarySerialInputChannel: option("primarySerialInputChannel", "org.qemu.wasm.primary-serial"),
+    primarySerialInputMaxPayloadBytes: numberOption("primarySerialInputMaxPayloadBytes", 4096),
     program: option("program", "/artifacts/qemu-system-x86_64.js"),
     qemuArgs: listOption("qemuArg"),
     qboot: option("qboot", "/firmware/qboot.rom"),
@@ -1793,6 +1863,7 @@ async function run() {
   globalThis.qemuWasmSmokeState = smokeState;
   installBrowserDialogSuppression(globalThis, smokeState);
   const serviceBridge = createServiceBridge(config, smokeState, globalThis);
+  const primarySerialInput = createPrimarySerialInput(config, smokeState, globalThis);
   const powerControl = createPowerControl(config, smokeState, serviceBridge);
   let qemuKeySink = null;
   let qemuModule = null;
@@ -2262,6 +2333,9 @@ async function run() {
   qemuModule = await moduleFactory(moduleOptions);
   powerControl.attachModule(qemuModule);
   installWasmKeySink(qemuModule);
+  if (primarySerialInput) {
+    primarySerialInput.attachModule(qemuModule);
+  }
   if (serviceBridge) {
     serviceBridge.attachModule(qemuModule);
   }

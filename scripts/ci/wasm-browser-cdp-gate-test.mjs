@@ -11,6 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  cdpConsoleMessageDiagnostic,
+  cdpResourceErrorDiagnostic,
   parseArgs,
   smokeServerArgs,
   smokeUrl,
@@ -90,3 +92,97 @@ assert.equal(manifestOptions.firmwareDir, join(manifestDir, "firmware"));
 assert.equal(manifestOptions.kernel, join(manifestDir, "Image"));
 assert.equal(manifestOptions.rootfs, join(manifestDir, "rootfs.raw"));
 assert.equal(manifestOptions.targetArch, "riscv64");
+
+{
+  const requestInfo = {
+    requestId: "1",
+    request: {
+      method: "GET",
+      url: "http://127.0.0.1:8151/missing.wasm",
+    },
+    initiator: {
+      type: "script",
+      url: "http://127.0.0.1:8151/wasm-browser-smoke.mjs",
+      lineNumber: 12,
+      columnNumber: 3,
+    },
+    type: "Script",
+  };
+  const diagnostic = cdpResourceErrorDiagnostic({
+    method: "Network.responseReceived",
+    params: {
+      requestId: "1",
+      type: "Script",
+      response: {
+        url: "http://127.0.0.1:8151/missing.wasm",
+        status: 404,
+        statusText: "Not Found",
+      },
+    },
+  }, requestInfo, 55);
+
+  assert.deepEqual(diagnostic, {
+    elapsedMs: 55,
+    event: "Network.responseReceived",
+    requestId: "1",
+    method: "GET",
+    url: "http://127.0.0.1:8151/missing.wasm",
+    status: 404,
+    statusText: "Not Found",
+    failureText: null,
+    resourceType: "Script",
+    initiator: {
+      type: "script",
+      url: "http://127.0.0.1:8151/wasm-browser-smoke.mjs",
+      lineNumber: 12,
+      columnNumber: 3,
+      stack: null,
+    },
+  });
+}
+
+{
+  const diagnostic = cdpResourceErrorDiagnostic({
+    method: "Network.loadingFailed",
+    params: {
+      requestId: "2",
+      errorText: "net::ERR_FAILED",
+      type: "Fetch",
+    },
+  }, {
+    requestId: "2",
+    request: {
+      method: "GET",
+      url: "http://127.0.0.1:8151/qemu-system-riscv64.wasm",
+    },
+    initiator: { type: "parser" },
+  }, 99);
+
+  assert.equal(diagnostic.url, "http://127.0.0.1:8151/qemu-system-riscv64.wasm");
+  assert.equal(diagnostic.failureText, "net::ERR_FAILED");
+  assert.equal(diagnostic.initiator.type, "parser");
+}
+
+{
+  const diagnostic = cdpConsoleMessageDiagnostic({
+    type: "error",
+    args: [{
+      value: "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    }],
+  }, 100, [{
+    elapsedMs: 99,
+    event: "Network.responseReceived",
+    method: "GET",
+    url: "http://127.0.0.1:8151/missing.js",
+    status: 404,
+    statusText: "Not Found",
+    initiator: {
+      type: "script",
+      url: "http://127.0.0.1:8151/wasm-browser-smoke.mjs",
+    },
+  }]);
+
+  assert.equal(diagnostic.resourceError.url, "http://127.0.0.1:8151/missing.js");
+  assert.equal(diagnostic.resourceError.status, 404);
+  assert.equal(diagnostic.resourceError.initiator.type, "script");
+}

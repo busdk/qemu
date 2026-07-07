@@ -81,6 +81,14 @@ Options:
                      before typing --keyboard-text
   --keyboard-text TEXT
                      Type TEXT into the focused browser display canvas
+  --serial-input-after-text TEXT
+                     Wait until browser-captured serial output contains TEXT
+                     before writing --serial-input-text to primary serial
+  --serial-input-text TEXT
+                     Write raw text to the browser-backed primary serial port
+  --pre-serial-input-wait-ms MS
+                     Wait after --serial-input-after-text is observed before
+                     writing --serial-input-text
   --pre-keyboard-wait-ms MS
                      Wait after --keyboard-after-text is observed before
                      typing --keyboard-text
@@ -258,7 +266,10 @@ export function parseArgs(argv) {
     kernel: null,
     keyboardAfterText: "",
     keyboardText: "",
+    preSerialInputWaitMs: 0,
     preKeyboardWaitMs: 0,
+    serialInputAfterText: "",
+    serialInputText: "",
     postKeyboardWaitMs: 0,
     powerOperation: "",
     powerTimeoutMs: 30000,
@@ -397,6 +408,15 @@ export function parseArgs(argv) {
     } else if (arg === "--keyboard-text") {
       options.keyboardText = argv[++i];
       explicit.add("keyboardText");
+    } else if (arg === "--serial-input-after-text") {
+      options.serialInputAfterText = argv[++i];
+      explicit.add("serialInputAfterText");
+    } else if (arg === "--serial-input-text") {
+      options.serialInputText = argv[++i];
+      explicit.add("serialInputText");
+    } else if (arg === "--pre-serial-input-wait-ms") {
+      options.preSerialInputWaitMs = Number(argv[++i]);
+      explicit.add("preSerialInputWaitMs");
     } else if (arg === "--pre-keyboard-wait-ms") {
       options.preKeyboardWaitMs = Number(argv[++i]);
       explicit.add("preKeyboardWaitMs");
@@ -643,6 +663,7 @@ export function parseArgs(argv) {
       "wasm64LiveGeneratedExecPreflightLimit",
       "wasm64TcgSummaryInterval",
       "port",
+      "preSerialInputWaitMs",
       "preKeyboardWaitMs",
       "postKeyboardWaitMs",
       "powerTimeoutMs",
@@ -699,6 +720,8 @@ export function parseArgs(argv) {
       "rootfsOpfsName",
       "rootfsStorage",
       "screenshot",
+      "serialInputAfterText",
+      "serialInputText",
       "targetArch",
       "visualMarker",
       "wasm",
@@ -905,6 +928,18 @@ export function parseArgs(argv) {
     console.error("--keyboard-after-text requires --keyboard-text");
     usage(2);
   }
+  if (options.serialInputAfterText !== "" && options.serialInputText === "") {
+    console.error("--serial-input-after-text requires --serial-input-text");
+    usage(2);
+  }
+  if (!Number.isInteger(options.preSerialInputWaitMs) || options.preSerialInputWaitMs < 0) {
+    console.error("--pre-serial-input-wait-ms must be a non-negative integer");
+    usage(2);
+  }
+  if (options.preSerialInputWaitMs > 0 && options.serialInputText === "") {
+    console.error("--pre-serial-input-wait-ms requires --serial-input-text");
+    usage(2);
+  }
   if (!Number.isInteger(options.preKeyboardWaitMs) || options.preKeyboardWaitMs < 0) {
     console.error("--pre-keyboard-wait-ms must be a non-negative integer");
     usage(2);
@@ -997,12 +1032,53 @@ export function isSuccessfulPageStatus(status, marker) {
     status === "Bus Engine OS is ready";
 }
 
-export function consoleMessageDiagnostic(message, elapsedMs) {
+function safeDiagnosticValue(fn, fallback = null) {
+  try {
+    return fn();
+  } catch {
+    return fallback;
+  }
+}
+
+function requestInitiatorDiagnostic(request) {
+  const frame = safeDiagnosticValue(() => request.frame(), null);
+  return {
+    frameUrl: frame ? safeDiagnosticValue(() => frame.url(), null) : null,
+    resourceType: safeDiagnosticValue(() => request.resourceType(), null),
+  };
+}
+
+function recentResourceError(resourceErrors) {
+  if (!Array.isArray(resourceErrors) || resourceErrors.length === 0) {
+    return null;
+  }
+  const entry = resourceErrors[resourceErrors.length - 1];
+  return {
+    elapsedMs: entry.elapsedMs,
+    event: entry.event,
+    method: entry.method,
+    url: entry.url,
+    status: entry.status ?? null,
+    statusText: entry.statusText ?? null,
+    failureText: entry.failureText ?? null,
+    initiator: entry.initiator || null,
+  };
+}
+
+function consoleLooksLikeResourceError(text) {
+  return /Failed to load resource|Cross-Origin-Embedder-Policy|COEP|CORS|404|403|net::ERR_/i.test(text);
+}
+
+export function consoleMessageDiagnostic(message, elapsedMs, resourceErrors = []) {
+  const text = message.text();
   return {
     elapsedMs,
     type: message.type(),
-    text: message.text(),
+    text,
     location: message.location ? message.location() : null,
+    resourceError: consoleLooksLikeResourceError(text)
+      ? recentResourceError(resourceErrors)
+      : null,
   };
 }
 
@@ -1023,6 +1099,19 @@ export function requestFailureDiagnostic(request, elapsedMs) {
     method: request.method(),
     url: request.url(),
     failureText: failure && failure.errorText ? failure.errorText : null,
+    initiator: requestInitiatorDiagnostic(request),
+  };
+}
+
+export function responseErrorDiagnostic(response, elapsedMs) {
+  const request = response.request();
+  return {
+    elapsedMs,
+    method: request.method(),
+    url: response.url(),
+    status: response.status(),
+    statusText: response.statusText(),
+    initiator: requestInitiatorDiagnostic(request),
   };
 }
 
@@ -1288,10 +1377,14 @@ function compactRequestFailure(failure) {
     return null;
   }
   return {
+    event: failure.event || null,
     elapsedMs: failure.elapsedMs,
     method: failure.method,
     url: failure.url,
     failureText: failure.failureText,
+    status: failure.status ?? null,
+    statusText: failure.statusText ?? null,
+    initiator: failure.initiator || null,
   };
 }
 
@@ -1318,6 +1411,7 @@ export function smokeResultSummary(result) {
   const firstPageError = compactPageError(firstEntry(result.pageErrors || []));
   const lastPageError = compactPageError(lastEntry(result.pageErrors || []));
   const firstRequestFailure = compactRequestFailure(firstEntry(result.requestFailures || []));
+  const firstResourceError = compactRequestFailure(firstEntry(result.resourceErrors || []));
   const lastProgressSample = compactProgressSample(lastEntry(result.progressSamples || []));
   const primaryError = result.errorMessage
     ? {
@@ -1339,6 +1433,8 @@ export function smokeResultSummary(result) {
     lastPageError,
     requestFailureCount: (result.requestFailures || []).length,
     firstRequestFailure,
+    resourceErrorCount: (result.resourceErrors || []).length,
+    firstResourceError,
     idleTimeout: result.idleTimeout || null,
     guestIdleTimeout: result.guestIdleTimeout || null,
     progressSampleCount: (result.progressSamples || []).length,
@@ -1728,6 +1824,9 @@ export function browserSmokeUrl(options) {
   if (options.serviceBridge != null) {
     url.searchParams.set("serviceBridge", JSON.stringify(options.serviceBridge));
   }
+  if ((options.serialInputText || "") !== "") {
+    url.searchParams.set("primarySerialInput", "1");
+  }
   url.searchParams.set("timeoutMs", String(options.timeoutMs));
   url.searchParams.set("visualMarker", options.visualMarker);
   return url;
@@ -1751,7 +1850,10 @@ export function initialSmokeResult(options, browserVersion) {
     harnessSelfTest: Boolean(options.harnessSelfTest),
     keyboardAfterText: options.keyboardAfterText,
     keyboardTextLength: options.keyboardText.length,
+    preSerialInputWaitMs: options.preSerialInputWaitMs || 0,
     preKeyboardWaitMs: options.preKeyboardWaitMs,
+    serialInputAfterText: options.serialInputAfterText || "",
+    serialInputTextLength: (options.serialInputText || "").length,
     postKeyboardWaitMs: options.postKeyboardWaitMs,
     powerOperation: options.powerOperation,
     powerTimeoutMs: options.powerTimeoutMs,
@@ -1850,6 +1952,7 @@ export function initialSmokeResult(options, browserVersion) {
     pageErrors: [],
     progressSampleErrors: [],
     progressSamples: [],
+    resourceErrors: [],
     requestFailures: [],
   };
 }
@@ -2068,6 +2171,41 @@ async function typeKeyboardText(page, options, result) {
   };
 }
 
+async function writePrimarySerialInputText(page, options, result) {
+  if (options.serialInputText === "") {
+    return;
+  }
+  await page.waitForFunction(
+    (afterText) => {
+      const state = globalThis.qemuWasmSmokeState || null;
+      const input = globalThis.qemuWasmPrimarySerialInput || null;
+      if (!state || !input || !input.state || !input.state.moduleAttached) {
+        return false;
+      }
+      if (afterText === "") {
+        return ["start-qemu", "guest-boot", "success"].includes(state.phase);
+      }
+      const output = document.querySelector("#output")?.textContent || "";
+      return output.includes(afterText);
+    },
+    options.serialInputAfterText,
+    { timeout: options.timeoutMs },
+  );
+  if (options.preSerialInputWaitMs > 0) {
+    await page.waitForTimeout(options.preSerialInputWaitMs);
+  }
+  const status = await page.evaluate((text) => {
+    return globalThis.qemuWasmPrimarySerialInput.writeText(text);
+  }, options.serialInputText);
+  result.serialInput = {
+    afterText: options.serialInputAfterText,
+    preSerialInputWaitMs: options.preSerialInputWaitMs,
+    target: "primary-serial",
+    textLength: options.serialInputText.length,
+    writeStatus: status,
+  };
+}
+
 async function currentSmokeState(page) {
   if (!page) {
     return null;
@@ -2163,7 +2301,11 @@ async function run() {
         "globalThis.qemuWasmIsTerminalPageStatus = isTerminalPageStatus;\n",
     });
     page.on("console", (message) => {
-      const entry = consoleMessageDiagnostic(message, Date.now() - startTime);
+      const entry = consoleMessageDiagnostic(
+        message,
+        Date.now() - startTime,
+        result.resourceErrors,
+      );
       appendBounded(result.consoleMessages, entry);
       console.log(`browser ${entry.type}: ${entry.text}`);
     });
@@ -2185,10 +2327,24 @@ async function run() {
       })());
     });
     page.on("requestfailed", (request) => {
-      appendBounded(result.requestFailures, requestFailureDiagnostic(
+      const entry = requestFailureDiagnostic(
         request,
         Date.now() - startTime,
-      ));
+      );
+      appendBounded(result.requestFailures, entry);
+      appendBounded(result.resourceErrors, {
+        ...entry,
+        event: "requestfailed",
+      });
+    });
+    page.on("response", (response) => {
+      if (response.status() < 400) {
+        return;
+      }
+      appendBounded(result.resourceErrors, {
+        ...responseErrorDiagnostic(response, Date.now() - startTime),
+        event: "response",
+      });
     });
     const url = browserSmokeUrl(options);
     result.smokeUrl = url.href;
@@ -2238,6 +2394,7 @@ async function run() {
       sampleAndCheckIdle("interval");
     }, options.progressSampleIntervalMs);
     await sampleAndCheckIdle("after-load");
+    await writePrimarySerialInputText(page, options, result);
     await typeKeyboardText(page, options, result);
     await Promise.race([
       page.waitForFunction(
