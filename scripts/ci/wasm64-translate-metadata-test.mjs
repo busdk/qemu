@@ -733,6 +733,29 @@ assert.match(runtime, /\\"last_access_index\\":%d/);
 assert.match(runtime, /int32_t first_branch_index = -1/);
 assert.match(runtime, /int32_t first_access_index = -1/);
 assert.match(runtime, /int32_t last_access_index = -1/);
+
+// Narrow, source-proven branch-before-access relaxation for the
+// multi-access softmmu reject population (R4d-g): admits exactly the
+// measured shape (one branch, zero pre-branch accesses, loads only, no
+// direct store) instead of unconditionally rejecting any branch presence.
+assert.match(runtime, /uint32_t branch_count = 0/);
+assert.match(runtime, /branch_count\+\+/);
+assert.match(runtime, /bool branch_before_load_only_relaxation =/);
+// Lock in the actual admission predicate, not just its presence, so a
+// widened or inverted condition would fail this test.
+assert.match(runtime, /branch_count == 1 &&/);
+assert.match(runtime, /first_branch_index < first_access_index &&/);
+assert.match(runtime, /store_count == 0 &&/);
+assert.match(runtime, /direct_store_count == 0;/);
+assert.match(runtime, /if \(!branch_before_load_only_relaxation\) \{/);
+// The JS emitter must scope the deferred commit flush the same way the C
+// admission gate scopes acceptance - both sides read the same flag name.
+assert.match(runtime, /let narrowBranchBeforeLoadOnlyRelaxation = false;/);
+assert.match(runtime, /if \(narrowBranchBeforeLoadOnlyRelaxation\) \{/);
+assert.match(
+  runtime,
+  /const guardedCommits = deferredSoftmmuCommits\.splice\(/,
+);
 const liveGeneratedExecTryBody = runtime.match(
   /static bool tcg_wasm64_live_generated_exec_try\([\s\S]*?\n\}\n\nstatic bool tcg_wasm64_translate_op_supported/,
 )?.[0] || "";

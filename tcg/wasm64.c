@@ -3542,13 +3542,31 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         });
         const bodyWords = terminalIndex < 0 ?
             words : words.slice(0, terminalIndex);
-        const softmmuAccessCount = bodyWords.filter((insn) => {
-            const opc = bits(insn >>> 0, 0, 8);
+        const softmmuAccessIndices = [];
+        let softmmuAccessCount = 0;
+        let allSoftmmuAccessesAreLoads = true;
+        for (let index = 0; index < bodyWords.length; index++) {
+            const opc = bits(bodyWords[index] >>> 0, 0, 8);
 
-            return opc === ops.tci_qemu_ld_rrr ||
-                   opc === ops.tci_qemu_st_rrr;
-        }).length;
+            if (opc === ops.tci_qemu_ld_rrr || opc === ops.tci_qemu_st_rrr) {
+                softmmuAccessCount++;
+                softmmuAccessIndices.push(index);
+                if (opc !== ops.tci_qemu_ld_rrr) {
+                    allSoftmmuAccessesAreLoads = false;
+                }
+            }
+        }
+        const firstSoftmmuAccessIndex = softmmuAccessIndices.length > 0 ?
+            softmmuAccessIndices[0] : -1;
         const allOrNothingSoftmmu = softmmuAccessCount > 1;
+        // R4d-g branch-position measurement (85ec802b3b): 47/47 rejected
+        // multi-access softmmu samples had the brcond strictly before every
+        // softmmu access, dominated by pure two-load bodies. Set below,
+        // once the body shape is known, only for that exact proven shape;
+        // read by compileRange() to scope the deferred commit flush inside
+        // the branch's own block instead of the single flat point after
+        // the whole compiled body.
+        let narrowBranchBeforeLoadOnlyRelaxation = false;
         const deferredSoftmmuCommits = [];
         const deferredDirectStores = [];
         let nextSoftmmuAccessIndex = 0;
@@ -4303,11 +4321,34 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
                     if (body === null) {
                         return null;
                     }
-                    code.push(...block([
-                        ...brIf(0, truthy(
-                            localGet(regLocal(bits(insn, 8, 4))))),
-                        ...body,
-                    ]));
+                    if (narrowBranchBeforeLoadOnlyRelaxation) {
+                        // Proven-shape-only: flush this branch's own
+                        // guarded accesses' deferred commits *inside* its
+                        // block, before the block's own close, instead of
+                        // at the single flat point after the whole body.
+                        // This body has zero softmmu accesses before the
+                        // branch (enforced above), so every entry
+                        // currently in deferredSoftmmuCommits belongs to
+                        // this guarded range; splicing it out here leaves
+                        // nothing for the outer flush to double-apply, and
+                        // - critically - the commits never execute at all
+                        // when the block's br_if skips `body`.
+                        const guardedCommits = deferredSoftmmuCommits.splice(
+                            0, deferredSoftmmuCommits.length);
+
+                        code.push(...block([
+                            ...brIf(0, truthy(
+                                localGet(regLocal(bits(insn, 8, 4))))),
+                            ...body,
+                            ...guardedCommits,
+                        ]));
+                    } else {
+                        code.push(...block([
+                            ...brIf(0, truthy(
+                                localGet(regLocal(bits(insn, 8, 4))))),
+                            ...body,
+                        ]));
+                    }
                     index = targetIndex;
                     continue;
                 }
@@ -4359,15 +4400,19 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
         let directMemoryStoreLoadAliasSize = 0;
         let multiAccessBranchIndex = -1;
         let multiAccessBranchOp = 0xffffffff;
+        let multiAccessBranchCount = 0;
 
         for (let index = 0; index < bodyWords.length; index++) {
             const insn = bodyWords[index];
             const opc = bits(insn >>> 0, 0, 8);
             const range = directMemoryRange(insn);
 
-            if (opc === ops.brcond && multiAccessBranchIndex < 0) {
-                multiAccessBranchIndex = index;
-                multiAccessBranchOp = opc;
+            if (opc === ops.brcond) {
+                multiAccessBranchCount++;
+                if (multiAccessBranchIndex < 0) {
+                    multiAccessBranchIndex = index;
+                    multiAccessBranchOp = opc;
+                }
             }
             if (range === null) {
                 continue;
@@ -4423,14 +4468,29 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
             throw new Error("unsupported live generated-output multi-access shape");
         }
         if (allOrNothingSoftmmu && multiAccessBranchIndex >= 0) {
-            recordModuleFailureDetail(
-                moduleFailureDetailMultiAccessBranch,
-                {
-                    index: multiAccessBranchIndex,
-                    op: multiAccessBranchOp,
-                    count: softmmuAccessCount,
-                });
-            throw new Error("unsupported live generated-output multi-access shape");
+            // Narrow, source-proven relaxation: exactly one brcond, zero
+            // softmmu accesses before it, every softmmu access a load
+            // (never a store), and no direct-store op anywhere in the
+            // body. Anything else - multiple branches, any access before
+            // the branch, or any store/direct-store - keeps rejecting
+            // unconditionally; those shapes are not proven safe here.
+            narrowBranchBeforeLoadOnlyRelaxation =
+                multiAccessBranchCount === 1 &&
+                firstSoftmmuAccessIndex >= 0 &&
+                multiAccessBranchIndex < firstSoftmmuAccessIndex &&
+                allSoftmmuAccessesAreLoads &&
+                directStoreRanges.length === 0;
+
+            if (!narrowBranchBeforeLoadOnlyRelaxation) {
+                recordModuleFailureDetail(
+                    moduleFailureDetailMultiAccessBranch,
+                    {
+                        index: multiAccessBranchIndex,
+                        op: multiAccessBranchOp,
+                        count: softmmuAccessCount,
+                    });
+                throw new Error("unsupported live generated-output multi-access shape");
+            }
         }
         if (allOrNothingSoftmmu && directMemoryUnsupported) {
             recordModuleFailureDetail(
@@ -8449,6 +8509,7 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
     int32_t first_branch_index = -1;
     int32_t first_access_index = -1;
     int32_t last_access_index = -1;
+    uint32_t branch_count = 0;
 
     *has_memop = false;
     *mmu_idx_out = 0;
@@ -8647,6 +8708,7 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
         }
         case INDEX_op_brcond:
             control_flow_unsupported = true;
+            branch_count++;
             if (first_branch_index < 0) {
                 first_branch_index = (int32_t)i;
             }
@@ -8681,11 +8743,33 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
         return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_DIRECT_MEMORY_UNSUPPORTED;
     }
     if (memop_count > 1 && control_flow_unsupported) {
-        tcg_wasm64_live_generated_exec_count_multi_access_reject(
-            memop_count, load_count, store_count, access_order,
-            access_memops, store_before_later_guard,
-            first_branch_index, first_access_index, last_access_index);
-        return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_CONTROL_FLOW_UNSUPPORTED;
+        /*
+         * Narrow, source-proven relaxation (R4d-g branch-position
+         * measurement: 47/47 samples had the branch strictly before every
+         * softmmu access, dominated by pure two-load bodies). Admit only
+         * the exact proven shape: exactly one brcond, zero softmmu
+         * accesses before it, every softmmu access a load (store_count ==
+         * 0), and no direct-store op anywhere in the body
+         * (direct_store_count == 0). Anything else - multiple branches,
+         * any access before the branch, or any store/direct-store - keeps
+         * rejecting unconditionally; those shapes are not proven safe
+         * here. Must match the mirrored eligibility check in the JS
+         * compileRange() inside tcg_wasm64_live_generated_exec_js.
+         */
+        bool branch_before_load_only_relaxation =
+            branch_count == 1 &&
+            first_access_index >= 0 &&
+            first_branch_index < first_access_index &&
+            store_count == 0 &&
+            direct_store_count == 0;
+
+        if (!branch_before_load_only_relaxation) {
+            tcg_wasm64_live_generated_exec_count_multi_access_reject(
+                memop_count, load_count, store_count, access_order,
+                access_memops, store_before_later_guard,
+                first_branch_index, first_access_index, last_access_index);
+            return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_CONTROL_FLOW_UNSUPPORTED;
+        }
     }
     if (memop_count > 1 && load_after_store) {
         tcg_wasm64_live_generated_exec_count_multi_access_reject(
