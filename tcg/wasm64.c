@@ -229,6 +229,7 @@ typedef enum TCGWasm64LiveGeneratedExecRejectReason {
 #define TCG_WASM64_LIVE_DIRECT_STORE_MAX 40
 #define TCG_WASM64_LIVE_MULTI_ACCESS_REJECT_SLOTS 8
 #define TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_SLOTS 8
+#define TCG_WASM64_LIVE_CONTROL_FLOW_REJECT_SLOTS 8
 
 typedef struct TCGWasm64LiveMemOpRejectStat {
     MemOp memop;
@@ -306,6 +307,21 @@ typedef struct TCGWasm64LiveMultiAccessRejectStat {
     bool store_before_later_guard;
     uint64_t count;
 } TCGWasm64LiveMultiAccessRejectStat;
+
+/*
+ * A brcond is rejected for generated-exec lowering when its target is
+ * misaligned, or when the target does not strictly follow the branch
+ * (target_index <= index): a self-branch or backward branch, i.e. a loop
+ * within the selected TB body. backward_distance is index - target_index
+ * (0 for a self-branch, meaningless when misaligned is set) so a proof can
+ * tell "tight spin loop" from "loop spanning many TCI ops" without a full
+ * per-instance dump.
+ */
+typedef struct TCGWasm64LiveControlFlowRejectStat {
+    bool misaligned;
+    int32_t backward_distance;
+    uint64_t count;
+} TCGWasm64LiveControlFlowRejectStat;
 
 typedef enum TCGWasm64LiveDirectMemoryRejectRoute {
     TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_IMMEDIATE_UNSUPPORTED,
@@ -619,6 +635,9 @@ static __thread TCGWasm64ModuleFailure
 static __thread TCGWasm64LiveMultiAccessRejectStat
     live_generated_exec_reject_multi_accesses[
         TCG_WASM64_LIVE_MULTI_ACCESS_REJECT_SLOTS];
+static __thread TCGWasm64LiveControlFlowRejectStat
+    live_generated_exec_reject_control_flow[
+        TCG_WASM64_LIVE_CONTROL_FLOW_REJECT_SLOTS];
 static __thread TCGWasm64LiveDirectMemoryRejectStat
     live_generated_exec_reject_direct_memory[
         TCG_WASM64_LIVE_DIRECT_MEMORY_REJECT_SLOTS];
@@ -7962,6 +7981,54 @@ static void tcg_wasm64_live_generated_exec_count_multi_access_reject(
         TCG_WASM64_LIVE_MULTI_ACCESS_REJECT_SLOTS - 1].count++;
 }
 
+static void tcg_wasm64_live_generated_exec_count_control_flow_reject(
+    bool misaligned, int32_t backward_distance)
+{
+    for (size_t i = 0; i < TCG_WASM64_LIVE_CONTROL_FLOW_REJECT_SLOTS; i++) {
+        TCGWasm64LiveControlFlowRejectStat *stat =
+            &live_generated_exec_reject_control_flow[i];
+
+        if (stat->count != 0 && stat->misaligned == misaligned &&
+            stat->backward_distance == backward_distance) {
+            stat->count++;
+            return;
+        }
+    }
+    for (size_t i = 0; i < TCG_WASM64_LIVE_CONTROL_FLOW_REJECT_SLOTS; i++) {
+        TCGWasm64LiveControlFlowRejectStat *stat =
+            &live_generated_exec_reject_control_flow[i];
+
+        if (stat->count == 0) {
+            stat->misaligned = misaligned;
+            stat->backward_distance = backward_distance;
+            stat->count = 1;
+            return;
+        }
+    }
+    live_generated_exec_reject_control_flow[
+        TCG_WASM64_LIVE_CONTROL_FLOW_REJECT_SLOTS - 1].count++;
+}
+
+/*
+ * Recomputes the same misaligned/backward-branch classification as
+ * tcg_wasm64_live_generated_exec_control_flow_supported() purely to record a
+ * diagnostic sample at the point an unsupported brcond is found; it does not
+ * change which brconds are accepted.
+ */
+static void tcg_wasm64_live_generated_exec_count_control_flow_reject_for_word(
+    uint32_t index, uint32_t word)
+{
+    int32_t target_offset = (int32_t)((index + 1) * 4) +
+                             sextract32(word, 12, 20);
+
+    if (target_offset % 4 != 0) {
+        tcg_wasm64_live_generated_exec_count_control_flow_reject(true, 0);
+        return;
+    }
+    tcg_wasm64_live_generated_exec_count_control_flow_reject(
+        false, (int32_t)index - (target_offset / 4));
+}
+
 static bool tcg_wasm64_live_generated_exec_direct_memory_stat_matches(
     const TCGWasm64LiveDirectMemoryRejectStat *stat,
     TCGWasm64LiveDirectMemoryRejectRoute route, TCGOpcode op,
@@ -8515,6 +8582,8 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
             control_flow_unsupported = true;
             if (!tcg_wasm64_live_generated_exec_control_flow_supported(
                     i, word)) {
+                tcg_wasm64_live_generated_exec_count_control_flow_reject_for_word(
+                    i, word);
                 return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_CONTROL_FLOW_UNSUPPORTED;
             }
             break;
@@ -8633,6 +8702,29 @@ static void tcg_wasm64_print_live_generated_exec_reject_multi_accesses(void)
                     (unsigned)stat->memops[i]);
         }
         fprintf(stderr, "],\"count\":%" PRIu64 "}", stat->count);
+        first = false;
+    }
+}
+
+static void tcg_wasm64_print_live_generated_exec_reject_control_flow(void)
+{
+    bool first = true;
+
+    for (size_t slot = 0; slot < TCG_WASM64_LIVE_CONTROL_FLOW_REJECT_SLOTS;
+         slot++) {
+        const TCGWasm64LiveControlFlowRejectStat *stat =
+            &live_generated_exec_reject_control_flow[slot];
+
+        if (stat->count == 0) {
+            continue;
+        }
+        fprintf(stderr,
+                "%s{\"reason\":\"selected-body-control-flow-unsupported\","
+                "\"misaligned\":%s,\"backward_distance\":%d,"
+                "\"count\":%" PRIu64 "}",
+                first ? "" : ",",
+                stat->misaligned ? "true" : "false",
+                stat->backward_distance, stat->count);
         first = false;
     }
 }
@@ -9221,6 +9313,9 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
     fprintf(stderr, "],"
             "\"reject_direct_memory\":[");
     tcg_wasm64_print_live_generated_exec_reject_direct_memory();
+    fprintf(stderr, "],"
+            "\"reject_control_flow\":[");
+    tcg_wasm64_print_live_generated_exec_reject_control_flow();
     fprintf(stderr, "]}\n");
 }
 
