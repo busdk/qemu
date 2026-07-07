@@ -497,6 +497,28 @@ readiness.
   which would show whether "branch strictly after all accesses" is common
   enough to be a narrow, safe relaxation candidate - not yet done, no
   browser proof needed to add it, only one would be needed to read it.
+  Diagnostic follow-up accepted 2026-07-07: commit `80c3233a16` adds the
+  bounded `reject_multi_accesses` branch-position fields
+  `branch_position`, `branch_index`, and `last_access_index` without changing
+  generated-exec acceptance. Canonical checks passed:
+  `git diff --check HEAD~1..HEAD`,
+  `node scripts/ci/wasm64-translate-metadata-test.mjs`,
+  `node scripts/ci/wasm-generated-output-equivalence-test.mjs`, and
+  `python3 scripts/ci/wasm-build-artifacts-local-test.py`. One controlled
+  browser sample with this build wrote
+  `.bus/services/workers/runtime/qemu-r4z-claude-consult-20260707a/scratch/r4z-repro/branch-position-sample.json`
+  and reproduced the same plateau (`elapsedMs=65273`, `markerSeen=false`,
+  `attempts=122`, `successes=58`, `rejects=64`, `skips=28`, coverage
+  `163/964`, no page/resource errors). The new distribution is decisive for
+  this reachable population: all `47/47` `reject_multi_accesses` entries have
+  `branch_position="before"`; there are zero `after` and zero `interleaved`
+  samples. The dominant bucket remains `LL` two-load bodies (`28/47`), with
+  representative `branch_index=3` and `last_access_index=14`. This rules out
+  a narrow "branch strictly after all accesses" relaxation as a useful next
+  patch for the current early-boot plateau. The next useful design question is
+  whether the compiler can split a body at a branch-before-accesses point into
+  a safe generated prefix plus fallback/continuation, or whether another
+  blocker class is cheaper to move first.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
