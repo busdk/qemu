@@ -225,7 +225,7 @@ run that reaches a weaker marker than normal multi-user readiness.
   TCI, record exact commands, browser version, artifact hashes, result JSON,
   and compare wall time to native RISC-V QEMU and the previous x86_64 browser
   evidence.
-  - [x] R1a - Make the existing QEMU WASM artifact builder and browser smoke
+- [x] R1a - Make the existing QEMU WASM artifact builder and browser smoke
     harness target-selectable before measuring `riscv64-softmmu`. DoD:
     `scripts/ci/wasm-build-artifacts-local.py` can request
     `--target riscv64`, the browser smoke server/page/runner can serve and
@@ -243,7 +243,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `qemu-system-riscv64.wasm`, validated manifest target `riscv64`, and
     wrote SHA256SUMS for those artifact names. No full artifact build or
     browser boot was run in this slice.
-  - [x] R1b - Establish a generic RISC-V Linux native control and record the
+- [x] R1b - Establish a generic RISC-V Linux native control and record the
     current browser blockers before using the guest for accelerator evidence.
     DoD: a real RISC-V Linux disk guest reaches login under native
     `qemu-system-riscv64`, the browser harness can serve the needed RISC-V
@@ -279,7 +279,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `Assertion failed: p_rcu_reader->depth != 0`. This completes the native
     control and blocker capture only; R1 remains open until a generic RISC-V
     browser smoke reaches its marker with default TCI.
-  - [x] R1c - Correct the RISC-V browser smoke shape and capture the current
+- [x] R1c - Correct the RISC-V browser smoke shape and capture the current
     default-TCI browser blocker without the ad hoc `-cpu rv64` option. DoD:
     `scripts/ci/wasm-prepare-tuxboot-smoke-guest.py --target riscv64`
     produces a browser manifest for `machine=virt`, blank `cpu`, raw ext4
@@ -325,7 +325,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     path, not the earlier ad hoc-shape RCU assertion. R1 remained open from
     this slice until the R1d cleanup artifact reached `Welcome to TuxTest` in
     browser default TCI.
-  - [x] R1d - Accept the generic RISC-V default-TCI browser baseline after
+- [x] R1d - Accept the generic RISC-V default-TCI browser baseline after
     removing stale TCI subset/direct-boundary experiments from the live tree.
     DoD: rebuild a current `riscv64-softmmu` default-TCI artifact from this
     branch, rerun the official blank-CPU TuxBoot browser manifest in Chrome,
@@ -389,7 +389,7 @@ run that reaches a weaker marker than normal multi-user readiness.
   tests cover supported integer/branch/load/store/CSR exits, counters report
   generated versus fallback execution, and x86_64 TCI browser smoke is not
   regressed.
-  - [x] R3a - Add the fail-closed generated-exit taxonomy to the wasm64
+- [x] R3a - Add the fail-closed generated-exit taxonomy to the wasm64
     backend counter contract before enabling any generated RISC-V execution.
     DoD: `TCGWasm64Counters` exposes the R2 exit classes, summaries report
     per-exit counts, parser tests cover the JSON shape, and no execution flow
@@ -409,7 +409,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `3caa09ef368be264c1989c0e72fb7a14b67bb6c2bb2ab234b5c5e903e8686b07`,
     manifest
     `5b9b0f594e0f85ed6c604a221124c0e0b10114c7bae2d7f8cf546a757868b288`.
-  - [x] R3b - Make local RISC-V WASM artifacts selectable between the default
+- [x] R3b - Make local RISC-V WASM artifacts selectable between the default
     TCI backend and the experimental wasm64 TCG backend without layering both
     backend choices together. DoD: default artifact builds still use
     `--enable-tcg-interpreter`, backend-mode builds use
@@ -435,7 +435,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `c455ba71fbac1c911b77183810b354959b180455a4e8d2d8ef8d9bf43c6b1cad`.
     The slice does not enable generated guest execution yet; it creates the
     clean selectable artifact path required before running backend smokes.
-  - [x] R3c - Add an explicit backend-generated execution gate for browser
+- [x] R3c - Add an explicit backend-generated execution gate for browser
     smoke runs. DoD: backend-built artifacts can request generated wasm64 TCG
     attempts with a backend-named option instead of relying on the older
     TCI-subset flag shape, default TCI behavior remains unchanged, the browser
@@ -466,7 +466,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     This slice does not prove speed or nonzero generated execution in a guest;
     the next R3 slice must run a backend browser smoke with this gate and
     inspect generated/fallback counters.
-  - [x] R3d - Keep the generated path off unsafe direct TCI host-memory ops
+- [x] R3d - Keep the generated path off unsafe direct TCI host-memory ops
     after the R3c RISC-V browser crash. DoD: direct host-memory `ld`/`st`
     opcodes are no longer accepted by
     `tcg_wasm64_translate_op_generated_supported()`, helper-backed QEMU
@@ -501,7 +501,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     blocker clarification, not a speed win. The next accepted R3 work must
     either implement a validated aligned generated-memory model or resolve the
     shared RCU assertion before another speed-gate run.
-  - [x] R3e - Accept the first selectable backend runtime-smoke browser proof
+- [x] R3e - Accept the first selectable backend runtime-smoke browser proof
     and isolate the remaining block-device failure to the `virtio-mmio` rootfs
     path. DoD: a current `riscv64-softmmu` backend artifact runs the
     QEMU-owned runtime smoke from the real Emscripten/QEMU path, records the
@@ -563,7 +563,7 @@ run that reaches a weaker marker than normal multi-user readiness.
   default RISC-V TCI, and microbenchmarks show at least 3x over RISC-V TCI for
   hot ALU/branch and TLB-hit RAM paths with at least 1,000,000
   guest-instruction-equivalent operations per `wasmjit_run()` call.
-  - [x] R4a - Add a deterministic preflight gate for the generated run-loop
+- [x] R4a - Add a deterministic preflight gate for the generated run-loop
     microbenchmarks before spending another browser run. Accepted 2026-07-03:
     `scripts/ci/wasmjit-runloop-benchmark-gate.mjs` runs both current
     accelerator micro-workloads, requires a configurable minimum
@@ -591,7 +591,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     This is a deterministic preflight over the local TCI-like model plus a
     compile-checked artifact, not the R4 browser speed gate and not proof that
     Linux boot is accelerated.
-  - [x] R4b - Add a same-artifact Emscripten runtime microbench that compares
+- [x] R4b - Add a same-artifact Emscripten runtime microbench that compares
     `wasmjit_run()` against the C/TCI-like hotset interpreter path inside the
     QEMU/WASM binary and records both ALU/branch and TLB-hit RAM ratios in the
     browser result JSON. DoD: both paths execute the same hotset semantics,
@@ -654,7 +654,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     fallback `4000000`, generated body `2130000` ns, C/TCI-like dispatch
     `20630000` ns, speedup `9685446` ppm, inline TLB loads/stores
     `1000000`/`1000000`, and matching exit/RAM values.
-  - [ ] R4c - Run the same-commit generic Chromium RISC-V speed gate only
+- [ ] R4c - Run the same-commit generic Chromium RISC-V speed gate only
     after R4b passes. DoD: build one default-TCI artifact and one accelerator
     artifact from the same commit, run the same generic guest/marker, record
     hashes/browser/result JSON/timings, and show the accelerator marker time
@@ -700,7 +700,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     improvement, below the required `25%`; the accelerator would have needed
     `32497` ms or faster against this default run. This is rejected R4c
     evidence, not accepted progress toward R5.
-  - [ ] R4d - Move from the opt-in runtime smoke to generated execution that
+- [ ] R4d - Move from the opt-in runtime smoke to generated execution that
     covers real guest translation blocks in the generic RISC-V boot path. DoD:
     before another R4c attempt, browser result JSON must show nonzero generated
     execution coverage from actual guest TBs before `Welcome to TuxTest`, top
@@ -743,7 +743,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     R4d attribution evidence only: no R4c speed-pass claim or Bus Engine OS
     proof is made, and R4d remains open for nonzero real generated execution
     coverage.
-  - [x] R4d-b - Add the opt-in live RV64 generated-coverage probe before the
+- [x] R4d-b - Add the opt-in live RV64 generated-coverage probe before the
     next browser proof. DoD: a deterministic implementation slice exposes a
     browser-runner flag for live generated TB coverage, automatically enables
     it when the R4d coverage gate is required, keeps strict TCI as the
@@ -775,7 +775,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     R4d remains open until the supervisor-run Chrome proof reports nonzero
     real RV64 generated coverage and the top remaining fallback PCs/TBs or op
     shapes before `Welcome to TuxTest`.
-  - [x] R4d-c - Expand deterministic RV64 boot-path generated-output
+- [x] R4d-c - Expand deterministic RV64 boot-path generated-output
     equivalence fixtures before the next live coverage browser proof. DoD:
     `scripts/ci/wasm-generated-output-equivalence-test.mjs` covers the
     side-effect-free RV64 boot-path op families accepted by the live
@@ -798,7 +798,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     artifact build, speed claim, BusDK work, or Bus Engine OS proof was run
     or enabled; R4d remains open for the supervisor-run Chrome proof of
     nonzero real RV64 generated coverage and remaining fallback attribution.
-  - [x] R4d-d - Lower bounded env-relative RV64 direct-memory operations in
+- [x] R4d-d - Lower bounded env-relative RV64 direct-memory operations in
     the deterministic generated-output emitter before the next live coverage
     proof. DoD: translation metadata records direct `ld32u` and companion
     direct-memory op words so the operand-level emitter can inspect them,
@@ -825,7 +825,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     run, artifact build, speed claim, BusDK work, or Bus Engine OS proof was
     run or enabled; R4d remains open for the supervisor-run Chrome proof of
     nonzero real RV64 generated coverage and remaining fallback attribution.
-  - [x] R4d-e - Add deterministic hot-block opcode histogram coverage to the
+- [x] R4d-e - Add deterministic hot-block opcode histogram coverage to the
     R4d coverage planning gate. DoD: `scripts/ci/wasm-tcg-coverage-gate.mjs`
     can evaluate either the latest hot-block summary or a max-per-op histogram
     across all retained hot-block summaries, preserving strict latest-summary
@@ -846,7 +846,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     build, speed claim, BusDK work, or Bus Engine OS proof was run or enabled;
     R4d remains open for the supervisor-run Chrome proof of nonzero real RV64
     generated coverage and remaining fallback attribution.
-  - [x] R4d-f - Add helper-exit-at-call generated-output prefix semantics for
+- [x] R4d-f - Add helper-exit-at-call generated-output prefix semantics for
     RV64 hot TBs. DoD: `INDEX_op_call` can terminate generated-output prefixes
     by committing generated register state and returning
     `TCG_WASM64_RUN_EXIT_HELPER`, unsupported helper-exit call classes fail
@@ -869,7 +869,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     work, or Bus Engine OS proof was run or enabled; R4d remains open for the
     supervisor-run Chrome proof of nonzero real RV64 generated coverage and
     remaining fallback attribution.
-  - [ ] R4d-g - Diagnose and repair the current RV64 generated-exec
+- [ ] R4d-g - Diagnose and repair the current RV64 generated-exec
     load/store runtime blocker before another speed-gate run. DoD: identify
     the exact generated path that raises the unaligned-access runtime error,
     add durable diagnostics or focused deterministic coverage for that path,
@@ -904,7 +904,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     WASM SHA256
     `c5c29bd49aa160ef220e6f70db3ac459ee23b2751852f149cf37bc4740627c56`.
     Remote ccache was cold (`0/1319` hits).
-  - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
+- [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
     but rejected only because they did not close the whole five-minute gap;
@@ -987,7 +987,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     per-TB emitter tests, then proves nonzero generated guest execution plus a
     same-commit browser speed improvement on the active target before any
     integration decision.
-  - [x] R4e - Preserve the target-neutral accelerator pieces so the RISC-V
+- [x] R4e - Preserve the target-neutral accelerator pieces so the RISC-V
     runtime work can be reused by an x86_64 accelerator lane without copying
     or re-inventing the proof contract. DoD: document and test that the
     reusable surface is target-neutral: `TCGWasm64RunContext`, synthetic exit
@@ -1010,7 +1010,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     covers browser result JSON parsing for the shared runloop summary shape
     and keeps the runner validation diagnostics testable in-process under
     piped Node execution.
-  - [ ] R4f - Add an x86_64 reuse and gap map before implementing x86_64
+- [ ] R4f - Add an x86_64 reuse and gap map before implementing x86_64
     generated execution. DoD: using current `x86_64-softmmu` browser smoke
     evidence or a fresh bounded smoke, record which parts are reusable from
     R4b/R4e and which are x86-specific. The reusable list must include the
@@ -1057,7 +1057,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     evidence does not record a real hot TB PC/identity plus
     `TranslationBlock.icount` for the `ld32u`-first family; the pre-R4i
     fixture explicitly reports `real_live_state_capture=false`.
-  - [ ] R4g - Record the current x86_64 baseline and shared accelerator
+- [ ] R4g - Record the current x86_64 baseline and shared accelerator
     contract evidence without accepting it as real x86 acceleration. DoD:
     build current default-TCI and backend-gated `x86_64-softmmu` Emscripten
     artifacts, run the deterministic runloop/parser/contract tests, run the
@@ -1093,7 +1093,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     helper/`qemu_ld`/`qemu_st` calls for synthetic micro-workloads. Live x86
     TB summaries remained empty (`wasm64Tcg.summaryCount=0`), so this is
     baseline/contract evidence only, not a performance pass.
-  - [x] R4h - Fix x86_64 live-TB instrumentation correctness before relying
+- [x] R4h - Fix x86_64 live-TB instrumentation correctness before relying
     on generated-coverage counters. DoD: reproduce and fix, or prove absent
     on the current x86_64 lane, both correctness signals from the supervisor
     review: the RCU unlock abort (`p_rcu_reader->depth != 0`) during an
@@ -1150,7 +1150,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     instrumentation stability only. It is not acceleration evidence:
     `generated_compiled=0`, `generated_executed=0`, and R4i remains the next
     x86 implementation gate.
-  - [x] R4i - Prove one real translated x86 Linux TB through
+- [x] R4i - Prove one real translated x86 Linux TB through
     `wasmjit_run()` before any more structural accelerator widening. DoD:
     choose one highest-frequency attachable live x86_64 TB shape from a real
     generic Linux or Bus Engine OS boot; use the measured `ld32u`-first family
@@ -1204,7 +1204,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `generated_attempts=0`, `generated_compiled=0`, `generated_executed=0`,
     `generated_coverage_numerator=0`, `generated_coverage_denominator=0`,
     `translated_tbs=40000`, and `exec_generated_output_available_tbs=0`.
-  - [x] R4i-a - Add a pre-R4i deterministic one-TB fixture scaffold without
+- [x] R4i-a - Add a pre-R4i deterministic one-TB fixture scaffold without
     claiming real live-state R4i completion. DoD: the measured non-`call`
     `ld32u`-first x86 shape is represented as an opt-in generated
     `wasmjit_run()` fixture, compared against a reference interpreter from the
@@ -1247,7 +1247,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `R4i` remains open until a real live TB instance has TB identity,
     `TranslationBlock.icount`, same-input CPU/TB state, and nonzero generated
     guest-instruction retirement.
-  - [x] R4j - Decide whether the bespoke descriptor ABI remains viable or the
+- [x] R4j - Decide whether the bespoke descriptor ABI remains viable or the
     x86 lane switches to a reference-shaped per-TB generated function body.
     DoD: after R4i, record whether the descriptor ABI expressed the dominant
     real TB shape without per-shape special cases. Continue the descriptor ABI
@@ -1281,7 +1281,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     shapes, and keep this branch's `TCGWasm64RunContext`/`wasmjit_run()`
     run-exit loop, metrics, strict fallback mode, and future hotset/chaining
     table.
-  - [ ] R4k - Expand from the one-TB proof to x86_64 generated bodies with
+- [ ] R4k - Expand from the one-TB proof to x86_64 generated bodies with
     internal chaining and inline SoftMMU/TLB-hit RAM load/store fast paths.
     DoD: generated x86_64 bodies retire counted guest instructions inside
     Wasm, avoid returning to the QEMU main loop per TB on deterministic hot
@@ -1780,7 +1780,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     Engine OS proof was run or enabled; R4k deterministic slices are complete
     and R4k remains open only for later integration/performance proof work
     before R4l may run a browser speed gate.
-  - [ ] R4l - Run the x86_64 same-commit generic Chromium speed gate only
+- [ ] R4l - Run the x86_64 same-commit generic Chromium speed gate only
     after R4h-R4k have deterministic evidence. DoD: build one default-TCI
     `x86_64-softmmu` artifact and one accelerator artifact from the same
     commit, run the same generic x86_64 browser guest/marker, record hashes,
@@ -1972,7 +1972,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     -1.0748655712788864` (`-107.49%`), and the accelerator therefore did not
     beat default TCI by at least `25%`. R4l remains failed/rejected, and no
     x86_64 Bus Engine OS proof was run.
-  - [x] R4m - R4k follow-up: connect metadata-backed live x86 TBs to
+- [x] R4m - R4k follow-up: connect metadata-backed live x86 TBs to
     generated execution before TCI fallback. DoD: document the failed R4l
     diagnosis that the accelerator artifact still reached normal guest
     execution through `tcg_tci_qemu_tb_exec()` instead of live generated
@@ -2225,7 +2225,7 @@ run that reaches a weaker marker than normal multi-user readiness.
   x86 Chromium preflight may run only after those deterministic tests pass,
   and R4l remains blocked until that preflight reports nonzero generated
   guest-instruction retirement from live x86 TBs.
-  - [x] R4s0 - Refresh the x86 lane to the latest shared QEMU `develop`
+- [x] R4s0 - Refresh the x86 lane to the latest shared QEMU `develop`
     before continuing R4s. Accepted 2026-07-04: `git fetch origin develop`
     confirmed QEMU `HEAD`, `origin/develop`, and `FETCH_HEAD` all at
     `e26d9f2aa2cb9892b4da6da1185304b0c8eb2013`; the x86 metrics gate then
@@ -2239,7 +2239,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     submodule pointer was committed and pushed in
     `6fb6abb34a6c398aa501632a309b38c071ad9f55`. BusDK
     `./scripts/sync-submodules.sh` ran afterward and left BusDK clean.
-  - [x] R4s1 - Rebase the active R4s implementation worktree onto latest
+- [x] R4s1 - Rebase the active R4s implementation worktree onto latest
     QEMU before measuring it. Accepted 2026-07-04: isolated branch
     `qemu/r4s-x86-softmmu-runloop` in
     `tmp/worktrees/qemu-r4s-x86-softmmu-runloop` rebased with autostash onto
@@ -2251,7 +2251,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `node scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`,
     `node --check scripts/ci/wasm-browser-smoke-runner.mjs`, and
     `git diff --check`.
-  - [x] R4s2 - Do not accept the first R4s implementation attempt as-is.
+- [x] R4s2 - Do not accept the first R4s implementation attempt as-is.
     Rejected 2026-07-04: the rebased attempt compiled but the bounded x86
     Chromium preflight still retired zero generated guest instructions. Build
     command: `python3 scripts/ci/wasm-build-artifacts-local.py --out
@@ -2281,7 +2281,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     is still rejected. Therefore the attempted `tci_qemu_ld_rrr` /
     `tci_qemu_st_rrr` live SoftMMU slice is not accepted, must not be
     committed to `develop`, and R4l remains blocked.
-  - [x] R4s3 - Replace the generic `generated-exec-rejected` bucket with
+- [x] R4s3 - Replace the generic `generated-exec-rejected` bucket with
     precise live x86 rejection attribution before another browser run. DoD:
     deterministic tests prove that generated execution failures are classified
     as the actual exit or predicate that failed, including JS status,
@@ -2313,7 +2313,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     run in this environment because `ninja` is not installed. No browser run,
     artifact build, speed claim, R4l unlock, or Bus Engine OS proof was run
     in this slice.
-  - [x] R4s4 - Handle or intentionally bypass `call`-fronted selected x86
+- [x] R4s4 - Handle or intentionally bypass `call`-fronted selected x86
     body shapes before rerunning the live preflight. DoD: the R4r-selected
     first-window shapes that currently report `call=44` either get a
     fail-closed helper-exit continuation that preserves temporary register
@@ -2340,7 +2340,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`, and
     `git diff --check` passed. No browser run, artifact build, speed claim,
     R4l unlock, or Bus Engine OS proof was run in this slice.
-  - [ ] R4s5 - Rework the live x86 SoftMMU slice with fail-closed safety
+- [ ] R4s5 - Rework the live x86 SoftMMU slice with fail-closed safety
     before another artifact build. DoD: the implementation zero-initializes
     the TLB mirror before refresh, rejects any `MemOpIdx` whose `MemOp`
     carries unmodeled high flags such as alignment or atomicity, assigns
@@ -2350,7 +2350,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     precisely. This item must land before any new R4s browser preflight.
     This item is intentionally split into reviewable safety slices after a
     broad worker attempt did not produce a checkpoint:
-    - [x] R4s5a - Separate the generated-status namespace from
+- [x] R4s5a - Separate the generated-status namespace from
       `TCGWasm64RunExitReason`. DoD: live generated status constants use
       values that cannot alias run-exit reasons; a single explicit mapper
       converts generated statuses to run-exit reasons where needed;
@@ -2372,7 +2372,7 @@ run that reaches a weaker marker than normal multi-user readiness.
       --check` passed. No R4s5b/R4s5c MemOp/TLB mirror work, browser run,
       artifact build, speed claim, or Bus Engine OS proof was done in this
       slice.
-    - [x] R4s5b - Add C-side selected-body memory-operation validation before
+- [x] R4s5b - Add C-side selected-body memory-operation validation before
       live x86 SoftMMU execution. DoD: the live path can identify the
       `MemOpIdx`/`MemOp`/`mmu_idx` for the selected generated-output memory
       helpers it intends to run, rejects any unproven `oi`, unsupported size,
@@ -2399,7 +2399,7 @@ run that reaches a weaker marker than normal multi-user readiness.
       target, so native compile verification is unrun. No browser run,
       artifact build, speed claim, R4l unlock, or Bus Engine OS proof was run
       in this slice.
-    - [x] R4s5c - Wire a zero-initialized TLB mirror into live x86 generated
+- [x] R4s5c - Wire a zero-initialized TLB mirror into live x86 generated
       execution only after R4s5b proves the memory operation and `mmu_idx`.
       DoD: `tcg_wasm64_live_generated_exec_try()` zero-initializes local TLB
       mirror storage, refreshes it from the current CPU/env and proven
@@ -2420,7 +2420,7 @@ run that reaches a weaker marker than normal multi-user readiness.
       generated-output emitter/layout contract so qemu ld/st SoftMMU lowering
       is a backend capability, not a special path for the currently measured
       x86 body.
-      - [x] R4s5c1 - Define the generic generated-output SoftMMU lowering
+- [x] R4s5c1 - Define the generic generated-output SoftMMU lowering
         contract before live execution wiring. DoD: the deterministic emitter
         model names one reusable lowering entrypoint for
         `tci_qemu_ld_rrr`/`tci_qemu_st_rrr`, derives or validates every
@@ -2430,14 +2430,14 @@ run that reaches a weaker marker than normal multi-user readiness.
         constant that no longer matches the exported C/header contract. This
         item is not accepted by adding a measured-shape-only branch in
         `tcg_wasm64_live_generated_exec_js()`.
-      - [x] R4s5c2 - Wire the C-side TLB mirror into live execution through
+- [x] R4s5c2 - Wire the C-side TLB mirror into live execution through
         the generic lowering contract. DoD:
         `tcg_wasm64_live_generated_exec_try()` zero-initializes a local
         `TCGWasm64TLBMirror`, refreshes it only after R4s5b proves the
         memory operation and `mmu_idx`, assigns `context.tlb`, and preserves
         precise fail-closed reasons for missing, invalid, stale, MMIO,
         slow-flag, page-crossing, permission, and TLB-miss/fault cases.
-      - [x] R4s5c3 - Prove live qemu ld/st lowering without helper calls in
+- [x] R4s5c3 - Prove live qemu ld/st lowering without helper calls in
         deterministic tests. DoD: clean RAM-hit load and store fixtures report
         nonzero inline TLB-hit counters, zero helper/`qemu_ld`/`qemu_st`
         calls, and generated guest-instruction retirement through the generic
@@ -2486,7 +2486,7 @@ run that reaches a weaker marker than normal multi-user readiness.
       bodies enter the generic SoftMMU lowering with the TLB mirror refreshed
       and validated, while unsupported translated shapes remain distinct from
       supported shapes that the emitter cannot lower.
-    - [x] R4s5d - Wire the generic SoftMMU/TLB lowering into the live x86
+- [x] R4s5d - Wire the generic SoftMMU/TLB lowering into the live x86
       generated-exec JavaScript emitter. Accepted 2026-07-04:
       `tcg_wasm64_live_generated_exec_js()` now recognizes
       `tci_qemu_ld_rrr` and `tci_qemu_st_rrr`, lowers a supported single
@@ -2544,7 +2544,7 @@ run that reaches a weaker marker than normal multi-user readiness.
       This is a generic QEMU accelerator slice, not a Bus Engine OS or
       fixed-shape shortcut. R4s6 must not spend browser time until this
       deterministic live-emitter path passes.
-  - [ ] R4s6 - Run the bounded x86 Chromium preflight after the accepted
+- [ ] R4s6 - Run the bounded x86 Chromium preflight after the accepted
     R4s5d live-emitter repair before any R4l speed gate. DoD: build a fresh
     current
     `x86_64-softmmu` backend artifact from QEMU `develop` with
@@ -2621,7 +2621,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     remains blocked, and the next x86 implementation item must address the
     measured live-body MemOp rejection and metadata-output mismatch before
     another browser speed run.
-  - [x] R4s7 - Admit safe MemOp atomicity metadata for ordinary x86 live
+- [x] R4s7 - Admit safe MemOp atomicity metadata for ordinary x86 live
     qemu load/store bodies. DoD: using the R4s6 preflight histogram, add
     deterministic attribution for the exact `MemOp` values behind
     `selected-body-memop-unsupported-atomic`,
@@ -2716,7 +2716,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `0xa01` for unsupported size and `0xae0` for unsupported alignment.
     `wasm64Tcg` was enabled but `summaryCount=0`, so the metrics gate failed
     with `tcg_missing=2`. R4l remains blocked.
-  - [x] R4s8 - Support or precisely reject measured x86 multi-access
+- [x] R4s8 - Support or precisely reject measured x86 multi-access
     SoftMMU bodies without partial side effects. DoD: using the post-R4s7
     preflight histogram, add deterministic attribution for selected
     `tci_qemu_ld_rrr`/`tci_qemu_st_rrr` bodies rejected as
@@ -2763,7 +2763,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm64-translate-metadata-test.mjs`, and `node
     scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs` passed. No
     browser or Chromium run was performed.
-  - [x] R4s8a - Attribute live metadata/output TB-code mismatches before
+- [x] R4s8a - Attribute live metadata/output TB-code mismatches before
     widening execution policy. DoD: split `js-status-metadata-output-tb-code-
     mismatch` into deterministic categories before treating it as generic
     invalidation: TCI branch/label relocation such as `brcond`, TCI pool
@@ -2797,7 +2797,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs` passed. No
     generated execution policy was widened; no Chromium/browser run, speed
     claim, artifact build, or Bus Engine OS proof was performed.
-  - [x] R4s9 - Make measured x86 branch-label relocation safe for live
+- [x] R4s9 - Make measured x86 branch-label relocation safe for live
     generated execution, or keep it fail-closed with a narrower blocker. DoD:
     using the fresh 2026-07-04 x86_64 artifact from QEMU commit
     `c801a0e0f6` (`qemu-system-x86_64.js`
@@ -2845,7 +2845,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-generated-output-equivalence-test.mjs`, and `node
     scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. No browser
     speed gate or Bus Engine OS proof was run in this slice.
-  - [x] R4s10 - Attribute the next post-R4s9 x86 preflight blockers before
+- [x] R4s10 - Attribute the next post-R4s9 x86 preflight blockers before
     widening execution again. DoD: using QEMU commit `b6b2d886c7` artifacts
     (`qemu-system-x86_64.js`
     `0c98c41b6ed8f7db55ce0896467ad78a0dcef1a65c5af9f3b660a89d23cde22f`,
@@ -2916,7 +2916,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `selected-body-softmmu-multi-access-unsupported=61`, and the same
     module-emission/pool-relocation/memop blockers. It is not accepted
     performance work.
-  - [x] R4s11 - Make the R4s10 x86 live body-build failure reproducible and
+- [x] R4s11 - Make the R4s10 x86 live body-build failure reproducible and
     either fix it generically or classify the exact unsupported mechanism.
     DoD: add a deterministic fixture for the live R4s10 shape
     `ld32u,tci_movi,tci_setcond32,brcond,tci_movi,st8,ld,tci_movi,add,st,goto_tb,exit_tb,exit_tb`
@@ -2955,7 +2955,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     and live displacement targets are valid and the loaded
     `tcg_target_ulong` bytes are identical. Pool relocation stays fail-closed
     until that value-equality invariant is captured.
-  - [x] R4s12 - Explain or fix the R4s11 module validation failure. DoD:
+- [x] R4s12 - Explain or fix the R4s11 module validation failure. DoD:
     extend deterministic and live attribution so the 13-op R4s10 shape reports
     the exact validation/compile error from the WebAssembly engine, or fix the
     emitter generically if the invalid construct is clear and the fix
@@ -2991,7 +2991,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `node scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. No browser
     preflight was run for this item; R4s13 owns that evidence now that
     deterministic generated retirement is nonzero.
-  - [ ] R4s13 - Run the bounded x86 Chromium generated-retirement preflight on
+- [ ] R4s13 - Run the bounded x86 Chromium generated-retirement preflight on
     a fresh same-commit artifact after R4s12. DoD: build current
     `x86_64-softmmu` Emscripten/WASM artifacts from QEMU `develop`, record
     artifact SHA-256 hashes, browser version, exact command, result JSON path,
@@ -3076,7 +3076,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     such as order `SSSS` and `SL`. This does not accept R4s13, does not
     unlock R4l, makes no speed claim, and does not permit a Bus Engine OS
     browser proof.
-  - [x] R4s14 - Reconcile the R4s12 deterministic memory64-generated fixture
+- [x] R4s14 - Reconcile the R4s12 deterministic memory64-generated fixture
     with the live R4s13 `body-build` module-emission failure before any new
     browser preflight. DoD: add deterministic coverage that exercises the
     same live generated-output emission path and memory64/shared import
@@ -3117,7 +3117,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     scripts/ci/wasm-browser-smoke-x86-metrics-gate-test.mjs`. No Chromium
     preflight, R4l speed gate, Bus Engine OS proof, or Bus-specific shortcut
     was run.
-  - [ ] R4s15 - Run the bounded x86 Chromium generated-retirement preflight
+- [ ] R4s15 - Run the bounded x86 Chromium generated-retirement preflight
     after R4s14. DoD: build fresh current `x86_64-softmmu`
     Emscripten/WASM artifacts from QEMU `develop`, record artifact SHA-256
     hashes, browser version, exact build and preflight commands, result JSON
@@ -3231,7 +3231,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     clause, R4l remains blocked, no speed claim is made, and no Bus Engine OS
     browser proof was run.
 
-  - [x] R4s16 - Repair the x86 live-generated-exec chain-target stop before
+- [x] R4s16 - Repair the x86 live-generated-exec chain-target stop before
     another R4s browser preflight. DoD: deterministic coverage proves that
     when a selected generated body retires guest instructions and then reaches
     a stale or unsupported `goto_tb` chain target, the generated work is
@@ -3270,7 +3270,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     preflight, R4l speed gate, Bus Engine OS proof, or Bus-specific shortcut
     was run; the next fresh bounded x86 Chromium preflight is the remaining
     gate before R4l.
-  - [x] R4s17 - Run the bounded x86 Chromium no-silent generated-retirement
+- [x] R4s17 - Run the bounded x86 Chromium no-silent generated-retirement
     preflight after R4s16. DoD: build fresh current `x86_64-softmmu`
     Emscripten/WASM artifacts from QEMU `develop`, record artifact SHA-256
     hashes, browser version, exact build and preflight commands, result JSON
@@ -3357,7 +3357,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     generated-retirement preflight acceptance, unlocks the next R4l
     same-commit generic Chromium speed gate, makes no speed claim by itself,
     and no Bus Engine OS browser proof was run.
-  - [x] R4s18 - Repair the normal-mode x86 live-generated-exec
+- [x] R4s18 - Repair the normal-mode x86 live-generated-exec
     unaligned-access crash before another R4l speed gate. DoD: using fresh
     `x86_64-softmmu` backend artifacts from QEMU `develop`, a bounded generic
     x86 Chromium run with `--wasm64-live-generated-exec` and
@@ -3443,7 +3443,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     coverage, dominated in this run by `js-status-metadata-output-pool-relocation`
     (`46931` rejects), selected-body memory alignment/multi-access rejects,
     module emission/validation failures, and unsupported `movcond`.
-  - [x] R4s19 - Repair the dominant x86 live-generated pool-relocation
+- [x] R4s19 - Repair the dominant x86 live-generated pool-relocation
     blocker before another R4l speed gate. DoD: the live generated-exec path
     safely rebases finalized `tci_movl` constant-pool operands from the
     current translated TB instead of rejecting them as
@@ -3565,7 +3565,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     generic x86 accelerator work to R4s20 module emission/validation and the
     remaining memory-shape rejects; it is not an R4l speed pass, and no full
     R4l speed gate or Bus Engine OS proof was run.
-  - [x] R4s20 - Repair second-tier x86 live-emitter module
+- [x] R4s20 - Repair second-tier x86 live-emitter module
     validation/emission blockers after R4s19 evidence, unless R4s19 shows a
     different dominant blocker. DoD: make live and deterministic SoftMMU
     emitters address-type aware so memory64 imports keep i64 memory
@@ -3613,7 +3613,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `node scripts/ci/wasm64-translate-metadata-test.mjs`. No browser
     preflight, fresh artifact build, full R4l speed gate, or Bus Engine OS
     proof was run for this item.
-  - [x] R4s20a - Re-measure current x86 live blocker attribution after R4s20
+- [x] R4s20a - Re-measure current x86 live blocker attribution after R4s20
     before continuing the next implementation slice. DoD: build fresh current
     `x86_64-softmmu` backend artifacts from QEMU `develop`, run only a
     bounded generic Chromium preflight against the pinned x86 TuxBoot guest,
@@ -3668,7 +3668,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     the top generic x86 coverage blocker, while R4s21-style MemOp-family work
     remains useful but secondary. No R4l speed gate or Bus Engine OS proof
     was run.
-  - [x] R4s21 - Classify and implement the dominant generic x86
+- [x] R4s21 - Classify and implement the dominant generic x86
     direct-memory blocker family before widening secondary MemOp flags. DoD:
     inspect the current R4s20a result and live generated-output metadata to
     identify the high-frequency `selected-body-direct-memory-unsupported`
@@ -3728,7 +3728,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `node scripts/ci/wasm64-translate-metadata-test.mjs`. No browser run,
     artifact build, R4l speed gate, or Bus Engine OS proof was run for this
     deterministic slice.
-  - [x] R4s21a - Re-measure current x86 live blocker attribution after R4s21
+- [x] R4s21a - Re-measure current x86 live blocker attribution after R4s21
     before widening the next direct-memory family. DoD: use fresh
     `x86_64-softmmu` backend artifacts from QEMU `develop`, run only a
     bounded generic Chromium preflight against the pinned x86 TuxBoot guest,
@@ -3803,7 +3803,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `CPUX86State.hflags`, and `0x180` is
     `CPUX86State.segs[R_DS].selector`. This accepts R4s21a as blocker
     attribution only. It does not unlock R4l or any Bus Engine OS proof.
-  - [x] R4s21b - Add an exact x86 env-direct field allowlist for measured
+- [x] R4s21b - Add an exact x86 env-direct field allowlist for measured
     direct-memory state fields instead of widening the whole env-relative
     window. DoD: admit only `tcg_env + offsetof(CPUX86State, field)` direct
     memory forms for `cc_op` at `0x128`, `hflags` at `0x130`, and
@@ -3860,7 +3860,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `segs[R_DS].selector` only after all guards pass. The no-commit after a
     later SoftMMU guard exit remains covered. Required deterministic checks
     passed again; no Chromium, R4l, or Bus Engine OS proof was run.
-  - [x] R4s21c - Re-measure the x86 live blocker distribution after the next
+- [x] R4s21c - Re-measure the x86 live blocker distribution after the next
     promoted env-relative direct-memory implementation. DoD: after the
     external x86 env-relative memory fix lands on QEMU `develop`, fetch and
     fast-forward to that commit, build fresh `x86_64-softmmu` backend
@@ -3965,7 +3965,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     `10689 / 375555`, but real generated coverage is still only about
     `2.85%`; the next x86 implementation must therefore attack broad shape
     coverage, not rerun a generic speed gate.
-  - [ ] R4s22 - Expand supported x86 live SoftMMU MemOp families only after
+- [ ] R4s22 - Expand supported x86 live SoftMMU MemOp families only after
     R4s19/R4s20 identify memory rejects as a remaining dominant blocker.
     DoD: admit alignment flags only with explicit QEMU-equivalent alignment
     checks, add generic `MO_16` load/store lowering, add signed-load
@@ -3985,7 +3985,7 @@ run that reaches a weaker marker than normal multi-user readiness.
     Therefore R4s22 should be batched with the direct-memory/multi-access
     all-or-nothing guard work instead of being run as a narrow MemOp-only
     browser experiment.
-    - [x] R4s22a - Fix and prove the x86 Emscripten artifact rebuild cache
+- [x] R4s22a - Fix and prove the x86 Emscripten artifact rebuild cache
       before using rebuilt artifacts for the next comparison. Accepted
       2026-07-05: QEMU commit `5d9ce37223` updates
       `scripts/ci/wasm-build-artifacts-local.py` so persistent incremental
@@ -4028,7 +4028,7 @@ run that reaches a weaker marker than normal multi-user readiness.
       `10424 / 355985`, inline TLB-hit loads/stores `18382 / 27645`, and
       helper/`qemu_ld`/`qemu_st` calls all zero. This validates the rebuild
       path and current x86 attribution only; it is not an R4l speed pass.
-    - [x] R4s22b - Reject the clean x86 env-direct widening branch after
+- [x] R4s22b - Reject the clean x86 env-direct widening branch after
       fixed-builder browser evidence. Branch
       `qemu/x86-r4s22-envdirect-20260705` at commit `2b8034b01a` added
       deterministic support for extra x86 env-direct fields and passed:
@@ -4055,7 +4055,7 @@ run that reaches a weaker marker than normal multi-user readiness.
       must not widen env-direct state writes from deterministic tests alone;
       it must first isolate the precise unsafe generated access or keep those
       fields fail-closed in browser proof.
-    - [ ] R4s23 - Apply the reusable RISC-V accelerator lessons to x86
+- [ ] R4s23 - Apply the reusable RISC-V accelerator lessons to x86
       through guarded x86 implementation slices, not by copying RISC-V timing
       or promoting the rejected env-direct branch. DoD: start from current
       `develop` and implement only the measured x86 blocker that can be made
