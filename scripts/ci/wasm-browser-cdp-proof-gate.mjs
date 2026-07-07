@@ -1,0 +1,198 @@
+#!/usr/bin/env node
+/*
+ * Validate CDP browser proof evidence fields.
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ */
+
+import fs from "node:fs";
+
+const SHA256_RE = /^[0-9a-f]{64}$/;
+
+function usage() {
+  return `Usage: wasm-browser-cdp-proof-gate.mjs --result FILE [options]
+
+Options:
+  --require-success         Fail when the proof result did not succeed
+  --require-guest-manifest  Fail when inputEvidence.guestManifest is missing
+  --json                    Print JSON only
+`;
+}
+
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isPositiveInteger(value) {
+  return Number.isInteger(value) && value > 0;
+}
+
+function parseArgs(argv) {
+  const options = {
+    json: false,
+    requireGuestManifest: false,
+    requireSuccess: false,
+    result: null,
+  };
+
+  for (let index = 2; index < argv.length; index++) {
+    const arg = argv[index];
+    if (arg === "--result") {
+      options.result = argv[++index];
+    } else if (arg === "--require-guest-manifest") {
+      options.requireGuestManifest = true;
+    } else if (arg === "--require-success") {
+      options.requireSuccess = true;
+    } else if (arg === "--json") {
+      options.json = true;
+    } else if (arg === "--help" || arg === "-h") {
+      options.help = true;
+    } else {
+      throw new Error(`unknown argument: ${arg}`);
+    }
+  }
+
+  return options;
+}
+
+function validateFileEvidence(inputEvidence, role, required) {
+  const entry = inputEvidence?.[role] ?? null;
+  const missingFields = [];
+  if (entry === null) {
+    if (required) {
+      missingFields.push(`inputEvidence.${role}`);
+    }
+    return {
+      present: false,
+      role,
+      missingFields,
+      ok: !required,
+    };
+  }
+  if (!isObject(entry)) {
+    return {
+      present: true,
+      role,
+      missingFields: [`inputEvidence.${role}`],
+      ok: false,
+    };
+  }
+  if (entry.role !== role) {
+    missingFields.push(`inputEvidence.${role}.role`);
+  }
+  if (!isNonEmptyString(entry.path)) {
+    missingFields.push(`inputEvidence.${role}.path`);
+  }
+  if (!isPositiveInteger(entry.bytes)) {
+    missingFields.push(`inputEvidence.${role}.bytes`);
+  }
+  if (!isNonEmptyString(entry.sha256) || !SHA256_RE.test(entry.sha256)) {
+    missingFields.push(`inputEvidence.${role}.sha256`);
+  }
+  return {
+    present: true,
+    role,
+    missingFields,
+    ok: missingFields.length === 0,
+    bytes: entry.bytes,
+    sha256: entry.sha256,
+  };
+}
+
+export function cdpProofEvidenceGate(result, options = {}) {
+  const missingFields = [];
+  const browserVersion = result?.browserVersion;
+  if (!isObject(browserVersion)) {
+    missingFields.push("browserVersion");
+  } else if (!isNonEmptyString(browserVersion.browser)) {
+    missingFields.push("browserVersion.browser");
+  }
+
+  const inputEvidence = result?.inputEvidence;
+  if (!isObject(inputEvidence)) {
+    missingFields.push("inputEvidence");
+  }
+
+  const files = {
+    program: validateFileEvidence(inputEvidence, "program", true),
+    wasm: validateFileEvidence(inputEvidence, "wasm", true),
+    kernel: validateFileEvidence(inputEvidence, "kernel", true),
+    initrd: validateFileEvidence(inputEvidence, "initrd", false),
+    rootfs: validateFileEvidence(inputEvidence, "rootfs", false),
+    guestManifest: validateFileEvidence(
+      inputEvidence,
+      "guestManifest",
+      Boolean(options.requireGuestManifest),
+    ),
+  };
+  for (const file of Object.values(files)) {
+    missingFields.push(...file.missingFields);
+  }
+  const hasGuestDisk = files.initrd.present || files.rootfs.present;
+  if (!hasGuestDisk) {
+    missingFields.push("inputEvidence.initrd|rootfs");
+  }
+  if (options.requireSuccess && result?.success !== true) {
+    missingFields.push("success");
+  }
+
+  const ok = missingFields.length === 0;
+  return {
+    format: 1,
+    purpose: "qemu-browser-cdp-proof-gate",
+    ok,
+    success: result?.success === true,
+    markerSeen: result?.markerSeen === true,
+    elapsedMs: Number.isInteger(result?.elapsedMs) ? result.elapsedMs : null,
+    browserVersion: browserVersion?.browser || null,
+    inputEvidencePresent: isObject(inputEvidence),
+    files,
+    missingFields,
+    pageErrorCount: Array.isArray(result?.pageErrors) ? result.pageErrors.length : null,
+    resourceErrorCount: Array.isArray(result?.resourceErrors)
+      ? result.resourceErrors.length
+      : null,
+  };
+}
+
+function printResult(gate, json) {
+  if (json) {
+    process.stdout.write(`${JSON.stringify(gate, null, 2)}\n`);
+    return;
+  }
+  process.stdout.write(
+    `qemu-browser-cdp-proof-gate: ok=${gate.ok} ` +
+    `success=${gate.success} markerSeen=${gate.markerSeen} ` +
+    `browser=${gate.browserVersion || "missing"} ` +
+    `missing=${gate.missingFields.length} ` +
+    `resourceErrors=${gate.resourceErrorCount ?? "n/a"}\n`,
+  );
+}
+
+export async function run(argv = process.argv) {
+  const options = parseArgs(argv);
+  if (options.help) {
+    process.stdout.write(usage());
+    return;
+  }
+  if (!options.result) {
+    throw new Error("--result is required");
+  }
+  const result = JSON.parse(fs.readFileSync(options.result, "utf8"));
+  const gate = cdpProofEvidenceGate(result, options);
+  printResult(gate, options.json);
+  if (!gate.ok) {
+    process.exit(1);
+  }
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  run().catch((error) => {
+    console.error(error && error.stack ? error.stack : String(error));
+    process.exit(1);
+  });
+}

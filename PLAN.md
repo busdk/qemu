@@ -1076,6 +1076,11 @@ readiness.
     for the served JavaScript/WASM artifacts, kernel, initrd or rootfs, and
     guest manifest under `inputEvidence`, so the controlled proof result JSON
     directly carries the artifact and guest-input hashes required by the gate.
+    Progress 2026-07-07: added
+    `scripts/ci/wasm-browser-cdp-proof-gate.mjs` as a post-result evidence
+    check. Run it after the CDP proof with `--require-guest-manifest --json`
+    to assert `browserVersion`, program/WASM/kernel/rootfs or initrd hashes,
+    and guest-manifest hash evidence before promoting a proof result.
 - [x] R4d-a - Re-audit previously rejected positive-speed QEMU/WASM
     experiments under the cumulative-improvement strategy. DoD: review the
     supervisor memos and this plan for experiments that were measurably faster
