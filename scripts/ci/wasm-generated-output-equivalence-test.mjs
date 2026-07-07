@@ -1849,24 +1849,39 @@ function compileSharedGeneratedOutputBody(
       // Narrow, source-proven relaxation (R4d-g branch-position measurement:
       // 47/47 samples had the branch strictly before every softmmu access,
       // dominated by pure two-load bodies). Only exempt the exact proven
-      // shape: exactly one brcond, zero softmmu accesses before it, every
-      // softmmu access a *load* (never a store), and no direct-store op
-      // anywhere in the body. Anything else - multiple branches, any access
-      // before the branch, or any store/direct-store - keeps rejecting
+      // shape: exactly one brcond, zero softmmu accesses before it, its
+      // target strictly *after* the last softmmu access (so the branch's
+      // guarded range fully contains - dominates - the whole access group;
+      // otherwise a forward target landing between two accesses would split
+      // the group, letting the first access's guard/commit run
+      // unconditionally before a later, unguarded access in the same
+      // nominal group faults), every softmmu access a *load* (never a
+      // store), and no direct-store op anywhere in the body. Anything else
+      // - multiple branches, any access before the branch, a
+      // non-dominating target, or any store/direct-store - keeps rejecting
       // unconditionally; those shapes are not proven safe here.
       const firstAccessIndex = softmmuOps.length > 0 ?
         softmmuOps[0].index : -1;
+      const lastAccessIndex = softmmuOps.length > 0 ?
+        softmmuOps.at(-1).index : -1;
       const hasDirectStore = ops.some((op) =>
         op.opc === OPS.st || op.opc === OPS.st8 || op.opc === OPS.st32);
+      const branchTargetPtr = unsupportedBranch.tbPtr +
+        sextract(unsupportedBranch.insn, 12, 20);
+      const branchTargetIndex =
+        targetIndexFromPtr(branchTargetPtr, relativeBase);
       const branchBeforeAllAccesses =
         branchOps.length === 1 &&
         firstAccessIndex >= 0 &&
         unsupportedBranch.index < firstAccessIndex;
+      const branchTargetDominatesAccesses =
+        branchTargetIndex >= 0 && branchTargetIndex > lastAccessIndex;
       const allSoftmmuAccessesAreLoads =
         softmmuOps.every((op) => op.opc === OPS.tci_qemu_ld_rrr);
 
       narrowBranchBeforeLoadOnlyRelaxation =
         branchBeforeAllAccesses &&
+        branchTargetDominatesAccesses &&
         allSoftmmuAccessesAreLoads &&
         !hasDirectStore;
 
@@ -3859,6 +3874,29 @@ function runR4zInterleavedAccessBranchStillRejectsFixture() {
     [
       opReg(OPS.tci_qemu_ld_rrr, 1, 14, 13),
       opBranch(4, 4),
+      opReg(OPS.tci_qemu_ld_rrr, 2, 14, 13),
+      OPS.exit_tb,
+    ],
+  );
+}
+
+// Promotion-blocking gap caught in review: the branch being *before* every
+// access does not by itself prove the branch's *target* is after every
+// access too. Here the branch precedes both loads (branchIndex=0 <
+// firstAccessIndex=1), but its target (index 2) lands exactly at the second
+// load, not past it - splitting the guarded range to cover only the first
+// load. Without a target-dominance check, the first load's guard/commit
+// would run unconditionally (only the first load is inside the block) while
+// the second load remains outside the block entirely, unguarded by the
+// branch, breaking the all-or-nothing invariant across the nominal
+// two-access group if the second load then faults. Must still reject.
+function runR4zBranchTargetBetweenLoadsStillRejectsFixture() {
+  return assertBranchBeforeAccessStillRejected(
+    "r4z-branch-target-between-two-loads-still-rejects",
+    0x6190,
+    [
+      opBranch(4, 4),
+      opReg(OPS.tci_qemu_ld_rrr, 1, 14, 13),
       opReg(OPS.tci_qemu_ld_rrr, 2, 14, 13),
       OPS.exit_tb,
     ],
@@ -6838,6 +6876,8 @@ const r4zBranchAfterAccessesStillRejects =
   runR4zBranchAfterAccessesStillRejectsFixture();
 const r4zInterleavedAccessBranchStillRejects =
   runR4zInterleavedAccessBranchStillRejectsFixture();
+const r4zBranchTargetBetweenLoadsStillRejects =
+  runR4zBranchTargetBetweenLoadsStillRejectsFixture();
 
 assert.equal(r4zBranchBeforeLoadsNotTaken.branchTaken, false);
 assert.equal(r4zBranchBeforeLoadsNotTaken.reg1Committed, true);
@@ -6858,6 +6898,7 @@ assert.equal(r4zBranchBeforeStoreStillRejects.ok, false);
 assert.equal(r4zBranchBeforeDirectStoreStillRejects.ok, false);
 assert.equal(r4zBranchAfterAccessesStillRejects.ok, false);
 assert.equal(r4zInterleavedAccessBranchStillRejects.ok, false);
+assert.equal(r4zBranchTargetBetweenLoadsStillRejects.ok, false);
 
 assert.equal(results.length, 31);
 assert.equal(results.filter((entry) => entry.terminal === "goto_tb").length, 8);
