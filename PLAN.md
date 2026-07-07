@@ -192,6 +192,27 @@ run that reaches a weaker marker than normal multi-user readiness.
   memory-growth/SAB/timing hypothesis matrix, fix the mechanism. Full
   failing stacks saved in tmp/qemu-atomic-align-riscv64-determinism-3-cdp/
   in the registered checkout of lane 2baea161.
+  Supervisor source-map refresh 2026-07-07 10:55 EEST: the exact named
+  `determinism-3-cdp` directory is not present in the current local checkout,
+  but the registered lane evidence at
+  `.bus/services/workers/runtime/2baea161-35b4-430f-9d90-8b67ba075410/qemu-worktree`
+  preserves the mapping and result JSONs. The 2026-07-05 07:00 memo records
+  direct WASM code-section parsing: trapped byte offset `0x13b9e08` is inside
+  function index `20564`, imported function count `342`, defined ordinal
+  `20222`, body size `1808`, body offset `227`; the relevant WAT body is
+  `$20222`, not WAT `$20564`. The body is Asyncify-instrumented outer
+  C/WASM runtime code that calls `$20223`, reads a TLS/static-list pointer
+  near `global1 + 22296`, then performs memory loads. The 2026-07-05 11:00
+  memo maps a later browser module offset `0x13ba199` to the same function
+  index/body index/body offset and identifies the trap as plain
+  `i64.load align=3 offset=8`, not an atomic. Representative stored JSON
+  `tmp/qemu-atomic-align-riscv64-clean-guard-20260705-11-summary-cdp/wasm-browser-smoke-result.json`
+  failed at `22616` ms with `markerSeen=false`,
+  `generated_run_entries=0`, and worker stack top `$func20564`. This narrows
+  R4z away from generated-body atomic lowering and toward Asyncify/exception
+  runtime state or an earlier fault that reaches that runtime path. R4z still
+  requires controlled-load reproduction and a fix; this source-map refresh is
+  diagnostic evidence only.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
