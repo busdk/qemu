@@ -37,6 +37,8 @@ Options:
   --program FILE      JavaScript launcher inside artifact dir
   --wasm FILE         WebAssembly module inside artifact dir
   --rootfs FILE       Raw root filesystem image exposed as /dev/vda
+  --vmstate-restore-state-file FILE
+                     VMState migration stream exposed as /vmstate/restore
   --help              Show this help
 `);
   process.exit(status);
@@ -54,6 +56,7 @@ function parseArgs(argv) {
     program: "qemu-system-x86_64.js",
     wasm: null,
     rootfs: null,
+    vmstateRestoreStateFile: null,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -78,6 +81,8 @@ function parseArgs(argv) {
       options.wasm = argv[++i];
     } else if (arg === "--rootfs") {
       options.rootfs = argv[++i];
+    } else if (arg === "--vmstate-restore-state-file") {
+      options.vmstateRestoreStateFile = argv[++i];
     } else if (arg === "--help") {
       usage(0);
     } else {
@@ -112,6 +117,9 @@ function parseArgs(argv) {
     kernel: options.kernel === null ? null : resolve(options.kernel),
     wasm: options.wasm === null ? defaultWasmForProgram(options.program) : options.wasm,
     rootfs: options.rootfs === null ? null : resolve(options.rootfs),
+    vmstateRestoreStateFile: options.vmstateRestoreStateFile === null
+      ? null
+      : resolve(options.vmstateRestoreStateFile),
   };
 }
 
@@ -178,6 +186,9 @@ function routeFile(options, scriptDir, pathname) {
   if (options.rootfs !== null) {
     routes.set("/guest/rootfs.raw", options.rootfs);
   }
+  if (options.vmstateRestoreStateFile !== null) {
+    routes.set("/vmstate/restore", options.vmstateRestoreStateFile);
+  }
   return routes.get(pathname);
 }
 
@@ -193,6 +204,9 @@ if (!options.harnessSelfTest) {
   }
   if (options.rootfs !== null) {
     requireReadable(options.rootfs, "rootfs");
+  }
+  if (options.vmstateRestoreStateFile !== null) {
+    requireReadable(options.vmstateRestoreStateFile, "VMState restore stream");
   }
   requireReadable(join(options.firmwareDir, "qboot.rom"), "qboot firmware");
   requireReadable(join(options.firmwareDir, "linuxboot_dma.bin"), "linuxboot firmware");
