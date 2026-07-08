@@ -255,6 +255,18 @@ readiness.
   multi-tab sharing uses a SharedWorker-hosted VM or a Web Locks
   leader-election handoff. Preserve cold-boot as the measured fallback path
   until the operator accepts the snapshot route as the public default.
+  Progress 2026-07-08 09:56:12 EEST: native QEMU migration-stream prototype
+  proved the accepted-style RISC-V `virtual-server` image can be saved and
+  restored through QEMU VMState using QMP over stdio. Proof JSON:
+  `/private/tmp/qemu-r4suspend-beo-native-migration-20260708a/native-migration-proof.json`.
+  Source reached `Linux version` in `733ms`, save elapsed `223ms`, VMState
+  stream size was `25,655,849` bytes, incoming restore elapsed `211ms`, and
+  restore reached the weak `Bus Engine OS` welcome marker after `1,684ms`
+  (`2,879ms` total proof elapsed). This does not close the item: the marker
+  is weaker than normal multi-user readiness, the proof is native not
+  Chrome/Chromium WASM, the proof manifest still needs recorded rootfs/kernel
+  SHA-256 compatibility keys, and the browser restore path plus snapshot
+  hygiene gates remain open.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
