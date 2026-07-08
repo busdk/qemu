@@ -287,6 +287,25 @@ readiness.
   suspend/resume proofs remain `0`, and the next step is a tuple-aligned
   native/browser manifest plus real Chrome/Chromium restore proof to the
   accepted readiness marker.
+  Progress 2026-07-08 15:15:48 EEST: accepted the strict restore-tuple
+  manifest generator in canonical `develop` as commit `9d8e10235b`. The new
+  `scripts/ci/wasm-vmstate-restore-tuple-manifest.mjs` emits strict
+  saved/current manifests from a native proof JSON, browser QEMU JS/WASM
+  artifacts, guest manifest, explicit source/build/machine/CPU fields, state
+  hashes, and device/storage/migration tuple fields. The focused test
+  `scripts/ci/wasm-vmstate-restore-tuple-manifest-test.mjs` proves a
+  synthetic compatible tuple passes `--restore-tuple` and the current
+  native/browser fixture fails before Chrome on exactly `devices`,
+  `qemu.binarySha256`, `qemu.buildConfigDigest`, `qemu.hostKind`,
+  `storage.drive`, and `storage.resumeDevice`. Canonical checks passed:
+  `node --check scripts/ci/wasm-vmstate-restore-tuple-manifest.mjs`, `node
+  scripts/ci/wasm-vmstate-restore-tuple-manifest-test.mjs`, `node
+  scripts/ci/wasm-vmstate-manifest-test.mjs`, and `git diff --check
+  HEAD~1..HEAD`. This still does not close R4suspend: browser
+  suspend/resume proofs remain `0`, and the next step is producing a
+  tuple-compatible VMState stream from the same accepted browser artifact
+  tuple or proving a native/server producer can satisfy the strict tuple
+  without weakening the gate.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
