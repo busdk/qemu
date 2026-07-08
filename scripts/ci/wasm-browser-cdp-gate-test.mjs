@@ -19,6 +19,7 @@ import {
   proofInputEvidence,
   smokeServerArgs,
   smokeUrl,
+  vmstateRestoreManifestCheck,
 } from "./wasm-browser-cdp-gate.mjs";
 
 const options = {
@@ -44,6 +45,13 @@ const options = {
   rootfsDevice: "virtio-mmio",
   targetArch: "riscv64",
   timeoutMs: 180000,
+  vmstateRestore: false,
+  vmstateRestoreCurrentManifest: "",
+  vmstateRestoreManifestCheck: null,
+  vmstateRestoreSavedManifest: "",
+  vmstateRestoreStateBytes: 0,
+  vmstateRestoreStateFile: "",
+  vmstateRestoreStateSha256: "",
   wasm: "qemu-system-riscv64.wasm",
 };
 
@@ -70,12 +78,33 @@ assert.equal(url.searchParams.get("rootfs"), "/guest/rootfs.raw");
 assert.equal(url.searchParams.get("rootfsDevice"), "virtio-mmio");
 assert.equal(url.searchParams.get("wasm64LiveGeneratedExec"), "1");
 
+const vmstateOptions = {
+  ...options,
+  vmstateRestore: true,
+  vmstateRestoreStateBytes: 26782067,
+  vmstateRestoreStateFile: "/tmp/state.vmstate",
+  vmstateRestoreStateSha256: "9f1c1825bad301514db7f9684671480d0aa577916b0d6fe43bbdbc54e97915c8",
+};
+const vmstateUrl = new URL(smokeUrl(vmstateOptions));
+assert.equal(vmstateUrl.searchParams.get("vmstateRestore"), "1");
+assert.equal(vmstateUrl.searchParams.get("vmstateRestoreSource"), "http");
+assert.equal(vmstateUrl.searchParams.get("vmstateRestoreUrl"), "http://127.0.0.1:8151/vmstate/restore");
+assert.equal(vmstateUrl.searchParams.get("vmstateRestoreStateBytes"), "26782067");
+assert.equal(
+  vmstateUrl.searchParams.get("vmstateRestoreStateSha256"),
+  "9f1c1825bad301514db7f9684671480d0aa577916b0d6fe43bbdbc54e97915c8",
+);
+const vmstateServerArgs = smokeServerArgs(vmstateOptions);
+assert.equal(vmstateServerArgs.includes("--vmstate-restore-state-file"), true);
+assert.equal(vmstateServerArgs.includes("/tmp/state.vmstate"), true);
+
 const manifestDir = mkdtempSync(join(tmpdir(), "qemu-cdp-gate-manifest-"));
 const manifestPath = join(manifestDir, "guest.json");
 writeFileSync(manifestPath, JSON.stringify({
   target_arch: "riscv64",
   default_parameters: {
     firmwareDir: "firmware",
+    initrd: "",
     kernel: "Image",
     rootfs: "rootfs.raw",
     marker: "Welcome to TuxTest",
@@ -93,6 +122,7 @@ const manifestOptions = await parseArgs([
 assert.equal(manifestOptions.artifactDir, "/tmp/explicit-artifacts");
 assert.equal(manifestOptions.firmwareDir, join(manifestDir, "firmware"));
 assert.equal(manifestOptions.kernel, join(manifestDir, "Image"));
+assert.equal(manifestOptions.initrd, null);
 assert.equal(manifestOptions.rootfs, join(manifestDir, "rootfs.raw"));
 assert.equal(manifestOptions.targetArch, "riscv64");
 assert.equal(manifestOptions.guestManifest, manifestPath);
@@ -257,4 +287,53 @@ function sha256(text) {
   assert.equal(diagnostic.resourceError.url, "http://127.0.0.1:8151/missing.js");
   assert.equal(diagnostic.resourceError.status, 404);
   assert.equal(diagnostic.resourceError.initiator.type, "script");
+}
+
+{
+  const vmstateManifestDir = mkdtempSync(join(tmpdir(), "qemu-cdp-gate-vmstate-"));
+  const savedManifest = join(vmstateManifestDir, "saved.json");
+  const currentManifest = join(vmstateManifestDir, "current.json");
+  const mismatchManifest = join(vmstateManifestDir, "mismatch.json");
+  const manifest = {
+    format: "qemu-wasm-vmstate-manifest-v1",
+    compatibility: {
+      guest: {
+        rootfsSha256: "a".repeat(64),
+      },
+      vmstate: {
+        streamSha256: "b".repeat(64),
+      },
+    },
+    requiredCompatibilityKeys: [
+      "guest.rootfsSha256",
+      "vmstate.streamSha256",
+    ],
+  };
+  writeFileSync(savedManifest, `${JSON.stringify(manifest)}\n`);
+  writeFileSync(currentManifest, `${JSON.stringify(manifest)}\n`);
+  writeFileSync(mismatchManifest, `${JSON.stringify({
+    ...manifest,
+    compatibility: {
+      ...manifest.compatibility,
+      guest: {
+        rootfsSha256: "c".repeat(64),
+      },
+    },
+  })}\n`);
+
+  const exact = vmstateRestoreManifestCheck({
+    vmstateRestore: true,
+    vmstateRestoreSavedManifest: savedManifest,
+    vmstateRestoreCurrentManifest: currentManifest,
+  });
+  assert.equal(exact.ok, true);
+  assert.equal(exact.saved, savedManifest);
+  assert.equal(exact.current, currentManifest);
+  const mismatch = vmstateRestoreManifestCheck({
+    vmstateRestore: true,
+    vmstateRestoreSavedManifest: savedManifest,
+    vmstateRestoreCurrentManifest: mismatchManifest,
+  });
+  assert.equal(mismatch.ok, false);
+  assert.equal(mismatch.mismatches[0].key, "guest.rootfsSha256");
 }

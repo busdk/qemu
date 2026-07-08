@@ -7,13 +7,14 @@
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { applyGuestManifest } from "./wasm-guest-manifest.mjs";
 import { installSignalCleanup } from "./wasm-playwright-loader.mjs";
+import { compareVmstateManifests } from "./wasm-vmstate-manifest.mjs";
 
 const THIS_FILE = fileURLToPath(import.meta.url);
 const DEFAULT_CHROME_PATHS = [
@@ -27,7 +28,7 @@ const DEFAULT_CHROME_PATHS = [
 
 function usage(status = 0) {
   const stream = status === 0 ? process.stdout : process.stderr;
-  stream.write(`usage: wasm-browser-cdp-gate.mjs --artifact-dir DIR --kernel FILE [--initrd FILE | --rootfs FILE] --out FILE [OPTIONS]\n\nRuns the QEMU WebAssembly browser smoke page through Chrome DevTools Protocol, without Playwright.\n\nOptions:\n  --artifact-dir DIR       Directory containing qemu-system-*.js/.wasm artifacts\n  --guest-manifest FILE    Load guest defaults such as kernel/rootfs/marker\n  --kernel FILE            Guest kernel served as /guest/kernel\n  --initrd FILE            Guest initramfs served as /guest/initramfs.cpio.gz\n  --rootfs FILE            Guest rootfs served as /guest/rootfs.raw\n  --out FILE               Write result JSON\n  --chrome FILE            Chrome/Chromium executable\n  --firmware-dir DIR       Directory containing QEMU firmware blobs\n  --host HOST              Smoke server host (default: 127.0.0.1)\n  --port N                 Smoke server port (default: 8151)\n  --cdp-port N             Chrome remote-debugging port (default: 9223)\n  --program FILE           QEMU JS artifact basename (default: manifest or qemu-system-riscv64.js)\n  --wasm FILE              QEMU WASM artifact basename (default: derived from program)\n  --marker TEXT            Required marker text (default: manifest or Welcome to TuxTest)\n  --timeout-ms N           Smoke timeout (default: manifest or 180000)\n  --max-output-bytes N     Smoke output byte cap (default: 160000)\n  --memory SIZE            Guest memory (default: manifest or 512M)\n  --machine NAME           QEMU machine (default: manifest or virt)\n  --cpu MODEL              QEMU CPU model (default: manifest or empty)\n  --rootfs-device KIND     Rootfs block device (default: manifest or virtio-mmio)\n  --target-arch ARCH       Guest target architecture for firmware mounts\n  --kernel-append TEXT     Kernel command line\n  --diagnostics-limit N    Live-generated-exec diagnostics limit (default: 24)\n  --no-live-generated-exec Disable live generated exec query flags\n  --help                   Show this help\n`);
+  stream.write(`usage: wasm-browser-cdp-gate.mjs --artifact-dir DIR --kernel FILE [--initrd FILE | --rootfs FILE] --out FILE [OPTIONS]\n\nRuns the QEMU WebAssembly browser smoke page through Chrome DevTools Protocol, without Playwright.\n\nOptions:\n  --artifact-dir DIR       Directory containing qemu-system-*.js/.wasm artifacts\n  --guest-manifest FILE    Load guest defaults such as kernel/rootfs/marker\n  --kernel FILE            Guest kernel served as /guest/kernel\n  --initrd FILE            Guest initramfs image\n  --rootfs FILE            Guest rootfs served as /guest/rootfs.raw\n  --out FILE               Write result JSON\n  --chrome FILE            Chrome/Chromium executable\n  --firmware-dir DIR       Directory containing QEMU firmware blobs\n  --host HOST              Smoke server host (default: 127.0.0.1)\n  --port N                 Smoke server port (default: 8151)\n  --cdp-port N             Chrome remote-debugging port (default: 9223)\n  --program FILE           QEMU JS artifact basename (default: manifest or qemu-system-riscv64.js)\n  --wasm FILE              QEMU WASM artifact basename (default: derived from program)\n  --marker TEXT            Required marker text (default: manifest or Welcome to TuxTest)\n  --timeout-ms N           Smoke timeout (default: manifest or 180000)\n  --max-output-bytes N     Smoke output byte cap (default: 160000)\n  --memory SIZE            Guest memory (default: manifest or 512M)\n  --machine NAME           QEMU machine (default: manifest or virt)\n  --cpu MODEL              QEMU CPU model (default: manifest or empty)\n  --rootfs-device KIND     Rootfs block device (default: manifest or virtio-mmio)\n  --target-arch ARCH       Guest target architecture for firmware mounts\n  --kernel-append TEXT     Kernel command line\n  --vmstate-restore        Enable browser VMState restore import\n  --vmstate-restore-state-file FILE\n                           Local VMState stream served as /vmstate/restore\n  --vmstate-restore-state-bytes N\n                           Expected VMState byte length\n  --vmstate-restore-state-sha256 HASH\n                           Expected VMState SHA-256\n  --vmstate-restore-saved-manifest FILE\n                           Saved-state compatibility manifest\n  --vmstate-restore-current-manifest FILE\n                           Current compatibility manifest\n  --diagnostics-limit N    Live-generated-exec diagnostics limit (default: 24)\n  --no-live-generated-exec Disable live generated exec query flags\n  --help                   Show this help\n`);
   process.exit(status);
 }
 
@@ -92,6 +93,13 @@ export async function parseArgs(argv) {
     rootfsDevice: "virtio-mmio",
     targetArch: "riscv64",
     timeoutMs: 180000,
+    vmstateRestore: false,
+    vmstateRestoreCurrentManifest: "",
+    vmstateRestoreManifestCheck: null,
+    vmstateRestoreSavedManifest: "",
+    vmstateRestoreStateBytes: 0,
+    vmstateRestoreStateFile: "",
+    vmstateRestoreStateSha256: "",
     wasm: null,
   };
 
@@ -160,6 +168,18 @@ export async function parseArgs(argv) {
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number(argv[++i]);
       explicit.add("timeoutMs");
+    } else if (arg === "--vmstate-restore") {
+      options.vmstateRestore = true;
+    } else if (arg === "--vmstate-restore-current-manifest") {
+      options.vmstateRestoreCurrentManifest = argv[++i];
+    } else if (arg === "--vmstate-restore-saved-manifest") {
+      options.vmstateRestoreSavedManifest = argv[++i];
+    } else if (arg === "--vmstate-restore-state-bytes") {
+      options.vmstateRestoreStateBytes = Number(argv[++i]);
+    } else if (arg === "--vmstate-restore-state-file") {
+      options.vmstateRestoreStateFile = argv[++i];
+    } else if (arg === "--vmstate-restore-state-sha256") {
+      options.vmstateRestoreStateSha256 = argv[++i];
     } else if (arg === "--wasm") {
       options.wasm = argv[++i];
       explicit.add("wasm");
@@ -173,7 +193,16 @@ export async function parseArgs(argv) {
 
   applyGuestManifest(options, explicit, {
     integerFields: ["timeoutMs"],
-    pathFields: ["artifactDir", "firmwareDir", "initrd", "kernel", "rootfs"],
+    pathFields: [
+      "artifactDir",
+      "firmwareDir",
+      "initrd",
+      "kernel",
+      "rootfs",
+      "vmstateRestoreCurrentManifest",
+      "vmstateRestoreSavedManifest",
+      "vmstateRestoreStateFile",
+    ],
     stringFields: [
       "artifactDir",
       "cpu",
@@ -189,9 +218,20 @@ export async function parseArgs(argv) {
       "rootfs",
       "rootfsDevice",
       "targetArch",
+      "vmstateRestoreCurrentManifest",
+      "vmstateRestoreSavedManifest",
+      "vmstateRestoreStateFile",
+      "vmstateRestoreStateSha256",
       "wasm",
     ],
   });
+
+  if (options.initrd === "") {
+    options.initrd = null;
+  }
+  if (options.rootfs === "") {
+    options.rootfs = null;
+  }
 
   if (options.artifactDir === null) {
     console.error("--artifact-dir is required");
@@ -204,6 +244,35 @@ export async function parseArgs(argv) {
   if (options.initrd === null && options.rootfs === null) {
     console.error("either --initrd/--rootfs or a guest manifest with one is required");
     usage(2);
+  }
+  if (options.vmstateRestore) {
+    const sha256 = /^[0-9a-f]{64}$/i;
+    if (options.vmstateRestoreStateFile === "") {
+      console.error("--vmstate-restore requires --vmstate-restore-state-file");
+      usage(2);
+    }
+    if (!Number.isInteger(options.vmstateRestoreStateBytes) ||
+        options.vmstateRestoreStateBytes <= 0) {
+      console.error("--vmstate-restore-state-bytes must be a positive integer");
+      usage(2);
+    }
+    if (!sha256.test(options.vmstateRestoreStateSha256)) {
+      console.error("--vmstate-restore-state-sha256 must be a 64-hex SHA-256");
+      usage(2);
+    }
+    if ((options.vmstateRestoreSavedManifest === "") !==
+        (options.vmstateRestoreCurrentManifest === "")) {
+      console.error("--vmstate-restore-saved-manifest and --vmstate-restore-current-manifest must be used together");
+      usage(2);
+    }
+    if (options.vmstateRestoreSavedManifest !== "") {
+      options.vmstateRestoreManifestCheck = vmstateRestoreManifestCheck(options);
+      if (!options.vmstateRestoreManifestCheck.ok) {
+        const mismatch = options.vmstateRestoreManifestCheck.mismatches[0];
+        console.error(`VMState manifest mismatch: ${mismatch.key}: ${mismatch.reason}`);
+        usage(2);
+      }
+    }
   }
   if (options.out === null) {
     console.error("--out is required");
@@ -229,6 +298,15 @@ export async function parseArgs(argv) {
   options.rootfs = options.rootfs === null ? null : resolve(options.rootfs);
   options.out = resolve(options.out);
   options.guestManifest = options.guestManifest === null ? null : resolve(options.guestManifest);
+  options.vmstateRestoreCurrentManifest = options.vmstateRestoreCurrentManifest === ""
+    ? ""
+    : resolve(options.vmstateRestoreCurrentManifest);
+  options.vmstateRestoreSavedManifest = options.vmstateRestoreSavedManifest === ""
+    ? ""
+    : resolve(options.vmstateRestoreSavedManifest);
+  options.vmstateRestoreStateFile = options.vmstateRestoreStateFile === ""
+    ? ""
+    : resolve(options.vmstateRestoreStateFile);
   options.wasm = options.wasm || defaultWasmForProgram(options.program);
   options.chrome = options.chrome || DEFAULT_CHROME_PATHS.find((path) => existsSync(path));
   if (!options.chrome) {
@@ -321,6 +399,13 @@ export function smokeUrl(options) {
   if (options.rootfs !== null) {
     url.searchParams.set("rootfs", "/guest/rootfs.raw");
   }
+  if (options.vmstateRestore) {
+    url.searchParams.set("vmstateRestore", "1");
+    url.searchParams.set("vmstateRestoreSource", "http");
+    url.searchParams.set("vmstateRestoreUrl", `${url.origin}/vmstate/restore`);
+    url.searchParams.set("vmstateRestoreStateBytes", String(options.vmstateRestoreStateBytes));
+    url.searchParams.set("vmstateRestoreStateSha256", options.vmstateRestoreStateSha256);
+  }
   url.searchParams.set("timeoutMs", String(options.timeoutMs));
   url.searchParams.set("visualMarker", "");
   return url.href;
@@ -342,6 +427,9 @@ export function smokeServerArgs(options) {
   }
   if (options.rootfs !== null) {
     args.push("--rootfs", options.rootfs);
+  }
+  if (options.vmstateRestoreStateFile !== "") {
+    args.push("--vmstate-restore-state-file", options.vmstateRestoreStateFile);
   }
   return args;
 }
@@ -464,6 +552,31 @@ function requireReadable(path, label) {
   }
 }
 
+function readJsonFile(path, label) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    throw new Error(`failed to read ${label} ${path}: ${error.message}`);
+  }
+}
+
+export function vmstateRestoreManifestCheck(options) {
+  if (!options.vmstateRestore ||
+      !options.vmstateRestoreSavedManifest ||
+      !options.vmstateRestoreCurrentManifest) {
+    return null;
+  }
+  const result = compareVmstateManifests(
+    readJsonFile(options.vmstateRestoreSavedManifest, "saved VMState manifest"),
+    readJsonFile(options.vmstateRestoreCurrentManifest, "current VMState manifest"),
+  );
+  return {
+    ...result,
+    saved: options.vmstateRestoreSavedManifest,
+    current: options.vmstateRestoreCurrentManifest,
+  };
+}
+
 async function sha256File(path) {
   const hash = createHash("sha256");
   await new Promise((resolveDone, rejectDone) => {
@@ -503,6 +616,18 @@ export async function proofInputEvidence(options) {
     initrd: await fileEvidence("initrd", options.initrd),
     rootfs: await fileEvidence("rootfs", options.rootfs),
     guestManifest: await fileEvidence("guestManifest", options.guestManifest),
+    vmstateRestoreState: await fileEvidence(
+      "vmstateRestoreState",
+      options.vmstateRestore ? options.vmstateRestoreStateFile : null,
+    ),
+    vmstateRestoreSavedManifest: await fileEvidence(
+      "vmstateRestoreSavedManifest",
+      options.vmstateRestoreSavedManifest,
+    ),
+    vmstateRestoreCurrentManifest: await fileEvidence(
+      "vmstateRestoreCurrentManifest",
+      options.vmstateRestoreCurrentManifest,
+    ),
   };
 }
 
@@ -516,6 +641,13 @@ async function main() {
   }
   if (options.rootfs !== null) {
     requireReadable(options.rootfs, "rootfs");
+  }
+  if (options.vmstateRestore) {
+    requireReadable(options.vmstateRestoreStateFile, "VMState restore stream");
+    if (options.vmstateRestoreSavedManifest !== "") {
+      requireReadable(options.vmstateRestoreSavedManifest, "saved VMState manifest");
+      requireReadable(options.vmstateRestoreCurrentManifest, "current VMState manifest");
+    }
   }
   requireReadable(resolve(options.artifactDir, basename(options.program)), "program artifact");
   requireReadable(resolve(options.artifactDir, basename(options.wasm)), "wasm artifact");
@@ -649,6 +781,7 @@ async function main() {
     }
     if (
       pageStatus === `marker reached: ${options.marker}` ||
+      pageStatus === "Bus Engine OS is ready" ||
       pageStatus.startsWith("timeout waiting for ") ||
       pageStatus === "failed" ||
       pageErrors.length > 0
@@ -659,14 +792,21 @@ async function main() {
   }
 
   const elapsedMs = Date.now() - started;
+  const success = (
+    pageStatus === `marker reached: ${options.marker}` ||
+    pageStatus === "Bus Engine OS is ready"
+  ) && pageErrors.length === 0;
   const result = {
     format: 1,
-    success: pageStatus === `marker reached: ${options.marker}` && pageErrors.length === 0,
+    success,
     marker: options.marker,
-    markerSeen: Boolean(finalState?.markerSeen) || pageStatus === `marker reached: ${options.marker}`,
+    markerSeen: Boolean(finalState?.markerSeen) ||
+      pageStatus === `marker reached: ${options.marker}` ||
+      pageStatus === "Bus Engine OS is ready",
     elapsedMs,
     browserVersion,
     inputEvidence,
+    vmstateRestoreManifestCheck: options.vmstateRestoreManifestCheck,
     pageStatus,
     smokeUrl: smokeUrl(options),
     pageErrors,
