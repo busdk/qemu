@@ -294,7 +294,52 @@ function sha256(text) {
   const savedManifest = join(vmstateManifestDir, "saved.json");
   const currentManifest = join(vmstateManifestDir, "current.json");
   const mismatchManifest = join(vmstateManifestDir, "mismatch.json");
+  const legacyManifest = join(vmstateManifestDir, "legacy.json");
   const manifest = {
+    format: "qemu-wasm-vmstate-manifest-v1",
+    compatibility: {
+      qemu: {
+        binarySha256: "d".repeat(64),
+        buildConfigDigest: "target=riscv64-softmmu;wasm64=true",
+        sourceCommit: "b73bd4c184ec",
+      },
+      target: "riscv64-softmmu",
+      machine: {
+        type: "virt",
+        version: "11.0",
+      },
+      cpu: {
+        model: "rv64",
+        extensions: ["a=true", "c=true", "m=true", "v=false"],
+      },
+      memory: "512M",
+      devices: [
+        "-drive file=/rootfs.raw,format=raw,if=none,id=hd0",
+        "-device virtio-blk-device,drive=hd0",
+      ],
+      migration: {
+        capabilities: {
+          "send-configuration": true,
+          "send-section-footer": true,
+        },
+      },
+      guest: {
+        kernelSha256: "e".repeat(64),
+        rootfsSha256: "a".repeat(64),
+        kernelAppend: "console=ttyS0 root=/dev/vda rw",
+      },
+      storage: {
+        drive: "-drive file=/rootfs.raw,format=raw,if=none,id=hd0 -device virtio-blk-device,drive=hd0",
+        resumeDevice: "virtio-blk-device",
+      },
+      vmstate: {
+        streamSha256: "b".repeat(64),
+        streamBytes: 26782067,
+        format: "qemu-migration-exec-stream",
+      },
+    },
+  };
+  const legacy = {
     format: "qemu-wasm-vmstate-manifest-v1",
     compatibility: {
       guest: {
@@ -304,10 +349,6 @@ function sha256(text) {
         streamSha256: "b".repeat(64),
       },
     },
-    requiredCompatibilityKeys: [
-      "guest.rootfsSha256",
-      "vmstate.streamSha256",
-    ],
   };
   writeFileSync(savedManifest, `${JSON.stringify(manifest)}\n`);
   writeFileSync(currentManifest, `${JSON.stringify(manifest)}\n`);
@@ -320,6 +361,7 @@ function sha256(text) {
       },
     },
   })}\n`);
+  writeFileSync(legacyManifest, `${JSON.stringify(legacy)}\n`);
 
   const exact = vmstateRestoreManifestCheck({
     vmstateRestore: true,
@@ -335,5 +377,16 @@ function sha256(text) {
     vmstateRestoreCurrentManifest: mismatchManifest,
   });
   assert.equal(mismatch.ok, false);
-  assert.equal(mismatch.mismatches[0].key, "guest.rootfsSha256");
+  assert.ok(mismatch.mismatches.some((entry) =>
+    entry.key === "guest.rootfsSha256" &&
+    entry.reason === "value-mismatch"));
+  const legacyCheck = vmstateRestoreManifestCheck({
+    vmstateRestore: true,
+    vmstateRestoreSavedManifest: legacyManifest,
+    vmstateRestoreCurrentManifest: legacyManifest,
+  });
+  assert.equal(legacyCheck.ok, false);
+  assert.ok(legacyCheck.mismatches.some((mismatch) =>
+    mismatch.key === "cpu.extensions" &&
+    mismatch.reason === "missing-saved"));
 }

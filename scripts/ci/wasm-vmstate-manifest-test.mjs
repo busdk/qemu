@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 
 import {
   VMSTATE_MANIFEST_FORMAT,
+  VMSTATE_RESTORE_TUPLE_REQUIRED_KEYS,
   compareVmstateManifests,
   validateVmstateManifest,
 } from "./wasm-vmstate-manifest.mjs";
@@ -52,6 +53,73 @@ function manifest(overrides = {}) {
     },
     ...overrides,
   };
+}
+
+function restoreTupleManifest(overrides = {}) {
+  return {
+    format: VMSTATE_MANIFEST_FORMAT,
+    compatibility: {
+      qemu: {
+        binarySha256: "c5c29bd49aa160ef220e6f70db3ac459ee23b2751852f149cf37bc4740627c56",
+        buildConfigDigest: "target=riscv64-softmmu;tcg_interpreter=true;wasm64=true",
+        sourceCommit: "b73bd4c184ec",
+      },
+      target: "riscv64-softmmu",
+      machine: {
+        type: "virt",
+        version: "11.0",
+      },
+      cpu: {
+        model: "rv64",
+        extensions: [
+          "a=true",
+          "c=true",
+          "d=true",
+          "f=true",
+          "m=true",
+          "v=false",
+        ],
+      },
+      memory: "512M",
+      devices: [
+        "-drive file=/rootfs.raw,format=raw,if=none,id=hd0",
+        "-device virtio-blk-device,drive=hd0",
+        "-nic none",
+      ],
+      migration: {
+        capabilities: {
+          "send-configuration": true,
+          "send-section-footer": true,
+        },
+      },
+      guest: {
+        kernelSha256: "2bd8132a3bf21570290042324fff48c987f42f2a00c08de979f43f0662ebadba",
+        rootfsSha256: "bdae7f7e022592800442b73eb32ec7631f43a4c13dd8621051204f7e482fbd2b",
+        kernelAppend: "console=ttyS0 root=/dev/vda rw",
+      },
+      storage: {
+        drive: "-drive file=/rootfs.raw,format=raw,if=none,id=hd0 -device virtio-blk-device,drive=hd0",
+        resumeDevice: "virtio-blk-device",
+      },
+      vmstate: {
+        streamSha256: "a98517d34f48025d47cfb1a37f7f2dd38c733a1e841b4b0dad96c22b8d655eed",
+        streamBytes: 26782067,
+        format: "qemu-migration-exec-stream",
+      },
+    },
+    ...overrides,
+  };
+}
+
+function tupleMismatch(mutator) {
+  const current = structuredClone(restoreTupleManifest());
+
+  mutator(current);
+  return compareVmstateManifests(
+    restoreTupleManifest(),
+    current,
+    { restoreTuple: true },
+  );
 }
 
 assert.equal(validateVmstateManifest(manifest(), "saved"), undefined);
@@ -115,6 +183,116 @@ assert.equal(validateVmstateManifest(manifest(), "saved"), undefined);
   const result = compareVmstateManifests(manifest(), current);
 
   assert.equal(result.ok, true);
+}
+
+{
+  const result = compareVmstateManifests(
+    restoreTupleManifest(),
+    restoreTupleManifest(),
+    { restoreTuple: true },
+  );
+
+  assert.equal(result.ok, true);
+  for (const key of VMSTATE_RESTORE_TUPLE_REQUIRED_KEYS) {
+    assert.ok(result.checkedKeys.includes(key));
+  }
+}
+
+{
+  const result = compareVmstateManifests(
+    manifest(),
+    manifest(),
+    { restoreTuple: true },
+  );
+
+  assert.equal(result.ok, false);
+  assert.ok(result.mismatches.some((mismatch) =>
+    mismatch.key === "machine.type" &&
+    mismatch.reason === "missing-saved"));
+  assert.ok(result.mismatches.some((mismatch) =>
+    mismatch.key === "cpu.extensions" &&
+    mismatch.reason === "missing-saved"));
+}
+
+{
+  const result = tupleMismatch((current) => {
+    current.compatibility.cpu.extensions = [
+      "a=true",
+      "c=true",
+      "d=true",
+      "f=true",
+      "m=true",
+      "v=true",
+    ];
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.mismatches, [{
+    key: "cpu.extensions",
+    reason: "value-mismatch",
+    saved: restoreTupleManifest().compatibility.cpu.extensions,
+    current: [
+      "a=true",
+      "c=true",
+      "d=true",
+      "f=true",
+      "m=true",
+      "v=true",
+    ],
+  }]);
+}
+
+{
+  const result = tupleMismatch((current) => {
+    current.compatibility.machine.version = "12.0";
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.mismatches, [{
+    key: "machine.version",
+    reason: "value-mismatch",
+    saved: "11.0",
+    current: "12.0",
+  }]);
+}
+
+{
+  const result = tupleMismatch((current) => {
+    current.compatibility.devices = [
+      "-drive file=/rootfs.raw,format=raw,if=none,id=hd0",
+      "-device virtio-rng-device",
+      "-device virtio-blk-device,drive=hd0",
+      "-nic none",
+    ];
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.mismatches, [{
+    key: "devices",
+    reason: "value-mismatch",
+    saved: restoreTupleManifest().compatibility.devices,
+    current: [
+      "-drive file=/rootfs.raw,format=raw,if=none,id=hd0",
+      "-device virtio-rng-device",
+      "-device virtio-blk-device,drive=hd0",
+      "-nic none",
+    ],
+  }]);
+}
+
+{
+  const result = tupleMismatch((current) => {
+    current.compatibility.vmstate.streamSha256 =
+      "0000000000000000000000000000000000000000000000000000000000000000";
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.mismatches, [{
+    key: "vmstate.streamSha256",
+    reason: "value-mismatch",
+    saved: "a98517d34f48025d47cfb1a37f7f2dd38c733a1e841b4b0dad96c22b8d655eed",
+    current: "0000000000000000000000000000000000000000000000000000000000000000",
+  }]);
 }
 
 assert.throws(

@@ -569,6 +569,7 @@ export function vmstateRestoreManifestCheck(options) {
   const result = compareVmstateManifests(
     readJsonFile(options.vmstateRestoreSavedManifest, "saved VMState manifest"),
     readJsonFile(options.vmstateRestoreCurrentManifest, "current VMState manifest"),
+    { restoreTuple: true },
   );
   return {
     ...result,

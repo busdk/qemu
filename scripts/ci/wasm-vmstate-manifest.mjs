@@ -9,6 +9,27 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 export const VMSTATE_MANIFEST_FORMAT = "qemu-wasm-vmstate-manifest-v1";
+export const VMSTATE_RESTORE_TUPLE_REQUIRED_KEYS = [
+  "qemu.binarySha256",
+  "qemu.buildConfigDigest",
+  "qemu.sourceCommit",
+  "target",
+  "machine.type",
+  "machine.version",
+  "cpu.model",
+  "cpu.extensions",
+  "memory",
+  "devices",
+  "migration.capabilities",
+  "guest.kernelSha256",
+  "guest.rootfsSha256",
+  "guest.kernelAppend",
+  "storage.drive",
+  "storage.resumeDevice",
+  "vmstate.streamSha256",
+  "vmstate.streamBytes",
+  "vmstate.format",
+];
 
 function usage(status) {
   const stream = status === 0 ? process.stdout : process.stderr;
@@ -19,6 +40,7 @@ Options:
   --current FILE        Current emulator/guest compatibility manifest
   --required-key KEY    Require compatibility.KEY to exist in both manifests;
                         may be repeated
+  --restore-tuple       Require the full browser restore compatibility tuple
   --json                Print a JSON result
   --help                Show this help
 `);
@@ -30,6 +52,7 @@ function parseArgs(argv) {
     current: null,
     json: false,
     requiredKeys: [],
+    restoreTuple: false,
     saved: null,
   };
 
@@ -42,6 +65,8 @@ function parseArgs(argv) {
       options.json = true;
     } else if (arg === "--required-key") {
       options.requiredKeys.push(argv[++i]);
+    } else if (arg === "--restore-tuple") {
+      options.restoreTuple = true;
     } else if (arg === "--saved") {
       options.saved = argv[++i];
     } else if (arg === "--help") {
@@ -152,6 +177,7 @@ export function compareVmstateManifests(saved, current, options = {}) {
     ...collectDottedKeys(saved.compatibility),
     ...(saved.requiredCompatibilityKeys || []),
     ...(options.requiredKeys || []),
+    ...(options.restoreTuple ? VMSTATE_RESTORE_TUPLE_REQUIRED_KEYS : []),
   ]);
   const mismatches = [];
 
@@ -198,7 +224,10 @@ function main(argv) {
     const result = compareVmstateManifests(
       readJson(options.saved),
       readJson(options.current),
-      { requiredKeys: options.requiredKeys },
+      {
+        requiredKeys: options.requiredKeys,
+        restoreTuple: options.restoreTuple,
+      },
     );
 
     if (options.json) {
