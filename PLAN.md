@@ -267,6 +267,26 @@ readiness.
   Chrome/Chromium WASM, the proof manifest still needs recorded rootfs/kernel
   SHA-256 compatibility keys, and the browser restore path plus snapshot
   hygiene gates remain open.
+  Progress 2026-07-08 14:51:36 EEST: accepted QEMU strict browser VMState
+  restore preflight and restore-stream server plumbing in canonical `develop`
+  as commits `fa9803d4fb`, `7b444a9159`, `adc52e1036`, and `a5835ed730`.
+  The new gate adds a reusable VMState compatibility manifest checker, wires
+  CDP browser restore runs through strict saved/current manifest preflight,
+  requires an explicit restore tuple for QEMU binary/source/build config,
+  machine type/version, CPU model/extensions, memory, ordered devices,
+  migration capabilities, guest kernel/rootfs hashes, storage identity, and
+  VMState stream bytes/hash/format, then serves the restore stream at
+  `/vmstate/restore` from `wasm-browser-smoke-server.mjs`. Canonical checks
+  passed: `node --check scripts/ci/wasm-vmstate-manifest.mjs`, `node
+  scripts/ci/wasm-vmstate-manifest-test.mjs`, `node --check
+  scripts/ci/wasm-browser-cdp-gate.mjs`, `node
+  scripts/ci/wasm-browser-cdp-gate-test.mjs`, `node --check
+  scripts/ci/wasm-browser-smoke-server.mjs`, `node
+  scripts/ci/wasm-browser-smoke-server-test.mjs`, and `git diff --check
+  HEAD~4..HEAD`. This still does not close R4suspend: browser
+  suspend/resume proofs remain `0`, and the next step is a tuple-aligned
+  native/browser manifest plus real Chrome/Chromium restore proof to the
+  accepted readiness marker.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
