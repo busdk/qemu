@@ -19,10 +19,13 @@ import {
   emscriptenModuleCanvas,
   installBrowserDialogSuppression,
   installDisplayInputPolicy,
+  loadVmstateRestoreData,
   normalizeSerialEvidenceLine,
   qemuArgs,
   recordMarkerEvidence,
   recordHarnessFailure,
+  sha256Hex,
+  validateVmstateRestoreConfig,
   writeWasmChardevText,
 } from "./wasm-browser-smoke.mjs";
 
@@ -49,6 +52,12 @@ function baseConfig(overrides = {}) {
     qemuArgs: [],
     rootfs: "",
     rootfsDevice: "virtio-mmio",
+    vmstateRestore: false,
+    vmstateRestorePath: "/vmstate/restore",
+    vmstateRestoreSource: "http",
+    vmstateRestoreStateBytes: 0,
+    vmstateRestoreStateSha256: "",
+    vmstateRestoreUrl: "/vmstate/restore",
     powerOperation: "",
     powerTimeoutMs: 30000,
     serviceBridge: null,
@@ -536,6 +545,134 @@ assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
 
   assert.ok(drives.includes("file=/rootfs.raw,format=raw,if=virtio"));
   assert.ok(drives.includes("file=/guest/persistent.raw,format=raw,if=virtio"));
+}
+
+{
+  const args = qemuArgs(baseConfig({
+    vmstateRestore: true,
+    vmstateRestorePath: "/vmstate/restore",
+  }));
+
+  assert.equal(valueAfter(args, "-incoming"), "file:/vmstate/restore");
+}
+
+{
+  const validRestoreConfig = baseConfig({
+    vmstateRestore: true,
+    vmstateRestoreStateBytes: 3,
+    vmstateRestoreStateSha256:
+      "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+  });
+
+  assert.equal(validateVmstateRestoreConfig(validRestoreConfig), undefined);
+  assert.throws(
+    () => validateVmstateRestoreConfig(baseConfig({
+      vmstateRestore: true,
+      vmstateRestoreStateBytes: 0,
+      vmstateRestoreStateSha256: validRestoreConfig.vmstateRestoreStateSha256,
+    })),
+    /vmstateRestoreStateBytes must be a positive integer/,
+  );
+  assert.throws(
+    () => validateVmstateRestoreConfig(baseConfig({
+      vmstateRestore: true,
+      vmstateRestoreStateBytes: 3,
+      vmstateRestoreStateSha256: "not-a-sha",
+    })),
+    /vmstateRestoreStateSha256 must be a 64-hex SHA-256/,
+  );
+  assert.throws(
+    () => validateVmstateRestoreConfig(baseConfig({
+      vmstateRestore: true,
+      vmstateRestorePath: "relative.vmstate",
+      vmstateRestoreStateBytes: 3,
+      vmstateRestoreStateSha256: validRestoreConfig.vmstateRestoreStateSha256,
+    })),
+    /vmstateRestorePath must be an absolute in-guest path/,
+  );
+  assert.throws(
+    () => validateVmstateRestoreConfig(baseConfig({
+      vmstateRestore: true,
+      vmstateRestoreSource: "opfs",
+      vmstateRestoreStateBytes: 3,
+      vmstateRestoreStateSha256: validRestoreConfig.vmstateRestoreStateSha256,
+    })),
+    /vmstateRestoreSource must be http/,
+  );
+}
+
+{
+  const data = new Uint8Array([1, 2, 3]);
+  const expectedSha256 = await sha256Hex(data);
+  const config = baseConfig({
+    vmstateRestore: true,
+    vmstateRestoreStateBytes: data.length,
+    vmstateRestoreStateSha256: expectedSha256,
+    vmstateRestoreUrl: "/vmstate/restore",
+  });
+  const state = {};
+  const loaded = await loadVmstateRestoreData(
+    config,
+    state,
+    async (url) => {
+      assert.equal(url, "/vmstate/restore");
+      return data;
+    },
+  );
+
+  assert.equal(loaded, data);
+  assert.equal(state.loadSource, "network");
+  assert.equal(state.loadedBytes, 3);
+  assert.equal(state.sha256, expectedSha256);
+  assert.equal(state.verified, true);
+}
+
+{
+  const data = new Uint8Array([1, 2, 3]);
+  const config = baseConfig({
+    vmstateRestore: true,
+    vmstateRestoreStateBytes: 4,
+    vmstateRestoreStateSha256:
+      "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+  });
+  const state = {};
+
+  await assert.rejects(
+    () => loadVmstateRestoreData(
+      config,
+      state,
+      async () => data,
+      async () => config.vmstateRestoreStateSha256,
+    ),
+    /VMState restore stream byte length mismatch: expected 4, got 3/,
+  );
+  assert.equal(state.loadedBytes, 3);
+  assert.equal(state.errorName, "Error");
+}
+
+{
+  const data = new Uint8Array([1, 2, 3]);
+  const config = baseConfig({
+    vmstateRestore: true,
+    vmstateRestoreStateBytes: data.length,
+    vmstateRestoreStateSha256:
+      "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  });
+  const state = {};
+
+  await assert.rejects(
+    () => loadVmstateRestoreData(
+      config,
+      state,
+      async () => data,
+      async () => "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
+    ),
+    /VMState restore stream SHA-256 mismatch/,
+  );
+  assert.equal(state.loadedBytes, 3);
+  assert.equal(state.sha256, "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81");
+  assert.equal(state.verified, undefined);
+  assert.equal(state.errorName, "Error");
 }
 
 {

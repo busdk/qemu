@@ -35,6 +35,8 @@ const OPFS_ROOTFS_DIRECTORY = "qemu-wasm-rootfs";
 const DEFAULT_PERSISTENT_DISK_OPFS_NAME = "qemu-wasm-persistent.raw";
 const DEFAULT_PERSISTENT_DISK_SIZE_BYTES = 256 * 1024 * 1024;
 const OPFS_PERSISTENT_DISK_DIRECTORY = "qemu-wasm-persistent-disk";
+const DEFAULT_VMSTATE_RESTORE_PATH = "/vmstate/restore";
+const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/i;
 
 function option(name, fallback) {
   const value = new URLSearchParams(window.location.search).get(name);
@@ -143,6 +145,17 @@ async function fetchOptionalBytes(url) {
     throw new Error(`failed to fetch ${url}: HTTP ${response.status}`);
   }
   return new Uint8Array(await response.arrayBuffer());
+}
+
+export async function sha256Hex(data, scope = globalThis) {
+  if (!scope.crypto || !scope.crypto.subtle) {
+    throw new Error("Web Crypto SHA-256 is not available");
+  }
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  const digest = await scope.crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function createParentPaths(module, path) {
@@ -272,6 +285,62 @@ async function loadPersistentDiskData(config, storageState) {
   storageState.loadedBytes = config.persistentDiskSizeBytes;
   storageState.seededEmpty = true;
   return new Uint8Array(config.persistentDiskSizeBytes);
+}
+
+export function validateVmstateRestoreConfig(config) {
+  if (!config.vmstateRestore) {
+    return;
+  }
+  if (config.vmstateRestoreSource !== "http") {
+    throw new Error("vmstateRestoreSource must be http");
+  }
+  if (!config.vmstateRestorePath.startsWith("/")) {
+    throw new Error("vmstateRestorePath must be an absolute in-guest path");
+  }
+  if (!Number.isInteger(config.vmstateRestoreStateBytes) ||
+      config.vmstateRestoreStateBytes <= 0) {
+    throw new Error("vmstateRestoreStateBytes must be a positive integer");
+  }
+  if (!SHA256_HEX_PATTERN.test(config.vmstateRestoreStateSha256)) {
+    throw new Error("vmstateRestoreStateSha256 must be a 64-hex SHA-256");
+  }
+}
+
+export async function loadVmstateRestoreData(
+  config,
+  restoreState,
+  fetcher = fetchBytes,
+  hasher = sha256Hex,
+) {
+  validateVmstateRestoreConfig(config);
+  if (!config.vmstateRestore) {
+    return null;
+  }
+
+  restoreState.loadSource = "network";
+  const data = await fetcher(config.vmstateRestoreUrl);
+  restoreState.loadedBytes = data.length;
+  if (data.length !== config.vmstateRestoreStateBytes) {
+    const error = new Error(
+      `VMState restore stream byte length mismatch: expected ${config.vmstateRestoreStateBytes}, got ${data.length}`,
+    );
+    restoreState.errorName = error.name;
+    restoreState.errorMessage = error.message;
+    throw error;
+  }
+
+  const actualSha256 = (await hasher(data)).toLowerCase();
+  restoreState.sha256 = actualSha256;
+  if (actualSha256 !== config.vmstateRestoreStateSha256.toLowerCase()) {
+    const error = new Error(
+      `VMState restore stream SHA-256 mismatch: expected ${config.vmstateRestoreStateSha256.toLowerCase()}, got ${actualSha256}`,
+    );
+    restoreState.errorName = error.name;
+    restoreState.errorMessage = error.message;
+    throw error;
+  }
+  restoreState.verified = true;
+  return data;
 }
 
 function programExitStatus(line) {
@@ -1173,6 +1242,9 @@ export function qemuArgs(config) {
       args.push("-drive", `file=${config.persistentDiskPath},format=raw,if=virtio`);
     }
   }
+  if (config.vmstateRestore) {
+    args.push("-incoming", `file:${config.vmstateRestorePath}`);
+  }
   if (config.serviceBridge) {
     const requestChardev = "qemu-wasm-service-request";
     const responseChardev = "qemu-wasm-service-response";
@@ -1644,6 +1716,12 @@ function buildConfig() {
     rootfsDevice: option("rootfsDevice", "virtio-mmio"),
     rootfsOpfsName: option("rootfsOpfsName", DEFAULT_ROOTFS_OPFS_NAME),
     rootfsStorage: option("rootfsStorage", "memfs"),
+    vmstateRestore: boolOption("vmstateRestore", false),
+    vmstateRestorePath: pathOption("vmstateRestorePath", DEFAULT_VMSTATE_RESTORE_PATH),
+    vmstateRestoreSource: option("vmstateRestoreSource", "http"),
+    vmstateRestoreStateBytes: nonNegativeNumberOption("vmstateRestoreStateBytes", 0),
+    vmstateRestoreStateSha256: option("vmstateRestoreStateSha256", ""),
+    vmstateRestoreUrl: option("vmstateRestoreUrl", "/vmstate/restore"),
     powerOperation: option("powerOperation", ""),
     powerTimeoutMs: numberOption("powerTimeoutMs", 30000),
     performanceAttribution: boolOption("performanceAttribution", false),
@@ -1761,6 +1839,7 @@ async function run() {
   if (config.persistentDisk && !config.persistentDiskPath.startsWith("/")) {
     throw new Error("persistentDiskPath must be an absolute in-guest path");
   }
+  validateVmstateRestoreConfig(config);
   if (!["none", "default"].includes(config.network)) {
     throw new Error("network must be none or default");
   }
@@ -1826,6 +1905,20 @@ async function run() {
       loadedBytes: 0,
       persisted: false,
       persistedBytes: 0,
+    },
+    vmstateRestore: {
+      enabled: config.vmstateRestore,
+      source: config.vmstateRestoreSource,
+      url: config.vmstateRestoreUrl,
+      path: config.vmstateRestorePath,
+      expectedBytes: config.vmstateRestoreStateBytes,
+      expectedSha256: config.vmstateRestoreStateSha256.toLowerCase(),
+      loadSource: null,
+      loadedBytes: 0,
+      sha256: null,
+      verified: false,
+      errorName: null,
+      errorMessage: null,
     },
     hotBlocks: {
       enabled: config.tcgHotblocks,
@@ -1991,6 +2084,13 @@ async function run() {
   }
   if (config.persistentDisk) {
     mounts.push({ path: config.persistentDiskPath, persistentDisk: true });
+  }
+  if (config.vmstateRestore) {
+    mounts.push({
+      path: config.vmstateRestorePath,
+      url: config.vmstateRestoreUrl,
+      vmstateRestore: true,
+    });
   }
 
   setPhase("validate-browser", "Checking browser support");
@@ -2238,6 +2338,11 @@ async function run() {
       mount.data = await loadRootfsData(mount, config, smokeState.rootfsStorage);
     } else if (mount.persistentDisk) {
       mount.data = await loadPersistentDiskData(config, smokeState.persistentDisk);
+    } else if (mount.vmstateRestore) {
+      mount.data = await loadVmstateRestoreData(
+        config,
+        smokeState.vmstateRestore,
+      );
     } else {
       mount.data = mount.optional
         ? await fetchOptionalBytes(mount.url)

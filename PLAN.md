@@ -328,6 +328,27 @@ readiness.
   which facts QEMU verifies generically versus which facts Bus Engine OS proves
   downstream. Only after that contract is accepted should a Chrome/Chromium
   product restore proof be authorized.
+  Progress 2026-07-09: added the browser smoke-page restore importer needed
+  by the strict VMState restore gate. The page now accepts
+  `vmstateRestore=1`, fetches the server-provided restore stream, verifies the
+  required byte length and SHA-256 before QEMU starts, mounts the stream into
+  MEMFS at `/vmstate/restore` by default, passes `-incoming
+  file:/vmstate/restore`, and records restore-stream evidence or failure in
+  result JSON. Focused checks passed: `node --check
+  scripts/ci/wasm-browser-smoke.mjs`, `node --check
+  scripts/ci/wasm-browser-smoke-args-test.mjs`, `node
+  scripts/ci/wasm-browser-smoke-args-test.mjs`, `node --check
+  scripts/ci/wasm-browser-cdp-gate.mjs`, `node
+  scripts/ci/wasm-browser-cdp-gate-test.mjs`, `node --check
+  scripts/ci/wasm-browser-smoke-server.mjs`, `node --check
+  scripts/ci/wasm-vmstate-manifest.mjs`, `node
+  scripts/ci/wasm-vmstate-manifest-test.mjs`, `node --check
+  scripts/ci/wasm-vmstate-restore-tuple-manifest.mjs`, `node
+  scripts/ci/wasm-vmstate-restore-tuple-manifest-test.mjs`, and `git diff
+  --check`. `node scripts/ci/wasm-browser-smoke-server-test.mjs` was not run
+  outside the sandbox because it binds a local listener and this shared host
+  must not start local services as part of this slice. This still does not
+  close R4suspend: browser product restore proofs remain `0`.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
