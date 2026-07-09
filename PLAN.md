@@ -9,17 +9,20 @@ file and then implemented.
 
 ## Active Goal
 
-Follow the supervisor-root `GOAL.md` for the active five-minute browser
-multi-user boot goal. This shared plan contains both the separate RISC-V
-accelerator lane and the Linux-supervisor `x86_64-softmmu` accelerator lane.
-The supervisor-root `GOAL.md` selects which lane the current executor owns.
+Follow the supervisor-root `GOAL.md` for the active browser-hosted Bus Engine
+OS fast-start goal. The current primary lane is the RISC-V `virtual-server`
+product suspend/resume path: prove that Chrome/Chromium browser-hosted
+QEMU/WASM can restore the accepted package-built Bus Engine OS artifact to the
+configured readiness marker and responsive console/login path faster than
+same-artifact cold boot, with strict compatibility, snapshot-hygiene, and
+result-evidence gates.
 
-This file is shared by the x86_64 and RISC-V supervisor environments. RISC-V
-items remain valid for the separate RISC-V lane. The current executor lane in
-the Linux supervisor environment owns only the `x86_64-softmmu` accelerator
-items, currently R4f-R4l and the x86 final proof item. Do not project x86_64
-boot timing from RISC-V measurements, and do not remove RISC-V items merely
-because they are out of scope for the x86_64 lane.
+This shared plan still contains x86_64 accelerator and RISC-V accelerator work
+for other executor environments. Those lanes remain valid when explicitly
+assigned, but they do not define this supervisor's current success path. Do
+not project x86_64 timing from RISC-V measurements, or the reverse; a cross-ISA
+result changes a target's estimate only after the same mechanism is enabled
+and measured on that target with comparable same-commit evidence.
 
 Each lane is complete only against its own accepted Bus Engine OS
 `virtual-server` kernel/rootfs pair. The proof must use Chrome or Chromium,
@@ -314,6 +317,17 @@ readiness.
   Expected-text matching, including `bus-engine-os login:`, remains strict;
   this is diagnostic correctness only and does not accept BEO readiness,
   product suspend/resume, or interactive console proof.
+  Follow-up 2026-07-09: R4suspend is now the primary fast-start lane for the
+  supervisor-root goal. The next accepted slice is not a browser proof; it is a
+  product restore contract for the accepted Bus Engine OS RISC-V tuple. Define
+  the exact saved/current compatibility manifest fields, restore-state source
+  shape, per-instance identity and entropy requirements, truncated/incompatible
+  state rejection behavior, console/readiness expectations, timing fields, and
+  result JSON fields for a product `virtual-server` resume proof. The contract
+  must compare restore readiness against same-artifact cold boot and must state
+  which facts QEMU verifies generically versus which facts Bus Engine OS proves
+  downstream. Only after that contract is accepted should a Chrome/Chromium
+  product restore proof be authorized.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
