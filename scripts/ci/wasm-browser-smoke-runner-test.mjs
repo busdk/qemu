@@ -248,6 +248,18 @@ for (const status of [
       persisted: true,
       persistedBytes: 1048576,
     },
+    vmstateRestore: {
+      enabled: true,
+      source: "http",
+      url: "http://127.0.0.1:8151/vmstate/restore",
+      path: "/vmstate/restore",
+      expectedBytes: 256,
+      expectedSha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      loadSource: "network",
+      loadedBytes: 256,
+      sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      verified: true,
+    },
     hotBlocks: {
       enabled: true,
       summaryCount: 1,
@@ -366,6 +378,18 @@ for (const status of [
     loadedBytes: 1048576,
     persisted: true,
     persistedBytes: 1048576,
+  });
+  assert.deepEqual(result.vmstateRestoreState, {
+    enabled: true,
+    source: "http",
+    url: "http://127.0.0.1:8151/vmstate/restore",
+    path: "/vmstate/restore",
+    expectedBytes: 256,
+    expectedSha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    loadSource: "network",
+    loadedBytes: 256,
+    sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    verified: true,
   });
   assert.deepEqual(result.hotBlocks, {
     enabled: true,

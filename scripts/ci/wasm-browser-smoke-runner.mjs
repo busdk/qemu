@@ -1672,6 +1672,7 @@ export function promoteSmokeState(result, smokeState) {
   result.powerControlState = smokeState.powerControl || null;
   result.persistentDiskState = smokeState.persistentDisk || null;
   result.rootfsStorageState = smokeState.rootfsStorage || null;
+  result.vmstateRestoreState = smokeState.vmstateRestore || null;
   result.serviceBridgeState = smokeState.serviceBridge || null;
   result.hotBlocks = smokeState.hotBlocks || null;
   result.performanceAttribution = smokeState.performanceAttribution || null;
