@@ -349,6 +349,14 @@ readiness.
   outside the sandbox because it binds a local listener and this shared host
   must not start local services as part of this slice. This still does not
   close R4suspend: browser product restore proofs remain `0`.
+  Follow-up 2026-07-09: the Playwright smoke runner now promotes the page's
+  `vmstateRestore` block to top-level `vmstateRestoreState` in result JSON,
+  matching the CDP gate's retained `smokeState` evidence and making
+  restore-stream verification visible to callers without parsing the whole page
+  state. Focused checks passed: `node --check
+  scripts/ci/wasm-browser-smoke-runner.mjs`, `node
+  scripts/ci/wasm-browser-smoke-runner-test.mjs`, `node
+  scripts/ci/wasm-browser-smoke-args-test.mjs`, and `git diff --check`.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
