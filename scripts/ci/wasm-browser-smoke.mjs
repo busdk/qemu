@@ -598,6 +598,14 @@ export const BOOT_MILESTONES = [
   },
 ];
 
+export function normalizeSerialEvidenceLine(line) {
+  return String(line)
+    .replace(/\x1b\[[0-9;:]*[A-Za-z]/g, "")
+    .replace(/[\x00-\x09\x0b-\x1f\x7f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function bootMilestoneForLine(line) {
   if (typeof line !== "string" || line === "") {
     return null;
@@ -636,6 +644,55 @@ export function recordBootMilestone(state, line, elapsedMs) {
   return entry;
 }
 
+export function recordMarkerEvidence(state, marker, line, elapsedMs) {
+  const normalizedLine = normalizeSerialEvidenceLine(line);
+
+  if (!state || typeof marker !== "string" || marker === "" ||
+      typeof line !== "string" ||
+      (!line.includes(marker) && !normalizedLine.includes(marker))) {
+    return null;
+  }
+  if (!state.markerEvidence) {
+    state.markerEvidence = {
+      marker,
+      count: 0,
+      firstLine: null,
+      firstNormalizedLine: null,
+      firstElapsedMs: null,
+      lastLine: null,
+      lastNormalizedLine: null,
+      lastElapsedMs: null,
+      maxSamples: 8,
+      samples: [],
+    };
+  }
+  state.markerEvidence.marker = marker;
+  state.markerEvidence.count += 1;
+  const sample = {
+    elapsedMs,
+    line,
+    normalizedLine,
+  };
+  if (state.markerEvidence.firstLine === null) {
+    state.markerEvidence.firstLine = line;
+    state.markerEvidence.firstNormalizedLine = normalizedLine;
+    state.markerEvidence.firstElapsedMs = elapsedMs;
+  }
+  state.markerEvidence.lastLine = line;
+  state.markerEvidence.lastNormalizedLine = normalizedLine;
+  state.markerEvidence.lastElapsedMs = elapsedMs;
+  if (!Array.isArray(state.markerEvidence.samples)) {
+    state.markerEvidence.samples = [];
+  }
+  state.markerEvidence.samples.push(sample);
+  const maxSamples = Number.isSafeInteger(state.markerEvidence.maxSamples)
+    ? state.markerEvidence.maxSamples
+    : 8;
+  while (state.markerEvidence.samples.length > maxSamples) {
+    state.markerEvidence.samples.shift();
+  }
+  return sample;
+}
 
 function serviceBridgeResponseStatus(response) {
   if (typeof response.status === "string" && response.status !== "") {
@@ -1856,6 +1913,7 @@ async function run() {
       } : null,
     },
     markerSeen: false,
+    markerEvidence: null,
     expectedTextSeen: config.expectText.map((text) => ({ text, seen: false })),
     lastLine: "",
     programExitStatus: null,
@@ -2142,7 +2200,12 @@ async function run() {
       smokeState.outputSuppressed = true;
       appendLine(output, `bus-engine-os: console output truncated after ${config.maxOutputBytes} bytes`);
     }
-    if (line.includes(config.marker)) {
+    if (recordMarkerEvidence(
+      smokeState,
+      config.marker,
+      line,
+      Math.round(performance.now() - startTime),
+    )) {
       smokeState.markerSeen = true;
     }
     if (serviceBridge && line.includes(config.serviceBridge.readinessMarker)) {

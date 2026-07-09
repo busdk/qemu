@@ -19,7 +19,9 @@ import {
   emscriptenModuleCanvas,
   installBrowserDialogSuppression,
   installDisplayInputPolicy,
+  normalizeSerialEvidenceLine,
   qemuArgs,
+  recordMarkerEvidence,
   recordHarnessFailure,
   writeWasmChardevText,
 } from "./wasm-browser-smoke.mjs";
@@ -195,6 +197,40 @@ function serviceBridgeConfig(overrides = {}) {
     interactiveOnly: false,
     ...overrides,
   };
+}
+
+{
+  const markerState = {};
+  const decoratedMultiUserLine = "[\u001b[0;32m  OK  \u001b[0m] Reached target \u001b[0;1;39mMulti-User System\u001b[0m.\r\r";
+
+  assert.equal(
+    decoratedMultiUserLine.includes("Reached target Multi-User System."),
+    false,
+  );
+  assert.equal(
+    normalizeSerialEvidenceLine(decoratedMultiUserLine),
+    "[ OK ] Reached target Multi-User System.",
+  );
+  assert.deepEqual(
+    recordMarkerEvidence(
+      markerState,
+      "Reached target Multi-User System.",
+      decoratedMultiUserLine,
+      4,
+    ),
+    {
+      elapsedMs: 4,
+      line: decoratedMultiUserLine,
+      normalizedLine: "[ OK ] Reached target Multi-User System.",
+    },
+  );
+  assert.equal(markerState.markerEvidence.count, 1);
+  assert.equal(markerState.markerEvidence.marker, "Reached target Multi-User System.");
+  assert.equal(markerState.markerEvidence.firstLine, decoratedMultiUserLine);
+  assert.equal(
+    markerState.markerEvidence.firstNormalizedLine,
+    "[ OK ] Reached target Multi-User System.",
+  );
 }
 
 {

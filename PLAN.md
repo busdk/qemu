@@ -306,6 +306,14 @@ readiness.
   tuple-compatible VMState stream from the same accepted browser artifact
   tuple or proving a native/server producer can satisfy the strict tuple
   without weakening the gate.
+  Follow-up 2026-07-09: the browser smoke harness now records marker
+  evidence when either the raw serial line or the normalized serial line
+  contains the configured marker. This fixes a diagnostic false negative for
+  ANSI-decorated systemd output such as `Reached target Multi-User System.`
+  while preserving the raw line and normalized evidence in smoke state.
+  Expected-text matching, including `bus-engine-os login:`, remains strict;
+  this is diagnostic correctness only and does not accept BEO readiness,
+  product suspend/resume, or interactive console proof.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
