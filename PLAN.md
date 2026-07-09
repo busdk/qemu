@@ -328,6 +328,42 @@ readiness.
   which facts QEMU verifies generically versus which facts Bus Engine OS proves
   downstream. Only after that contract is accepted should a Chrome/Chromium
   product restore proof be authorized.
+  Accepted contract 2026-07-09: the next worker must produce a static export
+  tuple before any product browser proof runs. The tuple is three JSON files:
+  saved manifest, current manifest, and a static export manifest. The saved and
+  current manifests must pass `scripts/ci/wasm-vmstate-manifest.mjs
+  --restore-tuple` and also carry these exact compatibility fields for the
+  accepted `virtual-server` artifact: QEMU source commit, build-config digest,
+  host kind, producer/binary digest plus browser launcher/module digests when
+  applicable; machine type/version; CPU model/extensions; memory; ordered
+  devices; migration capabilities; kernel/rootfs hashes; package-set digest;
+  profile identity; cold-boot kernel append; resume append; root storage and
+  resume-device identity; immutable disk/overlay identity and pairing digest;
+  restore stream hash/bytes/format; and ordered browser harness args for the
+  restore-affecting runner flags. The static export manifest must hash and name
+  the saved/current manifests, restore stream, QEMU artifact manifest, guest
+  manifest or equivalent artifact bundle, immutable disk image, mutable overlay
+  if any, and the same-artifact cold-boot result JSON used for comparison.
+  Restore-state source rules: accepted tuple only; same-artifact cold-boot
+  comparison only; no stale artifact, synthetic guest, shell-only capture, or
+  hand-edited manifest; and no product browser run until the static export
+  manifest exists. QEMU generically verifies tuple compatibility,
+  restore-stream byte/hash/format checks, immutable/overlay pairing, and
+  truncated/incompatible rejection before launch. Bus Engine OS downstream must
+  prove the package-set/profile identity, accepted readiness marker semantics,
+  snapshot-safe boundary or regeneration, entropy reseed before exposure, and
+  two-restored-instance uniqueness for machine identity and SSH host keys.
+  Required proof result JSON fields: browser name/version, browser runner
+  command, QEMU command, browser result JSON path/SHA-256, QEMU artifact
+  manifest path/SHA-256, static export manifest path/SHA-256, restore and cold
+  boot readiness timings, restore state evidence, and final marker/pageStatus/
+  console state. The next slice is accepted only when a worker produces the
+  static export tuple, records one truncation rejection and one incompatible
+  tuple rejection before QEMU starts, runs same-artifact cold boot plus restore
+  to the same accepted marker, proves restore is faster than cold boot, and
+  records the downstream uniqueness/entropy evidence. See
+  `docs/devel/wasm-support-plan.rst` "R4suspend product restore contract" for
+  the field-level contract.
   Progress 2026-07-09: added the browser smoke-page restore importer needed
   by the strict VMState restore gate. The page now accepts
   `vmstateRestore=1`, fetches the server-provided restore stream, verifies the

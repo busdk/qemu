@@ -4543,6 +4543,185 @@ native QEMU managed-save proof and a browser quota/error proof both exist.
 Until then, screenshots, serial logs, result JSON, and guest artifact manifests
 remain the accepted browser evidence.
 
+R4suspend product restore contract
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The next R4suspend slice for the downstream ``riscv64`` ``virtual-server``
+artifact is a contract, not another browser run.  Before any product browser
+restore proof is accepted, QEMU must consume a static export bundle with three
+machine-readable files:
+
+* a saved VMState compatibility manifest;
+* a current VMState compatibility manifest;
+* a static export manifest that pairs the restore stream, immutable disk,
+  mutable overlay state, QEMU artifact manifest, and same-artifact cold-boot
+  reference.
+
+The saved and current manifests must use
+``qemu-wasm-vmstate-manifest-v1`` and pass
+``scripts/ci/wasm-vmstate-manifest.mjs --restore-tuple``.  For the downstream
+``virtual-server`` restore gate they must also declare these exact
+compatibility keys, with saved/current values identical unless noted
+otherwise:
+
+* ``qemu.sourceCommit`` - exact QEMU source commit for the producer and
+  consumer artifacts;
+* ``qemu.buildConfigDigest`` - deterministic build-config digest for the
+  producer and consumer artifacts;
+* ``qemu.hostKind`` - ``native`` or ``wasm-browser`` so the checker can tell
+  whether the state came from a native export or a browser artifact;
+* ``qemu.binarySha256`` - producer binary digest for native exports, or the
+  effective browser module digest for browser-produced state;
+* ``qemu.launcherSha256`` - required when ``qemu.hostKind`` is
+  ``wasm-browser``; digest of the JavaScript launcher artifact;
+* ``qemu.moduleSha256`` - required when ``qemu.hostKind`` is
+  ``wasm-browser``; digest of the WebAssembly module artifact;
+* ``target`` - for this lane ``riscv64-softmmu``;
+* ``machine.type`` and ``machine.version`` - exact QEMU machine model and
+  version;
+* ``cpu.model`` and ``cpu.extensions`` - exact CPU model and normalized
+  extension set;
+* ``memory`` - guest RAM size;
+* ``devices`` - ordered device/drive list as launched by QEMU;
+* ``migration.capabilities`` - exact migration capability tuple used to create
+  and consume the stream;
+* ``guest.kernelSha256`` and ``guest.rootfsSha256`` - exact guest artifact
+  hashes;
+* ``guest.packageSetDigest`` - digest of the accepted package set used to
+  build the downstream artifact;
+* ``guest.profile`` - downstream artifact identity, currently
+  ``virtual-server``;
+* ``guest.kernelAppend`` - exact cold-boot kernel append string for the saved
+  artifact;
+* ``guest.resumeAppend`` - exact resume-time append string; for pure VMState
+  import this may equal ``guest.kernelAppend``, while guest-managed hibernate
+  paths must carry explicit ``resume=`` or equivalent arguments here;
+* ``storage.drive`` and ``storage.resumeDevice`` - exact QEMU-visible root
+  storage and resume-device identity;
+* ``storage.immutableDisk.sha256``, ``storage.immutableDisk.bytes``, and
+  ``storage.immutableDisk.format`` - immutable release-disk identity;
+* ``storage.overlay.kind`` - ``none``, ``opfs``, ``file``, or another explicit
+  transport name;
+* ``storage.overlay.sha256``, ``storage.overlay.bytes``, and
+  ``storage.overlay.format`` when ``storage.overlay.kind`` is not ``none``;
+* ``storage.pairingSha256`` - digest over the immutable disk identity, overlay
+  identity, and restore-state identity so the checker can reject mixed pairs;
+* ``vmstate.streamSha256``, ``vmstate.streamBytes``, and ``vmstate.format`` -
+  restore-stream identity and format;
+* ``harness.browser`` - expected browser family for the proof, for example
+  ``chromium``;
+* ``harness.runner`` - runner entry point, currently
+  ``scripts/ci/wasm-browser-smoke-runner.mjs`` or the CDP gate equivalent;
+* ``harness.argv`` - ordered restore-affecting browser harness arguments:
+  artifact directory/program/wasm selection, guest manifest, machine, CPU,
+  memory, kernel append, marker, expected serial text, timeout, rootfs device,
+  and every ``--vmstate-restore*`` flag.
+
+The static export manifest is the source-of-truth bundle that downstream Bus
+Engine OS hands to the browser proof.  It must record path, byte-length, and
+SHA-256 evidence for:
+
+* the saved manifest and current manifest;
+* the restore stream;
+* the QEMU artifact manifest for the accepted browser artifact pair;
+* the guest manifest or equivalent guest artifact bundle;
+* the immutable disk image and any mutable overlay image;
+* the same-artifact cold-boot result JSON used as the comparison baseline.
+
+The static export manifest must also restate ``guest.profile``,
+``guest.packageSetDigest``, the accepted readiness marker, required expected
+serial text, and the exact browser-runner command line that will be used for
+the restore proof.  No product browser run is accepted until this static
+export tuple exists.
+
+Restore-state source rules
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The accepted source rules are:
+
+* restore state must come from an accepted tuple export only; ad hoc shell
+  captures, hand-edited manifests, synthetic guests, or stale artifacts are
+  rejected;
+* the restore proof and cold-boot comparison must use the same accepted
+  kernel/rootfs/profile/package-set tuple and the same QEMU artifact manifest;
+* the restore stream must be imported exactly as exported, with no synthetic
+  filler pages and no browser-side mutation before QEMU sees it;
+* the proof remains blocked until a static export manifest names the exact
+  saved/current manifests and restore stream used by the browser run.
+
+QEMU is responsible for generic tuple verification, restore-stream import, and
+incompatibility rejection.  Downstream Bus Engine OS is responsible for proving
+that the package-set/profile digest is correct for the product artifact and
+that the chosen readiness marker is the accepted product marker.
+
+Safety rules
+^^^^^^^^^^^^
+
+The restore proof is rejected unless all of these hold:
+
+* truncated restore state is rejected before QEMU starts, using byte-length and
+  SHA-256 checks against the static export manifest;
+* incompatible manifests are rejected before QEMU starts, naming the first
+  mismatched compatibility key;
+* the snapshot is either taken before machine-id, SSH host keys, random seed,
+  DHCP lease, and user secrets exist, or downstream proof shows those values
+  are regenerated before exposure;
+* guest entropy is reseeded on every restore before any key or nonce
+  generation;
+* evidence from two restored instances shows distinct machine identity and SSH
+  host-key material, or equivalent proof that the snapshot is pre-secret and
+  regeneration happened before the proof boundary.
+
+Result JSON contract
+^^^^^^^^^^^^^^^^^^^^
+
+The accepted product restore proof must emit a result JSON bundle that the
+downstream static checker can validate without opening the browser manually.
+It may wrap the raw smoke-runner JSON, but it must contain at least:
+
+* ``browser`` and ``browserVersion``;
+* ``browserRunnerCommand`` - exact browser runner command line;
+* ``qemuCommand`` - exact QEMU argv captured from the page state;
+* ``browserResultJson.path`` and ``browserResultJson.sha256``;
+* ``qemuArtifactManifest.path`` and ``qemuArtifactManifest.sha256``;
+* ``staticExportManifest.path`` and ``staticExportManifest.sha256``;
+* ``timing.restoreReadyMs`` - elapsed time to the accepted readiness marker
+  from restore start;
+* ``timing.coldBootReadyMs`` - elapsed time to the same marker for the
+  same-artifact cold boot baseline;
+* ``timing.restoreImportMs`` or a more detailed import/decompression split if
+  available;
+* ``restoreStateEvidence`` - restore stream path, bytes, SHA-256, format,
+  saved-manifest path/SHA-256, current-manifest path/SHA-256, and whether the
+  importer verified byte length and digest before launch;
+* ``finalState.pageStatus``, ``finalState.markerSeen``,
+  ``finalState.lastLine``, ``finalState.guestLastLine``, and
+  ``finalState.programExitStatus``.
+
+When the raw smoke runner already emits a field, the wrapper should copy it
+verbatim rather than renaming it.  New wrapper-only fields should be additive
+and path/hash focused.
+
+Next proof gate
+^^^^^^^^^^^^^^^
+
+The next implementation/proof slice is accepted only when all of these are
+true:
+
+* a static export manifest exists and hashes the saved/current manifests,
+  restore stream, immutable disk, overlay state, QEMU artifact manifest, and
+  cold-boot baseline;
+* the saved/current manifests pass the strict restore tuple check plus the
+  additional product keys above;
+* a negative check proves truncated state rejection and one incompatible-field
+  rejection before QEMU starts;
+* a same-artifact cold boot and a restore run both reach the same accepted
+  readiness marker with the same expected serial identity text;
+* the proof bundle records both timings and shows restore is faster than the
+  recorded same-artifact cold boot;
+* downstream evidence shows entropy reseed plus two-restored-instance identity
+  uniqueness, or a documented pre-secret boundary with the same effect.
+
 First proof shape
 -----------------
 
