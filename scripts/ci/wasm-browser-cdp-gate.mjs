@@ -32,7 +32,7 @@ const DEFAULT_CHROME_PATHS = [
 function usage(status = 0) {
   const stream = status === 0 ? process.stdout : process.stderr;
   stream.write(`usage: wasm-browser-cdp-gate.mjs --artifact-dir DIR --kernel FILE [--initrd FILE | --rootfs FILE] --out FILE [OPTIONS]\n\nRuns the QEMU WebAssembly browser smoke page through Chrome DevTools Protocol, without Playwright.\n\nOptions:\n  --artifact-dir DIR       Directory containing qemu-system-*.js/.wasm artifacts\n  --guest-manifest FILE    Load guest defaults such as kernel/rootfs/marker\n  --kernel FILE            Guest kernel served as /guest/kernel\n  --initrd FILE            Guest initramfs image\n  --rootfs FILE            Guest rootfs served as /guest/rootfs.raw\n  --out FILE               Write result JSON\n  --chrome FILE            Chrome/Chromium executable\n  --firmware-dir DIR       Directory containing QEMU firmware blobs\n  --host HOST              Smoke server host (default: 127.0.0.1)\n  --port N                 Smoke server port (default: 8151)\n  --cdp-port N             Chrome remote-debugging port (default: 9223)\n  --program FILE           QEMU JS artifact basename (default: manifest or qemu-system-riscv64.js)\n  --wasm FILE              QEMU WASM artifact basename (default: derived from program)\n  --marker TEXT            Required marker text (default: manifest or Welcome to TuxTest)\n  --timeout-ms N           Smoke timeout (default: manifest or 180000)\n  --max-output-bytes N     Smoke output byte cap (default: 160000)\n  --memory SIZE            Guest memory (default: manifest or 512M)\n  --machine NAME           QEMU machine (default: manifest or virt)\n  --cpu MODEL              QEMU CPU model (default: manifest or empty)\n  --rootfs-device KIND     Rootfs block device (default: manifest or virtio-mmio)\n  --target-arch ARCH       Guest target architecture for firmware mounts\n  --kernel-append TEXT     Kernel command line\n  --vmstate-restore        Enable browser VMState restore import\n  --vmstate-restore-state-file FILE\n                           Local VMState stream served as /vmstate/restore\n  --vmstate-restore-state-bytes N\n                           Expected VMState byte length\n  --vmstate-restore-state-sha256 HASH\n                           Expected VMState SHA-256\n  --vmstate-restore-saved-manifest FILE\n                           Saved-state compatibility manifest\n  --vmstate-restore-current-manifest FILE\n                           Current compatibility manifest\n  --diagnostics-limit N    Live-generated-exec diagnostics limit (default: 24)\n  --no-live-generated-exec Disable live generated exec query flags\n  --help                   Show this help\n`);
-  stream.write(`Static restore options:\n  --expect-text TEXT       Additional serial text required for success; repeatable\n  --vmstate-restore-static-export-manifest FILE\n                           Fail-closed static export source of truth\n`);
+  stream.write(`Static restore options:\n  --expect-text TEXT       Additional serial text required for success; repeatable\n  --vmstate-restore-proof  Require acceptance-shaped fail-closed proof evidence\n  --vmstate-restore-static-export-manifest FILE\n                           Fail-closed static export source of truth\n`);
   process.exit(status);
 }
 
@@ -758,7 +758,7 @@ function restorePreflightFailure(code, field, message, details = {}) {
     purpose: "qemu-browser-cdp-vmstate-restore-preflight",
     ok: false,
     restoreMode: details.restoreMode || "static-export-proof",
-    productProofEligible: false,
+    staticExportProofEligible: false,
     browserStarted: false,
     qemuStarted: false,
     vmstateRestoreManifestCheck: details.vmstateRestoreManifestCheck || null,
@@ -803,7 +803,7 @@ export async function vmstateRestorePreflight(options, inputEvidence) {
     purpose: "qemu-browser-cdp-vmstate-restore-preflight",
     ok: true,
     restoreMode: options.vmstateRestore ? "generic-legacy" : "none",
-    productProofEligible: false,
+    staticExportProofEligible: false,
     browserStarted: false,
     qemuStarted: false,
     vmstateRestoreManifestCheck: null,
@@ -980,7 +980,7 @@ export async function vmstateRestorePreflight(options, inputEvidence) {
       },
     );
   }
-  base.productProofEligible = true;
+  base.staticExportProofEligible = true;
   return base;
 }
 
@@ -1017,7 +1017,7 @@ async function main() {
       format: 1,
       success: false,
       restoreMode: options.vmstateRestorePreflight.restoreMode,
-      productProofEligible: false,
+      staticExportProofEligible: false,
       browserStarted: false,
       qemuStarted: false,
       marker: options.marker,
@@ -1188,8 +1188,8 @@ async function main() {
     format: 1,
     success,
     restoreMode: options.vmstateRestorePreflight.restoreMode,
-    productProofEligible:
-      success && options.vmstateRestorePreflight.productProofEligible,
+    staticExportProofEligible:
+      success && options.vmstateRestorePreflight.staticExportProofEligible,
     browserStarted: true,
     qemuStarted: Boolean(finalState?.phases?.some((entry) =>
       entry?.phase === "start-qemu")),

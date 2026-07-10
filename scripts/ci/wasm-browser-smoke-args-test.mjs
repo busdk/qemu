@@ -611,6 +611,7 @@ assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
     vmstateRestoreUrl: "/vmstate/restore",
   });
   const state = {};
+  const clockValues = [100, 110, 112, 120];
   const loaded = await loadVmstateRestoreData(
     config,
     state,
@@ -618,6 +619,8 @@ assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
       assert.equal(url, "/vmstate/restore");
       return data;
     },
+    sha256Hex,
+    () => clockValues.shift(),
   );
 
   assert.equal(loaded, data);
@@ -625,6 +628,9 @@ assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
   assert.equal(state.loadedBytes, 3);
   assert.equal(state.sha256, expectedSha256);
   assert.equal(state.verified, true);
+  assert.equal(state.fetchMs, 10);
+  assert.equal(state.verifyMs, 8);
+  assert.equal(state.totalMs, 20);
 }
 
 {

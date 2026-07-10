@@ -206,6 +206,7 @@ try {
     wasm: module.path,
   };
   const argv = vmstateRestoreAffectingArgs(runnerOptions);
+  assert.equal(argv.some((entry) => entry.startsWith(dir)), false);
   const tuple = compatibility({
     argv,
     immutableDisk,
@@ -328,7 +329,7 @@ try {
     assert.equal(child.status, 1, child.stderr);
     const result = JSON.parse(readFileSync(out, "utf8"));
     assert.equal(result.success, false);
-    assert.equal(result.productProofEligible, false);
+    assert.equal(result.staticExportProofEligible, false);
     assert.equal(result.browserStarted, false);
     assert.equal(result.qemuStarted, false);
     return result;
@@ -368,7 +369,7 @@ try {
       missingInputEvidence,
     );
     assert.equal(missingPreflight.ok, false);
-    assert.equal(missingPreflight.productProofEligible, false);
+    assert.equal(missingPreflight.staticExportProofEligible, false);
     assert.equal(missingPreflight.browserStarted, false);
     assert.equal(missingPreflight.qemuStarted, false);
     assert.equal(missingPreflight.failure.code, "missing-static-export");
@@ -402,6 +403,23 @@ try {
       "unreadable-file",
     );
     runnerOptions.vmstateRestoreStaticExportManifest = staticPath;
+  }
+
+  {
+    const restoreRecord = staticManifest.files.restoreStream;
+    staticManifest.files.restoreStream = {
+      ...restoreRecord,
+      path: restoreStream.path,
+    };
+    writeJson(staticExport, staticManifest);
+    const result = await preflightVmstateStaticExport(staticExport);
+    assert.equal(result.ok, false);
+    assert.equal(result.browserStarted, false);
+    assert.equal(result.qemuStarted, false);
+    assert.equal(result.failure.code, "nonportable-path");
+    assert.equal(result.failure.field, "files.restoreStream.path");
+    staticManifest.files.restoreStream = restoreRecord;
+    writeJson(staticExport, staticManifest);
   }
 
   {
