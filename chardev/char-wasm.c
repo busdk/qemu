@@ -9,6 +9,7 @@
 #include "qemu/osdep.h"
 #include "chardev/char.h"
 #include "qapi/error.h"
+#include "qemu/atomic.h"
 #include "qemu/main-loop.h"
 #include "qemu/module.h"
 #include "qemu/option.h"
@@ -35,6 +36,7 @@ DECLARE_INSTANCE_CHECKER(WasmChardev, WASM_CHARDEV,
 
 static QemuMutex wasm_chardevs_lock;
 static GList *wasm_chardevs;
+static int wasm_chardevs_ready;
 
 EM_JS(int, wasm_chardev_pending_channel_len, (void), {
     const text = Module["qemuWasmChardevPendingChannel"] || "";
@@ -232,8 +234,15 @@ int qemu_wasm_chardev_write_pending(void)
     g_autofree char *channel = NULL;
     g_autofree uint8_t *data = NULL;
     WasmChardev *s;
-    int channel_len = wasm_chardev_pending_channel_len();
-    int data_len = wasm_chardev_pending_data_len();
+    int channel_len;
+    int data_len;
+
+    if (!qatomic_load_acquire(&wasm_chardevs_ready)) {
+        return -EAGAIN;
+    }
+
+    channel_len = wasm_chardev_pending_channel_len();
+    data_len = wasm_chardev_pending_data_len();
 
     if (channel_len <= 1 || data_len <= 0) {
         return -1;
@@ -295,6 +304,7 @@ static void register_types(void)
 {
     qemu_mutex_init(&wasm_chardevs_lock);
     type_register_static(&char_wasm_type_info);
+    qatomic_store_release(&wasm_chardevs_ready, true);
 }
 
 type_init(register_types);
