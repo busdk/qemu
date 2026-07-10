@@ -301,6 +301,9 @@ function sha256(text) {
       qemu: {
         binarySha256: "d".repeat(64),
         buildConfigDigest: "target=riscv64-softmmu;wasm64=true",
+        hostKind: "wasm-browser",
+        launcherSha256: "f".repeat(64),
+        moduleSha256: "d".repeat(64),
         sourceCommit: "b73bd4c184ec",
       },
       target: "riscv64-softmmu",
