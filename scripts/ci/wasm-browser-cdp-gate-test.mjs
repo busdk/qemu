@@ -16,8 +16,10 @@ import {
   chromeLaunchArgs,
   cdpConsoleMessageDiagnostic,
   cdpResourceErrorDiagnostic,
+  gateShouldStop,
   parseArgs,
   proofInputEvidence,
+  recordSerialInputAttempt,
   serialInputTriggerReady,
   smokeServerArgs,
   smokeUrl,
@@ -136,6 +138,68 @@ assert.equal(serialInputTriggerReady({
   output: "",
   state: { phase: "guest-boot", primarySerialInput: { moduleAttached: true } },
 }), true);
+
+const serialInputAttempt = {
+  attempts: 0,
+  elapsedMs: null,
+  failures: 0,
+  lastAttemptElapsedMs: null,
+  lastFailureElapsedMs: null,
+  lastWriteFailure: null,
+  sent: false,
+  writeStatus: null,
+};
+assert.equal(recordSerialInputAttempt(serialInputAttempt, {
+  ready: false,
+  error: "primary serial input channel is not ready",
+}, 1000), false);
+assert.deepEqual(serialInputAttempt, {
+  attempts: 1,
+  elapsedMs: null,
+  failures: 1,
+  lastAttemptElapsedMs: 1000,
+  lastFailureElapsedMs: 1000,
+  lastWriteFailure: "primary serial input channel is not ready",
+  sent: false,
+  writeStatus: null,
+});
+assert.equal(recordSerialInputAttempt(serialInputAttempt, {
+  exception: "registration exception",
+}, 2000), false);
+assert.equal(recordSerialInputAttempt(serialInputAttempt, {
+  ready: false,
+  status: "not-an-integer",
+}, 3000), false);
+assert.equal(recordSerialInputAttempt(serialInputAttempt, {
+  ready: false,
+  status: -1,
+}, 4000), false);
+assert.equal(serialInputAttempt.sent, false);
+assert.equal(serialInputAttempt.elapsedMs, null);
+assert.equal(serialInputAttempt.attempts, 4);
+assert.equal(serialInputAttempt.failures, 4);
+assert.equal(serialInputAttempt.lastWriteFailure, "write returned -1");
+assert.equal(recordSerialInputAttempt(serialInputAttempt, {
+  ready: true,
+  status: 0,
+}, 5000), true);
+assert.deepEqual(serialInputAttempt, {
+  attempts: 5,
+  elapsedMs: 5000,
+  failures: 4,
+  lastAttemptElapsedMs: 5000,
+  lastFailureElapsedMs: 4000,
+  lastWriteFailure: "write returned -1",
+  sent: true,
+  writeStatus: 0,
+});
+assert.equal(gateShouldStop(
+  "marker reached: ready", [], { sent: false }, "ready",
+), false);
+assert.equal(gateShouldStop(
+  "marker reached: ready", [], { sent: true }, "ready",
+), true);
+assert.equal(gateShouldStop("failed", [], { sent: false }, "ready"), true);
 
 const vmstateOptions = {
   ...options,

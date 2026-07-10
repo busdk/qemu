@@ -488,6 +488,35 @@ export function serialInputTriggerReady(snapshot, afterText = "") {
   );
 }
 
+export function recordSerialInputAttempt(serialInput, result, elapsedMs) {
+  serialInput.attempts += 1;
+  serialInput.lastAttemptElapsedMs = elapsedMs;
+  if (result?.ready === true && Number.isInteger(result.status) &&
+      result.status >= 0) {
+    serialInput.elapsedMs = elapsedMs;
+    serialInput.sent = true;
+    serialInput.writeStatus = result.status;
+    return true;
+  }
+  serialInput.failures += 1;
+  serialInput.lastFailureElapsedMs = elapsedMs;
+  serialInput.lastWriteFailure = result?.error ||
+    result?.exception ||
+    `write returned ${JSON.stringify(result?.status ?? result)}`;
+  return false;
+}
+
+export function gateShouldStop(pageStatus, pageErrors, serialInput, marker) {
+  if (
+    pageStatus === `marker reached: ${marker}` ||
+    pageStatus === "Bus Engine OS is ready"
+  ) {
+    return serialInput === null || serialInput.sent;
+  }
+  return pageStatus.startsWith("timeout waiting for ") ||
+    pageStatus === "failed" || pageErrors.length > 0;
+}
+
 export function smokeServerArgs(options) {
   const args = [
     "scripts/ci/wasm-browser-smoke-server.mjs",
@@ -1163,7 +1192,12 @@ async function main() {
   let lastProgressAt = 0;
   const serialInput = options.serialInputText === "" ? null : {
     afterText: options.serialInputAfterText,
+    attempts: 0,
     elapsedMs: null,
+    failures: 0,
+    lastAttemptElapsedMs: null,
+    lastFailureElapsedMs: null,
+    lastWriteFailure: null,
     sent: false,
     target: "primary-serial",
     textLength: options.serialInputText.length,
@@ -1224,19 +1258,22 @@ async function main() {
       output: pageOutput,
       state: finalState,
     }, serialInput.afterText)) {
-      const writeStatus = await cdpEval(cdp, `(() => {
-        const input = globalThis.qemuWasmPrimarySerialInput;
-        if (!input || !input.state || !input.state.moduleAttached) {
-          throw new Error('primary serial input is not attached');
+      const writeResult = await cdpEval(cdp, `(() => {
+        try {
+          const input = globalThis.qemuWasmPrimarySerialInput;
+          if (!input || !input.state || !input.state.moduleAttached) {
+            return { ready: false, error: 'primary serial input is not attached' };
+          }
+          const status = input.writeText(${JSON.stringify(options.serialInputText)});
+          if (!Number.isInteger(status) || status < 0) {
+            return { ready: false, status, error: 'primary serial input channel is not ready' };
+          }
+          return { ready: true, status };
+        } catch (error) {
+          return { ready: false, error: String(error) };
         }
-        return input.writeText(${JSON.stringify(options.serialInputText)});
       })()`);
-      if (!Number.isInteger(writeStatus) || writeStatus < 0) {
-        throw new Error(`primary serial input write failed: ${JSON.stringify(writeStatus)}`);
-      }
-      serialInput.elapsedMs = elapsedMs;
-      serialInput.sent = true;
-      serialInput.writeStatus = writeStatus;
+      recordSerialInputAttempt(serialInput, writeResult, elapsedMs);
     }
     if (elapsedMs - lastProgressAt >= 10000) {
       lastProgressAt = elapsedMs;
@@ -1244,13 +1281,7 @@ async function main() {
         finalState?.wasm64Runloop?.lastSummary?.generated_run_entries ?? null;
       console.error(`[gate] elapsed=${elapsedMs} status=${JSON.stringify(pageStatus)} entries=${entries}`);
     }
-    if (
-      pageStatus === `marker reached: ${options.marker}` ||
-      pageStatus === "Bus Engine OS is ready" ||
-      pageStatus.startsWith("timeout waiting for ") ||
-      pageStatus === "failed" ||
-      pageErrors.length > 0
-    ) {
+    if (gateShouldStop(pageStatus, pageErrors, serialInput, options.marker)) {
       break;
     }
     await sleep(1000);
