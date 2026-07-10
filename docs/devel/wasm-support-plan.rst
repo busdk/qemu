@@ -4617,6 +4617,34 @@ otherwise:
   memory, kernel append, marker, expected serial text, timeout, rootfs device,
   and every ``--vmstate-restore*`` flag.
 
+Native producer and browser consumer semantics
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The primary first proof uses full-QEMU VMState with a native producer and a
+``wasm-browser`` consumer.  Guest hibernation is deferred because enabling
+hibernation changes the accepted downstream kernel tuple.  For this explicit
+cross-host pair, ``qemu.hostKind``, ``qemu.binarySha256``, and
+``qemu.buildConfigDigest`` are role-specific evidence rather than equality
+keys:
+
+* the saved manifest records ``qemu.hostKind=native``, the exact native QEMU
+  binary digest, and the native producer build-config digest;
+* the current manifest records ``qemu.hostKind=wasm-browser``, the effective
+  browser module digest, the browser-consumer build-config digest, and required
+  ``qemu.launcherSha256`` and ``qemu.moduleSha256`` values;
+* both manifests still require the same ``qemu.sourceCommit`` and exact
+  equality for target, machine, CPU, memory, ordered devices, migration
+  capabilities, guest artifacts and product identity, kernel/resume arguments,
+  storage and pairing, VMState stream identity, and ordered harness arguments.
+
+The role exception is one-way and only applies to a native saved-state producer
+and a WASM browser current consumer.  Same-host comparisons retain ordinary
+equality for all declared keys.  Missing or invalid browser launcher/module
+digests fail the tuple check.
+
+Static proof preflight
+^^^^^^^^^^^^^^^^^^^^^^
+
 The static export manifest is the source-of-truth bundle that downstream Bus
 Engine OS hands to the browser proof.  It must record path, byte-length, and
 SHA-256 evidence for:
@@ -4633,6 +4661,20 @@ The static export manifest must also restate ``guest.profile``,
 serial text, and the exact browser-runner command line that will be used for
 the restore proof.  No product browser run is accepted until this static
 export tuple exists.
+
+QEMU consumes this bundle as
+``qemu-wasm-vmstate-static-export-v1``.  File paths and the ordered
+restore-affecting argv are bundle-relative, so the same checked export can move
+between proof hosts without accepting host-specific path drift.  Preflight
+opens and hashes every named file, validates the declared QEMU artifact
+manifest's launcher/module entries against the files and current tuple,
+recomputes the immutable-disk/overlay/VMState pairing digest, and validates the
+same-artifact cold result before any process starts.  The CDP runner's strict
+mode is selected with ``--vmstate-restore-proof`` and requires the static
+export, saved/current manifests, and expected serial identity text.  Generic
+legacy restore remains separately labeled and is never product-proof eligible.
+This static gate does not authorize a browser proof; supervisor authorization
+is still required after the downstream tuple exists and is reviewed.
 
 Restore-state source rules
 ^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -62,6 +62,9 @@ function restoreTupleManifest(overrides = {}) {
       qemu: {
         binarySha256: "c5c29bd49aa160ef220e6f70db3ac459ee23b2751852f149cf37bc4740627c56",
         buildConfigDigest: "target=riscv64-softmmu;tcg_interpreter=true;wasm64=true",
+        hostKind: "wasm-browser",
+        launcherSha256: "7fa406692c8a4238acc0607d3ec18ab518bdb639c77f7a223bb1ff2bf95b19a0",
+        moduleSha256: "c5c29bd49aa160ef220e6f70db3ac459ee23b2751852f149cf37bc4740627c56",
         sourceCommit: "b73bd4c184ec",
       },
       target: "riscv64-softmmu",
@@ -96,15 +99,32 @@ function restoreTupleManifest(overrides = {}) {
         kernelSha256: "2bd8132a3bf21570290042324fff48c987f42f2a00c08de979f43f0662ebadba",
         rootfsSha256: "bdae7f7e022592800442b73eb32ec7631f43a4c13dd8621051204f7e482fbd2b",
         kernelAppend: "console=ttyS0 root=/dev/vda rw",
+        packageSetDigest: "package-set-v1:0123456789abcdef",
+        profile: "virtual-server",
+        resumeAppend: "console=ttyS0 root=/dev/vda rw",
       },
       storage: {
         drive: "-drive file=/rootfs.raw,format=raw,if=none,id=hd0 -device virtio-blk-device,drive=hd0",
+        immutableDisk: {
+          sha256: "bdae7f7e022592800442b73eb32ec7631f43a4c13dd8621051204f7e482fbd2b",
+          bytes: 1048576,
+          format: "raw",
+        },
+        overlay: {
+          kind: "none",
+        },
+        pairingSha256: "942287b76c5bfeda9e44f8914bff2c79e60a67dfd889b2b87067a01ffb16c7f0",
         resumeDevice: "virtio-blk-device",
       },
       vmstate: {
         streamSha256: "a98517d34f48025d47cfb1a37f7f2dd38c733a1e841b4b0dad96c22b8d655eed",
         streamBytes: 26782067,
         format: "qemu-migration-exec-stream",
+      },
+      harness: {
+        browser: "Chromium",
+        runner: "scripts/ci/wasm-browser-cdp-gate.mjs",
+        argv: ["--machine", "virt", "--cpu", "rv64"],
       },
     },
     ...overrides,
@@ -196,6 +216,72 @@ assert.equal(validateVmstateManifest(manifest(), "saved"), undefined);
   for (const key of VMSTATE_RESTORE_TUPLE_REQUIRED_KEYS) {
     assert.ok(result.checkedKeys.includes(key));
   }
+}
+
+{
+  const saved = restoreTupleManifest();
+  const current = restoreTupleManifest();
+  saved.compatibility.qemu.hostKind = "native";
+  saved.compatibility.qemu.binarySha256 = "1".repeat(64);
+  saved.compatibility.qemu.buildConfigDigest =
+    "target=riscv64-softmmu;host=native";
+  delete saved.compatibility.qemu.launcherSha256;
+  delete saved.compatibility.qemu.moduleSha256;
+  current.compatibility.qemu.buildConfigDigest =
+    "target=riscv64-softmmu;host=wasm-browser";
+  const result = compareVmstateManifests(saved, current, {
+    restoreTuple: true,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.producerConsumer.crossHost, true);
+  assert.equal(result.producerConsumer.producer.hostKind, "native");
+  assert.equal(result.producerConsumer.producer.binarySha256, "1".repeat(64));
+  assert.equal(result.producerConsumer.consumer.hostKind, "wasm-browser");
+  assert.equal(
+    result.producerConsumer.consumer.moduleSha256,
+    current.compatibility.qemu.moduleSha256,
+  );
+}
+
+{
+  const saved = restoreTupleManifest();
+  const current = restoreTupleManifest();
+  saved.compatibility.qemu.hostKind = "native";
+  saved.compatibility.qemu.binarySha256 = "1".repeat(64);
+  saved.compatibility.qemu.buildConfigDigest = "native-build";
+  delete saved.compatibility.qemu.launcherSha256;
+  delete saved.compatibility.qemu.moduleSha256;
+  current.compatibility.qemu.buildConfigDigest = "wasm-build";
+  current.compatibility.guest.packageSetDigest = "different-package-set";
+  const result = compareVmstateManifests(saved, current, {
+    restoreTuple: true,
+  });
+
+  assert.equal(result.ok, false);
+  assert.ok(result.mismatches.some((entry) =>
+    entry.key === "guest.packageSetDigest" &&
+    entry.reason === "value-mismatch"));
+}
+
+{
+  const saved = restoreTupleManifest();
+  const current = restoreTupleManifest();
+  saved.compatibility.qemu.hostKind = "native";
+  saved.compatibility.qemu.binarySha256 = "1".repeat(64);
+  saved.compatibility.qemu.buildConfigDigest = "native-build";
+  delete saved.compatibility.qemu.launcherSha256;
+  delete saved.compatibility.qemu.moduleSha256;
+  current.compatibility.qemu.buildConfigDigest = "wasm-build";
+  delete current.compatibility.qemu.moduleSha256;
+  const result = compareVmstateManifests(saved, current, {
+    restoreTuple: true,
+  });
+
+  assert.equal(result.ok, false);
+  assert.ok(result.mismatches.some((entry) =>
+    entry.key === "qemu.moduleSha256" &&
+    entry.reason === "missing-current"));
 }
 
 {

@@ -9,12 +9,15 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { applyGuestManifest } from "./wasm-guest-manifest.mjs";
 import { installSignalCleanup } from "./wasm-playwright-loader.mjs";
 import { compareVmstateManifests } from "./wasm-vmstate-manifest.mjs";
+import {
+  preflightVmstateStaticExport,
+} from "./wasm-vmstate-static-export.mjs";
 
 const THIS_FILE = fileURLToPath(import.meta.url);
 const DEFAULT_CHROME_PATHS = [
@@ -29,6 +32,7 @@ const DEFAULT_CHROME_PATHS = [
 function usage(status = 0) {
   const stream = status === 0 ? process.stdout : process.stderr;
   stream.write(`usage: wasm-browser-cdp-gate.mjs --artifact-dir DIR --kernel FILE [--initrd FILE | --rootfs FILE] --out FILE [OPTIONS]\n\nRuns the QEMU WebAssembly browser smoke page through Chrome DevTools Protocol, without Playwright.\n\nOptions:\n  --artifact-dir DIR       Directory containing qemu-system-*.js/.wasm artifacts\n  --guest-manifest FILE    Load guest defaults such as kernel/rootfs/marker\n  --kernel FILE            Guest kernel served as /guest/kernel\n  --initrd FILE            Guest initramfs image\n  --rootfs FILE            Guest rootfs served as /guest/rootfs.raw\n  --out FILE               Write result JSON\n  --chrome FILE            Chrome/Chromium executable\n  --firmware-dir DIR       Directory containing QEMU firmware blobs\n  --host HOST              Smoke server host (default: 127.0.0.1)\n  --port N                 Smoke server port (default: 8151)\n  --cdp-port N             Chrome remote-debugging port (default: 9223)\n  --program FILE           QEMU JS artifact basename (default: manifest or qemu-system-riscv64.js)\n  --wasm FILE              QEMU WASM artifact basename (default: derived from program)\n  --marker TEXT            Required marker text (default: manifest or Welcome to TuxTest)\n  --timeout-ms N           Smoke timeout (default: manifest or 180000)\n  --max-output-bytes N     Smoke output byte cap (default: 160000)\n  --memory SIZE            Guest memory (default: manifest or 512M)\n  --machine NAME           QEMU machine (default: manifest or virt)\n  --cpu MODEL              QEMU CPU model (default: manifest or empty)\n  --rootfs-device KIND     Rootfs block device (default: manifest or virtio-mmio)\n  --target-arch ARCH       Guest target architecture for firmware mounts\n  --kernel-append TEXT     Kernel command line\n  --vmstate-restore        Enable browser VMState restore import\n  --vmstate-restore-state-file FILE\n                           Local VMState stream served as /vmstate/restore\n  --vmstate-restore-state-bytes N\n                           Expected VMState byte length\n  --vmstate-restore-state-sha256 HASH\n                           Expected VMState SHA-256\n  --vmstate-restore-saved-manifest FILE\n                           Saved-state compatibility manifest\n  --vmstate-restore-current-manifest FILE\n                           Current compatibility manifest\n  --diagnostics-limit N    Live-generated-exec diagnostics limit (default: 24)\n  --no-live-generated-exec Disable live generated exec query flags\n  --help                   Show this help\n`);
+  stream.write(`Static restore options:\n  --expect-text TEXT       Additional serial text required for success; repeatable\n  --vmstate-restore-static-export-manifest FILE\n                           Fail-closed static export source of truth\n`);
   process.exit(status);
 }
 
@@ -74,6 +78,7 @@ export async function parseArgs(argv) {
     diagnosticsLimit: 24,
     display: "none",
     displayDevice: "default",
+    expectText: [],
     firmwareDir: "pc-bios",
     guestManifest: null,
     host: "127.0.0.1",
@@ -96,7 +101,10 @@ export async function parseArgs(argv) {
     vmstateRestore: false,
     vmstateRestoreCurrentManifest: "",
     vmstateRestoreManifestCheck: null,
+    vmstateRestorePreflight: null,
+    vmstateRestoreProof: false,
     vmstateRestoreSavedManifest: "",
+    vmstateRestoreStaticExportManifest: "",
     vmstateRestoreStateBytes: 0,
     vmstateRestoreStateFile: "",
     vmstateRestoreStateSha256: "",
@@ -117,6 +125,9 @@ export async function parseArgs(argv) {
       explicit.add("cpu");
     } else if (arg === "--diagnostics-limit") {
       options.diagnosticsLimit = Number(argv[++i]);
+    } else if (arg === "--expect-text") {
+      options.expectText.push(argv[++i]);
+      explicit.add("expectText");
     } else if (arg === "--firmware-dir") {
       options.firmwareDir = argv[++i];
       explicit.add("firmwareDir");
@@ -170,10 +181,14 @@ export async function parseArgs(argv) {
       explicit.add("timeoutMs");
     } else if (arg === "--vmstate-restore") {
       options.vmstateRestore = true;
+    } else if (arg === "--vmstate-restore-proof") {
+      options.vmstateRestoreProof = true;
     } else if (arg === "--vmstate-restore-current-manifest") {
       options.vmstateRestoreCurrentManifest = argv[++i];
     } else if (arg === "--vmstate-restore-saved-manifest") {
       options.vmstateRestoreSavedManifest = argv[++i];
+    } else if (arg === "--vmstate-restore-static-export-manifest") {
+      options.vmstateRestoreStaticExportManifest = argv[++i];
     } else if (arg === "--vmstate-restore-state-bytes") {
       options.vmstateRestoreStateBytes = Number(argv[++i]);
     } else if (arg === "--vmstate-restore-state-file") {
@@ -201,6 +216,7 @@ export async function parseArgs(argv) {
       "rootfs",
       "vmstateRestoreCurrentManifest",
       "vmstateRestoreSavedManifest",
+      "vmstateRestoreStaticExportManifest",
       "vmstateRestoreStateFile",
     ],
     stringFields: [
@@ -220,10 +236,12 @@ export async function parseArgs(argv) {
       "targetArch",
       "vmstateRestoreCurrentManifest",
       "vmstateRestoreSavedManifest",
+      "vmstateRestoreStaticExportManifest",
       "vmstateRestoreStateFile",
       "vmstateRestoreStateSha256",
       "wasm",
     ],
+    stringListFields: ["expectText"],
   });
 
   if (options.initrd === "") {
@@ -265,14 +283,27 @@ export async function parseArgs(argv) {
       console.error("--vmstate-restore-saved-manifest and --vmstate-restore-current-manifest must be used together");
       usage(2);
     }
-    if (options.vmstateRestoreSavedManifest !== "") {
-      options.vmstateRestoreManifestCheck = vmstateRestoreManifestCheck(options);
-      if (!options.vmstateRestoreManifestCheck.ok) {
-        const mismatch = options.vmstateRestoreManifestCheck.mismatches[0];
-        console.error(`VMState manifest mismatch: ${mismatch.key}: ${mismatch.reason}`);
-        usage(2);
-      }
+    if (options.vmstateRestoreProof &&
+        options.vmstateRestoreSavedManifest === "") {
+      console.error("--vmstate-restore-proof requires saved/current VMState manifests");
+      usage(2);
     }
+    if (options.vmstateRestoreProof && options.expectText.length === 0) {
+      console.error("--vmstate-restore-proof requires --expect-text");
+      usage(2);
+    }
+    if (!options.vmstateRestoreProof &&
+        options.vmstateRestoreStaticExportManifest !== "") {
+      console.error("--vmstate-restore-static-export-manifest requires --vmstate-restore-proof");
+      usage(2);
+    }
+  } else if (options.vmstateRestoreStaticExportManifest !== "") {
+    console.error("--vmstate-restore-static-export-manifest requires --vmstate-restore");
+    usage(2);
+  }
+  if (options.expectText.some((text) => typeof text !== "string" || text === "")) {
+    console.error("--expect-text must be a non-empty string");
+    usage(2);
   }
   if (options.out === null) {
     console.error("--out is required");
@@ -304,6 +335,10 @@ export async function parseArgs(argv) {
   options.vmstateRestoreSavedManifest = options.vmstateRestoreSavedManifest === ""
     ? ""
     : resolve(options.vmstateRestoreSavedManifest);
+  options.vmstateRestoreStaticExportManifest =
+    options.vmstateRestoreStaticExportManifest === ""
+      ? ""
+      : resolve(options.vmstateRestoreStaticExportManifest);
   options.vmstateRestoreStateFile = options.vmstateRestoreStateFile === ""
     ? ""
     : resolve(options.vmstateRestoreStateFile);
@@ -375,6 +410,9 @@ export function smokeUrl(options) {
   url.searchParams.set("display", options.display);
   url.searchParams.set("displayDevice", options.displayDevice);
   url.searchParams.set("expectedResolution", "");
+  for (const text of options.expectText || []) {
+    url.searchParams.append("expectText", text);
+  }
   url.searchParams.set("focusDisplay", "0");
   url.searchParams.set("marker", options.marker);
   url.searchParams.set("maxOutputBytes", String(options.maxOutputBytes));
@@ -632,6 +670,320 @@ export async function proofInputEvidence(options) {
   };
 }
 
+export function vmstateRestoreAffectingArgs(options) {
+  const staticExportRoot = options.vmstateRestoreStaticExportManifest
+    ? dirname(resolve(options.vmstateRestoreStaticExportManifest))
+    : null;
+  const portablePath = (path, label) => {
+    if (staticExportRoot === null) {
+      return path;
+    }
+    const value = relative(staticExportRoot, resolve(path));
+    if (value === "") {
+      return ".";
+    }
+    if (value === ".." || value.startsWith(`..${sep}`) || isAbsolute(value)) {
+      throw new Error(
+        `${label} must be inside the static export directory: ${path}`,
+      );
+    }
+    return value.split(sep).join("/");
+  };
+  const args = [
+    "--artifact-dir", portablePath(options.artifactDir, "artifactDir"),
+  ];
+  if (options.guestManifest !== null) {
+    args.push(
+      "--guest-manifest",
+      portablePath(options.guestManifest, "guestManifest"),
+    );
+  }
+  args.push("--kernel", portablePath(options.kernel, "kernel"));
+  if (options.initrd !== null) {
+    args.push("--initrd", portablePath(options.initrd, "initrd"));
+  }
+  if (options.rootfs !== null) {
+    args.push("--rootfs", portablePath(options.rootfs, "rootfs"));
+  }
+  args.push(
+    "--program", portablePath(
+      resolve(options.artifactDir, basename(options.program)),
+      "program",
+    ),
+    "--wasm", portablePath(
+      resolve(options.artifactDir, basename(options.wasm)),
+      "wasm",
+    ),
+    "--target-arch", options.targetArch,
+    "--machine", options.machine,
+    "--cpu", options.cpu,
+    "--memory", options.memory,
+    "--kernel-append", options.kernelAppend,
+    "--marker", options.marker,
+  );
+  for (const text of options.expectText || []) {
+    args.push("--expect-text", text);
+  }
+  args.push(
+    "--timeout-ms", String(options.timeoutMs),
+    "--rootfs-device", options.rootfsDevice,
+    "--vmstate-restore",
+    "--vmstate-restore-proof",
+    "--vmstate-restore-state-file",
+    portablePath(options.vmstateRestoreStateFile, "vmstateRestoreStateFile"),
+    "--vmstate-restore-state-bytes", String(options.vmstateRestoreStateBytes),
+    "--vmstate-restore-state-sha256", options.vmstateRestoreStateSha256,
+    "--vmstate-restore-saved-manifest",
+    portablePath(
+      options.vmstateRestoreSavedManifest,
+      "vmstateRestoreSavedManifest",
+    ),
+    "--vmstate-restore-current-manifest",
+    portablePath(
+      options.vmstateRestoreCurrentManifest,
+      "vmstateRestoreCurrentManifest",
+    ),
+    "--vmstate-restore-static-export-manifest",
+    portablePath(
+      options.vmstateRestoreStaticExportManifest,
+      "vmstateRestoreStaticExportManifest",
+    ),
+  );
+  return args;
+}
+
+function restorePreflightFailure(code, field, message, details = {}) {
+  return {
+    format: 1,
+    purpose: "qemu-browser-cdp-vmstate-restore-preflight",
+    ok: false,
+    restoreMode: details.restoreMode || "static-export-proof",
+    productProofEligible: false,
+    browserStarted: false,
+    qemuStarted: false,
+    vmstateRestoreManifestCheck: details.vmstateRestoreManifestCheck || null,
+    staticExportPreflight: details.staticExportPreflight || null,
+    failure: {
+      code,
+      field,
+      message,
+      expected: details.expected ?? null,
+      actual: details.actual ?? null,
+    },
+  };
+}
+
+function evidenceMismatch(entry, expected, field, staticExportPreflight) {
+  if (entry === null || entry === undefined) {
+    return restorePreflightFailure(
+      "missing-input-evidence",
+      field,
+      `${field} is required`,
+      { staticExportPreflight },
+    );
+  }
+  if (entry.sha256 !== expected.sha256 || entry.bytes !== expected.bytes) {
+    return restorePreflightFailure(
+      "static-export-input-mismatch",
+      field,
+      `${field} does not match the static export`,
+      {
+        expected: { bytes: expected.bytes, sha256: expected.sha256 },
+        actual: { bytes: entry.bytes, sha256: entry.sha256 },
+        staticExportPreflight,
+      },
+    );
+  }
+  return null;
+}
+
+export async function vmstateRestorePreflight(options, inputEvidence) {
+  const base = {
+    format: 1,
+    purpose: "qemu-browser-cdp-vmstate-restore-preflight",
+    ok: true,
+    restoreMode: options.vmstateRestore ? "generic-legacy" : "none",
+    productProofEligible: false,
+    browserStarted: false,
+    qemuStarted: false,
+    vmstateRestoreManifestCheck: null,
+    staticExportPreflight: null,
+    failure: null,
+  };
+  if (!options.vmstateRestore) {
+    return base;
+  }
+
+  const manifestCheck = vmstateRestoreManifestCheck(options);
+  base.vmstateRestoreManifestCheck = manifestCheck;
+  if (manifestCheck !== null && !manifestCheck.ok) {
+    const mismatch = manifestCheck.mismatches[0];
+    return restorePreflightFailure(
+      "incompatible-restore-tuple",
+      mismatch.key,
+      `VMState manifest mismatch: ${mismatch.key}: ${mismatch.reason}`,
+      {
+        expected: mismatch.saved,
+        actual: mismatch.current,
+        vmstateRestoreManifestCheck: manifestCheck,
+      },
+    );
+  }
+
+  const state = inputEvidence.vmstateRestoreState;
+  if (state.bytes !== options.vmstateRestoreStateBytes) {
+    return restorePreflightFailure(
+      "restore-stream-bytes-mismatch",
+      "vmstateRestoreState.bytes",
+      `VMState restore stream byte length mismatch: expected ${options.vmstateRestoreStateBytes}, got ${state.bytes}`,
+      {
+        expected: options.vmstateRestoreStateBytes,
+        actual: state.bytes,
+        vmstateRestoreManifestCheck: manifestCheck,
+      },
+    );
+  }
+  if (state.sha256 !== options.vmstateRestoreStateSha256.toLowerCase()) {
+    return restorePreflightFailure(
+      "restore-stream-sha256-mismatch",
+      "vmstateRestoreState.sha256",
+      `VMState restore stream SHA-256 mismatch: expected ${options.vmstateRestoreStateSha256.toLowerCase()}, got ${state.sha256}`,
+      {
+        expected: options.vmstateRestoreStateSha256.toLowerCase(),
+        actual: state.sha256,
+        vmstateRestoreManifestCheck: manifestCheck,
+      },
+    );
+  }
+
+  if (!options.vmstateRestoreProof) {
+    return base;
+  }
+  base.restoreMode = "static-export-proof";
+  if (options.vmstateRestoreStaticExportManifest === "") {
+    return restorePreflightFailure(
+      "missing-static-export",
+      "vmstateRestoreStaticExportManifest",
+      "strict VMState restore proof requires a static export manifest",
+    );
+  }
+  const staticCheck = await preflightVmstateStaticExport(
+    options.vmstateRestoreStaticExportManifest,
+  );
+  base.staticExportPreflight = staticCheck;
+  if (!staticCheck.ok) {
+    return restorePreflightFailure(
+      staticCheck.failure.code,
+      staticCheck.failure.field,
+      staticCheck.failure.message,
+      {
+        expected: staticCheck.failure.expected,
+        actual: staticCheck.failure.actual,
+        vmstateRestoreManifestCheck: manifestCheck,
+        staticExportPreflight: staticCheck,
+      },
+    );
+  }
+
+  for (const [role, expected] of [
+    ["vmstateRestoreState", staticCheck.files.restoreStream],
+    ["vmstateRestoreSavedManifest", staticCheck.files.savedManifest],
+    ["vmstateRestoreCurrentManifest", staticCheck.files.currentManifest],
+    ["guestManifest", staticCheck.files.guestManifest],
+    ["rootfs", staticCheck.files.immutableDisk],
+  ]) {
+    const mismatch = evidenceMismatch(
+      inputEvidence[role],
+      expected,
+      `inputEvidence.${role}`,
+      staticCheck,
+    );
+    if (mismatch !== null) {
+      return mismatch;
+    }
+  }
+
+  for (const [role, expectedSha256] of [
+    ["program", staticCheck.restorePlan.artifacts.launcherSha256],
+    ["wasm", staticCheck.restorePlan.artifacts.moduleSha256],
+    ["kernel", staticCheck.restorePlan.artifacts.kernelSha256],
+  ]) {
+    const entry = inputEvidence[role];
+    if (entry === null || entry.sha256 !== expectedSha256) {
+      return restorePreflightFailure(
+        "static-export-input-mismatch",
+        `inputEvidence.${role}.sha256`,
+        `inputEvidence.${role}.sha256 does not match the static export tuple`,
+        {
+          expected: expectedSha256,
+          actual: entry?.sha256 ?? null,
+          vmstateRestoreManifestCheck: manifestCheck,
+          staticExportPreflight: staticCheck,
+        },
+      );
+    }
+  }
+  if (options.marker !== staticCheck.restorePlan.marker) {
+    return restorePreflightFailure(
+      "static-export-runner-mismatch",
+      "marker",
+      "restore marker does not match the static export",
+      {
+        expected: staticCheck.restorePlan.marker,
+        actual: options.marker,
+        staticExportPreflight: staticCheck,
+      },
+    );
+  }
+  if (JSON.stringify(options.expectText || []) !==
+      JSON.stringify(staticCheck.restorePlan.expectedSerialText)) {
+    return restorePreflightFailure(
+      "static-export-runner-mismatch",
+      "expectText",
+      "ordered expected serial text does not match the static export",
+      {
+        expected: staticCheck.restorePlan.expectedSerialText,
+        actual: options.expectText || [],
+        staticExportPreflight: staticCheck,
+      },
+    );
+  }
+  if (staticCheck.restorePlan.runner !==
+      "scripts/ci/wasm-browser-cdp-gate.mjs") {
+    return restorePreflightFailure(
+      "unsupported-static-export-runner",
+      "harness.runner",
+      `unsupported static export runner: ${staticCheck.restorePlan.runner}`,
+      { staticExportPreflight: staticCheck },
+    );
+  }
+  let actualArgv;
+  try {
+    actualArgv = vmstateRestoreAffectingArgs(options);
+  } catch (error) {
+    return restorePreflightFailure(
+      "nonportable-static-export-path",
+      "harness.argv",
+      error.message,
+      { staticExportPreflight: staticCheck },
+    );
+  }
+  if (JSON.stringify(actualArgv) !== JSON.stringify(staticCheck.restorePlan.argv)) {
+    return restorePreflightFailure(
+      "static-export-runner-mismatch",
+      "harness.argv",
+      "ordered restore-affecting arguments do not match the static export",
+      {
+        expected: staticCheck.restorePlan.argv,
+        actual: actualArgv,
+        staticExportPreflight: staticCheck,
+      },
+    );
+  }
+  base.productProofEligible = true;
+  return base;
+}
+
 async function main() {
   const options = await parseArgs(process.argv.slice(2));
   const root = process.cwd();
@@ -654,6 +1006,34 @@ async function main() {
   requireReadable(resolve(options.artifactDir, basename(options.wasm)), "wasm artifact");
   const inputEvidence = await proofInputEvidence(options);
   await mkdir(dirname(options.out), { recursive: true });
+  options.vmstateRestorePreflight = await vmstateRestorePreflight(
+    options,
+    inputEvidence,
+  );
+  options.vmstateRestoreManifestCheck =
+    options.vmstateRestorePreflight.vmstateRestoreManifestCheck;
+  if (!options.vmstateRestorePreflight.ok) {
+    const result = {
+      format: 1,
+      success: false,
+      restoreMode: options.vmstateRestorePreflight.restoreMode,
+      productProofEligible: false,
+      browserStarted: false,
+      qemuStarted: false,
+      marker: options.marker,
+      markerSeen: false,
+      inputEvidence,
+      vmstateRestorePreflight: options.vmstateRestorePreflight,
+      vmstateRestoreManifestCheck: options.vmstateRestoreManifestCheck,
+      staticExportPreflight:
+        options.vmstateRestorePreflight.staticExportPreflight,
+      errorMessage: options.vmstateRestorePreflight.failure.message,
+    };
+    await writeFile(options.out, `${JSON.stringify(result, null, 2)}\n`);
+    console.error(result.errorMessage);
+    process.exitCode = 1;
+    return;
+  }
 
   const serverArgs = smokeServerArgs(options);
   const server = spawn(process.execPath, serverArgs, {
@@ -793,13 +1173,26 @@ async function main() {
   }
 
   const elapsedMs = Date.now() - started;
-  const success = (
+  const pageSuccess = (
     pageStatus === `marker reached: ${options.marker}` ||
     pageStatus === "Bus Engine OS is ready"
   ) && pageErrors.length === 0;
+  const coldBootReadyMs =
+    options.vmstateRestorePreflight?.staticExportPreflight?.coldBoot?.readyMs ??
+    null;
+  const restoreFasterThanColdBoot = Number.isInteger(coldBootReadyMs)
+    ? elapsedMs < coldBootReadyMs
+    : null;
+  const success = pageSuccess && restoreFasterThanColdBoot !== false;
   const result = {
     format: 1,
     success,
+    restoreMode: options.vmstateRestorePreflight.restoreMode,
+    productProofEligible:
+      success && options.vmstateRestorePreflight.productProofEligible,
+    browserStarted: true,
+    qemuStarted: Boolean(finalState?.phases?.some((entry) =>
+      entry?.phase === "start-qemu")),
     marker: options.marker,
     markerSeen: Boolean(finalState?.markerSeen) ||
       pageStatus === `marker reached: ${options.marker}` ||
@@ -807,7 +1200,12 @@ async function main() {
     elapsedMs,
     browserVersion,
     inputEvidence,
+    browserRunnerCommand: [process.execPath, THIS_FILE, ...process.argv.slice(2)],
+    qemuCommand: finalState?.qemuArgs || [],
     vmstateRestoreManifestCheck: options.vmstateRestoreManifestCheck,
+    vmstateRestorePreflight: options.vmstateRestorePreflight,
+    staticExportPreflight:
+      options.vmstateRestorePreflight?.staticExportPreflight || null,
     pageStatus,
     smokeUrl: smokeUrl(options),
     pageErrors,
@@ -816,6 +1214,27 @@ async function main() {
     pageTextTail,
     lastLine: finalState?.lastLine || null,
     guestLastLine: finalState?.guestLastLine || null,
+    expectedTextSeen: finalState?.expectedTextSeen || [],
+    programExitStatus: finalState?.programExitStatus ?? null,
+    vmstateRestoreState: finalState?.vmstateRestore || null,
+    timing: options.vmstateRestore ? {
+      restoreReadyMs: elapsedMs,
+      coldBootReadyMs,
+      restoreImportMs: finalState?.vmstateRestore?.totalMs ?? null,
+      restoreFasterThanColdBoot,
+    } : null,
+    coldBootFallback:
+      options.vmstateRestorePreflight?.staticExportPreflight?.coldBoot || null,
+    finalState: {
+      pageStatus,
+      markerSeen: Boolean(finalState?.markerSeen) ||
+        pageStatus === `marker reached: ${options.marker}` ||
+        pageStatus === "Bus Engine OS is ready",
+      lastLine: finalState?.lastLine || null,
+      guestLastLine: finalState?.guestLastLine || null,
+      expectedTextSeen: finalState?.expectedTextSeen || [],
+      programExitStatus: finalState?.programExitStatus ?? null,
+    },
     serialBlocker: pageErrors[0]?.exceptionDetails?.exception?.description || null,
     wasm64Tcg: finalState?.wasm64Tcg || null,
     wasm64Runloop: finalState?.wasm64Runloop || null,

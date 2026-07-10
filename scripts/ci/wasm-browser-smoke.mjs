@@ -311,6 +311,7 @@ export async function loadVmstateRestoreData(
   restoreState,
   fetcher = fetchBytes,
   hasher = sha256Hex,
+  clock = () => performance.now(),
 ) {
   validateVmstateRestoreConfig(config);
   if (!config.vmstateRestore) {
@@ -318,8 +319,11 @@ export async function loadVmstateRestoreData(
   }
 
   restoreState.loadSource = "network";
+  const loadStarted = clock();
   const data = await fetcher(config.vmstateRestoreUrl);
+  const loadCompleted = clock();
   restoreState.loadedBytes = data.length;
+  restoreState.fetchMs = Math.max(0, Math.round(loadCompleted - loadStarted));
   if (data.length !== config.vmstateRestoreStateBytes) {
     const error = new Error(
       `VMState restore stream byte length mismatch: expected ${config.vmstateRestoreStateBytes}, got ${data.length}`,
@@ -329,8 +333,12 @@ export async function loadVmstateRestoreData(
     throw error;
   }
 
+  const verifyStarted = clock();
   const actualSha256 = (await hasher(data)).toLowerCase();
+  const verifyCompleted = clock();
   restoreState.sha256 = actualSha256;
+  restoreState.verifyMs = Math.max(0, Math.round(verifyCompleted - verifyStarted));
+  restoreState.totalMs = Math.max(0, Math.round(verifyCompleted - loadStarted));
   if (actualSha256 !== config.vmstateRestoreStateSha256.toLowerCase()) {
     const error = new Error(
       `VMState restore stream SHA-256 mismatch: expected ${config.vmstateRestoreStateSha256.toLowerCase()}, got ${actualSha256}`,
@@ -1917,6 +1925,9 @@ async function run() {
       loadedBytes: 0,
       sha256: null,
       verified: false,
+      fetchMs: null,
+      verifyMs: null,
+      totalMs: null,
       errorName: null,
       errorMessage: null,
     },

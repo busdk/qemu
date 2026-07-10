@@ -118,7 +118,7 @@ const compatible = emitRestoreTupleManifests(
     currentQemuWasm: qemuWasm.path,
     machineVersion: "11.0",
     savedBuildConfigDigest: "same-build-config",
-    savedHostKind: "wasm-browser",
+    savedHostKind: "native",
     sourceCommit: "c5ca7f518c",
   },
 );
@@ -130,6 +130,7 @@ const compatibleCheck = compareVmstateManifests(
 
 assert.equal(compatibleCheck.ok, true);
 assert.deepEqual(compatibleCheck.mismatches, []);
+assert.equal(compatibleCheck.producerConsumer.crossHost, true);
 assert.equal(compatible.saved.compatibility.qemu.binarySha256, qemuWasm.sha256);
 assert.equal(compatible.saved.compatibility.storage.drive, virtioMmioDrive);
 assert.equal(compatible.current.compatibility.storage.drive, virtioMmioDrive);
@@ -187,9 +188,6 @@ assert.deepEqual(
   mismatchCheck.mismatches.map((entry) => entry.key),
   [
     "devices",
-    "qemu.binarySha256",
-    "qemu.buildConfigDigest",
-    "qemu.hostKind",
     "storage.drive",
     "storage.resumeDevice",
   ],

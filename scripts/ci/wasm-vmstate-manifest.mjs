@@ -12,6 +12,7 @@ export const VMSTATE_MANIFEST_FORMAT = "qemu-wasm-vmstate-manifest-v1";
 export const VMSTATE_RESTORE_TUPLE_REQUIRED_KEYS = [
   "qemu.binarySha256",
   "qemu.buildConfigDigest",
+  "qemu.hostKind",
   "qemu.sourceCommit",
   "target",
   "machine.type",
@@ -29,6 +30,14 @@ export const VMSTATE_RESTORE_TUPLE_REQUIRED_KEYS = [
   "vmstate.streamSha256",
   "vmstate.streamBytes",
   "vmstate.format",
+];
+
+export const VMSTATE_CROSS_HOST_ROLE_SPECIFIC_KEYS = [
+  "qemu.binarySha256",
+  "qemu.buildConfigDigest",
+  "qemu.hostKind",
+  "qemu.launcherSha256",
+  "qemu.moduleSha256",
 ];
 
 function usage(status) {
@@ -180,6 +189,12 @@ export function compareVmstateManifests(saved, current, options = {}) {
     ...(options.restoreTuple ? VMSTATE_RESTORE_TUPLE_REQUIRED_KEYS : []),
   ]);
   const mismatches = [];
+  const savedHostKind = nestedValue(saved.compatibility, "qemu.hostKind");
+  const currentHostKind = nestedValue(current.compatibility, "qemu.hostKind");
+  const nativeProducerBrowserConsumer = options.restoreTuple &&
+    savedHostKind.present && savedHostKind.value === "native" &&
+    currentHostKind.present && currentHostKind.value === "wasm-browser";
+  const roleSpecificKeys = new Set(VMSTATE_CROSS_HOST_ROLE_SPECIFIC_KEYS);
 
   for (const key of [...required].sort()) {
     const savedValue = nestedValue(saved.compatibility, key);
@@ -200,6 +215,9 @@ export function compareVmstateManifests(saved, current, options = {}) {
       });
       continue;
     }
+    if (nativeProducerBrowserConsumer && roleSpecificKeys.has(key)) {
+      continue;
+    }
     if (canonical(savedValue.value) !== canonical(currentValue.value)) {
       mismatches.push({
         key,
@@ -210,10 +228,120 @@ export function compareVmstateManifests(saved, current, options = {}) {
     }
   }
 
+  if (options.restoreTuple) {
+    for (const [label, manifest] of [["saved", saved], ["current", current]]) {
+      const compatibility = manifest.compatibility;
+      const hostKind = nestedValue(compatibility, "qemu.hostKind");
+      if (hostKind.present &&
+          !["native", "wasm-browser"].includes(hostKind.value)) {
+        mismatches.push({
+          key: "qemu.hostKind",
+          reason: `invalid-${label}`,
+          [label]: hostKind.value,
+        });
+      }
+      const binarySha256 = nestedValue(
+        compatibility,
+        "qemu.binarySha256",
+      );
+      if (binarySha256.present &&
+          (typeof binarySha256.value !== "string" ||
+           !/^[0-9a-f]{64}$/.test(binarySha256.value))) {
+        mismatches.push({
+          key: "qemu.binarySha256",
+          reason: `invalid-${label}`,
+          [label]: binarySha256.value,
+        });
+      }
+      for (const key of ["qemu.buildConfigDigest", "qemu.sourceCommit"]) {
+        const value = nestedValue(compatibility, key);
+        if (value.present &&
+            (typeof value.value !== "string" || value.value === "")) {
+          mismatches.push({
+            key,
+            reason: `invalid-${label}`,
+            [label]: value.value,
+          });
+        }
+      }
+      if (hostKind.present && hostKind.value === "wasm-browser") {
+        for (const key of ["qemu.launcherSha256", "qemu.moduleSha256"]) {
+          const value = nestedValue(compatibility, key);
+          if (!value.present) {
+            mismatches.push({ key, reason: `missing-${label}` });
+          } else if (typeof value.value !== "string" ||
+                     !/^[0-9a-f]{64}$/.test(value.value)) {
+            mismatches.push({
+              key,
+              reason: `invalid-${label}`,
+              [label]: value.value,
+            });
+          }
+        }
+      }
+      const overlayKind = nestedValue(compatibility, "storage.overlay.kind");
+      if (overlayKind.present && overlayKind.value !== "none") {
+        for (const key of [
+          "storage.overlay.sha256",
+          "storage.overlay.bytes",
+          "storage.overlay.format",
+        ]) {
+          const value = nestedValue(compatibility, key);
+          if (!value.present) {
+            mismatches.push({ key, reason: `missing-${label}` });
+          }
+        }
+      }
+      const harnessArgv = nestedValue(compatibility, "harness.argv");
+      if (harnessArgv.present &&
+          (!Array.isArray(harnessArgv.value) ||
+           harnessArgv.value.some((entry) => typeof entry !== "string"))) {
+        mismatches.push({
+          key: "harness.argv",
+          reason: `invalid-${label}`,
+          [label]: harnessArgv.value,
+        });
+      }
+    }
+  }
+
   return {
     ok: mismatches.length === 0,
     checkedKeys: [...required].sort(),
     mismatches,
+    producerConsumer: options.restoreTuple ? {
+      crossHost: nativeProducerBrowserConsumer,
+      producer: {
+        hostKind: savedHostKind.present ? savedHostKind.value : null,
+        binarySha256: nestedValue(
+          saved.compatibility,
+          "qemu.binarySha256",
+        ).value ?? null,
+        buildConfigDigest: nestedValue(
+          saved.compatibility,
+          "qemu.buildConfigDigest",
+        ).value ?? null,
+      },
+      consumer: {
+        hostKind: currentHostKind.present ? currentHostKind.value : null,
+        binarySha256: nestedValue(
+          current.compatibility,
+          "qemu.binarySha256",
+        ).value ?? null,
+        buildConfigDigest: nestedValue(
+          current.compatibility,
+          "qemu.buildConfigDigest",
+        ).value ?? null,
+        launcherSha256: nestedValue(
+          current.compatibility,
+          "qemu.launcherSha256",
+        ).value ?? null,
+        moduleSha256: nestedValue(
+          current.compatibility,
+          "qemu.moduleSha256",
+        ).value ?? null,
+      },
+    } : null,
   };
 }
 

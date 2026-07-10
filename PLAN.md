@@ -393,6 +393,38 @@ readiness.
   scripts/ci/wasm-browser-smoke-runner.mjs`, `node
   scripts/ci/wasm-browser-smoke-runner-test.mjs`, `node
   scripts/ci/wasm-browser-smoke-args-test.mjs`, and `git diff --check`.
+  Progress 2026-07-10: implemented the generic static-export preflight and
+  strict CDP restore-proof binding from QEMU base
+  `01efc762848479a214fdb1c69d317a242c91b662`. The accepted primary
+  architecture is now full-QEMU VMState produced by native QEMU and consumed
+  by browser-hosted QEMU/WASM. Guest hibernation is deferred because the
+  accepted downstream kernel has hibernation disabled and enabling it would
+  change the accepted artifact tuple. For a native producer and WASM browser
+  consumer, source commit plus guest, target, machine, CPU, memory, ordered
+  devices, migration capabilities, storage, VMState, and ordered harness
+  fields remain exact equality keys. Producer/consumer `hostKind`, binary
+  digest, and build-config digest are role-specific evidence; the browser
+  consumer additionally requires exact launcher and module SHA-256 values.
+  The new `qemu-wasm-vmstate-static-export-v1` preflight hashes the
+  saved/current manifests, restore stream, QEMU artifact manifest, guest
+  manifest, immutable disk, optional overlay, and cold-boot result; validates
+  the QEMU artifact manifest's declared launcher/module files and hashes;
+  recomputes immutable/overlay/VMState pairing; and binds package set, profile,
+  resume append, readiness marker, serial identity text, and portable ordered
+  restore arguments before any browser or QEMU process starts.
+  `--vmstate-restore-proof` is the only proof-eligible CDP mode and fails
+  closed without the static export. Legacy generic restore remains explicitly
+  labeled `generic-legacy` and cannot set `productProofEligible`. Rejection
+  JSON tests cover an omitted or unreadable static export, truncated state,
+  same-length hash corruption, incompatible manifests, altered static inputs,
+  and QEMU artifact-manifest content mismatch; all record
+  `browserStarted=false` and `qemuStarted=false`. Restore results retain the
+  exact manifest check, static preflight, browser/QEMU commands, restore import
+  timing, cold/restore readiness comparison, marker/expected-text state, final
+  console lines, and cold-boot fallback. This is static and deterministic
+  QEMU harness evidence only: product browser restore proofs remain `0`, the
+  downstream static tuple is not present in this worktree, and no browser run
+  is authorized by this change.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
