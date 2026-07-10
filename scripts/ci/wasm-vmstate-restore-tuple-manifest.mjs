@@ -200,7 +200,7 @@ function selectedProofDevices(command) {
   for (let i = 0; i < command.length; i += 1) {
     const arg = command[i];
 
-    if (["-drive", "-device", "-nic", "-netdev", "-object", "-display"].includes(arg)) {
+    if (["-drive", "-device", "-nic", "-netdev", "-object"].includes(arg)) {
       devices.push(`${arg} ${command[i + 1] || ""}`);
       i += 1;
     }

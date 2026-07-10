@@ -104,6 +104,8 @@ const compatible = emitRestoreTupleManifests(
     rootfs,
     sourceCommand: [
       "qemu-system-riscv64",
+      "-display",
+      "none",
       "-drive",
       "file=/rootfs.raw,format=raw,if=none,id=hd0",
       "-device",
