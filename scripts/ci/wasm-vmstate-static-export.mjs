@@ -607,6 +607,17 @@ function validateColdBootResult(cold, current, evidence, staticFields) {
     cold.elapsedMs,
     "coldBootResult.elapsedMs",
   );
+  const browserVersion = requireString(
+    cold.browserVersion?.browser,
+    "coldBootResult.browserVersion.browser",
+  );
+  if (!/chrome|chromium/i.test(browserVersion)) {
+    fail(
+      "cold-boot-invalid",
+      "coldBootResult.browserVersion.browser",
+      "cold boot must record a Chrome or Chromium browser version",
+    );
+  }
   matchValue(cold.marker, staticFields.marker, "coldBootResult.marker");
   if (cold.markerSeen !== true) {
     fail(
@@ -673,6 +684,7 @@ function validateColdBootResult(cold, current, evidence, staticFields) {
 
   return {
     readyMs,
+    browserVersion,
     marker: cold.marker,
     pageStatus,
     expectedTextSeen,
