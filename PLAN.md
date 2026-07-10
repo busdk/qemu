@@ -219,29 +219,29 @@ readiness.
   active 2026-07-07 from operator direction. QEMU owns the generic VM-state
   mechanics, browser restore path, and browser lifecycle persistence; Bus
   Engine OS owns the snapshot-safe guest boundary and Linux-kernel
-  suspend/hibernate feasibility in its own PLAN. Preferred architecture:
-  guest-assisted suspend/resume, where QEMU provides the browser-safe tools
-  and storage contract, and Linux produces/restores the hibernation image with
-  kernel knowledge of live pages, devices, and resume ordering. DoD starts
-  with a comparison matrix and one measured prototype for each viable path:
-  guest-assisted Linux hibernate/resume, full-QEMU-state restore, and any
-  hybrid where QEMU accelerates loading a guest-managed hibernation image.
+  suspend/hibernate feasibility in its own PLAN. Primary architecture:
+  native full-QEMU VMState producer -> browser-hosted QEMU/WASM consumer.
+  Guest hibernation is deferred because enabling it changes the accepted
+  downstream kernel/artifact tuple. The alternate paths remain future work:
+  the DoD retains a comparison matrix and one measured prototype for each
+  viable path, including guest-assisted Linux hibernate/resume and any hybrid
+  where QEMU accelerates loading a guest-managed hibernation image.
   The primary QEMU deliverable is a generic tool/API shape for browser-hosted
   guests: create a resume-capable storage device or image, pass the correct
   resume kernel arguments, emit a compatibility manifest, atomically pair the
   immutable release disk with mutable resume/overlay state, restore from HTTP
   or OPFS, report timing phases, and reject incompatible state before boot.
-  The full-QEMU-state prototype remains a fallback/probe: boot the accepted
-  `virtual-server` kernel/rootfs to a pre-secret milestone, snapshot CPU, RAM,
-  and device state, restore it in Chrome/Chromium through the WASM QEMU build,
-  and record download, decompression, restore, and ready-marker timings against
-  the current `373.989s` clean cold boot and `300.000s` goal. The Linux-kernel
-  path is preferred if evidence shows it stores materially less state, restores
-  faster, or avoids serializing unused guest RAM, because the guest kernel can
-  know which pages and devices must survive while the virtualizer generally
-  cannot. The proof must define the exact producer/consumer shape: native
-  `qemu-system-riscv64` migration stream, WASM-produced QEMU state,
-  guest-produced hibernation image, or hybrid; compatibility keys including
+  The primary proof must boot the accepted `virtual-server` kernel/rootfs to a
+  pre-secret milestone, have native `qemu-system-riscv64` produce the full
+  QEMU VMState, restore it in Chrome/Chromium through the browser QEMU/WASM
+  consumer, and record download, decompression, restore, and ready-marker
+  timings against the current `373.989s` clean cold boot and `300.000s` goal.
+  The guest-assisted Linux hibernation path remains future work, including the
+  question of whether it stores materially less state, restores faster, or
+  avoids serializing unused guest RAM. The proof must define the exact
+  producer/consumer shape: native `qemu-system-riscv64` migration stream,
+  WASM-produced QEMU state, guest-produced hibernation image, or hybrid;
+  compatibility keys including
   QEMU commit, WASM artifact hashes, machine model, CPU, device list, memory
   size, kernel SHA-256, rootfs SHA-256, package-set digest, profile, resume
   device identity, and hibernation image format; and rejection behavior when
