@@ -17,8 +17,10 @@ import {
   cdpResourceErrorDiagnostic,
   parseArgs,
   proofInputEvidence,
+  serialInputTriggerReady,
   smokeServerArgs,
   smokeUrl,
+  vmstateRestoreAffectingArgs,
   vmstateRestoreManifestCheck,
 } from "./wasm-browser-cdp-gate.mjs";
 
@@ -28,7 +30,9 @@ const options = {
   diagnosticsLimit: 24,
   display: "none",
   displayDevice: "default",
+  expectText: [],
   firmwareDir: "/tmp/qemu-firmware",
+  guestManifest: null,
   host: "127.0.0.1",
   initrd: null,
   kernel: "/tmp/qemu-guest/Image",
@@ -41,14 +45,18 @@ const options = {
   network: "none",
   port: 8151,
   program: "qemu-system-riscv64.js",
+  qemuArgs: [],
   rootfs: "/tmp/qemu-guest/rootfs.raw",
   rootfsDevice: "virtio-mmio",
+  serialInputAfterText: "",
+  serialInputText: "",
   targetArch: "riscv64",
   timeoutMs: 180000,
   vmstateRestore: false,
   vmstateRestoreCurrentManifest: "",
   vmstateRestoreManifestCheck: null,
   vmstateRestoreSavedManifest: "",
+  vmstateRestoreStaticExportManifest: "",
   vmstateRestoreStateBytes: 0,
   vmstateRestoreStateFile: "",
   vmstateRestoreStateSha256: "",
@@ -77,6 +85,39 @@ assert.equal(url.searchParams.get("wasm"), "/artifacts/qemu-system-riscv64.wasm"
 assert.equal(url.searchParams.get("rootfs"), "/guest/rootfs.raw");
 assert.equal(url.searchParams.get("rootfsDevice"), "virtio-mmio");
 assert.equal(url.searchParams.get("wasm64LiveGeneratedExec"), "1");
+assert.equal(url.searchParams.has("primarySerialInput"), false);
+
+const serialInputOptions = {
+  ...options,
+  qemuArgs: [
+    "-object",
+    "rng-random,id=rng0,filename=/dev/urandom",
+    "-device",
+    "virtio-rng-device,rng=rng0",
+  ],
+  serialInputAfterText: "QEMU_WASM_SNAPSHOT_READY",
+  serialInputText: "QEMU_WASM_RESUME_CONTINUE\n",
+};
+const serialInputUrl = new URL(smokeUrl(serialInputOptions));
+assert.equal(serialInputUrl.searchParams.get("primarySerialInput"), "1");
+assert.deepEqual(serialInputUrl.searchParams.getAll("qemuArg"), [
+  "-object",
+  "rng-random,id=rng0,filename=/dev/urandom",
+  "-device",
+  "virtio-rng-device,rng=rng0",
+]);
+assert.equal(serialInputTriggerReady({
+  output: "QEMU_WASM_SNAPSHOT_READY\n",
+  state: { phase: "guest-boot", primarySerialInput: { moduleAttached: true } },
+}, serialInputOptions.serialInputAfterText), true);
+assert.equal(serialInputTriggerReady({
+  output: "",
+  state: { phase: "guest-boot", primarySerialInput: { moduleAttached: true } },
+}, serialInputOptions.serialInputAfterText), false);
+assert.equal(serialInputTriggerReady({
+  output: "",
+  state: { phase: "guest-boot", primarySerialInput: { moduleAttached: true } },
+}), true);
 
 const vmstateOptions = {
   ...options,
@@ -97,6 +138,32 @@ assert.equal(
 const vmstateServerArgs = smokeServerArgs(vmstateOptions);
 assert.equal(vmstateServerArgs.includes("--vmstate-restore-state-file"), true);
 assert.equal(vmstateServerArgs.includes("/tmp/state.vmstate"), true);
+const restoreArgs = vmstateRestoreAffectingArgs({
+  ...vmstateOptions,
+  expectText: ["bus-engine-os login:"],
+  qemuArgs: serialInputOptions.qemuArgs,
+  serialInputAfterText: "QEMU_WASM_SNAPSHOT_READY",
+  serialInputText: "QEMU_WASM_RESUME_CONTINUE\n",
+  vmstateRestoreCurrentManifest: "/tmp/current.json",
+  vmstateRestoreSavedManifest: "/tmp/saved.json",
+  vmstateRestoreStaticExportManifest: "/tmp/static-export.json",
+});
+const serialArgIndex = restoreArgs.indexOf("--serial-input-after-text");
+assert.notEqual(serialArgIndex, -1);
+const qemuArgIndex = restoreArgs.indexOf("--qemu-arg");
+assert.notEqual(qemuArgIndex, -1);
+assert.deepEqual(restoreArgs.slice(qemuArgIndex, qemuArgIndex + 8), [
+  "--qemu-arg", "-object",
+  "--qemu-arg", "rng-random,id=rng0,filename=/dev/urandom",
+  "--qemu-arg", "-device",
+  "--qemu-arg", "virtio-rng-device,rng=rng0",
+]);
+assert.deepEqual(restoreArgs.slice(serialArgIndex, serialArgIndex + 4), [
+  "--serial-input-after-text",
+  "QEMU_WASM_SNAPSHOT_READY",
+  "--serial-input-text",
+  "QEMU_WASM_RESUME_CONTINUE\n",
+]);
 
 const manifestDir = mkdtempSync(join(tmpdir(), "qemu-cdp-gate-manifest-"));
 const manifestPath = join(manifestDir, "guest.json");
@@ -117,6 +184,12 @@ const manifestOptions = await parseArgs([
   "--guest-manifest", manifestPath,
   "--artifact-dir", "/tmp/explicit-artifacts",
   "--chrome", "/bin/sh",
+  "--qemu-arg", "-object",
+  "--qemu-arg", "rng-random,id=rng0,filename=/dev/urandom",
+  "--qemu-arg", "-device",
+  "--qemu-arg", "virtio-rng-device,rng=rng0",
+  "--serial-input-after-text", "QEMU_WASM_SNAPSHOT_READY",
+  "--serial-input-text", "QEMU_WASM_RESUME_CONTINUE\n",
   "--out", "/tmp/qemu-cdp-gate-result.json",
 ]);
 assert.equal(manifestOptions.artifactDir, "/tmp/explicit-artifacts");
@@ -126,6 +199,9 @@ assert.equal(manifestOptions.initrd, null);
 assert.equal(manifestOptions.rootfs, join(manifestDir, "rootfs.raw"));
 assert.equal(manifestOptions.targetArch, "riscv64");
 assert.equal(manifestOptions.guestManifest, manifestPath);
+assert.deepEqual(manifestOptions.qemuArgs, serialInputOptions.qemuArgs);
+assert.equal(manifestOptions.serialInputAfterText, "QEMU_WASM_SNAPSHOT_READY");
+assert.equal(manifestOptions.serialInputText, "QEMU_WASM_RESUME_CONTINUE\n");
 
 function sha256(text) {
   return createHash("sha256").update(text).digest("hex");

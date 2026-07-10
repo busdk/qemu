@@ -4676,6 +4676,26 @@ legacy restore remains separately labeled and is never product-proof eligible.
 This static gate does not authorize a browser proof; supervisor authorization
 is still required after the downstream tuple exists and is reviewed.
 
+The CDP gate can bind additional ordered QEMU arguments with repeatable
+``--qemu-arg`` options.  These arguments are forwarded to the smoke page and
+therefore appear in the real browser QEMU command, while the same ordered list
+is retained in the static restore-affecting argument contract.  Product
+restore tuples use this for devices that are not implied by root storage, such
+as a virtio RNG object/device pair.  The tuple generator separately accepts
+repeatable ``--current-device`` entries and recognizes ``-object`` and
+``-netdev`` in native producer commands, so the saved/current manifests can
+name the same ordered device set without pretending that a manifest-only
+device was launched.
+
+For guest boundaries that wait on serial input, the CDP gate accepts
+``--serial-input-after-text`` and ``--serial-input-text``.  It enables the
+existing primary serial channel, waits until the caller-supplied output is
+visible and the channel is attached, sends the exact caller-supplied text, and
+records elapsed time, payload length, and QEMU write status in result JSON.
+Configured serial input that is never delivered prevents proof success.  Both
+arguments are part of the ordered static restore contract; no downstream
+marker or continuation token is built into QEMU.
+
 Restore-state source rules
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 

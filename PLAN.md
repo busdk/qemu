@@ -425,6 +425,30 @@ readiness.
   QEMU harness evidence only: product browser restore proofs remain `0`, the
   downstream static tuple is not present in this worktree, and no browser run
   is authorized by this change.
+  Progress 2026-07-10 15:47 UTC: the isolated
+  `feature/r4suspend-rng-serial-release-20260710` branch closes two generic
+  product-proof harness gaps. The restore-tuple generator accepts repeatable
+  ordered `--current-device` values and now retains `-object` and `-netdev`
+  entries from native producer commands, allowing native/browser tuples to
+  bind virtio RNG and network-disable state instead of only root storage. The
+  CDP gate accepts repeatable ordered `--qemu-arg` values, forwards them into
+  the browser's real QEMU command, binds them in static restore arguments, and
+  can wait for caller-configured serial output before sending caller-configured
+  text through the existing primary serial channel. Result JSON records whether
+  the write occurred, its elapsed time, payload length, and QEMU write status;
+  configured input that is never sent makes the run fail. No guest marker,
+  device, or product name is hard-coded. Checks passed: `node --check
+  scripts/ci/wasm-browser-cdp-gate.mjs`, `node
+  scripts/ci/wasm-browser-cdp-gate-test.mjs`, `node --check
+  scripts/ci/wasm-vmstate-restore-tuple-manifest.mjs`, `node
+  scripts/ci/wasm-vmstate-restore-tuple-manifest-test.mjs`, `node
+  scripts/ci/wasm-vmstate-manifest-test.mjs`, `node
+  scripts/ci/wasm-vmstate-static-export-test.mjs`, `node
+  scripts/ci/wasm-browser-smoke-args-test.mjs`, `node
+  scripts/ci/wasm-browser-smoke-runner-test.mjs`, and `git diff --check`.
+  Browser product restore proofs remain `0`; this harness slice requires the
+  matching native VMState/static tuple and Chromium matrix before R4suspend can
+  close.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status

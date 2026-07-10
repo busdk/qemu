@@ -28,6 +28,8 @@ Options:
   --current-qemu-js FILE          Current browser QEMU JavaScript launcher
   --current-qemu-wasm FILE        Current browser QEMU WebAssembly module
   --current-guest-manifest FILE   Current browser-hosted guest manifest
+  --current-device ARG           Additional current QEMU device/object argument;
+                                 repeat in exact QEMU order
   --source-commit COMMIT          QEMU source commit for both artifacts
   --saved-build-config-digest TEXT
   --current-build-config-digest TEXT
@@ -45,6 +47,7 @@ function parseArgs(argv) {
     cpuExtensions: [],
     cpuModel: null,
     currentBuildConfigDigest: null,
+    currentDevices: [],
     currentGuestManifest: null,
     currentQemuJs: null,
     currentQemuWasm: null,
@@ -65,6 +68,8 @@ function parseArgs(argv) {
       options.cpuModel = argv[++i];
     } else if (arg === "--current-build-config-digest") {
       options.currentBuildConfigDigest = argv[++i];
+    } else if (arg === "--current-device") {
+      options.currentDevices.push(argv[++i]);
     } else if (arg === "--current-guest-manifest") {
       options.currentGuestManifest = argv[++i];
     } else if (arg === "--current-qemu-js") {
@@ -195,7 +200,7 @@ function selectedProofDevices(command) {
   for (let i = 0; i < command.length; i += 1) {
     const arg = command[i];
 
-    if (["-drive", "-device", "-nic", "-display"].includes(arg)) {
+    if (["-drive", "-device", "-nic", "-netdev", "-object", "-display"].includes(arg)) {
       devices.push(`${arg} ${command[i + 1] || ""}`);
       i += 1;
     }
@@ -326,7 +331,7 @@ export function emitRestoreTupleManifests(proof, options) {
     buildConfigDigest: options.currentBuildConfigDigest,
     cpuExtensions: options.cpuExtensions,
     cpuModel: options.cpuModel,
-    devices: storage.devices,
+    devices: [...storage.devices, ...(options.currentDevices || [])],
     guest: { kernelAppend: defaults.kernelAppend || "" },
     hostKind: options.currentHostKind || "wasm-browser",
     kernel: guestKernel.evidence,

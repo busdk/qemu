@@ -92,6 +92,9 @@ const rootfs = writeFixture(dir, "rootfs.raw", "rootfs\n");
 const state = writeFixture(dir, "state.vmstate", Buffer.from([0, 1, 2, 3]));
 const virtioMmioDrive =
   "-drive file=/rootfs.raw,format=raw,if=none,id=hd0 -device virtio-blk-device,drive=hd0";
+const rngObject = "-object rng-random,id=rng0,filename=/dev/urandom";
+const rngDevice = "-device virtio-rng-device,rng=rng0";
+const noNetwork = "-nic none";
 const compatible = emitRestoreTupleManifests(
   proof({
     drive: virtioMmioDrive,
@@ -105,6 +108,12 @@ const compatible = emitRestoreTupleManifests(
       "file=/rootfs.raw,format=raw,if=none,id=hd0",
       "-device",
       "virtio-blk-device,drive=hd0",
+      "-object",
+      "rng-random,id=rng0,filename=/dev/urandom",
+      "-device",
+      "virtio-rng-device,rng=rng0",
+      "-nic",
+      "none",
     ],
     state,
   }),
@@ -112,6 +121,7 @@ const compatible = emitRestoreTupleManifests(
     cpuExtensions: ["a=true", "c=true", "m=true"],
     cpuModel: "rv64",
     currentBuildConfigDigest: "same-build-config",
+    currentDevices: [rngObject, rngDevice, noNetwork],
     currentGuestManifest: guestManifest(dir, kernel, rootfs),
     currentHostKind: "wasm-browser",
     currentQemuJs: qemuJs.path,
@@ -134,6 +144,17 @@ assert.equal(compatibleCheck.producerConsumer.crossHost, true);
 assert.equal(compatible.saved.compatibility.qemu.binarySha256, qemuWasm.sha256);
 assert.equal(compatible.saved.compatibility.storage.drive, virtioMmioDrive);
 assert.equal(compatible.current.compatibility.storage.drive, virtioMmioDrive);
+assert.deepEqual(compatible.saved.compatibility.devices, [
+  "-drive file=/rootfs.raw,format=raw,if=none,id=hd0",
+  "-device virtio-blk-device,drive=hd0",
+  rngObject,
+  rngDevice,
+  noNetwork,
+]);
+assert.deepEqual(
+  compatible.current.compatibility.devices,
+  compatible.saved.compatibility.devices,
+);
 assert.equal(compatible.saved.compatibility.vmstate.streamSha256, state.sha256);
 assert.equal(compatible.current.evidence.qemuModuleSha256, qemuWasm.sha256);
 assert.equal(
