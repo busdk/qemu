@@ -355,6 +355,7 @@ try {
       inputEvidence,
     );
     assert.equal(runnerPreflight.ok, true);
+    assert.equal(runnerPreflight.staticExportProofEligible, true);
     assert.equal(runnerPreflight.browserStarted, false);
     assert.equal(runnerPreflight.qemuStarted, false);
     assert.equal(runnerPreflight.staticExportPreflight.ok, true);

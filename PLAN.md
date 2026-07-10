@@ -414,7 +414,7 @@ readiness.
   restore arguments before any browser or QEMU process starts.
   `--vmstate-restore-proof` is the only proof-eligible CDP mode and fails
   closed without the static export. Legacy generic restore remains explicitly
-  labeled `generic-legacy` and cannot set `productProofEligible`. Rejection
+  labeled `generic-legacy` and cannot set `staticExportProofEligible`. Rejection
   JSON tests cover an omitted or unreadable static export, truncated state,
   same-length hash corruption, incompatible manifests, altered static inputs,
   and QEMU artifact-manifest content mismatch; all record
