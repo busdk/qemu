@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream, readFileSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { compareVmstateManifests } from "./wasm-vmstate-manifest.mjs";
@@ -150,7 +150,19 @@ async function actualFileEvidence(path, role) {
 async function checkedFileEvidence(record, baseDir, role, options = {}) {
   requireObject(record, `files.${role}`);
   const rawPath = requireString(record.path, `files.${role}.path`);
-  const path = isAbsolute(rawPath) ? rawPath : resolve(baseDir, rawPath);
+  const path = resolve(baseDir, rawPath);
+  const relativePath = relative(resolve(baseDir), path);
+  if (isAbsolute(rawPath) ||
+      relativePath === "" ||
+      relativePath === ".." ||
+      relativePath.startsWith(`..${sep}`) ||
+      isAbsolute(relativePath)) {
+    fail(
+      "nonportable-path",
+      `files.${role}.path`,
+      `${role} path must stay inside the static export directory: ${rawPath}`,
+    );
+  }
   const expectedBytes = requirePositiveInteger(
     record.bytes,
     `files.${role}.bytes`,
