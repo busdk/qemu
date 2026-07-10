@@ -236,6 +236,9 @@ try {
   writeJson(coldBootResult, {
     success: true,
     elapsedMs: 373989,
+    browserVersion: {
+      browser: "HeadlessChrome/150.0.0.0",
+    },
     marker: "event=ready state=multi-user",
     markerSeen: true,
     pageStatus: "marker reached: event=ready state=multi-user",
