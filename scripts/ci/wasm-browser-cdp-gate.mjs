@@ -31,7 +31,7 @@ const DEFAULT_CHROME_PATHS = [
 
 function usage(status = 0) {
   const stream = status === 0 ? process.stdout : process.stderr;
-  stream.write(`usage: wasm-browser-cdp-gate.mjs --artifact-dir DIR --kernel FILE [--initrd FILE | --rootfs FILE] --out FILE [OPTIONS]\n\nRuns the QEMU WebAssembly browser smoke page through Chrome DevTools Protocol, without Playwright.\n\nOptions:\n  --artifact-dir DIR       Directory containing qemu-system-*.js/.wasm artifacts\n  --guest-manifest FILE    Load guest defaults such as kernel/rootfs/marker\n  --kernel FILE            Guest kernel served as /guest/kernel\n  --initrd FILE            Guest initramfs image\n  --rootfs FILE            Guest rootfs served as /guest/rootfs.raw\n  --out FILE               Write result JSON\n  --chrome FILE            Chrome/Chromium executable\n  --firmware-dir DIR       Directory containing QEMU firmware blobs\n  --host HOST              Smoke server host (default: 127.0.0.1)\n  --port N                 Smoke server port (default: 8151)\n  --cdp-port N             Chrome remote-debugging port (default: 9223)\n  --program FILE           QEMU JS artifact basename (default: manifest or qemu-system-riscv64.js)\n  --wasm FILE              QEMU WASM artifact basename (default: derived from program)\n  --marker TEXT            Required marker text (default: manifest or Welcome to TuxTest)\n  --timeout-ms N           Smoke timeout (default: manifest or 180000)\n  --max-output-bytes N     Smoke output byte cap (default: 160000)\n  --memory SIZE            Guest memory (default: manifest or 512M)\n  --machine NAME           QEMU machine (default: manifest or virt)\n  --cpu MODEL              QEMU CPU model (default: manifest or empty)\n  --rootfs-device KIND     Rootfs block device (default: manifest or virtio-mmio)\n  --target-arch ARCH       Guest target architecture for firmware mounts\n  --kernel-append TEXT     Kernel command line\n  --vmstate-restore        Enable browser VMState restore import\n  --vmstate-restore-state-file FILE\n                           Local VMState stream served as /vmstate/restore\n  --vmstate-restore-state-bytes N\n                           Expected VMState byte length\n  --vmstate-restore-state-sha256 HASH\n                           Expected VMState SHA-256\n  --vmstate-restore-saved-manifest FILE\n                           Saved-state compatibility manifest\n  --vmstate-restore-current-manifest FILE\n                           Current compatibility manifest\n  --diagnostics-limit N    Live-generated-exec diagnostics limit (default: 24)\n  --no-live-generated-exec Disable live generated exec query flags\n  --help                   Show this help\n`);
+  stream.write(`usage: wasm-browser-cdp-gate.mjs --artifact-dir DIR --kernel FILE [--initrd FILE | --rootfs FILE] --out FILE [OPTIONS]\n\nRuns the QEMU WebAssembly browser smoke page through Chrome DevTools Protocol, without Playwright.\n\nOptions:\n  --artifact-dir DIR       Directory containing qemu-system-*.js/.wasm artifacts\n  --guest-manifest FILE    Load guest defaults such as kernel/rootfs/marker\n  --kernel FILE            Guest kernel served as /guest/kernel\n  --initrd FILE            Guest initramfs image\n  --rootfs FILE            Guest rootfs served as /guest/rootfs.raw\n  --out FILE               Write result JSON\n  --chrome FILE            Chrome/Chromium executable\n  --firmware-dir DIR       Directory containing QEMU firmware blobs\n  --host HOST              Smoke server host (default: 127.0.0.1)\n  --port N                 Smoke server port (default: 8151)\n  --cdp-host HOST          Chrome remote-debugging host (default: 127.0.0.1)\n  --cdp-port N             Chrome remote-debugging port (default: 9223)\n  --program FILE           QEMU JS artifact basename (default: manifest or qemu-system-riscv64.js)\n  --wasm FILE              QEMU WASM artifact basename (default: derived from program)\n  --marker TEXT            Required marker text (default: manifest or Welcome to TuxTest)\n  --timeout-ms N           Smoke timeout (default: manifest or 180000)\n  --max-output-bytes N     Smoke output byte cap (default: 160000)\n  --memory SIZE            Guest memory (default: manifest or 512M)\n  --machine NAME           QEMU machine (default: manifest or virt)\n  --cpu MODEL              QEMU CPU model (default: manifest or empty)\n  --rootfs-device KIND     Rootfs block device (default: manifest or virtio-mmio)\n  --target-arch ARCH       Guest target architecture for firmware mounts\n  --kernel-append TEXT     Kernel command line\n  --vmstate-restore        Enable browser VMState restore import\n  --vmstate-restore-state-file FILE\n                           Local VMState stream served as /vmstate/restore\n  --vmstate-restore-state-bytes N\n                           Expected VMState byte length\n  --vmstate-restore-state-sha256 HASH\n                           Expected VMState SHA-256\n  --vmstate-restore-saved-manifest FILE\n                           Saved-state compatibility manifest\n  --vmstate-restore-current-manifest FILE\n                           Current compatibility manifest\n  --diagnostics-limit N    Live-generated-exec diagnostics limit (default: 24)\n  --no-live-generated-exec Disable live generated exec query flags\n  --help                   Show this help\n`);
   stream.write(`Static restore options:\n  --expect-text TEXT       Additional serial text required for success; repeatable\n  --qemu-arg ARG           Additional QEMU argument; repeat in exact order\n  --serial-input-after-text TEXT\n                           Wait for serial text before sending configured input\n  --serial-input-text TEXT Send exact text through the primary serial channel\n  --vmstate-restore-proof  Require acceptance-shaped fail-closed proof evidence\n  --vmstate-restore-static-export-manifest FILE\n                           Fail-closed static export source of truth\n`);
   process.exit(status);
 }
@@ -72,6 +72,7 @@ export async function parseArgs(argv) {
   const explicit = new Set();
   const options = {
     artifactDir: null,
+    cdpHost: "127.0.0.1",
     cdpPort: 9223,
     chrome: null,
     cpu: "",
@@ -119,6 +120,8 @@ export async function parseArgs(argv) {
     if (arg === "--artifact-dir") {
       options.artifactDir = argv[++i];
       explicit.add("artifactDir");
+    } else if (arg === "--cdp-host") {
+      options.cdpHost = argv[++i];
     } else if (arg === "--cdp-port") {
       options.cdpPort = Number(argv[++i]);
     } else if (arg === "--chrome") {
@@ -506,6 +509,20 @@ export function smokeServerArgs(options) {
     args.push("--vmstate-restore-state-file", options.vmstateRestoreStateFile);
   }
   return args;
+}
+
+export function chromeLaunchArgs(options, userDataDir) {
+  return [
+    "--headless=new",
+    `--remote-debugging-address=${options.cdpHost}`,
+    `--remote-debugging-port=${options.cdpPort}`,
+    `--user-data-dir=${userDataDir}`,
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-background-networking",
+    "--disable-gpu",
+    "about:blank",
+  ];
 }
 
 async function stopProcess(child) {
@@ -1105,26 +1122,19 @@ async function main() {
 
   const userDataDir = resolve(dirname(options.out), "chrome-profile");
   await mkdir(userDataDir, { recursive: true });
-  chrome = spawn(options.chrome, [
-    "--headless=new",
-    `--remote-debugging-port=${options.cdpPort}`,
-    `--user-data-dir=${userDataDir}`,
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--disable-background-networking",
-    "--disable-gpu",
-    "about:blank",
-  ], { stdio: ["ignore", "pipe", "pipe"] });
+  chrome = spawn(options.chrome, chromeLaunchArgs(options, userDataDir), {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   chrome.stdout.on("data", lineBuffer("[chrome] "));
   chrome.stderr.on("data", lineBuffer("[chrome] "));
   const versionResponse = await waitForHttp(
-    `http://127.0.0.1:${options.cdpPort}/json/version`,
+    `http://${options.cdpHost}:${options.cdpPort}/json/version`,
     10000,
   );
   const browserVersion = browserVersionDiagnostic(await versionResponse.json());
 
   const targetResponse = await fetch(
-    `http://127.0.0.1:${options.cdpPort}/json/new?${encodeURIComponent(smokeUrl(options))}`,
+    `http://${options.cdpHost}:${options.cdpPort}/json/new?${encodeURIComponent(smokeUrl(options))}`,
     { method: "PUT" },
   );
   if (!targetResponse.ok) {

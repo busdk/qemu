@@ -13,6 +13,7 @@ import { join } from "node:path";
 
 import {
   browserVersionDiagnostic,
+  chromeLaunchArgs,
   cdpConsoleMessageDiagnostic,
   cdpResourceErrorDiagnostic,
   parseArgs,
@@ -26,6 +27,8 @@ import {
 
 const options = {
   artifactDir: "/tmp/qemu-artifacts",
+  cdpHost: "127.0.0.1",
+  cdpPort: 9223,
   cpu: "",
   diagnosticsLimit: 24,
   display: "none",
@@ -76,6 +79,21 @@ assert.deepEqual(args.slice(0, 7), [
 assert.equal(args.includes("--rootfs"), true);
 assert.equal(args.includes("/tmp/qemu-guest/rootfs.raw"), true);
 assert.equal(args.includes("--initrd"), false);
+
+assert.deepEqual(chromeLaunchArgs({
+  cdpHost: "127.0.0.2",
+  cdpPort: 9223,
+}, "/tmp/chrome-profile"), [
+  "--headless=new",
+  "--remote-debugging-address=127.0.0.2",
+  "--remote-debugging-port=9223",
+  "--user-data-dir=/tmp/chrome-profile",
+  "--no-first-run",
+  "--no-default-browser-check",
+  "--disable-background-networking",
+  "--disable-gpu",
+  "about:blank",
+]);
 
 const url = new URL(smokeUrl(options));
 assert.equal(url.searchParams.get("targetArch"), "riscv64");
@@ -183,6 +201,7 @@ writeFileSync(manifestPath, JSON.stringify({
 const manifestOptions = await parseArgs([
   "--guest-manifest", manifestPath,
   "--artifact-dir", "/tmp/explicit-artifacts",
+  "--cdp-host", "127.0.0.2",
   "--chrome", "/bin/sh",
   "--qemu-arg", "-object",
   "--qemu-arg", "rng-random,id=rng0,filename=/dev/urandom",
@@ -193,6 +212,7 @@ const manifestOptions = await parseArgs([
   "--out", "/tmp/qemu-cdp-gate-result.json",
 ]);
 assert.equal(manifestOptions.artifactDir, "/tmp/explicit-artifacts");
+assert.equal(manifestOptions.cdpHost, "127.0.0.2");
 assert.equal(manifestOptions.firmwareDir, join(manifestDir, "firmware"));
 assert.equal(manifestOptions.kernel, join(manifestDir, "Image"));
 assert.equal(manifestOptions.initrd, null);

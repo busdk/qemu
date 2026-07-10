@@ -110,6 +110,14 @@ Accepted QEMU build-environment evidence recorded:
 
 ## Browser proof diagnostics cleanup - 2026-07-07
 
+- [x] Make the Chrome DevTools endpoint bind address configurable for isolated
+  multi-user proof hosts. `wasm-browser-cdp-gate.mjs` now accepts
+  `--cdp-host`, forwards it through Chrome's
+  `--remote-debugging-address`, and uses the same host for CDP HTTP requests.
+  The default remains `127.0.0.1`; the active product proof will use
+  `127.0.0.2` for both smoke HTTP and CDP so it does not bind services on the
+  other user's loopback address. Deterministic launch-argument and parser
+  checks pass; the real Chrome binding remains part of R4suspend acceptance.
 - [x] Classify the browser harness `wasmMemory64` feature probe as runtime
   capability evidence. The probe now uses BigInt page counts for
   `WebAssembly.Memory({ address: "i64" })`, so a supporting browser no longer
