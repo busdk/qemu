@@ -12,6 +12,7 @@ import {
   browserNonInteractiveStdin,
   browserRuntimeSnapshot,
   createPowerControl,
+  createPrimarySerialInput,
   createServiceBridge,
   deliverDisplayKeyEvent,
   displayKeyPolicy,
@@ -19,9 +20,11 @@ import {
   emscriptenModuleCanvas,
   installBrowserDialogSuppression,
   installDisplayInputPolicy,
+  installWasmChardevReceiverRouter,
   loadVmstateRestoreData,
   normalizeSerialEvidenceLine,
   qemuArgs,
+  recordBootMilestone,
   recordMarkerEvidence,
   recordHarnessFailure,
   sha256Hex,
@@ -721,6 +724,127 @@ assert.equal(displayKeyPolicy(fakeKeyEvent("a")), "pass-through");
 
   assert.ok(args.includes("virtio-serial-pci"));
   assert.equal(args.includes("virtio-serial-device"), false);
+}
+
+{
+  const scope = {};
+  const smokeState = {
+    bootMilestones: {
+      byId: {},
+      entries: [],
+      count: 0,
+      last: null,
+    },
+    markerEvidence: null,
+  };
+  const completed = [];
+  const partial = [];
+  let loginPromptSeen = false;
+  const primary = createPrimarySerialInput(
+    baseConfig({ primarySerialInput: true }),
+    smokeState,
+    scope,
+    (line, options = {}) => {
+      if (options.partial) {
+        partial.push(line);
+        loginPromptSeen ||= line.includes("console READY login:");
+        return;
+      }
+      completed.push(line);
+      recordBootMilestone(smokeState, line, completed.length);
+      recordMarkerEvidence(smokeState, "READY", line, completed.length);
+    },
+  );
+  const encoder = new TextEncoder();
+
+  assert.equal(typeof scope.qemuWasmChardevReceive, "function");
+  assert.equal(
+    scope.qemuWasmChardevReceive(
+      "org.qemu.wasm.primary-serial",
+      encoder.encode("Linux ver"),
+    ),
+    true,
+  );
+  scope.qemuWasmChardevReceive(
+    "org.qemu.wasm.primary-serial",
+    encoder.encode("sion 6.1\nconsole READY login:"),
+  );
+
+  assert.deepEqual(completed, ["Linux version 6.1"]);
+  assert.deepEqual(partial, ["Linux ver", "console READY login:"]);
+  assert.equal(loginPromptSeen, true);
+  assert.equal(smokeState.bootMilestones.byId.kernel_linux_version.line, "Linux version 6.1");
+  assert.equal(smokeState.markerEvidence, null);
+  assert.equal(primary.state.receives, 2);
+  assert.equal(primary.state.receivedBytes, encoder.encode("Linux version 6.1\nconsole READY login:").length);
+  assert.equal(primary.state.bufferedTextLength, "console READY login:".length);
+
+  const euroBytes = encoder.encode(" EUR: \u20ac");
+  scope.qemuWasmChardevReceive(
+    "org.qemu.wasm.primary-serial",
+    euroBytes.slice(0, euroBytes.length - 1),
+  );
+  scope.qemuWasmChardevReceive(
+    "org.qemu.wasm.primary-serial",
+    euroBytes.slice(euroBytes.length - 1),
+  );
+  assert.equal(partial.at(-1), "console READY login: EUR: \u20ac");
+
+  scope.qemuWasmChardevReceive(
+    "org.qemu.wasm.primary-serial",
+    encoder.encode("\n"),
+  );
+  assert.deepEqual(completed, [
+    "Linux version 6.1",
+    "console READY login: EUR: \u20ac",
+  ]);
+
+  for (let index = 0; index < 10; index += 1) {
+    scope.qemuWasmChardevReceive(
+      "org.qemu.wasm.primary-serial",
+      encoder.encode(String(index)),
+    );
+  }
+  assert.equal(primary.state.receiveSamples.length, 8);
+}
+
+{
+  const scope = {
+    location: { origin: "https://example.invalid" },
+    addEventListener() {},
+  };
+  const smokeState = {};
+  const completed = [];
+  const partial = [];
+  const config = baseConfig({
+    primarySerialInput: true,
+    serviceBridge: serviceBridgeConfig({ interactiveOnly: true }),
+  });
+  const router = installWasmChardevReceiverRouter(scope);
+  const primary = createPrimarySerialInput(config, smokeState, scope, (line, options = {}) => {
+    (options.partial ? partial : completed).push(line);
+  });
+  const bridge = createServiceBridge(config, smokeState, scope);
+  const encoder = new TextEncoder();
+
+  assert.equal(scope.qemuWasmChardevReceiverRouter, router);
+  scope.qemuWasmChardevReceive(
+    config.primarySerialInputChannel,
+    encoder.encode("guest prompt> "),
+  );
+  scope.qemuWasmChardevReceive(
+    config.serviceBridge.responseChannel,
+    encoder.encode(`${JSON.stringify({ id: "unsolicited", status: "ok" })}\n`),
+  );
+
+  assert.deepEqual(completed, []);
+  assert.deepEqual(partial, ["guest prompt> "]);
+  assert.equal(primary.state.receives, 1);
+  assert.equal(bridge.state.received, 1);
+  assert.equal(
+    scope.qemuWasmChardevReceive("org.qemu.wasm.unknown", encoder.encode("ignored")),
+    false,
+  );
 }
 
 {

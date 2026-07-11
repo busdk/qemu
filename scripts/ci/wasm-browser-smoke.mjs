@@ -812,10 +812,53 @@ export function writeWasmChardevText(module, channel, text, maxPayloadBytes = 40
   return status;
 }
 
-export function createPrimarySerialInput(config, smokeState, scope = globalThis) {
+export function installWasmChardevReceiverRouter(scope = globalThis) {
+  if (scope.qemuWasmChardevReceiverRouter) {
+    return scope.qemuWasmChardevReceiverRouter;
+  }
+  const receivers = new Map();
+  const router = {
+    register(channel, receiver) {
+      if (!receivers.has(channel)) {
+        receivers.set(channel, new Set());
+      }
+      receivers.get(channel).add(receiver);
+      return () => {
+        const channelReceivers = receivers.get(channel);
+        channelReceivers?.delete(receiver);
+        if (channelReceivers?.size === 0) {
+          receivers.delete(channel);
+        }
+      };
+    },
+    receive(channel, bytes) {
+      const channelReceivers = receivers.get(channel);
+      if (!channelReceivers) {
+        return false;
+      }
+      for (const receiver of channelReceivers) {
+        receiver(channel, bytes);
+      }
+      return true;
+    },
+  };
+  scope.qemuWasmChardevReceiverRouter = router;
+  scope.qemuWasmChardevReceive = router.receive;
+  return router;
+}
+
+export function createPrimarySerialInput(
+  config,
+  smokeState,
+  scope = globalThis,
+  output = null,
+) {
   if (!config.primarySerialInput) {
     return null;
   }
+  const decoder = new TextDecoder();
+  let lineBuffer = "";
+  let emit = output;
   const state = {
     channel: config.primarySerialInputChannel,
     maxPayloadBytes: config.primarySerialInputMaxPayloadBytes,
@@ -826,6 +869,14 @@ export function createPrimarySerialInput(config, smokeState, scope = globalThis)
     lastWriteStatus: null,
     lastTextLength: 0,
     lastError: null,
+    receives: 0,
+    receivedBytes: 0,
+    decodedCharacters: 0,
+    lastReceiveBytes: 0,
+    lastReceiveTextLength: 0,
+    bufferedTextLength: 0,
+    maxReceiveSamples: 8,
+    receiveSamples: [],
   };
   smokeState.primarySerialInput = state;
   let module = null;
@@ -849,14 +900,53 @@ export function createPrimarySerialInput(config, smokeState, scope = globalThis)
       throw error;
     }
   };
+  const receive = (channel, bytes) => {
+    if (channel !== state.channel) {
+      return false;
+    }
+    const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    const text = decoder.decode(data, { stream: true });
+    state.receives += 1;
+    state.receivedBytes += data.length;
+    state.decodedCharacters += text.length;
+    state.lastReceiveBytes = data.length;
+    state.lastReceiveTextLength = text.length;
+    lineBuffer += text;
+    const lines = lineBuffer.split("\n");
+    lineBuffer = lines.pop() || "";
+    for (const line of lines) {
+      emit?.(line.endsWith("\r") ? line.slice(0, -1) : line);
+    }
+    if (text !== "" && lineBuffer !== "") {
+      emit?.(
+        lineBuffer.endsWith("\r") ? lineBuffer.slice(0, -1) : lineBuffer,
+        { partial: true },
+      );
+    }
+    state.bufferedTextLength = lineBuffer.length;
+    state.receiveSamples.push({
+      bytes: data.length,
+      textLength: text.length,
+      bufferedTextLength: lineBuffer.length,
+    });
+    while (state.receiveSamples.length > state.maxReceiveSamples) {
+      state.receiveSamples.shift();
+    }
+    return true;
+  };
   const input = {
     attachModule(nextModule) {
       module = nextModule;
       state.moduleAttached = Boolean(module);
     },
+    attachOutput(nextOutput) {
+      emit = nextOutput;
+    },
+    receive,
     state,
     writeText,
   };
+  installWasmChardevReceiverRouter(scope).register(state.channel, receive);
   scope.qemuWasmPrimarySerialInput = input;
   return input;
 }
@@ -1026,7 +1116,10 @@ export function createServiceBridge(config, smokeState, scope = globalThis) {
     state,
   };
 
-  scope.qemuWasmChardevReceive = receive;
+  installWasmChardevReceiverRouter(scope).register(
+    bridgeConfig.responseChannel,
+    receive,
+  );
   scope.qemuWasmServiceBridge = bridge;
   if (typeof scope.addEventListener === "function") {
     scope.addEventListener("message", (event) => {
@@ -2024,6 +2117,7 @@ async function run() {
   };
   globalThis.qemuWasmSmokeState = smokeState;
   installBrowserDialogSuppression(globalThis, smokeState);
+  installWasmChardevReceiverRouter(globalThis);
   const serviceBridge = createServiceBridge(config, smokeState, globalThis);
   const primarySerialInput = createPrimarySerialInput(config, smokeState, globalThis);
   const powerControl = createPowerControl(config, smokeState, serviceBridge);
@@ -2243,6 +2337,30 @@ async function run() {
     );
   };
 
+  const observeSerialReadiness = (line, partial = false) => {
+    const elapsedMs = Math.round(performance.now() - startTime);
+    if (partial) {
+      recordBootMilestone(smokeState, line, elapsedMs);
+    }
+    if ((!partial || !smokeState.markerSeen) && recordMarkerEvidence(
+      smokeState,
+      config.marker,
+      line,
+      elapsedMs,
+    )) {
+      smokeState.markerSeen = true;
+    }
+    if (serviceBridge && line.includes(config.serviceBridge.readinessMarker)) {
+      serviceBridge.markReady("serial");
+    }
+    for (const expected of smokeState.expectedTextSeen) {
+      if (!expected.seen && line.includes(expected.text)) {
+        expected.seen = true;
+      }
+    }
+    maybeComplete();
+  };
+
   const emit = (line) => {
     smokeState.lines += 1;
     smokeState.lastLine = line;
@@ -2311,23 +2429,7 @@ async function run() {
       smokeState.outputSuppressed = true;
       appendLine(output, `bus-engine-os: console output truncated after ${config.maxOutputBytes} bytes`);
     }
-    if (recordMarkerEvidence(
-      smokeState,
-      config.marker,
-      line,
-      Math.round(performance.now() - startTime),
-    )) {
-      smokeState.markerSeen = true;
-    }
-    if (serviceBridge && line.includes(config.serviceBridge.readinessMarker)) {
-      serviceBridge.markReady("serial");
-    }
-    for (const expected of smokeState.expectedTextSeen) {
-      if (!expected.seen && line.includes(expected.text)) {
-        expected.seen = true;
-      }
-    }
-    maybeComplete();
+    observeSerialReadiness(line);
     const exitStatus = programExitStatus(line);
     if (
       exitStatus !== null &&
@@ -2338,6 +2440,13 @@ async function run() {
       setPhase("program-exit", `Bus Engine OS stopped before becoming ready: status ${exitStatus}`);
     }
   };
+  primarySerialInput?.attachOutput((line, options = {}) => {
+    if (options.partial) {
+      observeSerialReadiness(line, true);
+      return;
+    }
+    emit(line);
+  });
 
   setPhase("fetch-guest-inputs", "loading boot assets");
   drawBrowserStatusFrame(canvas, "Loading Bus Engine OS...");
