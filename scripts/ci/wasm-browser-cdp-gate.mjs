@@ -32,7 +32,7 @@ const DEFAULT_CHROME_PATHS = [
 function usage(status = 0) {
   const stream = status === 0 ? process.stdout : process.stderr;
   stream.write(`usage: wasm-browser-cdp-gate.mjs --artifact-dir DIR --kernel FILE [--initrd FILE | --rootfs FILE] --out FILE [OPTIONS]\n\nRuns the QEMU WebAssembly browser smoke page through Chrome DevTools Protocol, without Playwright.\n\nOptions:\n  --artifact-dir DIR       Directory containing qemu-system-*.js/.wasm artifacts\n  --guest-manifest FILE    Load guest defaults such as kernel/rootfs/marker\n  --kernel FILE            Guest kernel served as /guest/kernel\n  --initrd FILE            Guest initramfs image\n  --rootfs FILE            Guest rootfs served as /guest/rootfs.raw\n  --out FILE               Write result JSON\n  --chrome FILE            Chrome/Chromium executable\n  --firmware-dir DIR       Directory containing QEMU firmware blobs\n  --host HOST              Smoke server host (default: 127.0.0.1)\n  --port N                 Smoke server port (default: 8151)\n  --cdp-host HOST          Chrome remote-debugging host (default: 127.0.0.1)\n  --cdp-port N             Chrome remote-debugging port (default: 9223)\n  --program FILE           QEMU JS artifact basename (default: manifest or qemu-system-riscv64.js)\n  --wasm FILE              QEMU WASM artifact basename (default: derived from program)\n  --marker TEXT            Required marker text (default: manifest or Welcome to TuxTest)\n  --timeout-ms N           Smoke timeout (default: manifest or 180000)\n  --max-output-bytes N     Smoke output byte cap (default: 160000)\n  --memory SIZE            Guest memory (default: manifest or 512M)\n  --machine NAME           QEMU machine (default: manifest or virt)\n  --cpu MODEL              QEMU CPU model (default: manifest or empty)\n  --rootfs-device KIND     Rootfs block device (default: manifest or virtio-mmio)\n  --target-arch ARCH       Guest target architecture for firmware mounts\n  --kernel-append TEXT     Kernel command line\n  --vmstate-restore        Enable browser VMState restore import\n  --vmstate-restore-state-file FILE\n                           Local VMState stream served as /vmstate/restore\n  --vmstate-restore-state-bytes N\n                           Expected VMState byte length\n  --vmstate-restore-state-sha256 HASH\n                           Expected VMState SHA-256\n  --vmstate-restore-saved-manifest FILE\n                           Saved-state compatibility manifest\n  --vmstate-restore-current-manifest FILE\n                           Current compatibility manifest\n  --diagnostics-limit N    Live-generated-exec diagnostics limit (default: 24)\n  --no-live-generated-exec Disable live generated exec query flags\n  --help                   Show this help\n`);
-  stream.write(`Static restore options:\n  --expect-text TEXT       Additional serial text required for success; repeatable\n  --qemu-arg ARG           Additional QEMU argument; repeat in exact order\n  --serial-input-after-text TEXT\n                           Wait for serial text before sending configured input\n  --serial-input-text TEXT Send exact text through the primary serial channel\n  --vmstate-restore-proof  Require acceptance-shaped fail-closed proof evidence\n  --vmstate-restore-static-export-manifest FILE\n                           Fail-closed static export source of truth\n`);
+  stream.write(`Static restore options:\n  --expect-text TEXT       Additional serial text required for success; repeatable\n  --qemu-arg ARG           Additional QEMU argument; repeat in exact order\n  --serial-input-after-text TEXT\n                           Wait for serial text before sending configured input\n  --serial-input-text TEXT Send exact text through the primary serial channel\n  --pre-serial-input-wait-ms N\n                           Wait after serial input trigger before writing (default: 0)\n  --vmstate-restore-proof  Require acceptance-shaped fail-closed proof evidence\n  --vmstate-restore-static-export-manifest FILE\n                           Fail-closed static export source of truth\n`);
   process.exit(status);
 }
 
@@ -94,6 +94,7 @@ export async function parseArgs(argv) {
     network: "none",
     out: null,
     port: 8151,
+    preSerialInputWaitMs: 0,
     program: "qemu-system-riscv64.js",
     qemuArgs: [],
     rootfs: null,
@@ -170,6 +171,9 @@ export async function parseArgs(argv) {
       options.out = argv[++i];
     } else if (arg === "--port") {
       options.port = Number(argv[++i]);
+    } else if (arg === "--pre-serial-input-wait-ms") {
+      options.preSerialInputWaitMs = Number(argv[++i]);
+      explicit.add("preSerialInputWaitMs");
     } else if (arg === "--program") {
       options.program = argv[++i];
       explicit.add("program");
@@ -222,7 +226,7 @@ export async function parseArgs(argv) {
   }
 
   applyGuestManifest(options, explicit, {
-    integerFields: ["timeoutMs"],
+    integerFields: ["preSerialInputWaitMs", "timeoutMs"],
     pathFields: [
       "artifactDir",
       "firmwareDir",
@@ -324,6 +328,15 @@ export async function parseArgs(argv) {
   }
   if (options.serialInputAfterText !== "" && options.serialInputText === "") {
     console.error("--serial-input-after-text requires --serial-input-text");
+    usage(2);
+  }
+  if (!Number.isInteger(options.preSerialInputWaitMs) ||
+      options.preSerialInputWaitMs < 0) {
+    console.error("--pre-serial-input-wait-ms must be a non-negative integer");
+    usage(2);
+  }
+  if (options.preSerialInputWaitMs > 0 && options.serialInputText === "") {
+    console.error("--pre-serial-input-wait-ms requires --serial-input-text");
     usage(2);
   }
   if (options.out === null) {
@@ -486,6 +499,19 @@ export function serialInputTriggerReady(snapshot, afterText = "") {
   return ["start-qemu", "guest-boot", "success"].includes(
     snapshot.state.phase,
   );
+}
+
+export function serialInputWriteReady(
+  serialInput,
+  triggerReady,
+  elapsedMs,
+  waitMs = 0,
+) {
+  if (serialInput.triggerElapsedMs === null && triggerReady) {
+    serialInput.triggerElapsedMs = elapsedMs;
+  }
+  return serialInput.triggerElapsedMs !== null &&
+    elapsedMs - serialInput.triggerElapsedMs >= waitMs;
 }
 
 export function recordSerialInputAttempt(serialInput, result, elapsedMs) {
@@ -813,6 +839,7 @@ export function vmstateRestoreAffectingArgs(options) {
     args.push(
       "--serial-input-after-text", options.serialInputAfterText || "",
       "--serial-input-text", options.serialInputText,
+      "--pre-serial-input-wait-ms", String(options.preSerialInputWaitMs || 0),
     );
   }
   args.push(
@@ -1198,9 +1225,11 @@ async function main() {
     lastAttemptElapsedMs: null,
     lastFailureElapsedMs: null,
     lastWriteFailure: null,
+    preSerialInputWaitMs: options.preSerialInputWaitMs,
     sent: false,
     target: "primary-serial",
     textLength: options.serialInputText.length,
+    triggerElapsedMs: null,
     writeStatus: null,
   };
 
@@ -1254,10 +1283,16 @@ async function main() {
       pageTextTail = snapshot.text || pageTextTail;
     }
     const elapsedMs = Date.now() - started;
-    if (serialInput !== null && !serialInput.sent && serialInputTriggerReady({
+    const serialTriggerReady = serialInput !== null && serialInputTriggerReady({
       output: pageOutput,
       state: finalState,
-    }, serialInput.afterText)) {
+    }, serialInput.afterText);
+    if (serialInput !== null && !serialInput.sent && serialInputWriteReady(
+      serialInput,
+      serialTriggerReady,
+      elapsedMs,
+      options.preSerialInputWaitMs,
+    )) {
       const writeResult = await cdpEval(cdp, `(() => {
         try {
           const input = globalThis.qemuWasmPrimarySerialInput;

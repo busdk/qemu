@@ -21,6 +21,7 @@ import {
   proofInputEvidence,
   recordSerialInputAttempt,
   serialInputTriggerReady,
+  serialInputWriteReady,
   smokeServerArgs,
   smokeUrl,
   vmstateRestoreAffectingArgs,
@@ -49,6 +50,7 @@ const options = {
   memory: "512M",
   network: "none",
   port: 8151,
+  preSerialInputWaitMs: 0,
   program: "qemu-system-riscv64.js",
   qemuArgs: [],
   rootfs: "/tmp/qemu-guest/rootfs.raw",
@@ -139,6 +141,18 @@ assert.equal(serialInputTriggerReady({
   state: { phase: "guest-boot", primarySerialInput: { moduleAttached: true } },
 }), true);
 
+const serialInputTiming = { triggerElapsedMs: null };
+assert.equal(serialInputWriteReady(serialInputTiming, false, 900, 1000), false);
+assert.equal(serialInputTiming.triggerElapsedMs, null);
+assert.equal(serialInputWriteReady(serialInputTiming, true, 1000, 1000), false);
+assert.equal(serialInputTiming.triggerElapsedMs, 1000);
+assert.equal(serialInputWriteReady(serialInputTiming, false, 1500, 1000), false);
+assert.equal(serialInputTiming.triggerElapsedMs, 1000);
+assert.equal(serialInputWriteReady(serialInputTiming, true, 1999, 1000), false);
+assert.equal(serialInputWriteReady(serialInputTiming, false, 2000, 1000), true);
+assert.equal(serialInputTiming.triggerElapsedMs, 1000);
+assert.equal(serialInputWriteReady({ triggerElapsedMs: null }, true, 42, 0), true);
+
 const serialInputAttempt = {
   attempts: 0,
   elapsedMs: null,
@@ -226,6 +240,7 @@ const restoreArgs = vmstateRestoreAffectingArgs({
   qemuArgs: serialInputOptions.qemuArgs,
   serialInputAfterText: "QEMU_WASM_SNAPSHOT_READY",
   serialInputText: "QEMU_WASM_RESUME_CONTINUE\n",
+  preSerialInputWaitMs: 1000,
   vmstateRestoreCurrentManifest: "/tmp/current.json",
   vmstateRestoreSavedManifest: "/tmp/saved.json",
   vmstateRestoreStaticExportManifest: "/tmp/static-export.json",
@@ -240,11 +255,13 @@ assert.deepEqual(restoreArgs.slice(qemuArgIndex, qemuArgIndex + 8), [
   "--qemu-arg", "-device",
   "--qemu-arg", "virtio-rng-device,rng=rng0",
 ]);
-assert.deepEqual(restoreArgs.slice(serialArgIndex, serialArgIndex + 4), [
+assert.deepEqual(restoreArgs.slice(serialArgIndex, serialArgIndex + 6), [
   "--serial-input-after-text",
   "QEMU_WASM_SNAPSHOT_READY",
   "--serial-input-text",
   "QEMU_WASM_RESUME_CONTINUE\n",
+  "--pre-serial-input-wait-ms",
+  "1000",
 ]);
 
 const manifestDir = mkdtempSync(join(tmpdir(), "qemu-cdp-gate-manifest-"));
@@ -273,6 +290,7 @@ const manifestOptions = await parseArgs([
   "--qemu-arg", "virtio-rng-device,rng=rng0",
   "--serial-input-after-text", "QEMU_WASM_SNAPSHOT_READY",
   "--serial-input-text", "QEMU_WASM_RESUME_CONTINUE\n",
+  "--pre-serial-input-wait-ms", "1000",
   "--out", "/tmp/qemu-cdp-gate-result.json",
 ]);
 assert.equal(manifestOptions.artifactDir, "/tmp/explicit-artifacts");
@@ -286,6 +304,15 @@ assert.equal(manifestOptions.guestManifest, manifestPath);
 assert.deepEqual(manifestOptions.qemuArgs, serialInputOptions.qemuArgs);
 assert.equal(manifestOptions.serialInputAfterText, "QEMU_WASM_SNAPSHOT_READY");
 assert.equal(manifestOptions.serialInputText, "QEMU_WASM_RESUME_CONTINUE\n");
+assert.equal(manifestOptions.preSerialInputWaitMs, 1000);
+
+const defaultWaitOptions = await parseArgs([
+  "--guest-manifest", manifestPath,
+  "--artifact-dir", "/tmp/explicit-artifacts",
+  "--chrome", "/bin/sh",
+  "--out", "/tmp/qemu-cdp-gate-default-wait-result.json",
+]);
+assert.equal(defaultWaitOptions.preSerialInputWaitMs, 0);
 
 function sha256(text) {
   return createHash("sha256").update(text).digest("hex");
