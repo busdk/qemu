@@ -481,6 +481,24 @@ readiness.
   post-ready template state and bind the exact writable template disk to its
   VMState; do not spend another five-minute browser run on the pre-systemd
   state.
+  Accepted producer tooling 2026-07-11 01:00 UTC: commit `ed7cf74db5`
+  moves the native VMState producer out of supervisor `tmp/` and into the
+  shared QEMU source as `scripts/ci/wasm-vmstate-native-producer.py`, with a
+  standard-library test. The generic tool accepts an opaque readiness marker
+  and exact ordered QEMU arguments, owns serial/QMP endpoints, validates the
+  real `send-configuration` and `send-section-footer` MigrationState
+  properties through `info migrate -a`, migrates through QEMU's `file:`
+  transport, polls to completion, publishes state atomically, and records
+  artifact hashes, QMP evidence, and timings. Seven deterministic tests pass.
+  The exact native QEMU SHA-256
+  `30c1b92a174dbe9113c287222d535b891ea909fae21108d10ede735a21a442d4`
+  real smoke reached the current marker in `2.114 s`, completed migration in
+  `0.313 s`, and wrote a `32187866`-byte stream with SHA-256
+  `310265391780b8e568bb6b053e75bc0500c67c5d9b1e15f547fa691ca2eb3d84`.
+  Proof JSON:
+  `tmp/beo-r30-package-built-resume-proof-20260710/native-producer-tool-smoke/proof.json`.
+  This accepts generic producer mechanics only; the post-ready guest boundary
+  and product browser proof remain open.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
