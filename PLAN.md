@@ -457,6 +457,30 @@ readiness.
   Browser product restore proofs remain `0`; this harness slice requires the
   matching native VMState/static tuple and Chromium matrix before R4suspend can
   close.
+  Progress 2026-07-11 00:35 UTC: the exact native-to-browser tuple now restores
+  successfully in pinned Docker Chromium 150 with no network or published host
+  ports. Commits `fdca1f33bd` and `5327b8be17` make the primary WASM serial
+  channel duplex without replacing the optional service-bridge receiver and
+  add a bounded post-trigger delay for migration-release input. Focused Node
+  checks pass. With QEMU WASM SHA-256
+  `6565230dbe7ded308768e76527640b3239940065da7c3f8ac888b5cec96063bd`,
+  kernel SHA-256
+  `5cdeea615a80f5b6e7b39fdfc30a0bdbc586cc15f3f74282ad9d903ab15602f8`,
+  rootfs SHA-256
+  `078d2d49b679ef9b0fe4cb4cebfabfa7ededc2c50c56509bc69164610410687e`,
+  and VMState SHA-256
+  `1b7d26c088e0081ca817a7f8fcf15dac30db79535248bcca8b35ab761bc7454d`,
+  VMState fetch plus verification took `312 ms`, the serial release was
+  accepted at `6034 ms`, and fresh machine-id/SSH fingerprint evidence was
+  emitted. The run then timed out at `305628 ms`: systemd appeared at
+  `43236 ms`, udev listening at `232719 ms`, and journald startup at
+  `252746 ms`, without multi-user/login readiness. Result JSON:
+  `tmp/beo-r30-package-built-resume-proof-20260710/browser-proof-restore-primary-serial-router/restore-result.json`.
+  This rejects the current pre-systemd capture boundary as the product
+  fast-start candidate. The next R4suspend slice must capture a guest-declared
+  post-ready template state and bind the exact writable template disk to its
+  VMState; do not spend another five-minute browser run on the pre-systemd
+  state.
 
 - [x] R1f - Treat the Bus Engine OS page readiness status as a runner
   success instead of a post-marker failure. DoD: when the browser page status
