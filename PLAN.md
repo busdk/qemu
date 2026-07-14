@@ -10,12 +10,11 @@ file and then implemented.
 ## Active Goal
 
 Follow the supervisor-root `GOAL.md` for the active browser-hosted Bus Engine
-OS fast-start goal. The current primary lane is the RISC-V `virtual-server`
-product suspend/resume path: prove that Chrome/Chromium browser-hosted
-QEMU/WASM can restore the accepted package-built Bus Engine OS artifact to the
-configured readiness marker and responsive console/login path faster than
-same-artifact cold boot, with strict compatibility, snapshot-hygiene, and
-result-evidence gates.
+OS goal. The current primary lane is one cold RISC-V `virtual-server` slice in
+Chrome/Chromium: package-built Bus Engine OS, usable console/network/storage,
+and one frontend-to-in-guest Codex App Server request/response. Suspend/resume
+and further acceleration are follow-ons and cannot delay this first complete
+browser proof.
 
 This shared plan still contains x86_64 accelerator and RISC-V accelerator work
 for other executor environments. Those lanes remain valid when explicitly
@@ -29,10 +28,9 @@ Each lane is complete only against its own accepted Bus Engine OS
 the QEMU WebAssembly artifacts produced by this branch, and the standard
 `virtual-server` boot path. Shell-only init bypasses, synthetic guests, stale
 artifacts, native-QEMU-only boots, and heavily reduced product profiles do not
-satisfy either lane. Snapshot/restore is allowed only through the explicit
-R4suspend browser fast-path item below, with a sanitized pre-secret state,
-restore compatibility proof, entropy reseed proof, and a recorded cold-boot
-fallback measurement.
+satisfy either lane. The current gate uses cold boot. Any later snapshot/restore
+proof must use the explicit R4suspend item below with a sanitized pre-secret
+state, restore compatibility, entropy reseed, and a recorded cold-boot fallback.
 
 Keep unrelated downstream work out of scope. Do not take over bus-pkg, OPFS
 persistence, virtio-net, virtual-desktop packaging, Codex packaging, or Engine
@@ -212,11 +210,12 @@ guest, a shell-only boot, a stale artifact, an unsanitized snapshot/restore
 shortcut, or a run that reaches a weaker marker than normal multi-user
 readiness.
 
-## Active Work Items
+## Active And Follow-On Work Items
 
 - [ ] R4suspend - Prove browser pre-boot suspend/resume as the public
   fast-path for the RISC-V `virtual-server` goal:
-  active 2026-07-07 from operator direction. QEMU owns the generic VM-state
+  deferred behind the first complete cold browser slice as of 2026-07-13.
+  QEMU owns the generic VM-state
   mechanics, browser restore path, and browser lifecycle persistence; Bus
   Engine OS owns the snapshot-safe guest boundary and Linux-kernel
   suspend/hibernate feasibility in its own PLAN. Primary architecture:
