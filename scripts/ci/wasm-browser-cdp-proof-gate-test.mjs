@@ -183,6 +183,23 @@ for (const [field, invalidValue] of [
   const diagnosticGate = cdpProofEvidenceGate(tcgOnly);
   assert.equal(diagnosticGate.ok, true);
   assert.equal(diagnosticGate.generatedExec.source, "wasm64Tcg");
+
+  const oldShapeDiagnostic = JSON.parse(JSON.stringify(tcgOnly));
+  delete oldShapeDiagnostic.wasm64Tcg.lastSummary.generated_guest_instructions;
+  delete oldShapeDiagnostic.wasm64Tcg.lastSummary.generated_body_time_ns;
+  const optionalGate = cdpProofEvidenceGate(oldShapeDiagnostic);
+  assert.equal(optionalGate.ok, true);
+  assert.equal(optionalGate.generatedExec.generatedGuestInstructions, null);
+  assert.equal(optionalGate.generatedExec.generatedBodyTimeNs, null);
+  assert.deepEqual(optionalGate.generatedExec.missingFields, []);
+
+  const requiredGate = cdpProofEvidenceGate(oldShapeDiagnostic, {
+    requireGeneratedExec: true,
+  });
+  assert.equal(requiredGate.ok, false);
+  assert.deepEqual(requiredGate.generatedExec.missingFields, [
+    "wasm64Runloop.lastSummary.event=live-generated-exec-summary",
+  ]);
 }
 
 {

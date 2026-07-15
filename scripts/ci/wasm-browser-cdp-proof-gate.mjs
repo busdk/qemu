@@ -175,10 +175,10 @@ function validateGeneratedExec(result, required) {
   if (!isPositiveInteger(generatedRunEntries)) {
     missingFields.push(`${source}.lastSummary.generated_run_entries`);
   }
-  if (!isPositiveInteger(generatedGuestInstructions)) {
+  if (required && !isPositiveInteger(generatedGuestInstructions)) {
     missingFields.push(`${source}.lastSummary.generated_guest_instructions`);
   }
-  if (!isPositiveInteger(generatedBodyTimeNs)) {
+  if (required && !isPositiveInteger(generatedBodyTimeNs)) {
     missingFields.push(`${source}.lastSummary.generated_body_time_ns`);
   }
   if (!isPositiveInteger(generatedCoverageNumerator)) {
