@@ -17,6 +17,42 @@ DEFAULT_INPUT_TEXT = "ab"
 DEFAULT_SERVICE_READY_MARKER = "QEMU_WASM_SERVICE_READY"
 DEFAULT_SERVICE_REQUEST_PATH = "/dev/virtio-ports/org.qemu.wasm.service.request"
 DEFAULT_SERVICE_RESPONSE_PATH = "/dev/virtio-ports/org.qemu.wasm.service.response"
+JSON_WHITESPACE_PATTERN = r'[ \t\r]*'
+SERVICE_REQUEST_PATTERN = (
+    r'^' + JSON_WHITESPACE_PATTERN + r'[{]' + JSON_WHITESPACE_PATTERN
+    + r'"operation"' + JSON_WHITESPACE_PATTERN + r':' + JSON_WHITESPACE_PATTERN
+    + r'"[A-Za-z][A-Za-z0-9._:-]*"' + JSON_WHITESPACE_PATTERN
+    + r',' + JSON_WHITESPACE_PATTERN + r'"id"' + JSON_WHITESPACE_PATTERN
+    + r':' + JSON_WHITESPACE_PATTERN + r'"[A-Za-z][A-Za-z0-9._:-]*"'
+    + JSON_WHITESPACE_PATTERN + r',' + JSON_WHITESPACE_PATTERN
+    + r'"deadlineMs"' + JSON_WHITESPACE_PATTERN + r':'
+    + JSON_WHITESPACE_PATTERN + r'(0|[1-9][0-9]*)'
+    + JSON_WHITESPACE_PATTERN + r'[}]' + JSON_WHITESPACE_PATTERN + r'$'
+)
+SERVICE_REQUEST_AWK = r'''{
+    if (RT != "\n" || length($0) > 4095 ||
+        index($0, sprintf("%c", 24)) != 0) {
+        print "M"
+        next
+    }
+    if ($0 !~ /''' + SERVICE_REQUEST_PATTERN + r'''/) {
+        print "M"
+        next
+    }
+    if (split($0, field, "\"") != 11 ||
+        length(field[4]) > 128 || length(field[8]) > 128) {
+        print "M"
+        next
+    }
+    printf "V\t%s\t%s\n", field[8], field[4]
+    accepted = 1
+    exit
+}
+END {
+    if (!accepted) {
+        print "E"
+    }
+}'''
 
 
 def parse_args():
@@ -297,20 +333,152 @@ done
 
 say {shell_quote(ready_marker)}
 
-if IFS= read -r line < "$request"; then
-    id=$(printf '%s\\n' "$line" | /bin/busybox sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')
-    operation=$(printf '%s\\n' "$line" | /bin/busybox sed -n 's/.*"operation"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p')
-    [ -n "$id" ] || id='health-1'
-    if [ "$operation" = health ]; then
-        printf '{{"id":"%s","status":"ok","operation":"health"}}\\n' "$id" > "$response"
-        say {shell_quote(marker)}
-    else
-        printf '{{"id":"%s","status":"error","error":"unsupported operation"}}\\n' "$id" > "$response"
-        say 'QEMU_WASM_SERVICE_UNSUPPORTED_OPERATION'
+tab=$(printf '\\t')
+service_dir=${{TMPDIR:-/tmp}}/qemu-wasm-service.$$
+normalized="$service_dir/normalized"
+tags="$service_dir/tags"
+service_dir_created=0
+normalized_open=0
+normalizer_pid=
+parser_pid=
+
+cleanup_service() {{
+    if [ -n "$parser_pid" ]; then
+        kill "$parser_pid" 2>/dev/null || true
+        wait "$parser_pid" 2>/dev/null || true
+        parser_pid=
     fi
+    if [ -n "$normalizer_pid" ]; then
+        kill "$normalizer_pid" 2>/dev/null || true
+        wait "$normalizer_pid" 2>/dev/null || true
+        normalizer_pid=
+    fi
+    if [ "$normalized_open" = 1 ]; then
+        exec 3>&-
+        normalized_open=0
+    fi
+    if [ "$service_dir_created" = 1 ]; then
+        /bin/busybox rm -f "$normalized" "$tags"
+        /bin/busybox rmdir "$service_dir" 2>/dev/null || true
+        service_dir_created=0
+    fi
+}}
+trap 'cleanup_service' EXIT
+trap 'exit 1' HUP INT TERM
+
+service_failed=0
+read_failed_reported=0
+terminal_record=0
+if /bin/busybox mkdir -p "${{TMPDIR:-/tmp}}" &&
+    /bin/busybox mkdir -m 700 "$service_dir"; then
+    service_dir_created=1
 else
+    service_failed=1
+fi
+if [ "$service_failed" = 0 ] &&
+    ! /bin/busybox mkfifo "$normalized" "$tags"; then
+    service_failed=1
+fi
+if [ "$service_failed" = 0 ]; then
+    if exec 3<> "$normalized"; then
+        normalized_open=1
+    else
+        service_failed=1
+    fi
+fi
+
+if [ "$service_failed" = 0 ]; then
+    LC_ALL=C /bin/busybox tr '\\000' '\\030' \\
+        < "$request" > "$normalized" 3>&- &
+    normalizer_pid=$!
+    LC_ALL=C /bin/busybox awk {shell_quote(SERVICE_REQUEST_AWK)} \\
+        < "$normalized" > "$tags" 3>&- &
+    parser_pid=$!
+    exec 3>&-
+    normalized_open=0
+
+    while IFS= read -r record; do
+        case "$record" in
+        M)
+            say 'QEMU_WASM_SERVICE_MALFORMED_REQUEST'
+            continue
+            ;;
+        V"$tab"*)
+            fields=${{record#V"$tab"}}
+            id=${{fields%%"$tab"*}}
+            operation=${{fields#*"$tab"}}
+            if [ "$fields" = "$id" ] || [ -z "$id" ] ||
+                [ -z "$operation" ] ||
+                [ "$record" != "V$tab$id$tab$operation" ]; then
+                service_failed=1
+                say 'QEMU_WASM_SERVICE_READ_FAILED'
+                read_failed_reported=1
+                break
+            fi
+            case "$operation" in
+            *"$tab"*)
+                service_failed=1
+                say 'QEMU_WASM_SERVICE_READ_FAILED'
+                read_failed_reported=1
+                break
+                ;;
+            esac
+            terminal_record=1
+            if [ "$operation" = health ]; then
+                printf \\
+                    '{{"id":"%s","status":"ok","operation":"health"}}\\n' \\
+                    "$id" > "$response"
+                say {shell_quote(marker)}
+            else
+                printf \\
+                    '{{"id":"%s","status":"error","error":"%s"}}\\n' \\
+                    "$id" 'unsupported operation' > "$response"
+                say 'QEMU_WASM_SERVICE_UNSUPPORTED_OPERATION'
+            fi
+            break
+            ;;
+        E)
+            terminal_record=1
+            service_failed=1
+            say 'QEMU_WASM_SERVICE_READ_FAILED'
+            read_failed_reported=1
+            break
+            ;;
+        *)
+            service_failed=1
+            say 'QEMU_WASM_SERVICE_READ_FAILED'
+            read_failed_reported=1
+            break
+            ;;
+        esac
+    done < "$tags"
+
+    parser_status=0
+    wait "$parser_pid" || parser_status=$?
+    parser_pid=
+
+    normalizer_stopped=0
+    if kill -0 "$normalizer_pid" 2>/dev/null &&
+        kill "$normalizer_pid" 2>/dev/null; then
+        normalizer_stopped=1
+    fi
+    normalizer_status=0
+    wait "$normalizer_pid" || normalizer_status=$?
+    normalizer_pid=
+
+    if [ "$parser_status" -ne 0 ] || [ "$terminal_record" != 1 ]; then
+        service_failed=1
+    fi
+    if [ "$normalizer_status" -ne 0 ] &&
+        [ "$normalizer_stopped" != 1 ]; then
+        service_failed=1
+    fi
+fi
+
+if [ "$service_failed" = 1 ] && [ "$read_failed_reported" != 1 ]; then
     say 'QEMU_WASM_SERVICE_READ_FAILED'
 fi
+cleanup_service
 
 poweroff -f 2>/dev/null || /bin/busybox poweroff -f 2>/dev/null || /bin/busybox sleep 5
 """.encode("utf-8")
