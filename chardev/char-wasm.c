@@ -6,9 +6,13 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
+#ifdef WASM_CHARDEV_ABI_TEST
+#include "wasm-chardev-abi-stubs.h"
+#else
 #include "qemu/osdep.h"
 #include "chardev/char.h"
 #include "qapi/error.h"
+#include "qemu/atomic.h"
 #include "qemu/main-loop.h"
 #include "qemu/module.h"
 #include "qemu/option.h"
@@ -16,6 +20,8 @@
 #include "qemu/timer.h"
 #include "qom/object.h"
 #include <emscripten.h>
+#include <stdint.h>
+#endif
 
 #define WASM_CHARDEV_DEFAULT_MAX_PAYLOAD 4096
 #define WASM_CHARDEV_MAX_PAYLOAD_LIMIT 1048576
@@ -28,6 +34,9 @@ typedef struct WasmChardev {
     QEMUTimer *flush_timer;
     uint8_t *pending_input;
     int pending_input_len;
+    uint64_t pending_input_token;
+    bool pending_input_cancellable;
+    bool pending_input_started;
 } WasmChardev;
 
 DECLARE_INSTANCE_CHECKER(WasmChardev, WASM_CHARDEV,
@@ -35,6 +44,23 @@ DECLARE_INSTANCE_CHECKER(WasmChardev, WASM_CHARDEV,
 
 static QemuMutex wasm_chardevs_lock;
 static GList *wasm_chardevs;
+static uint64_t wasm_chardev_next_input_token;
+
+static uint64_t wasm_chardev_allocate_input_token(void)
+{
+    uint64_t previous;
+
+    for (;;) {
+        previous = qatomic_read(&wasm_chardev_next_input_token);
+        if (previous == UINT64_MAX) {
+            return 0;
+        }
+        if (qatomic_cmpxchg(&wasm_chardev_next_input_token,
+                            previous, previous + 1) == previous) {
+            return previous + 1;
+        }
+    }
+}
 
 EM_JS(int, wasm_chardev_pending_channel_len, (void), {
     const text = Module["qemuWasmChardevPendingChannel"] || "";
@@ -121,11 +147,15 @@ static void wasm_chr_flush_pending_input(WasmChardev *s)
         }
 
         write_len = MIN(can_write, s->pending_input_len);
+        s->pending_input_started = true;
         qemu_chr_be_write(chr, s->pending_input, write_len);
 
         s->pending_input_len -= write_len;
         if (s->pending_input_len == 0) {
             g_clear_pointer(&s->pending_input, g_free);
+            s->pending_input_token = 0;
+            s->pending_input_cancellable = false;
+            s->pending_input_started = false;
             qemu_mutex_unlock(&s->pending_input_lock);
             return;
         }
@@ -135,6 +165,15 @@ static void wasm_chr_flush_pending_input(WasmChardev *s)
                 s->pending_input_len);
     }
     qemu_mutex_unlock(&s->pending_input_lock);
+}
+
+static void wasm_chr_clear_pending_input(WasmChardev *s)
+{
+    g_clear_pointer(&s->pending_input, g_free);
+    s->pending_input_len = 0;
+    s->pending_input_token = 0;
+    s->pending_input_cancellable = false;
+    s->pending_input_started = false;
 }
 
 static void wasm_chr_flush_timer_cb(void *opaque)
@@ -234,6 +273,7 @@ int qemu_wasm_chardev_write_pending(void)
     WasmChardev *s;
     int channel_len = wasm_chardev_pending_channel_len();
     int data_len = wasm_chardev_pending_data_len();
+    uint64_t token;
 
     if (channel_len <= 1 || data_len <= 0) {
         return -1;
@@ -257,14 +297,99 @@ int qemu_wasm_chardev_write_pending(void)
         return -5;
     }
 
+    token = wasm_chardev_allocate_input_token();
+    if (!token) {
+        qemu_mutex_unlock(&s->pending_input_lock);
+        return -4;
+    }
+
     data = g_malloc(data_len);
     wasm_chardev_copy_pending_data(data, data_len);
 
     s->pending_input = g_steal_pointer(&data);
     s->pending_input_len = data_len;
+    s->pending_input_token = token;
+    s->pending_input_cancellable = true;
     qemu_mutex_unlock(&s->pending_input_lock);
     wasm_chr_schedule_flush(s);
     return data_len;
+}
+
+EMSCRIPTEN_KEEPALIVE
+uint64_t qemu_wasm_chardev_pending_input_token(void)
+{
+    g_autofree char *channel = NULL;
+    WasmChardev *s;
+    int channel_len = wasm_chardev_pending_channel_len();
+    uint64_t token;
+
+    if (channel_len <= 1) {
+        return 0;
+    }
+    channel = g_malloc0(channel_len);
+    wasm_chardev_copy_pending_channel(channel, channel_len);
+
+    qemu_mutex_lock(&wasm_chardevs_lock);
+    s = wasm_chardev_find_locked(channel);
+    qemu_mutex_unlock(&wasm_chardevs_lock);
+    if (!s) {
+        return 0;
+    }
+
+    qemu_mutex_lock(&s->pending_input_lock);
+    token = s->pending_input_token;
+    qemu_mutex_unlock(&s->pending_input_lock);
+    return token;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int qemu_wasm_chardev_cancel_pending_input(uint64_t token)
+{
+    g_autofree char *channel = NULL;
+    WasmChardev *s;
+    int channel_len = wasm_chardev_pending_channel_len();
+    int canceled = QEMU_WASM_CHARDEV_CANCEL_NONE;
+    bool schedule_flush = false;
+
+    if (!token || channel_len <= 1) {
+        return canceled;
+    }
+    channel = g_malloc0(channel_len);
+    wasm_chardev_copy_pending_channel(channel, channel_len);
+
+    qemu_mutex_lock(&wasm_chardevs_lock);
+    s = wasm_chardev_find_locked(channel);
+    qemu_mutex_unlock(&wasm_chardevs_lock);
+    if (!s) {
+        return canceled;
+    }
+
+    qemu_mutex_lock(&s->pending_input_lock);
+    if (!s->pending_input_cancellable || s->pending_input_token != token) {
+        qemu_mutex_unlock(&s->pending_input_lock);
+        return canceled;
+    }
+    if (s->pending_input_started) {
+        g_free(s->pending_input);
+        s->pending_input = g_malloc(2);
+        s->pending_input[0] = 0x18;
+        s->pending_input[1] = '\n';
+        s->pending_input_len = 2;
+        s->pending_input_token = 0;
+        s->pending_input_cancellable = false;
+        s->pending_input_started = false;
+        canceled = QEMU_WASM_CHARDEV_CANCEL_PARTIAL;
+        schedule_flush = true;
+    } else {
+        wasm_chr_clear_pending_input(s);
+        timer_del(s->flush_timer);
+        canceled = QEMU_WASM_CHARDEV_CANCEL_UNDELIVERED;
+    }
+    qemu_mutex_unlock(&s->pending_input_lock);
+    if (schedule_flush) {
+        wasm_chr_schedule_flush(s);
+    }
+    return canceled;
 }
 
 static void wasm_chr_accept_input(Chardev *chr)
