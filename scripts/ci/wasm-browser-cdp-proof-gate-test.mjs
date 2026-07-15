@@ -66,6 +66,8 @@ const result = {
       generated_coverage_denominator: 1000,
       generated_coverage_numerator: 21,
       generated_coverage_ppm: 21000,
+      generated_body_time_ns: 45000,
+      generated_guest_instructions: 163,
       generated_run_entries: 7,
     },
   },
@@ -85,6 +87,8 @@ const result = {
   assert.equal(gate.generatedExec.ok, true);
   assert.equal(gate.generatedExec.source, "wasm64Runloop");
   assert.equal(gate.generatedExec.generatedRunEntries, 7);
+  assert.equal(gate.generatedExec.generatedGuestInstructions, 163);
+  assert.equal(gate.generatedExec.generatedBodyTimeNs, 45000);
   assert.equal(gate.elapsedOk, true);
   assert.equal(gate.maxElapsedMs, 300000);
   assert.equal(gate.files.rootfs.present, true);
@@ -117,6 +121,27 @@ const result = {
   ));
 }
 
+for (const [field, invalidValue] of [
+  ["generated_guest_instructions", undefined],
+  ["generated_guest_instructions", 0],
+  ["generated_guest_instructions", 1.5],
+  ["generated_body_time_ns", undefined],
+  ["generated_body_time_ns", 0],
+  ["generated_body_time_ns", 1.5],
+]) {
+  const broken = JSON.parse(JSON.stringify(result));
+  if (invalidValue === undefined) {
+    delete broken.wasm64Runloop.lastSummary[field];
+  } else {
+    broken.wasm64Runloop.lastSummary[field] = invalidValue;
+  }
+  const gate = cdpProofEvidenceGate(broken, { requireGeneratedExec: true });
+  assert.equal(gate.ok, false);
+  assert.deepEqual(gate.generatedExec.missingFields, [
+    `wasm64Runloop.lastSummary.${field}`,
+  ]);
+}
+
 // R4d-g: the wasm64Runloop "live-generated-exec-summary" event
 // (tcg/wasm64.c tcg_wasm64_report_live_generated_exec_summary) never emits
 // generated_coverage_ppm, only the numerator/denominator. A real controlled
@@ -144,14 +169,30 @@ const result = {
       generated_coverage_denominator: 2000,
       generated_coverage_numerator: 5,
       generated_coverage_ppm: 2500,
+      generated_body_time_ns: 45000,
+      generated_guest_instructions: 163,
       generated_run_entries: 3,
     },
   };
   const gate = cdpProofEvidenceGate(tcgOnly, { requireGeneratedExec: true });
-  assert.equal(gate.ok, true);
-  assert.equal(gate.generatedExec.source, "wasm64Tcg");
-  assert.equal(gate.generatedExec.generatedRunEntries, 3);
-  assert.equal(gate.generatedExec.generatedCoverageNumerator, 5);
+  assert.equal(gate.ok, false);
+  assert.equal(gate.generatedExec.source, null);
+  assert.deepEqual(gate.generatedExec.missingFields, [
+    "wasm64Runloop.lastSummary.event=live-generated-exec-summary",
+  ]);
+  const diagnosticGate = cdpProofEvidenceGate(tcgOnly);
+  assert.equal(diagnosticGate.ok, true);
+  assert.equal(diagnosticGate.generatedExec.source, "wasm64Tcg");
+}
+
+{
+  const wrongEvent = JSON.parse(JSON.stringify(result));
+  wrongEvent.wasm64Runloop.lastSummary.event = "summary";
+  const gate = cdpProofEvidenceGate(wrongEvent, { requireGeneratedExec: true });
+  assert.equal(gate.ok, false);
+  assert.deepEqual(gate.generatedExec.missingFields, [
+    "wasm64Runloop.lastSummary.event=live-generated-exec-summary",
+  ]);
 }
 
 {
@@ -194,6 +235,27 @@ const result = {
   const gate = JSON.parse(output);
   assert.equal(gate.ok, true);
   assert.equal(gate.purpose, "qemu-browser-cdp-proof-gate");
+}
+
+{
+  const dir = mkdtempSync(join(tmpdir(), "qemu-cdp-proof-gate-"));
+  const resultPath = join(dir, "result.json");
+  const broken = JSON.parse(JSON.stringify(result));
+  delete broken.wasm64Runloop.lastSummary.generated_guest_instructions;
+  broken.wasm64Runloop.lastSummary.generated_body_time_ns = 0;
+  writeFileSync(resultPath, JSON.stringify(broken));
+  assert.throws(() => execFileSync(process.execPath, [
+    "scripts/ci/wasm-browser-cdp-proof-gate.mjs",
+    "--result", resultPath,
+    "--require-generated-exec",
+  ], { encoding: "utf8", stdio: "pipe" }), (error) => {
+    assert.equal(error.status, 1);
+    assert.equal(
+      error.stderr,
+      "generated execution evidence failed: wasm64Runloop.lastSummary.generated_guest_instructions; wasm64Runloop.lastSummary.generated_body_time_ns\n",
+    );
+    return true;
+  });
 }
 
 console.log("wasm-browser-cdp-proof-gate-test: ok");
