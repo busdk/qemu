@@ -111,7 +111,7 @@ function validateFileEvidence(inputEvidence, role, required) {
   };
 }
 
-function generatedSummary(result) {
+function generatedSummary(result, required) {
   const runloop = result?.wasm64Runloop?.lastSummary;
   if (isObject(runloop) && runloop.event === "live-generated-exec-summary") {
     return {
@@ -120,16 +120,13 @@ function generatedSummary(result) {
     };
   }
   const tcg = result?.wasm64Tcg?.lastSummary;
-  if (isObject(tcg)) {
+  if (!required && isObject(tcg)) {
     return {
       source: "wasm64Tcg",
       summary: tcg,
     };
   }
-  return {
-    source: null,
-    summary: null,
-  };
+  return { source: null, summary: null };
 }
 
 // The wasm64Tcg "summary" event reports generated_coverage_ppm directly, but
@@ -147,11 +144,13 @@ function computeCoveragePpm(numerator, denominator) {
 }
 
 function validateGeneratedExec(result, required) {
-  const { source, summary } = generatedSummary(result);
+  const { source, summary } = generatedSummary(result, required);
   const missingFields = [];
   if (summary === null) {
     if (required) {
-      missingFields.push("wasm64Runloop.lastSummary|wasm64Tcg.lastSummary");
+      missingFields.push(
+        "wasm64Runloop.lastSummary.event=live-generated-exec-summary",
+      );
     }
     return {
       present: false,
@@ -161,6 +160,8 @@ function validateGeneratedExec(result, required) {
     };
   }
   const generatedRunEntries = summary.generated_run_entries;
+  const generatedGuestInstructions = summary.generated_guest_instructions;
+  const generatedBodyTimeNs = summary.generated_body_time_ns;
   const generatedCoverageNumerator = summary.generated_coverage_numerator;
   const generatedCoverageDenominator = summary.generated_coverage_denominator;
   const generatedCoveragePpmComputed = computeCoveragePpm(
@@ -173,6 +174,12 @@ function validateGeneratedExec(result, required) {
 
   if (!isPositiveInteger(generatedRunEntries)) {
     missingFields.push(`${source}.lastSummary.generated_run_entries`);
+  }
+  if (required && !isPositiveInteger(generatedGuestInstructions)) {
+    missingFields.push(`${source}.lastSummary.generated_guest_instructions`);
+  }
+  if (required && !isPositiveInteger(generatedBodyTimeNs)) {
+    missingFields.push(`${source}.lastSummary.generated_body_time_ns`);
   }
   if (!isPositiveInteger(generatedCoverageNumerator)) {
     missingFields.push(`${source}.lastSummary.generated_coverage_numerator`);
@@ -188,6 +195,12 @@ function validateGeneratedExec(result, required) {
     source,
     event: summary.event || null,
     generatedRunEntries: Number.isInteger(generatedRunEntries) ? generatedRunEntries : null,
+    generatedGuestInstructions: Number.isInteger(generatedGuestInstructions)
+      ? generatedGuestInstructions
+      : null,
+    generatedBodyTimeNs: Number.isInteger(generatedBodyTimeNs)
+      ? generatedBodyTimeNs
+      : null,
     generatedCoverageNumerator: Number.isInteger(generatedCoverageNumerator)
       ? generatedCoverageNumerator
       : null,
@@ -312,6 +325,11 @@ export async function run(argv = process.argv) {
   const gate = cdpProofEvidenceGate(result, options);
   printResult(gate, options.json);
   if (!gate.ok) {
+    if (options.requireGeneratedExec && !gate.generatedExec.ok) {
+      console.error(
+        `generated execution evidence failed: ${gate.generatedExec.missingFields.join("; ")}`,
+      );
+    }
     process.exit(1);
   }
 }

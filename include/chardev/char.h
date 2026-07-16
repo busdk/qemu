@@ -225,7 +225,15 @@ void qemu_chr_set_feature(Chardev *chr,
 QemuOpts *qemu_chr_parse_compat(const char *label, const char *filename,
                                 bool permit_mux_mon);
 #ifdef CONFIG_EMSCRIPTEN
+typedef enum QemuWasmChardevCancelStatus {
+    QEMU_WASM_CHARDEV_CANCEL_NONE = 0,
+    QEMU_WASM_CHARDEV_CANCEL_UNDELIVERED = 1,
+    QEMU_WASM_CHARDEV_CANCEL_PARTIAL = 2,
+} QemuWasmChardevCancelStatus;
+
 int qemu_wasm_chardev_write_pending(void);
+uint64_t qemu_wasm_chardev_pending_input_token(void);
+int qemu_wasm_chardev_cancel_pending_input(uint64_t token);
 #endif
 int qemu_chr_write(Chardev *s, const uint8_t *buf, int len, bool write_all);
 #define qemu_chr_write_all(s, buf, len) qemu_chr_write(s, buf, len, true)
