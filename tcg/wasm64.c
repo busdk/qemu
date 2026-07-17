@@ -4478,10 +4478,20 @@ EM_JS(int, tcg_wasm64_live_generated_exec_js,
             // Narrow, source-proven relaxation: exactly one brcond, zero
             // softmmu accesses before it, every softmmu access a load
             // (never a store), and no direct-store op anywhere in the
-            // body. Anything else - multiple branches, any access before
-            // the branch, or any store/direct-store - keeps rejecting
-            // unconditionally; those shapes are not proven safe here.
+            // body.
+            //
+            // Quarantined (T42): a real generated-execution attempt
+            // admitted via this exact shape froze before any guest serial
+            // output for the remainder of a 1,200s bound, while the
+            // identical inputs succeeded immediately with live generated
+            // execution disabled. Keep computing the predicate so this
+            // stays checked against source drift, but never admit it until
+            // it is re-proven safe: every body matching it still rejects
+            // unconditionally, same as any other unproven shape.
+            const multiAccessBranchBeforeLoadRelaxationQuarantined = true;
+
             narrowBranchBeforeLoadOnlyRelaxation =
+                !multiAccessBranchBeforeLoadRelaxationQuarantined &&
                 multiAccessBranchCount === 1 &&
                 firstSoftmmuAccessIndex >= 0 &&
                 multiAccessBranchIndex < firstSoftmmuAccessIndex &&
@@ -8759,17 +8769,31 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
         /*
          * Narrow, source-proven relaxation (R4d-g branch-position
          * measurement: 47/47 samples had the branch strictly before every
-         * softmmu access, dominated by pure two-load bodies). Admit only
-         * the exact proven shape: exactly one brcond, zero softmmu
-         * accesses before it, every softmmu access a load (store_count ==
-         * 0), and no direct-store op anywhere in the body
-         * (direct_store_count == 0). Anything else - multiple branches,
-         * any access before the branch, or any store/direct-store - keeps
-         * rejecting unconditionally; those shapes are not proven safe
-         * here. Must match the mirrored eligibility check in the JS
+         * softmmu access, dominated by pure two-load bodies). The proven
+         * shape is: exactly one brcond, zero softmmu accesses before it,
+         * every softmmu access a load (store_count == 0), and no
+         * direct-store op anywhere in the body (direct_store_count == 0).
+         * Must match the mirrored eligibility check in the JS
          * compileRange() inside tcg_wasm64_live_generated_exec_js.
+         *
+         * Quarantined (T42): a real generated-execution attempt admitted
+         * via this exact shape executed 58 one-TB generated chains, then
+         * froze before any guest serial output for the remainder of a
+         * 1,200s bound, while the identical JS/WASM/kernel/rootfs
+         * succeeded immediately with live generated execution disabled.
+         * The equivalence fixtures only prove the deferred-commit scoping
+         * is correct in isolation, not that the shape is safe against a
+         * real guest workload. Keep computing the predicate so the
+         * mirrored JS logic and metadata/equivalence tests stay checked
+         * against source drift, but never admit it until it is re-proven
+         * safe: every body matching it still falls back through the
+         * unconditional control-flow-unsupported reject below, same as
+         * any other unproven shape.
          */
+        const bool multi_access_branch_before_load_relaxation_quarantined =
+            true;
         bool branch_before_load_only_relaxation =
+            !multi_access_branch_before_load_relaxation_quarantined &&
             branch_count == 1 &&
             first_access_index >= 0 &&
             first_branch_index < first_access_index &&

@@ -1848,18 +1848,21 @@ function compileSharedGeneratedOutputBody(
     if (unsupportedBranch) {
       // Narrow, source-proven relaxation (R4d-g branch-position measurement:
       // 47/47 samples had the branch strictly before every softmmu access,
-      // dominated by pure two-load bodies). Only exempt the exact proven
-      // shape: exactly one brcond, zero softmmu accesses before it, its
-      // target strictly *after* the last softmmu access (so the branch's
-      // guarded range fully contains - dominates - the whole access group;
-      // otherwise a forward target landing between two accesses would split
-      // the group, letting the first access's guard/commit run
-      // unconditionally before a later, unguarded access in the same
-      // nominal group faults), every softmmu access a *load* (never a
-      // store), and no direct-store op anywhere in the body. Anything else
-      // - multiple branches, any access before the branch, a
-      // non-dominating target, or any store/direct-store - keeps rejecting
-      // unconditionally; those shapes are not proven safe here.
+      // dominated by pure two-load bodies). The proven shape is: exactly
+      // one brcond, zero softmmu accesses before it, its target strictly
+      // *after* the last softmmu access (so the branch's guarded range
+      // fully contains - dominates - the whole access group), every softmmu
+      // access a *load* (never a store), and no direct-store op anywhere in
+      // the body.
+      //
+      // Quarantined (T42): a real generated-execution attempt admitted via
+      // this exact shape froze before any guest serial output for the
+      // remainder of a 1,200s bound, while the identical inputs succeeded
+      // immediately with live generated execution disabled. Keep computing
+      // the predicate so this stays checked against source drift, but
+      // never admit it until it is re-proven safe: every body matching it
+      // still rejects unconditionally, same as any other unproven shape.
+      const multiAccessBranchBeforeLoadRelaxationQuarantined = true;
       const firstAccessIndex = softmmuOps.length > 0 ?
         softmmuOps[0].index : -1;
       const lastAccessIndex = softmmuOps.length > 0 ?
@@ -1880,6 +1883,7 @@ function compileSharedGeneratedOutputBody(
         softmmuOps.every((op) => op.opc === OPS.tci_qemu_ld_rrr);
 
       narrowBranchBeforeLoadOnlyRelaxation =
+        !multiAccessBranchBeforeLoadRelaxationQuarantined &&
         branchBeforeAllAccesses &&
         branchTargetDominatesAccesses &&
         allSoftmmuAccessesAreLoads &&
@@ -3601,210 +3605,54 @@ async function runR4s21cLaterAccessFailsFixture() {
 // R4d-g/R4z: deterministic fixtures for the narrow, source-proven
 // branch-before-access relaxation (measured 47/47 samples: the branch
 // always precedes every softmmu access, dominated by two-load bodies).
-// These prove the safety boundary of compileSharedGeneratedOutputBody's
-// scope-aware commit placement before any tcg/wasm64.c change is made.
-async function runR4zBranchBeforeLoadsNotTakenFixture() {
-  const fixture = {
-    name: "r4z-branch-before-two-loads-not-taken-commits",
-    relativeBase: 0x6120,
-    words: [
+//
+// T42: this relaxation is quarantined in compileSharedGeneratedOutputBody -
+// a real generated-execution attempt admitted via this exact shape executed
+// 58 one-TB generated chains, then froze before any guest serial output for
+// the remainder of a 1,200s bound, while the identical JS/WASM/kernel/rootfs
+// succeeded immediately with live generated execution disabled. Admission is
+// a static, register-value-independent check on the instruction words, so
+// the three variants below (branch not taken, branch taken, a later access
+// fault) must now all reject identically regardless of that runtime detail;
+// they no longer exercise the scope-aware commit placement, since that code
+// path is unreachable while quarantined.
+function runR4zBranchBeforeLoadsNotTakenFixture() {
+  return assertBranchBeforeAccessStillRejected(
+    "r4z-branch-before-two-loads-not-taken-quarantined",
+    0x6120,
+    [
       opBranch(4, 8),
       opReg(OPS.tci_qemu_ld_rrr, 1, 14, 13),
       opReg(OPS.tci_qemu_ld_rrr, 2, 14, 13),
       OPS.exit_tb,
     ],
-  };
-  const generated = createState(fixture.relativeBase, fixture.words, 1);
-  const expectedRam =
-    generated.view.getBigUint64(generated.dataBase + 0x10, true);
-  const emission = emitPerTBFunctionBody(fixture.words, fixture.relativeBase);
-
-  assert.equal(emission.ok, true, `${fixture.name} emitter failed closed`);
-  assert.equal(emission.softmmuLowering, SHARED_SOFTMMU_LOWERING_NAME);
-  assert.equal(emission.softmmuLoweredOps, 2);
-  assert.equal(emission.moduleValid, true,
-               `${fixture.name} emitted invalid module`);
-
-  const compiled = await WebAssembly.compile(emission.moduleBytes);
-  const instance = await WebAssembly.instantiate(compiled, {
-    env: {
-      memory: generated.memory,
-      qemu_ld_rrr: generated.helpers.qemuLd,
-      qemu_st_rrr: generated.helpers.qemuSt,
-    },
-  });
-  const status = instance.exports.run(generated.ctxPtr);
-  const counters = softmmuCounterSnapshot(
-    generated.view, generated.countersPtr);
-  const afterReg1 =
-    generated.view.getBigUint64(generated.regsPtr + 1 * 8, true);
-  const afterReg2 =
-    generated.view.getBigUint64(generated.regsPtr + 2 * 8, true);
-
-  assert.equal(status, STATUS_EXIT, `${fixture.name} status mismatch`);
-  assert.equal(afterReg1, expectedRam,
-               `${fixture.name} first guarded load must commit`);
-  assert.equal(afterReg2, expectedRam,
-               `${fixture.name} second guarded load must commit`);
-  assert.equal(counters.inlineTlbHitLoads, 2n,
-               `${fixture.name} both guarded loads must be counted`);
-  assert.equal(counters.inlineTlbHitStores, 0n);
-  assert.equal(counters.exitsTlbMissOrFault, 0n);
-  assert.equal(counters.exitsUnsupported, 0n);
-
-  return {
-    name: fixture.name,
-    status: status.toString(),
-    branchTaken: false,
-    reg1Committed: afterReg1 === expectedRam,
-    reg2Committed: afterReg2 === expectedRam,
-    inlineTlbHitLoads: counters.inlineTlbHitLoads.toString(),
-  };
+  );
 }
 
-async function runR4zBranchBeforeLoadsTakenFixture() {
-  const fixture = {
-    name: "r4z-branch-before-two-loads-taken-skips-no-commit",
-    relativeBase: 0x6130,
-    words: [
+function runR4zBranchBeforeLoadsTakenFixture() {
+  return assertBranchBeforeAccessStillRejected(
+    "r4z-branch-before-two-loads-taken-quarantined",
+    0x6130,
+    [
       opBranch(4, 8),
       opReg(OPS.tci_qemu_ld_rrr, 1, 14, 13),
       opReg(OPS.tci_qemu_ld_rrr, 2, 14, 13),
       OPS.exit_tb,
     ],
-  };
-  const generated = createState(fixture.relativeBase, fixture.words, 1);
-
-  generated.view.setBigUint64(generated.regsPtr + 4 * 8, 1n, true);
-  const beforeReg1 =
-    generated.view.getBigUint64(generated.regsPtr + 1 * 8, true);
-  const beforeReg2 =
-    generated.view.getBigUint64(generated.regsPtr + 2 * 8, true);
-  const emission = emitPerTBFunctionBody(fixture.words, fixture.relativeBase);
-
-  assert.equal(emission.ok, true, `${fixture.name} emitter failed closed`);
-  assert.equal(emission.softmmuLowering, SHARED_SOFTMMU_LOWERING_NAME);
-  assert.equal(emission.softmmuLoweredOps, 2);
-
-  const compiled = await WebAssembly.compile(emission.moduleBytes);
-  const instance = await WebAssembly.instantiate(compiled, {
-    env: {
-      memory: generated.memory,
-      qemu_ld_rrr: generated.helpers.qemuLd,
-      qemu_st_rrr: generated.helpers.qemuSt,
-    },
-  });
-  const status = instance.exports.run(generated.ctxPtr);
-  const counters = softmmuCounterSnapshot(
-    generated.view, generated.countersPtr);
-  const afterReg1 =
-    generated.view.getBigUint64(generated.regsPtr + 1 * 8, true);
-  const afterReg2 =
-    generated.view.getBigUint64(generated.regsPtr + 2 * 8, true);
-
-  assert.equal(status, STATUS_EXIT, `${fixture.name} status mismatch`);
-  assert.equal(afterReg1, beforeReg1,
-               `${fixture.name} skipped load must not modify reg1`);
-  assert.equal(afterReg2, beforeReg2,
-               `${fixture.name} skipped load must not modify reg2`);
-  assert.equal(counters.inlineTlbHitLoads, 0n,
-               `${fixture.name} skipped loads must not be counted`);
-  assert.equal(counters.inlineTlbHitStores, 0n);
-  assert.equal(counters.exitsTlbMissOrFault, 0n);
-  assert.equal(counters.exitsUnsupported, 0n);
-
-  return {
-    name: fixture.name,
-    status: status.toString(),
-    branchTaken: true,
-    reg1Unchanged: afterReg1 === beforeReg1,
-    reg2Unchanged: afterReg2 === beforeReg2,
-    inlineTlbHitLoads: counters.inlineTlbHitLoads.toString(),
-  };
+  );
 }
 
-async function runR4zBranchBeforeSecondLoadFaultFixture() {
-  const fixture = {
-    name: "r4z-branch-before-two-loads-second-fault-no-early-commit",
-    relativeBase: 0x6140,
-    words: [
+function runR4zBranchBeforeSecondLoadFaultFixture() {
+  return assertBranchBeforeAccessStillRejected(
+    "r4z-branch-before-two-loads-second-fault-quarantined",
+    0x6140,
+    [
       opBranch(4, 8),
       opReg(OPS.tci_qemu_ld_rrr, 1, 14, 13),
       opReg(OPS.tci_qemu_ld_rrr, 2, 12, 13),
       OPS.exit_tb,
     ],
-  };
-  const generated = createState(fixture.relativeBase, fixture.words, 1);
-  const failingLoadAddress =
-    BigInt(generated.dataBase + 0x10) +
-    (1n << BigInt(WASMJIT_TLB_CONSTANTS.targetPageBits));
-
-  generated.view.setBigUint64(generated.regsPtr + 12 * 8,
-                              failingLoadAddress, true);
-  const beforeReg1 =
-    generated.view.getBigUint64(generated.regsPtr + 1 * 8, true);
-  const beforeReg2 =
-    generated.view.getBigUint64(generated.regsPtr + 2 * 8, true);
-  const emission = emitPerTBFunctionBody(fixture.words, fixture.relativeBase);
-
-  assert.equal(emission.ok, true, `${fixture.name} emitter failed closed`);
-  assert.equal(emission.softmmuLowering, SHARED_SOFTMMU_LOWERING_NAME);
-  assert.equal(emission.softmmuLoweredOps, 2);
-
-  const compiled = await WebAssembly.compile(emission.moduleBytes);
-  const instance = await WebAssembly.instantiate(compiled, {
-    env: {
-      memory: generated.memory,
-      qemu_ld_rrr: generated.helpers.qemuLd,
-      qemu_st_rrr: generated.helpers.qemuSt,
-    },
-  });
-  const status = instance.exports.run(generated.ctxPtr);
-  const counters = softmmuCounterSnapshot(
-    generated.view, generated.countersPtr);
-  const exit = readSoftmmuExit(generated.view, generated.retPtr);
-  const afterReg1 =
-    generated.view.getBigUint64(generated.regsPtr + 1 * 8, true);
-  const afterReg2 =
-    generated.view.getBigUint64(generated.regsPtr + 2 * 8, true);
-
-  assert.equal(status, STATUS_TLB_MISS_OR_FAULT,
-               `${fixture.name} status mismatch`);
-  assert.equal(exit.reasonName, "tlb-miss-or-fault");
-  // flushGeneratedRegisterLocals() - the step that publishes WASM-local
-  // register values back to the observable regsPtr memory - is only
-  // emitted once, unconditionally after the whole compiled body, on the
-  // eventual-success continuation (compileGeneratedOutputModule, right
-  // after `instructions.push(...compiled.body)`). Any qemu_ld/st guard
-  // failure returns via a bare `return` from deep inside that body
-  // (sharedSoftmmuFailureReturn), which unwinds past the flush entirely.
-  // So neither access's register write is observable here, regardless of
-  // which one (if either) actually ran first - a stronger and simpler
-  // invariant than "only the deferred commit is withheld": nothing this
-  // attempt computed becomes visible unless the whole body completes.
-  assert.equal(afterReg1, beforeReg1,
-               `${fixture.name} first load's register must not become visible without a flush`);
-  assert.equal(afterReg2, beforeReg2,
-               `${fixture.name} failed load must not modify its own register`);
-  // The DEFERRED part - both loads' inlineTlbHitLoads counters, now scoped
-  // inside the branch's own block - must not run at all either: proves no
-  // part of the guarded block's deferred commit escapes when a later
-  // access in the same scope faults.
-  assert.equal(counters.inlineTlbHitLoads, 0n,
-               `${fixture.name} deferred counters must not escape a later fault`);
-  assert.equal(counters.inlineTlbHitStores, 0n);
-  assert.equal(counters.exitsTlbMissOrFault, 1n);
-
-  return {
-    name: fixture.name,
-    status: status.toString(),
-    runExitReason: exit.reasonName,
-    firstLoadRegisterUnchanged: afterReg1 === beforeReg1,
-    secondLoadRegisterUnchanged: afterReg2 === beforeReg2,
-    deferredCountersEscaped: counters.inlineTlbHitLoads !== 0n,
-    inlineTlbHitLoads: counters.inlineTlbHitLoads.toString(),
-    exitsTlbMissOrFault: counters.exitsTlbMissOrFault.toString(),
-  };
+  );
 }
 
 function assertBranchBeforeAccessStillRejected(name, relativeBase, words) {
@@ -6864,10 +6712,10 @@ const r4s21bLaterAccessFails = await runR4s21bLaterAccessFailsFixture();
 const r4s21cLaterAccessFails = await runR4s21cLaterAccessFailsFixture();
 
 const r4zBranchBeforeLoadsNotTaken =
-  await runR4zBranchBeforeLoadsNotTakenFixture();
-const r4zBranchBeforeLoadsTaken = await runR4zBranchBeforeLoadsTakenFixture();
+  runR4zBranchBeforeLoadsNotTakenFixture();
+const r4zBranchBeforeLoadsTaken = runR4zBranchBeforeLoadsTakenFixture();
 const r4zBranchBeforeSecondLoadFault =
-  await runR4zBranchBeforeSecondLoadFaultFixture();
+  runR4zBranchBeforeSecondLoadFaultFixture();
 const r4zBranchBeforeStoreStillRejects =
   runR4zBranchBeforeStoreStillRejectsFixture();
 const r4zBranchBeforeDirectStoreStillRejects =
@@ -6879,21 +6727,9 @@ const r4zInterleavedAccessBranchStillRejects =
 const r4zBranchTargetBetweenLoadsStillRejects =
   runR4zBranchTargetBetweenLoadsStillRejectsFixture();
 
-assert.equal(r4zBranchBeforeLoadsNotTaken.branchTaken, false);
-assert.equal(r4zBranchBeforeLoadsNotTaken.reg1Committed, true);
-assert.equal(r4zBranchBeforeLoadsNotTaken.reg2Committed, true);
-assert.equal(r4zBranchBeforeLoadsNotTaken.inlineTlbHitLoads, "2");
-assert.equal(r4zBranchBeforeLoadsTaken.branchTaken, true);
-assert.equal(r4zBranchBeforeLoadsTaken.reg1Unchanged, true);
-assert.equal(r4zBranchBeforeLoadsTaken.reg2Unchanged, true);
-assert.equal(r4zBranchBeforeLoadsTaken.inlineTlbHitLoads, "0");
-assert.equal(r4zBranchBeforeSecondLoadFault.runExitReason,
-             "tlb-miss-or-fault");
-assert.equal(r4zBranchBeforeSecondLoadFault.firstLoadRegisterUnchanged, true);
-assert.equal(r4zBranchBeforeSecondLoadFault.secondLoadRegisterUnchanged,
-             true);
-assert.equal(r4zBranchBeforeSecondLoadFault.deferredCountersEscaped, false);
-assert.equal(r4zBranchBeforeSecondLoadFault.inlineTlbHitLoads, "0");
+assert.equal(r4zBranchBeforeLoadsNotTaken.ok, false);
+assert.equal(r4zBranchBeforeLoadsTaken.ok, false);
+assert.equal(r4zBranchBeforeSecondLoadFault.ok, false);
 assert.equal(r4zBranchBeforeStoreStillRejects.ok, false);
 assert.equal(r4zBranchBeforeDirectStoreStillRejects.ok, false);
 assert.equal(r4zBranchAfterAccessesStillRejects.ok, false);
