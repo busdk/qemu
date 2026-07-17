@@ -8,6 +8,8 @@
 import fs from "node:fs";
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
+const SERVICE_REQUEST_ID_RE =
+  /^gate2-initialize-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function usage() {
   return `Usage: wasm-browser-cdp-proof-gate.mjs --result FILE [options]
@@ -16,6 +18,8 @@ Options:
   --require-success         Fail when the proof result did not succeed
   --require-guest-manifest  Fail when inputEvidence.guestManifest is missing
   --require-generated-exec  Fail without nonzero generated-exec coverage
+  --require-service-roundtrip initialize
+                            Require one attributed initialize exchange
   --max-elapsed-ms MS       Fail when result elapsedMs exceeds MS
   --json                    Print JSON only
 `;
@@ -39,6 +43,7 @@ function parseArgs(argv) {
     maxElapsedMs: null,
     requireGeneratedExec: false,
     requireGuestManifest: false,
+    requireServiceRoundtrip: null,
     requireSuccess: false,
     result: null,
   };
@@ -51,6 +56,8 @@ function parseArgs(argv) {
       options.requireGeneratedExec = true;
     } else if (arg === "--require-guest-manifest") {
       options.requireGuestManifest = true;
+    } else if (arg === "--require-service-roundtrip") {
+      options.requireServiceRoundtrip = argv[++index];
     } else if (arg === "--require-success") {
       options.requireSuccess = true;
     } else if (arg === "--max-elapsed-ms") {
@@ -65,6 +72,202 @@ function parseArgs(argv) {
   }
 
   return options;
+}
+
+function hasForbiddenServiceEvidence(value) {
+  if (Array.isArray(value)) {
+    return value.some((entry) => hasForbiddenServiceEvidence(entry));
+  }
+  if (!isObject(value)) {
+    return false;
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    if (["body", "payload", "params", "error", "env"].includes(key.toLowerCase()) ||
+        hasForbiddenServiceEvidence(entry)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function validateServiceRoundtrip(result, requiredOperation) {
+  const evidence = result?.serviceRoundtrip;
+  const missingFields = [];
+  if (requiredOperation === null) {
+    return {
+      present: isObject(evidence),
+      requiredOperation: null,
+      ok: true,
+      missingFields,
+    };
+  }
+  if (requiredOperation !== "initialize") {
+    return {
+      present: isObject(evidence),
+      requiredOperation,
+      ok: false,
+      missingFields: ["requireServiceRoundtrip=initialize"],
+    };
+  }
+  if (!isObject(evidence)) {
+    return {
+      present: false,
+      requiredOperation,
+      ok: false,
+      missingFields: ["serviceRoundtrip"],
+    };
+  }
+  const readiness = evidence.readiness;
+  const transport = evidence.transport;
+  const response = evidence.response;
+  const timing = evidence.timing;
+  if (evidence.source !== "qemuWasmServiceBridge.request") {
+    missingFields.push("serviceRoundtrip.source");
+  }
+  if (evidence.operation !== requiredOperation) {
+    missingFields.push("serviceRoundtrip.operation");
+  }
+  if (!isNonEmptyString(evidence.requestId) ||
+      evidence.requestId.length > 64 ||
+      !SERVICE_REQUEST_ID_RE.test(evidence.requestId)) {
+    missingFields.push("serviceRoundtrip.requestId");
+  }
+  if (!isPositiveInteger(evidence.timeoutMs) || evidence.timeoutMs > 10000) {
+    missingFields.push("serviceRoundtrip.timeoutMs<=10000");
+  }
+  if (!isObject(readiness)) {
+    missingFields.push("serviceRoundtrip.readiness");
+  } else {
+    for (const [field, expected] of [
+      ["readyBefore", true],
+      ["readyAfter", true],
+      ["readySourceBefore", "serial"],
+      ["readySourceAfter", "serial"],
+      ["moduleAttachedBefore", true],
+      ["moduleAttachedAfter", true],
+      ["interactiveOnlyBefore", true],
+      ["interactiveOnlyAfter", true],
+      ["healthRequestedBefore", false],
+      ["healthRequestedAfter", false],
+    ]) {
+      if (readiness[field] !== expected) {
+        missingFields.push(`serviceRoundtrip.readiness.${field}`);
+      }
+    }
+  }
+  if (!isObject(transport)) {
+    missingFields.push("serviceRoundtrip.transport");
+  } else {
+    for (const field of [
+      "pendingBefore",
+      "pendingAfter",
+      "sentBefore",
+      "sentAfter",
+      "receivedBefore",
+      "receivedAfter",
+      "resolvedBefore",
+      "resolvedAfter",
+      "timedOutBefore",
+      "timedOutAfter",
+    ]) {
+      if (!Number.isInteger(transport[field]) || transport[field] < 0) {
+        missingFields.push(`serviceRoundtrip.transport.${field}`);
+      }
+    }
+    if (transport.pendingBefore !== 0) {
+      missingFields.push("serviceRoundtrip.transport.pendingBefore=0");
+    }
+    if (transport.pendingAfter !== 0) {
+      missingFields.push("serviceRoundtrip.transport.pendingAfter=0");
+    }
+    if (transport.sentAfter !== transport.sentBefore + 1) {
+      missingFields.push("serviceRoundtrip.transport.sentDelta=1");
+    }
+    if (transport.receivedAfter !== transport.receivedBefore + 1) {
+      missingFields.push("serviceRoundtrip.transport.receivedDelta=1");
+    }
+    if (transport.resolvedAfter !== transport.resolvedBefore + 1) {
+      missingFields.push("serviceRoundtrip.transport.resolvedDelta=1");
+    }
+    if (transport.timedOutAfter !== transport.timedOutBefore) {
+      missingFields.push("serviceRoundtrip.transport.timedOutDelta=0");
+    }
+    if (transport.lastRequestId !== evidence.requestId) {
+      missingFields.push("serviceRoundtrip.transport.lastRequestId");
+    }
+    if (transport.lastResponseId !== evidence.requestId) {
+      missingFields.push("serviceRoundtrip.transport.lastResponseId");
+    }
+  }
+  if (!isObject(response)) {
+    missingFields.push("serviceRoundtrip.response");
+  } else {
+    if (JSON.stringify(Object.keys(response).sort()) !==
+        JSON.stringify(["adapter", "app_server", "id", "operation", "status"])) {
+      missingFields.push("serviceRoundtrip.response.fields");
+    }
+    for (const [field, expected] of [
+      ["id", evidence.requestId],
+      ["operation", "initialize"],
+      ["status", "ok"],
+      ["adapter", "ready"],
+      ["app_server", "initialized"],
+    ]) {
+      if (response[field] !== expected ||
+          !isNonEmptyString(response[field]) ||
+          response[field].length > 64) {
+        missingFields.push(`serviceRoundtrip.response.${field}`);
+      }
+    }
+  }
+  if (evidence.responseProjectionSafe !== true) {
+    missingFields.push("serviceRoundtrip.responseProjectionSafe");
+  }
+  if (evidence.classification !== "success") {
+    missingFields.push("serviceRoundtrip.classification=success");
+  }
+  let elapsedMs = null;
+  if (!isObject(timing) ||
+      !Number.isFinite(timing.startedAtMs) ||
+      timing.startedAtMs < 0 ||
+      !Number.isFinite(timing.completedAtMs) ||
+      timing.completedAtMs < timing.startedAtMs ||
+      !Number.isFinite(timing.elapsedMs) ||
+      timing.elapsedMs < 0 ||
+      Math.abs(
+        timing.elapsedMs - (timing.completedAtMs - timing.startedAtMs),
+      ) > 0.001 ||
+      timing.elapsedMs > 10000 ||
+      timing.elapsedMs > evidence.timeoutMs) {
+    missingFields.push("serviceRoundtrip.timing");
+  } else {
+    elapsedMs = timing.elapsedMs;
+  }
+  if (hasForbiddenServiceEvidence(evidence)) {
+    missingFields.push("serviceRoundtrip.forbiddenFields");
+  }
+  if (Object.hasOwn(result, "frontend_roundtrip")) {
+    missingFields.push("frontend_roundtrip-forbidden");
+  }
+  return {
+    present: true,
+    requiredOperation,
+    ok: missingFields.length === 0,
+    source: evidence.source ?? null,
+    operation: evidence.operation ?? null,
+    requestId: isNonEmptyString(evidence.requestId) ? evidence.requestId : null,
+    timeoutMs: isPositiveInteger(evidence.timeoutMs) ? evidence.timeoutMs : null,
+    classification: evidence.classification ?? null,
+    response: isObject(response) ? {
+      id: response.id ?? null,
+      operation: response.operation ?? null,
+      status: response.status ?? null,
+      adapter: response.adapter ?? null,
+      app_server: response.app_server ?? null,
+    } : null,
+    elapsedMs,
+    missingFields,
+  };
 }
 
 function validateFileEvidence(inputEvidence, role, required) {
@@ -257,6 +460,11 @@ export function cdpProofEvidenceGate(result, options = {}) {
     Boolean(options.requireGeneratedExec),
   );
   missingFields.push(...generatedExec.missingFields);
+  const serviceRoundtrip = validateServiceRoundtrip(
+    result,
+    options.requireServiceRoundtrip ?? null,
+  );
+  missingFields.push(...serviceRoundtrip.missingFields);
   const elapsedMs = Number.isInteger(result?.elapsedMs) ? result.elapsedMs : null;
   const maxElapsedMs = options.maxElapsedMs ?? null;
   let elapsedOk = elapsedMs !== null;
@@ -288,6 +496,7 @@ export function cdpProofEvidenceGate(result, options = {}) {
     inputEvidencePresent: isObject(inputEvidence),
     files,
     generatedExec,
+    serviceRoundtrip,
     missingFields,
     pageErrorCount: Array.isArray(result?.pageErrors) ? result.pageErrors.length : null,
     resourceErrorCount: Array.isArray(result?.resourceErrors)
@@ -306,6 +515,7 @@ function printResult(gate, json) {
     `success=${gate.success} markerSeen=${gate.markerSeen} ` +
     `elapsedMs=${gate.elapsedMs ?? "missing"} ` +
     `generatedExec=${gate.generatedExec.ok} ` +
+    `serviceRoundtrip=${gate.serviceRoundtrip.ok} ` +
     `browser=${gate.browserVersion || "missing"} ` +
     `missing=${gate.missingFields.length} ` +
     `resourceErrors=${gate.resourceErrorCount ?? "n/a"}\n`,

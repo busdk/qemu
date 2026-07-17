@@ -6,7 +6,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -28,11 +28,21 @@ const DEFAULT_CHROME_PATHS = [
   "google-chrome",
   "chromium",
 ].filter(Boolean);
+const SERVICE_REQUEST_ID_RE =
+  /^gate2-initialize-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const SERVICE_REQUEST_MAX_TIMEOUT_MS = 60000;
 
 function usage(status = 0) {
   const stream = status === 0 ? process.stdout : process.stderr;
   stream.write(`usage: wasm-browser-cdp-gate.mjs --artifact-dir DIR --kernel FILE [--initrd FILE | --rootfs FILE] --out FILE [OPTIONS]\n\nRuns the QEMU WebAssembly browser smoke page through Chrome DevTools Protocol, without Playwright.\n\nOptions:\n  --artifact-dir DIR       Directory containing qemu-system-*.js/.wasm artifacts\n  --guest-manifest FILE    Load guest defaults such as kernel/rootfs/marker\n  --kernel FILE            Guest kernel served as /guest/kernel\n  --initrd FILE            Guest initramfs image\n  --rootfs FILE            Guest rootfs served as /guest/rootfs.raw\n  --out FILE               Write result JSON\n  --chrome FILE            Chrome/Chromium executable\n  --firmware-dir DIR       Directory containing QEMU firmware blobs\n  --host HOST              Smoke server host (default: 127.0.0.1)\n  --port N                 Smoke server port (default: 8151)\n  --cdp-port N             Chrome remote-debugging port (default: 9223)\n  --program FILE           QEMU JS artifact basename (default: manifest or qemu-system-riscv64.js)\n  --wasm FILE              QEMU WASM artifact basename (default: derived from program)\n  --marker TEXT            Required marker text (default: manifest or Welcome to TuxTest)\n  --timeout-ms N           Smoke timeout (default: manifest or 180000)\n  --max-output-bytes N     Smoke output byte cap (default: 160000)\n  --memory SIZE            Guest memory (default: manifest or 512M)\n  --machine NAME           QEMU machine (default: manifest or virt)\n  --cpu MODEL              QEMU CPU model (default: manifest or empty)\n  --rootfs-device KIND     Rootfs block device (default: manifest or virtio-mmio)\n  --target-arch ARCH       Guest target architecture for firmware mounts\n  --kernel-append TEXT     Kernel command line\n  --vmstate-restore        Enable browser VMState restore import\n  --vmstate-restore-state-file FILE\n                           Local VMState stream served as /vmstate/restore\n  --vmstate-restore-state-bytes N\n                           Expected VMState byte length\n  --vmstate-restore-state-sha256 HASH\n                           Expected VMState SHA-256\n  --vmstate-restore-saved-manifest FILE\n                           Saved-state compatibility manifest\n  --vmstate-restore-current-manifest FILE\n                           Current compatibility manifest\n  --diagnostics-limit N    Live-generated-exec diagnostics limit (default: 24)\n  --no-live-generated-exec Disable live generated exec query flags\n  --help                   Show this help\n`);
   stream.write(`Static restore options:\n  --expect-text TEXT       Additional serial text required for success; repeatable\n  --vmstate-restore-proof  Require acceptance-shaped fail-closed proof evidence\n  --vmstate-restore-static-export-manifest FILE\n                           Fail-closed static export source of truth\n`);
+  stream.write(`Service request options:
+  --service-request-operation initialize
+                           Send one initialize request after guest readiness
+  --service-request-timeout-ms N
+                           Request timeout, 1..60000 ms (default: 10000)
+  --qemu-arg ARG           Additional ordered QEMU argument; repeatable
+`);
   process.exit(status);
 }
 
@@ -94,8 +104,11 @@ export async function parseArgs(argv) {
     out: null,
     port: 8151,
     program: "qemu-system-riscv64.js",
+    qemuArgs: [],
     rootfs: null,
     rootfsDevice: "virtio-mmio",
+    serviceRequestOperation: "",
+    serviceRequestTimeoutMs: 10000,
     targetArch: "riscv64",
     timeoutMs: 180000,
     vmstateRestore: false,
@@ -167,12 +180,21 @@ export async function parseArgs(argv) {
     } else if (arg === "--program") {
       options.program = argv[++i];
       explicit.add("program");
+    } else if (arg === "--qemu-arg") {
+      options.qemuArgs.push(argv[++i]);
+      explicit.add("qemuArgs");
     } else if (arg === "--rootfs") {
       options.rootfs = argv[++i];
       explicit.add("rootfs");
     } else if (arg === "--rootfs-device") {
       options.rootfsDevice = argv[++i];
       explicit.add("rootfsDevice");
+    } else if (arg === "--service-request-operation") {
+      options.serviceRequestOperation = argv[++i];
+      explicit.add("serviceRequestOperation");
+    } else if (arg === "--service-request-timeout-ms") {
+      options.serviceRequestTimeoutMs = Number(argv[++i]);
+      explicit.add("serviceRequestTimeoutMs");
     } else if (arg === "--target-arch") {
       options.targetArch = argv[++i];
       explicit.add("targetArch");
@@ -241,7 +263,7 @@ export async function parseArgs(argv) {
       "vmstateRestoreStateSha256",
       "wasm",
     ],
-    stringListFields: ["expectText"],
+    stringListFields: ["expectText", "qemuArgs"],
   });
 
   if (options.initrd === "") {
@@ -303,6 +325,26 @@ export async function parseArgs(argv) {
   }
   if (options.expectText.some((text) => typeof text !== "string" || text === "")) {
     console.error("--expect-text must be a non-empty string");
+    usage(2);
+  }
+  if (options.qemuArgs.some((arg) => typeof arg !== "string" || arg === "")) {
+    console.error("--qemu-arg must be a non-empty string");
+    usage(2);
+  }
+  if (options.serviceRequestOperation !== "" &&
+      options.serviceRequestOperation !== "initialize") {
+    console.error("--service-request-operation only supports initialize");
+    usage(2);
+  }
+  if (explicit.has("serviceRequestTimeoutMs") &&
+      options.serviceRequestOperation === "") {
+    console.error("--service-request-timeout-ms requires --service-request-operation");
+    usage(2);
+  }
+  if (!Number.isInteger(options.serviceRequestTimeoutMs) ||
+      options.serviceRequestTimeoutMs <= 0 ||
+      options.serviceRequestTimeoutMs > SERVICE_REQUEST_MAX_TIMEOUT_MS) {
+    console.error("--service-request-timeout-ms must be an integer from 1 to 60000");
     usage(2);
   }
   if (options.out === null) {
@@ -421,6 +463,21 @@ export function smokeUrl(options) {
   url.searchParams.set("network", options.network);
   url.searchParams.set("program", `/artifacts/${basename(options.program)}`);
   url.searchParams.set("wasm", `/artifacts/${basename(options.wasm)}`);
+  for (const qemuArg of options.qemuArgs || []) {
+    url.searchParams.append("qemuArg", qemuArg);
+  }
+  if (options.serviceRequestOperation === "initialize") {
+    url.searchParams.set("serviceBridge", JSON.stringify({
+      kind: "virtio-serial-jsonl",
+      requestChannel: "org.qemu.wasm.service.request",
+      responseChannel: "org.qemu.wasm.service.response",
+      readinessMarker: "QEMU_WASM_SERVICE_READY",
+      healthRequest: { operation: "health" },
+      timeoutMs: options.serviceRequestTimeoutMs,
+      maxPayloadBytes: 16384,
+      interactiveOnly: true,
+    }));
+  }
   url.searchParams.set("powerOperation", "");
   url.searchParams.set("powerTimeoutMs", "30000");
   if (options.liveGeneratedExec) {
@@ -490,17 +547,247 @@ async function stopProcess(child) {
   }
 }
 
-async function cdpEval(cdp, expression) {
+async function cdpEval(cdp, expression, timeout = 5000) {
   const result = await cdp.send("Runtime.evaluate", {
     expression,
     returnByValue: true,
     awaitPromise: true,
-    timeout: 5000,
+    timeout,
   });
   if (result.exceptionDetails) {
     return { exception: result.exceptionDetails.text || "exception" };
   }
   return result.result?.value;
+}
+
+function hasForbiddenServiceEvidence(value) {
+  if (Array.isArray(value)) {
+    return value.some((entry) => hasForbiddenServiceEvidence(entry));
+  }
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  for (const [key, entry] of Object.entries(value)) {
+    if (["body", "payload", "params", "error", "env"].includes(key.toLowerCase()) ||
+        hasForbiddenServiceEvidence(entry)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function createServiceRequestId(uuid = randomUUID()) {
+  const requestId = `gate2-initialize-${uuid}`;
+  if (!SERVICE_REQUEST_ID_RE.test(requestId) || requestId.length > 64) {
+    throw new Error("invalid generated service request id");
+  }
+  return requestId;
+}
+
+export async function runServiceRoundtripInPage(
+  request,
+  scope = globalThis,
+  now = () => scope.performance.now(),
+) {
+  const requestIdRe =
+    /^gate2-initialize-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  const boundedScalar = (value, maxLength) =>
+    typeof value === "string" && value.length > 0 &&
+    value.length <= maxLength ? value : null;
+  const bridge = scope.qemuWasmServiceBridge;
+  const state = bridge?.state;
+  const startedAtMs = Number(now());
+  const stateSnapshot = (candidate) => ({
+    ready: candidate?.ready === true,
+    readySource: boundedScalar(candidate?.readySource, 32),
+    moduleAttached: candidate?.moduleAttached === true,
+    interactiveOnly: candidate?.interactiveOnly === true,
+    healthRequested: candidate?.healthRequested === true,
+    pending: Number.isInteger(candidate?.pending) ? candidate.pending : null,
+    sent: Number.isInteger(candidate?.sent) ? candidate.sent : null,
+    received: Number.isInteger(candidate?.received) ? candidate.received : null,
+    resolved: Number.isInteger(candidate?.resolved) ? candidate.resolved : null,
+    timedOut: Number.isInteger(candidate?.timedOut) ? candidate.timedOut : null,
+    lastRequestId: boundedScalar(candidate?.lastRequestId, 64),
+    lastResponseId: boundedScalar(candidate?.lastResponseId, 64),
+  });
+  const before = stateSnapshot(state);
+  const preconditionsOk =
+    request?.operation === "initialize" &&
+    typeof request?.requestId === "string" &&
+    requestIdRe.test(request.requestId) &&
+    request.requestId.length <= 64 &&
+    Number.isInteger(request?.timeoutMs) &&
+    request.timeoutMs > 0 &&
+    request.timeoutMs <= 60000 &&
+    typeof bridge?.request === "function" &&
+    before.ready &&
+    before.readySource === "serial" &&
+    before.moduleAttached &&
+    before.interactiveOnly &&
+    !before.healthRequested &&
+    before.pending === 0;
+  let response = null;
+  let requestRejected = false;
+  if (preconditionsOk) {
+    try {
+      response = await bridge.request({
+        id: request.requestId,
+        operation: request.operation,
+      }, {
+        timeoutMs: request.timeoutMs,
+      });
+    } catch {
+      requestRejected = true;
+    }
+  }
+  const completedAtMs = Number(now());
+  const after = stateSnapshot(state);
+  const responseIsObject = response !== null &&
+    typeof response === "object" && !Array.isArray(response);
+  const responseProjectionSafe = responseIsObject &&
+    Object.keys(response).every((key) =>
+      ["id", "operation", "status", "adapter", "app_server"].includes(key));
+  const selectedResponse = responseIsObject ? {
+    id: boundedScalar(response.id, 64),
+    operation: boundedScalar(response.operation, 32),
+    status: boundedScalar(response.status, 32),
+    adapter: boundedScalar(response.adapter, 32),
+    app_server: boundedScalar(response.app_server, 32),
+  } : null;
+  let classification = "precondition-failed";
+  if (preconditionsOk && requestRejected) {
+    classification = after.timedOut === before.timedOut + 1
+      ? "timeout"
+      : "error";
+  } else if (preconditionsOk && selectedResponse !== null) {
+    classification =
+      responseProjectionSafe &&
+      selectedResponse.id === request.requestId &&
+      selectedResponse.operation === "initialize" &&
+      selectedResponse.status === "ok" &&
+      selectedResponse.adapter === "ready" &&
+      selectedResponse.app_server === "initialized"
+        ? "success"
+        : "error";
+  }
+  return {
+    source: "qemuWasmServiceBridge.request",
+    operation: request?.operation ?? null,
+    requestId: request?.requestId ?? null,
+    timeoutMs: request?.timeoutMs ?? null,
+    readiness: {
+      readyBefore: before.ready,
+      readyAfter: after.ready,
+      readySourceBefore: before.readySource,
+      readySourceAfter: after.readySource,
+      moduleAttachedBefore: before.moduleAttached,
+      moduleAttachedAfter: after.moduleAttached,
+      interactiveOnlyBefore: before.interactiveOnly,
+      interactiveOnlyAfter: after.interactiveOnly,
+      healthRequestedBefore: before.healthRequested,
+      healthRequestedAfter: after.healthRequested,
+    },
+    transport: {
+      pendingBefore: before.pending,
+      pendingAfter: after.pending,
+      sentBefore: before.sent,
+      sentAfter: after.sent,
+      receivedBefore: before.received,
+      receivedAfter: after.received,
+      resolvedBefore: before.resolved,
+      resolvedAfter: after.resolved,
+      timedOutBefore: before.timedOut,
+      timedOutAfter: after.timedOut,
+      lastRequestId: after.lastRequestId,
+      lastResponseId: after.lastResponseId,
+    },
+    response: selectedResponse,
+    responseProjectionSafe,
+    classification,
+    timing: {
+      startedAtMs,
+      completedAtMs,
+      elapsedMs: completedAtMs - startedAtMs,
+    },
+  };
+}
+
+export function serviceRoundtripSucceeded(evidence) {
+  const readiness = evidence?.readiness;
+  const transport = evidence?.transport;
+  const response = evidence?.response;
+  const timing = evidence?.timing;
+  const elapsedMatches = Number.isFinite(timing?.startedAtMs) &&
+    timing.startedAtMs >= 0 &&
+    Number.isFinite(timing?.completedAtMs) &&
+    timing.completedAtMs >= timing.startedAtMs &&
+    Number.isFinite(timing?.elapsedMs) &&
+    timing.elapsedMs >= 0 &&
+    Math.abs(
+      timing.elapsedMs - (timing.completedAtMs - timing.startedAtMs),
+    ) <= 0.001 &&
+    timing.elapsedMs <= evidence?.timeoutMs;
+  return evidence?.source === "qemuWasmServiceBridge.request" &&
+    evidence?.operation === "initialize" &&
+    typeof evidence?.requestId === "string" &&
+    evidence.requestId.length <= 64 &&
+    SERVICE_REQUEST_ID_RE.test(evidence.requestId) &&
+    Number.isInteger(evidence?.timeoutMs) &&
+    evidence.timeoutMs > 0 &&
+    evidence.timeoutMs <= SERVICE_REQUEST_MAX_TIMEOUT_MS &&
+    readiness?.readyBefore === true &&
+    readiness?.readyAfter === true &&
+    readiness?.readySourceBefore === "serial" &&
+    readiness?.readySourceAfter === "serial" &&
+    readiness?.moduleAttachedBefore === true &&
+    readiness?.moduleAttachedAfter === true &&
+    readiness?.interactiveOnlyBefore === true &&
+    readiness?.interactiveOnlyAfter === true &&
+    readiness?.healthRequestedBefore === false &&
+    readiness?.healthRequestedAfter === false &&
+    transport?.pendingBefore === 0 &&
+    transport?.pendingAfter === 0 &&
+    transport?.sentAfter === transport?.sentBefore + 1 &&
+    transport?.receivedAfter === transport?.receivedBefore + 1 &&
+    transport?.resolvedAfter === transport?.resolvedBefore + 1 &&
+    transport?.timedOutAfter === transport?.timedOutBefore &&
+    transport?.lastRequestId === evidence.requestId &&
+    transport?.lastResponseId === evidence.requestId &&
+    response?.id === evidence.requestId &&
+    response?.operation === "initialize" &&
+    response?.status === "ok" &&
+    response?.adapter === "ready" &&
+    response?.app_server === "initialized" &&
+    evidence?.responseProjectionSafe === true &&
+    evidence?.classification === "success" &&
+    elapsedMatches &&
+    !hasForbiddenServiceEvidence(evidence);
+}
+
+async function requestServiceRoundtrip(cdp, options) {
+  const request = {
+    operation: options.serviceRequestOperation,
+    requestId: createServiceRequestId(),
+    timeoutMs: options.serviceRequestTimeoutMs,
+  };
+  const expression =
+    `(${runServiceRoundtripInPage.toString()})(${JSON.stringify(request)})`;
+  try {
+    return await cdpEval(
+      cdp,
+      expression,
+      Math.min(options.serviceRequestTimeoutMs + 1000, 61000),
+    );
+  } catch {
+    return {
+      source: "qemuWasmServiceBridge.request",
+      operation: request.operation,
+      requestId: request.requestId,
+      timeoutMs: request.timeoutMs,
+      classification: "cdp-error",
+    };
+  }
 }
 
 function compactCdpInitiator(initiator) {
@@ -1172,11 +1459,19 @@ async function main() {
     await sleep(1000);
   }
 
-  const elapsedMs = Date.now() - started;
-  const pageSuccess = (
+  const pageReady = (
     pageStatus === `marker reached: ${options.marker}` ||
     pageStatus === "Bus Engine OS is ready"
-  ) && pageErrors.length === 0;
+  );
+  let serviceRoundtrip = null;
+  if (options.serviceRequestOperation !== "" &&
+      pageReady && pageErrors.length === 0) {
+    serviceRoundtrip = await requestServiceRoundtrip(cdp, options);
+  }
+  const elapsedMs = Date.now() - started;
+  const pageSuccess = pageReady && pageErrors.length === 0 &&
+    (options.serviceRequestOperation === "" ||
+      serviceRoundtripSucceeded(serviceRoundtrip));
   const coldBootReadyMs =
     options.vmstateRestorePreflight?.staticExportPreflight?.coldBoot?.readyMs ??
     null;
@@ -1200,6 +1495,7 @@ async function main() {
     elapsedMs,
     browserVersion,
     inputEvidence,
+    serviceRoundtrip,
     browserRunnerCommand: [process.execPath, THIS_FILE, ...process.argv.slice(2)],
     qemuCommand: finalState?.qemuArgs || [],
     vmstateRestoreManifestCheck: options.vmstateRestoreManifestCheck,

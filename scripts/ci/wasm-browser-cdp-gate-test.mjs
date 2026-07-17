@@ -15,8 +15,11 @@ import {
   browserVersionDiagnostic,
   cdpConsoleMessageDiagnostic,
   cdpResourceErrorDiagnostic,
+  createServiceRequestId,
   parseArgs,
   proofInputEvidence,
+  runServiceRoundtripInPage,
+  serviceRoundtripSucceeded,
   smokeServerArgs,
   smokeUrl,
   vmstateRestoreManifestCheck,
@@ -41,8 +44,11 @@ const options = {
   network: "none",
   port: 8151,
   program: "qemu-system-riscv64.js",
+  qemuArgs: ["-device", "virtio-rng-device"],
   rootfs: "/tmp/qemu-guest/rootfs.raw",
   rootfsDevice: "virtio-mmio",
+  serviceRequestOperation: "initialize",
+  serviceRequestTimeoutMs: 10000,
   targetArch: "riscv64",
   timeoutMs: 180000,
   vmstateRestore: false,
@@ -77,6 +83,20 @@ assert.equal(url.searchParams.get("wasm"), "/artifacts/qemu-system-riscv64.wasm"
 assert.equal(url.searchParams.get("rootfs"), "/guest/rootfs.raw");
 assert.equal(url.searchParams.get("rootfsDevice"), "virtio-mmio");
 assert.equal(url.searchParams.get("wasm64LiveGeneratedExec"), "1");
+assert.deepEqual(url.searchParams.getAll("qemuArg"), [
+  "-device",
+  "virtio-rng-device",
+]);
+assert.deepEqual(JSON.parse(url.searchParams.get("serviceBridge")), {
+  kind: "virtio-serial-jsonl",
+  requestChannel: "org.qemu.wasm.service.request",
+  responseChannel: "org.qemu.wasm.service.response",
+  readinessMarker: "QEMU_WASM_SERVICE_READY",
+  healthRequest: { operation: "health" },
+  timeoutMs: 10000,
+  maxPayloadBytes: 16384,
+  interactiveOnly: true,
+});
 
 const vmstateOptions = {
   ...options,
@@ -117,6 +137,10 @@ const manifestOptions = await parseArgs([
   "--guest-manifest", manifestPath,
   "--artifact-dir", "/tmp/explicit-artifacts",
   "--chrome", "/bin/sh",
+  "--qemu-arg", "-device",
+  "--qemu-arg", "virtio-rng-device",
+  "--service-request-operation", "initialize",
+  "--service-request-timeout-ms", "10000",
   "--out", "/tmp/qemu-cdp-gate-result.json",
 ]);
 assert.equal(manifestOptions.artifactDir, "/tmp/explicit-artifacts");
@@ -126,6 +150,195 @@ assert.equal(manifestOptions.initrd, null);
 assert.equal(manifestOptions.rootfs, join(manifestDir, "rootfs.raw"));
 assert.equal(manifestOptions.targetArch, "riscv64");
 assert.equal(manifestOptions.guestManifest, manifestPath);
+assert.deepEqual(manifestOptions.qemuArgs, ["-device", "virtio-rng-device"]);
+assert.equal(manifestOptions.serviceRequestOperation, "initialize");
+assert.equal(manifestOptions.serviceRequestTimeoutMs, 10000);
+
+const serviceRequestId = createServiceRequestId(
+  "01234567-89ab-4cde-8fab-0123456789ab",
+);
+assert.equal(
+  serviceRequestId,
+  "gate2-initialize-01234567-89ab-4cde-8fab-0123456789ab",
+);
+
+function serviceBridgeState(overrides = {}) {
+  return {
+    ready: true,
+    readySource: "serial",
+    moduleAttached: true,
+    interactiveOnly: true,
+    healthRequested: false,
+    pending: 0,
+    sent: 0,
+    received: 0,
+    resolved: 0,
+    timedOut: 0,
+    lastRequestId: null,
+    lastResponseId: null,
+    ...overrides,
+  };
+}
+
+function monotonicNow(...values) {
+  let index = 0;
+  return () => values[index++];
+}
+
+{
+  const state = serviceBridgeState();
+  const scope = {
+    qemuWasmServiceBridge: {
+      state,
+      async request(frame, requestOptions) {
+        assert.deepEqual(frame, {
+          id: serviceRequestId,
+          operation: "initialize",
+        });
+        assert.deepEqual(requestOptions, { timeoutMs: 10000 });
+        state.pending = 1;
+        state.sent += 1;
+        state.lastRequestId = frame.id;
+        await Promise.resolve();
+        state.received += 1;
+        state.resolved += 1;
+        state.pending = 0;
+        state.lastResponseId = frame.id;
+        return {
+          id: frame.id,
+          operation: "initialize",
+          status: "ok",
+          adapter: "ready",
+          app_server: "initialized",
+        };
+      },
+    },
+  };
+  const evidence = await runServiceRoundtripInPage({
+    operation: "initialize",
+    requestId: serviceRequestId,
+    timeoutMs: 10000,
+  }, scope, monotonicNow(100, 112.5));
+  assert.equal(serviceRoundtripSucceeded(evidence), true);
+  assert.equal(evidence.readiness.healthRequestedBefore, false);
+  assert.equal(evidence.readiness.healthRequestedAfter, false);
+  assert.equal(evidence.transport.pendingBefore, 0);
+  assert.equal(evidence.transport.pendingAfter, 0);
+  assert.equal(evidence.transport.sentAfter - evidence.transport.sentBefore, 1);
+  assert.equal(
+    evidence.transport.receivedAfter - evidence.transport.receivedBefore,
+    1,
+  );
+  assert.equal(
+    evidence.transport.resolvedAfter - evidence.transport.resolvedBefore,
+    1,
+  );
+  assert.equal(evidence.transport.lastRequestId, serviceRequestId);
+  assert.equal(evidence.transport.lastResponseId, serviceRequestId);
+  assert.equal(evidence.response.id, serviceRequestId);
+  assert.equal(evidence.response.adapter, "ready");
+  assert.equal(evidence.response.app_server, "initialized");
+  assert.equal(evidence.timing.elapsedMs, 12.5);
+  assert.equal(Object.hasOwn(evidence, "cAccepted"), false);
+
+  for (const mutate of [
+    (copy) => { copy.readiness.healthRequestedAfter = true; },
+    (copy) => { copy.transport.pendingBefore = 1; },
+    (copy) => { copy.transport.sentAfter += 1; },
+    (copy) => { copy.transport.lastResponseId = "mismatched"; },
+    (copy) => { copy.response.adapter = "wrong"; },
+    (copy) => { copy.response.app_server = "wrong"; },
+    (copy) => { copy.classification = "timeout"; },
+    (copy) => { copy.timing.elapsedMs = 10001; },
+  ]) {
+    const broken = JSON.parse(JSON.stringify(evidence));
+    mutate(broken);
+    assert.equal(serviceRoundtripSucceeded(broken), false);
+  }
+}
+
+{
+  const state = serviceBridgeState();
+  const scope = {
+    qemuWasmServiceBridge: {
+      state,
+      async request(frame) {
+        state.pending = 1;
+        state.sent += 1;
+        state.lastRequestId = frame.id;
+        state.received += 1;
+        state.resolved += 1;
+        state.pending = 0;
+        state.lastResponseId = frame.id;
+        return {
+          id: frame.id,
+          operation: "initialize",
+          status: "ok",
+          adapter: "ready",
+          app_server: "initialized",
+          body: "must-not-be-retained",
+        };
+      },
+    },
+  };
+  const evidence = await runServiceRoundtripInPage({
+    operation: "initialize",
+    requestId: serviceRequestId,
+    timeoutMs: 10000,
+  }, scope, monotonicNow(200, 201));
+  assert.equal(evidence.responseProjectionSafe, false);
+  assert.equal(serviceRoundtripSucceeded(evidence), false);
+  assert.equal(JSON.stringify(evidence).includes("must-not-be-retained"), false);
+  assert.equal(Object.hasOwn(evidence.response, "body"), false);
+}
+
+{
+  const state = serviceBridgeState();
+  let calls = 0;
+  const scope = {
+    qemuWasmServiceBridge: {
+      state,
+      async request(frame) {
+        calls += 1;
+        state.pending = 1;
+        state.sent += 1;
+        state.lastRequestId = frame.id;
+        state.pending = 0;
+        state.timedOut += 1;
+        throw new Error("secret timeout detail");
+      },
+    },
+  };
+  const evidence = await runServiceRoundtripInPage({
+    operation: "initialize",
+    requestId: serviceRequestId,
+    timeoutMs: 10000,
+  }, scope, monotonicNow(300, 10300));
+  assert.equal(calls, 1);
+  assert.equal(evidence.classification, "timeout");
+  assert.equal(serviceRoundtripSucceeded(evidence), false);
+  assert.equal(JSON.stringify(evidence).includes("secret timeout detail"), false);
+}
+
+{
+  const state = serviceBridgeState({ pending: 1 });
+  let calls = 0;
+  const evidence = await runServiceRoundtripInPage({
+    operation: "initialize",
+    requestId: serviceRequestId,
+    timeoutMs: 10000,
+  }, {
+    qemuWasmServiceBridge: {
+      state,
+      request() {
+        calls += 1;
+      },
+    },
+  }, monotonicNow(400, 401));
+  assert.equal(calls, 0);
+  assert.equal(evidence.classification, "precondition-failed");
+  assert.equal(serviceRoundtripSucceeded(evidence), false);
+}
 
 function sha256(text) {
   return createHash("sha256").update(text).digest("hex");
