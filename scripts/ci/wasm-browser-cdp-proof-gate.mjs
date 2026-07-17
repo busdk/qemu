@@ -37,6 +37,10 @@ function isPositiveInteger(value) {
   return Number.isInteger(value) && value > 0;
 }
 
+function acceptedLiteral(value, expected) {
+  return value === expected ? expected : null;
+}
+
 function parseArgs(argv) {
   const options = {
     json: false,
@@ -132,8 +136,8 @@ function validateServiceRoundtrip(result, requiredOperation) {
       !SERVICE_REQUEST_ID_RE.test(evidence.requestId)) {
     missingFields.push("serviceRoundtrip.requestId");
   }
-  if (!isPositiveInteger(evidence.timeoutMs) || evidence.timeoutMs > 10000) {
-    missingFields.push("serviceRoundtrip.timeoutMs<=10000");
+  if (evidence.timeoutMs !== 10000) {
+    missingFields.push("serviceRoundtrip.timeoutMs=10000");
   }
   if (!isObject(readiness)) {
     missingFields.push("serviceRoundtrip.readiness");
@@ -249,21 +253,35 @@ function validateServiceRoundtrip(result, requiredOperation) {
   if (Object.hasOwn(result, "frontend_roundtrip")) {
     missingFields.push("frontend_roundtrip-forbidden");
   }
+  const safeRequestId =
+    isNonEmptyString(evidence.requestId) &&
+    evidence.requestId.length <= 64 &&
+    SERVICE_REQUEST_ID_RE.test(evidence.requestId) ? evidence.requestId : null;
+  const safeClassification = [
+    "success",
+    "error",
+    "timeout",
+    "precondition-failed",
+    "cdp-error",
+  ].includes(evidence.classification) ? evidence.classification : null;
   return {
     present: true,
     requiredOperation,
     ok: missingFields.length === 0,
-    source: evidence.source ?? null,
-    operation: evidence.operation ?? null,
-    requestId: isNonEmptyString(evidence.requestId) ? evidence.requestId : null,
-    timeoutMs: isPositiveInteger(evidence.timeoutMs) ? evidence.timeoutMs : null,
-    classification: evidence.classification ?? null,
+    source: acceptedLiteral(
+      evidence.source,
+      "qemuWasmServiceBridge.request",
+    ),
+    operation: acceptedLiteral(evidence.operation, "initialize"),
+    requestId: safeRequestId,
+    timeoutMs: evidence.timeoutMs === 10000 ? 10000 : null,
+    classification: safeClassification,
     response: isObject(response) ? {
-      id: response.id ?? null,
-      operation: response.operation ?? null,
-      status: response.status ?? null,
-      adapter: response.adapter ?? null,
-      app_server: response.app_server ?? null,
+      id: response.id === safeRequestId ? safeRequestId : null,
+      operation: acceptedLiteral(response.operation, "initialize"),
+      status: acceptedLiteral(response.status, "ok"),
+      adapter: acceptedLiteral(response.adapter, "ready"),
+      app_server: acceptedLiteral(response.app_server, "initialized"),
     } : null,
     elapsedMs,
     missingFields,

@@ -30,7 +30,7 @@ const DEFAULT_CHROME_PATHS = [
 ].filter(Boolean);
 const SERVICE_REQUEST_ID_RE =
   /^gate2-initialize-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const SERVICE_REQUEST_MAX_TIMEOUT_MS = 60000;
+const SERVICE_REQUEST_TIMEOUT_MS = 10000;
 
 function usage(status = 0) {
   const stream = status === 0 ? process.stdout : process.stderr;
@@ -39,8 +39,8 @@ function usage(status = 0) {
   stream.write(`Service request options:
   --service-request-operation initialize
                            Send one initialize request after guest readiness
-  --service-request-timeout-ms N
-                           Request timeout, 1..60000 ms (default: 10000)
+  --service-request-timeout-ms 10000
+                           Request timeout (default and required: 10000 ms)
   --qemu-arg ARG           Additional ordered QEMU argument; repeatable
 `);
   process.exit(status);
@@ -341,10 +341,8 @@ export async function parseArgs(argv) {
     console.error("--service-request-timeout-ms requires --service-request-operation");
     usage(2);
   }
-  if (!Number.isInteger(options.serviceRequestTimeoutMs) ||
-      options.serviceRequestTimeoutMs <= 0 ||
-      options.serviceRequestTimeoutMs > SERVICE_REQUEST_MAX_TIMEOUT_MS) {
-    console.error("--service-request-timeout-ms must be an integer from 1 to 60000");
+  if (options.serviceRequestTimeoutMs !== SERVICE_REQUEST_TIMEOUT_MS) {
+    console.error("--service-request-timeout-ms must be exactly 10000 for initialize");
     usage(2);
   }
   if (options.out === null) {
@@ -594,6 +592,8 @@ export async function runServiceRoundtripInPage(
   const boundedScalar = (value, maxLength) =>
     typeof value === "string" && value.length > 0 &&
     value.length <= maxLength ? value : null;
+  const nonnegativeInteger = (value) =>
+    Number.isInteger(value) && value >= 0 ? value : null;
   const bridge = scope.qemuWasmServiceBridge;
   const state = bridge?.state;
   const startedAtMs = Number(now());
@@ -603,23 +603,23 @@ export async function runServiceRoundtripInPage(
     moduleAttached: candidate?.moduleAttached === true,
     interactiveOnly: candidate?.interactiveOnly === true,
     healthRequested: candidate?.healthRequested === true,
-    pending: Number.isInteger(candidate?.pending) ? candidate.pending : null,
-    sent: Number.isInteger(candidate?.sent) ? candidate.sent : null,
-    received: Number.isInteger(candidate?.received) ? candidate.received : null,
-    resolved: Number.isInteger(candidate?.resolved) ? candidate.resolved : null,
-    timedOut: Number.isInteger(candidate?.timedOut) ? candidate.timedOut : null,
+    pending: nonnegativeInteger(candidate?.pending),
+    sent: nonnegativeInteger(candidate?.sent),
+    received: nonnegativeInteger(candidate?.received),
+    resolved: nonnegativeInteger(candidate?.resolved),
+    timedOut: nonnegativeInteger(candidate?.timedOut),
     lastRequestId: boundedScalar(candidate?.lastRequestId, 64),
     lastResponseId: boundedScalar(candidate?.lastResponseId, 64),
   });
   const before = stateSnapshot(state);
-  const preconditionsOk =
-    request?.operation === "initialize" &&
+  const requestId =
     typeof request?.requestId === "string" &&
     requestIdRe.test(request.requestId) &&
-    request.requestId.length <= 64 &&
-    Number.isInteger(request?.timeoutMs) &&
-    request.timeoutMs > 0 &&
-    request.timeoutMs <= 60000 &&
+    request.requestId.length <= 64 ? request.requestId : null;
+  const preconditionsOk =
+    request?.operation === "initialize" &&
+    requestId !== null &&
+    request?.timeoutMs === 10000 &&
     typeof bridge?.request === "function" &&
     before.ready &&
     before.readySource === "serial" &&
@@ -645,16 +645,18 @@ export async function runServiceRoundtripInPage(
   const after = stateSnapshot(state);
   const responseIsObject = response !== null &&
     typeof response === "object" && !Array.isArray(response);
-  const responseProjectionSafe = responseIsObject &&
+  const responseFieldsSafe = responseIsObject &&
     Object.keys(response).every((key) =>
       ["id", "operation", "status", "adapter", "app_server"].includes(key));
   const selectedResponse = responseIsObject ? {
-    id: boundedScalar(response.id, 64),
-    operation: boundedScalar(response.operation, 32),
-    status: boundedScalar(response.status, 32),
-    adapter: boundedScalar(response.adapter, 32),
-    app_server: boundedScalar(response.app_server, 32),
+    id: response.id === requestId ? requestId : null,
+    operation: response.operation === "initialize" ? "initialize" : null,
+    status: response.status === "ok" ? "ok" : null,
+    adapter: response.adapter === "ready" ? "ready" : null,
+    app_server: response.app_server === "initialized" ? "initialized" : null,
   } : null;
+  const responseProjectionSafe = responseFieldsSafe &&
+    Object.values(selectedResponse).every((value) => value !== null);
   let classification = "precondition-failed";
   if (preconditionsOk && requestRejected) {
     classification = after.timedOut === before.timedOut + 1
@@ -699,8 +701,8 @@ export async function runServiceRoundtripInPage(
       resolvedAfter: after.resolved,
       timedOutBefore: before.timedOut,
       timedOutAfter: after.timedOut,
-      lastRequestId: after.lastRequestId,
-      lastResponseId: after.lastResponseId,
+      lastRequestId: after.lastRequestId === requestId ? requestId : null,
+      lastResponseId: after.lastResponseId === requestId ? requestId : null,
     },
     response: selectedResponse,
     responseProjectionSafe,
@@ -718,6 +720,17 @@ export function serviceRoundtripSucceeded(evidence) {
   const transport = evidence?.transport;
   const response = evidence?.response;
   const timing = evidence?.timing;
+  const transportCountersValid = [
+    "sentBefore",
+    "sentAfter",
+    "receivedBefore",
+    "receivedAfter",
+    "resolvedBefore",
+    "resolvedAfter",
+    "timedOutBefore",
+    "timedOutAfter",
+  ].every((field) =>
+    Number.isInteger(transport?.[field]) && transport[field] >= 0);
   const elapsedMatches = Number.isFinite(timing?.startedAtMs) &&
     timing.startedAtMs >= 0 &&
     Number.isFinite(timing?.completedAtMs) &&
@@ -733,9 +746,7 @@ export function serviceRoundtripSucceeded(evidence) {
     typeof evidence?.requestId === "string" &&
     evidence.requestId.length <= 64 &&
     SERVICE_REQUEST_ID_RE.test(evidence.requestId) &&
-    Number.isInteger(evidence?.timeoutMs) &&
-    evidence.timeoutMs > 0 &&
-    evidence.timeoutMs <= SERVICE_REQUEST_MAX_TIMEOUT_MS &&
+    evidence?.timeoutMs === SERVICE_REQUEST_TIMEOUT_MS &&
     readiness?.readyBefore === true &&
     readiness?.readyAfter === true &&
     readiness?.readySourceBefore === "serial" &&
@@ -748,6 +759,7 @@ export function serviceRoundtripSucceeded(evidence) {
     readiness?.healthRequestedAfter === false &&
     transport?.pendingBefore === 0 &&
     transport?.pendingAfter === 0 &&
+    transportCountersValid &&
     transport?.sentAfter === transport?.sentBefore + 1 &&
     transport?.receivedAfter === transport?.receivedBefore + 1 &&
     transport?.resolvedAfter === transport?.resolvedBefore + 1 &&

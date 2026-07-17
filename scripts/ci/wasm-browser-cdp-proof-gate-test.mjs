@@ -18,6 +18,15 @@ import {
 const sha = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const serviceRequestId =
   "gate2-initialize-01234567-89ab-4cde-8fab-0123456789ab";
+const safetyRegressionFailures = [];
+
+function checkSafetyRegression(name, callback) {
+  try {
+    callback();
+  } catch (error) {
+    safetyRegressionFailures.push(`${name}: ${error.message}`);
+  }
+}
 
 const result = {
   browserVersion: {
@@ -149,6 +158,80 @@ const result = {
   assert.equal(gate.files.rootfs.present, true);
   assert.deepEqual(gate.missingFields, []);
 }
+
+for (const [name, timeoutMs, elapsedMs] of [
+  ["nonliteral-short-timeout", 9999, 75],
+  ["60000-timeout-with-15000-elapsed", 60000, 15000],
+]) {
+  checkSafetyRegression(name, () => {
+    const broken = JSON.parse(JSON.stringify(result));
+    broken.serviceRoundtrip.timeoutMs = timeoutMs;
+    broken.serviceRoundtrip.timing.completedAtMs =
+      broken.serviceRoundtrip.timing.startedAtMs + elapsedMs;
+    broken.serviceRoundtrip.timing.elapsedMs = elapsedMs;
+    const gate = cdpProofEvidenceGate(broken, {
+      requireServiceRoundtrip: "initialize",
+    });
+    assert.equal(gate.ok, false);
+    assert.ok(gate.missingFields.includes(
+      "serviceRoundtrip.timeoutMs=10000",
+    ));
+  });
+}
+
+for (const [name, beforeField, afterField, beforeValue, afterValue] of [
+  ["sent", "sentBefore", "sentAfter", -3, -2],
+  ["received", "receivedBefore", "receivedAfter", -4, -3],
+  ["resolved", "resolvedBefore", "resolvedAfter", -5, -4],
+  ["timedOut", "timedOutBefore", "timedOutAfter", -6, -6],
+]) {
+  checkSafetyRegression(`nonnegative ${name} counters`, () => {
+    const broken = JSON.parse(JSON.stringify(result));
+    broken.serviceRoundtrip.transport[beforeField] = beforeValue;
+    broken.serviceRoundtrip.transport[afterField] = afterValue;
+    const gate = cdpProofEvidenceGate(broken, {
+      requireServiceRoundtrip: "initialize",
+    });
+    assert.equal(gate.ok, false);
+    assert.ok(gate.missingFields.includes(
+      `serviceRoundtrip.transport.${beforeField}`,
+    ));
+    assert.ok(gate.missingFields.includes(
+      `serviceRoundtrip.transport.${afterField}`,
+    ));
+  });
+}
+
+checkSafetyRegression("guest scalar sentinel redaction", () => {
+  const sentinel = "sk-retained-secret";
+  const broken = JSON.parse(JSON.stringify(result));
+  broken.serviceRoundtrip.transport.lastResponseId = sentinel;
+  broken.serviceRoundtrip.response = {
+    id: sentinel,
+    operation: sentinel,
+    status: sentinel,
+    adapter: sentinel,
+    app_server: sentinel,
+    error: sentinel,
+  };
+  broken.serviceRoundtrip.responseProjectionSafe = false;
+  broken.serviceRoundtrip.classification = "error";
+  const gate = cdpProofEvidenceGate(broken, {
+    requireServiceRoundtrip: "initialize",
+  });
+  assert.equal(gate.ok, false);
+  assert.equal(JSON.stringify(gate).includes(sentinel), false);
+  assert.deepEqual(gate.serviceRoundtrip.response, {
+    id: null,
+    operation: null,
+    status: null,
+    adapter: null,
+    app_server: null,
+  });
+  assert.equal(gate.serviceRoundtrip.classification, "error");
+});
+
+assert.deepEqual(safetyRegressionFailures, []);
 
 for (const [name, mutate, expectedMissing] of [
   [

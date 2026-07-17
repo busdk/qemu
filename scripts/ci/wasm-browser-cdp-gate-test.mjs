@@ -6,6 +6,7 @@
  */
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -185,6 +186,44 @@ function monotonicNow(...values) {
   return () => values[index++];
 }
 
+const safetyRegressionFailures = [];
+
+async function checkSafetyRegression(name, callback) {
+  try {
+    await callback();
+  } catch (error) {
+    safetyRegressionFailures.push(`${name}: ${error.message}`);
+  }
+}
+
+await checkSafetyRegression("literal initialize timeout", () => {
+  const moduleUrl =
+    new URL("./wasm-browser-cdp-gate.mjs", import.meta.url).href;
+  const script = `
+    const { parseArgs } = await import(${JSON.stringify(moduleUrl)});
+    await parseArgs([
+      "--artifact-dir", "/tmp/artifacts",
+      "--kernel", "/tmp/Image",
+      "--initrd", "/tmp/initrd",
+      "--out", "/tmp/result.json",
+      "--service-request-operation", "initialize",
+      "--service-request-timeout-ms", "60000",
+    ]);
+  `;
+  const probe = spawnSync(process.execPath, [
+    "--input-type=module",
+    "--eval",
+    script,
+  ], { encoding: "utf8" });
+  assert.equal(probe.status, 2);
+  assert.match(
+    probe.stderr,
+    /--service-request-timeout-ms must be exactly 10000 for initialize/,
+  );
+});
+
+let successfulServiceRoundtripEvidence = null;
+
 {
   const state = serviceBridgeState();
   const scope = {
@@ -219,6 +258,7 @@ function monotonicNow(...values) {
     requestId: serviceRequestId,
     timeoutMs: 10000,
   }, scope, monotonicNow(100, 112.5));
+  successfulServiceRoundtripEvidence = evidence;
   assert.equal(serviceRoundtripSucceeded(evidence), true);
   assert.equal(evidence.readiness.healthRequestedBefore, false);
   assert.equal(evidence.readiness.healthRequestedAfter, false);
@@ -257,6 +297,55 @@ function monotonicNow(...values) {
   }
 }
 
+await checkSafetyRegression("60000 ms request with 15000 ms elapsed", async () => {
+  const state = serviceBridgeState();
+  let calls = 0;
+  const evidence = await runServiceRoundtripInPage({
+    operation: "initialize",
+    requestId: serviceRequestId,
+    timeoutMs: 60000,
+  }, {
+    qemuWasmServiceBridge: {
+      state,
+      async request(frame) {
+        calls += 1;
+        state.pending = 1;
+        state.sent += 1;
+        state.lastRequestId = frame.id;
+        state.received += 1;
+        state.resolved += 1;
+        state.pending = 0;
+        state.lastResponseId = frame.id;
+        return {
+          id: frame.id,
+          operation: "initialize",
+          status: "ok",
+          adapter: "ready",
+          app_server: "initialized",
+        };
+      },
+    },
+  }, monotonicNow(1000, 16000));
+  assert.equal(calls, 0);
+  assert.equal(evidence.classification, "precondition-failed");
+  assert.equal(serviceRoundtripSucceeded(evidence), false);
+});
+
+for (const [name, beforeField, afterField, beforeValue, afterValue] of [
+  ["sent", "sentBefore", "sentAfter", -3, -2],
+  ["received", "receivedBefore", "receivedAfter", -4, -3],
+  ["resolved", "resolvedBefore", "resolvedAfter", -5, -4],
+  ["timedOut", "timedOutBefore", "timedOutAfter", -6, -6],
+]) {
+  await checkSafetyRegression(`nonnegative ${name} counters`, () => {
+    const evidence =
+      JSON.parse(JSON.stringify(successfulServiceRoundtripEvidence));
+    evidence.transport[beforeField] = beforeValue;
+    evidence.transport[afterField] = afterValue;
+    assert.equal(serviceRoundtripSucceeded(evidence), false);
+  });
+}
+
 {
   const state = serviceBridgeState();
   const scope = {
@@ -291,6 +380,48 @@ function monotonicNow(...values) {
   assert.equal(JSON.stringify(evidence).includes("must-not-be-retained"), false);
   assert.equal(Object.hasOwn(evidence.response, "body"), false);
 }
+
+await checkSafetyRegression("guest scalar sentinel redaction", async () => {
+  const sentinel = "sk-retained-secret";
+  const state = serviceBridgeState();
+  const evidence = await runServiceRoundtripInPage({
+    operation: "initialize",
+    requestId: serviceRequestId,
+    timeoutMs: 10000,
+  }, {
+    qemuWasmServiceBridge: {
+      state,
+      async request(frame) {
+        state.pending = 1;
+        state.sent += 1;
+        state.lastRequestId = frame.id;
+        state.received += 1;
+        state.resolved += 1;
+        state.pending = 0;
+        state.lastResponseId = sentinel;
+        return {
+          id: sentinel,
+          operation: sentinel,
+          status: sentinel,
+          adapter: sentinel,
+          app_server: sentinel,
+          error: sentinel,
+        };
+      },
+    },
+  }, monotonicNow(250, 251));
+  assert.equal(JSON.stringify(evidence).includes(sentinel), false);
+  assert.deepEqual(evidence.response, {
+    id: null,
+    operation: null,
+    status: null,
+    adapter: null,
+    app_server: null,
+  });
+  assert.equal(evidence.transport.lastResponseId, null);
+  assert.equal(evidence.classification, "error");
+  assert.equal(serviceRoundtripSucceeded(evidence), false);
+});
 
 {
   const state = serviceBridgeState();
@@ -339,6 +470,8 @@ function monotonicNow(...values) {
   assert.equal(evidence.classification, "precondition-failed");
   assert.equal(serviceRoundtripSucceeded(evidence), false);
 }
+
+assert.deepEqual(safetyRegressionFailures, []);
 
 function sha256(text) {
   return createHash("sha256").update(text).digest("hex");
