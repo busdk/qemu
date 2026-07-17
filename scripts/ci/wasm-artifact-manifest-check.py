@@ -10,6 +10,19 @@ import json
 from pathlib import Path
 
 
+# Byte markers that exist only when tcg/wasm64.c was compiled into the
+# module: the wasm64 runtime control readers and the runloop evidence
+# emitter prefix. A TCI-only build contains none of them, so requiring
+# them fails closed before a TCI-only artifact reaches a browser run.
+WASM64_BACKEND_MARKERS = (
+    b"QEMU_WASM64_RUNLOOP_SMOKE",
+    b"QEMU_WASM64_LIVE_GENERATED_EXEC",
+    b"QEMU_WASM64_LIVE_GENERATED_EXEC_NO_FALLBACK",
+    b"QEMU_WASM64_LIVE_GENERATED_EXEC_PREFLIGHT",
+    b"qemu-wasm64-runloop:",
+)
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -77,6 +90,21 @@ def require_artifact(
         )
 
 
+def require_wasm64_backend(root: Path, path: str) -> None:
+    module = root / path
+    data = module.read_bytes()
+    missing = [
+        marker.decode("ascii")
+        for marker in WASM64_BACKEND_MARKERS
+        if marker not in data
+    ]
+    if missing:
+        raise SystemExit(
+            "WebAssembly module does not contain the wasm64 TCG backend; "
+            f"missing capability markers in {module}: {', '.join(missing)}"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Verify a QEMU WebAssembly artifact manifest target pair."
@@ -98,6 +126,14 @@ def main() -> int:
         required=True,
         help="QEMU system target to require, for example x86_64",
     )
+    parser.add_argument(
+        "--require-wasm64-backend",
+        action="store_true",
+        help=(
+            "fail unless the WebAssembly module bytes contain the wasm64 "
+            "TCG backend runtime controls and runloop evidence emitter"
+        ),
+    )
     args = parser.parse_args()
 
     manifest = load_manifest(args.manifest)
@@ -113,9 +149,13 @@ def main() -> int:
         root, pair.get("javascript"), "JavaScript launcher", artifacts
     )
     require_artifact(root, pair.get("wasm"), "WebAssembly module", artifacts)
+    backend_note = ""
+    if args.require_wasm64_backend:
+        require_wasm64_backend(root, pair["wasm"])
+        backend_note = " with the wasm64 TCG backend"
 
     print(
-        f"verified QEMU WebAssembly target {args.target}: "
+        f"verified QEMU WebAssembly target {args.target}{backend_note}: "
         f"{pair['javascript']} + {pair['wasm']}"
     )
     return 0

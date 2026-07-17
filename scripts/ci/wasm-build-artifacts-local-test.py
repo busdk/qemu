@@ -53,6 +53,7 @@ def test_default_docker_command():
             "wasm-artifact-manifest-check.py --manifest qemu-system-wasm-artifacts.json --target x86_64",
         ]:
             assert want in joined, joined
+        assert "--require-wasm64-backend" not in joined, joined
         assert "rm -rf /tmp/src /tmp/build" not in joined, joined
         assert "find /tmp/src -mindepth 1 -maxdepth 1 ! -name subprojects" in joined, joined
         assert "-name '*.c' -o -name '*.cc' -o -name '*.cpp'" in joined, joined
@@ -154,6 +155,11 @@ def test_tcg_wasm64_backend_command_replaces_interpreter():
         assert "--enable-tcg-interpreter" not in joined, joined
         assert "--target-list=riscv64-softmmu" in joined, joined
         assert f"{source / 'tmp' / 'qemu-wasm-build' / 'riscv64-wasm64-tcg-ccache' / 'build'}:/tmp/build" in joined, joined
+        assert (
+            "wasm-artifact-manifest-check.py --manifest "
+            "qemu-system-wasm-artifacts.json --target riscv64 "
+            "--require-wasm64-backend"
+        ) in joined, joined
 
 
 def test_dry_run_includes_image_build():

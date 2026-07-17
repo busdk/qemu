@@ -37,7 +37,9 @@ def run_manifest(root: Path, output: Path) -> subprocess.CompletedProcess:
     )
 
 
-def run_check(manifest: Path, target: str) -> subprocess.CompletedProcess:
+def run_check(
+    manifest: Path, target: str, *extra_args: str
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         [
             sys.executable,
@@ -46,12 +48,23 @@ def run_check(manifest: Path, target: str) -> subprocess.CompletedProcess:
             str(manifest),
             "--target",
             target,
+            *extra_args,
         ],
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
+
+
+WASM64_BACKEND_MARKER_DATA = (
+    b"\0asmqemu"
+    b"QEMU_WASM64_RUNLOOP_SMOKE\0"
+    b"QEMU_WASM64_LIVE_GENERATED_EXEC\0"
+    b"QEMU_WASM64_LIVE_GENERATED_EXEC_NO_FALLBACK\0"
+    b"QEMU_WASM64_LIVE_GENERATED_EXEC_PREFLIGHT\0"
+    b'qemu-wasm64-runloop: {"format":1,'
+)
 
 
 def test_manifest() -> None:
@@ -195,6 +208,77 @@ def test_missing_artifact_entry_for_target_pair() -> None:
         assert "has no entry for JavaScript launcher" in check.stderr
 
 
+def test_wasm64_backend_markers_pass() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        (root / "qemu-system-riscv64.js").write_bytes(
+            b"console.log('qemu wasm');\n"
+        )
+        (root / "qemu-system-riscv64.wasm").write_bytes(
+            WASM64_BACKEND_MARKER_DATA
+        )
+
+        output = root / "manifest.json"
+        result = run_manifest(root, output)
+        assert result.returncode == 0, result.stderr
+
+        check = run_check(output, "riscv64", "--require-wasm64-backend")
+        assert check.returncode == 0, check.stderr
+        assert (
+            "verified QEMU WebAssembly target riscv64 "
+            "with the wasm64 TCG backend" in check.stdout
+        )
+
+
+def test_wasm64_backend_markers_fail_closed_on_tci_only() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        (root / "qemu-system-riscv64.js").write_bytes(
+            b"console.log('qemu wasm');\n"
+        )
+        (root / "qemu-system-riscv64.wasm").write_bytes(
+            b"\0asmqemu"
+            b"../src/tcg/tci.c\0"
+            b"QEMU_TCI_PROGRESS\0"
+        )
+
+        output = root / "manifest.json"
+        result = run_manifest(root, output)
+        assert result.returncode == 0, result.stderr
+
+        check = run_check(output, "riscv64", "--require-wasm64-backend")
+        assert check.returncode == 1
+        assert (
+            "WebAssembly module does not contain the wasm64 TCG backend"
+            in check.stderr
+        )
+        assert "QEMU_WASM64_RUNLOOP_SMOKE" in check.stderr
+        assert "qemu-wasm64-runloop:" in check.stderr
+
+        unchecked = run_check(output, "riscv64")
+        assert unchecked.returncode == 0, unchecked.stderr
+
+
+def test_wasm64_backend_markers_all_required() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        (root / "qemu-system-riscv64.js").write_bytes(
+            b"console.log('qemu wasm');\n"
+        )
+        partial = WASM64_BACKEND_MARKER_DATA.replace(
+            b"QEMU_WASM64_LIVE_GENERATED_EXEC_PREFLIGHT\0", b"\0"
+        )
+        (root / "qemu-system-riscv64.wasm").write_bytes(partial)
+
+        output = root / "manifest.json"
+        result = run_manifest(root, output)
+        assert result.returncode == 0, result.stderr
+
+        check = run_check(output, "riscv64", "--require-wasm64-backend")
+        assert check.returncode == 1
+        assert "QEMU_WASM64_LIVE_GENERATED_EXEC_PREFLIGHT" in check.stderr
+
+
 def test_missing_artifacts() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
@@ -212,6 +296,9 @@ def main() -> int:
     test_missing_target_pair_file()
     test_target_pair_checksum_mismatch()
     test_missing_artifact_entry_for_target_pair()
+    test_wasm64_backend_markers_pass()
+    test_wasm64_backend_markers_fail_closed_on_tci_only()
+    test_wasm64_backend_markers_all_required()
     test_missing_artifacts()
     return 0
 

@@ -156,6 +156,7 @@ def shell_script(
     trust_source_mtimes: bool,
     ccache: bool,
     em_cache: bool,
+    require_wasm64_backend: bool,
 ) -> str:
     quoted_configure = " ".join(shlex.quote(arg) for arg in configure_args)
     configure_hash = configure_fingerprint(configure_args)
@@ -226,7 +227,7 @@ for extra_artifact in {shlex.quote(artifact_js)}.symbols {shlex.quote(artifact_w
 done
 cd /host-out
 python3 /tmp/src/scripts/ci/wasm-artifact-manifest.py --root . --output qemu-system-wasm-artifacts.json
-python3 /tmp/src/scripts/ci/wasm-artifact-manifest-check.py --manifest qemu-system-wasm-artifacts.json --target {shlex.quote(target)}
+python3 /tmp/src/scripts/ci/wasm-artifact-manifest-check.py --manifest qemu-system-wasm-artifacts.json --target {shlex.quote(target)}{" --require-wasm64-backend" if require_wasm64_backend else ""}
 sha256sum {shlex.quote(artifact_js)} {shlex.quote(artifact_wasm)} qemu-system-wasm-artifacts.json > SHA256SUMS
 ls -lh
 {ccache_stats}
@@ -294,6 +295,7 @@ def docker_run_command(args: argparse.Namespace) -> list[str]:
             args.trust_source_mtimes,
             not args.no_ccache,
             not args.no_em_cache,
+            args.tcg_wasm64_backend,
         ),
     ]
     return command
