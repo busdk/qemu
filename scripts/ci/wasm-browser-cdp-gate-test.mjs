@@ -346,6 +346,72 @@ for (const [name, beforeField, afterField, beforeValue, afterValue] of [
   });
 }
 
+await checkSafetyRegression("whole result smoke-state redaction", async () => {
+  const sentinel = "sk-unmatched-response-status";
+  const state = serviceBridgeState({
+    received: 1,
+    lastResponseId: "unmatched-response",
+    lastResponseStatus: sentinel,
+  });
+  const capturedFinalState = {
+    markerSeen: true,
+    serviceBridge: JSON.parse(JSON.stringify(state)),
+  };
+  const serviceRoundtrip = await runServiceRoundtripInPage({
+    operation: "initialize",
+    requestId: serviceRequestId,
+    timeoutMs: 10000,
+  }, {
+    qemuWasmServiceBridge: {
+      state,
+      async request(frame) {
+        state.pending = 1;
+        state.sent += 1;
+        state.lastRequestId = frame.id;
+        state.received += 1;
+        state.resolved += 1;
+        state.pending = 0;
+        state.lastResponseId = frame.id;
+        state.lastResponseStatus = "ok";
+        return {
+          id: frame.id,
+          operation: "initialize",
+          status: "ok",
+          adapter: "ready",
+          app_server: "initialized",
+        };
+      },
+    },
+  }, monotonicNow(180, 181));
+  assert.equal(serviceRoundtripSucceeded(serviceRoundtrip), true);
+  const completeResult = {
+    format: 1,
+    success: true,
+    browserStarted: true,
+    qemuStarted: true,
+    markerSeen: true,
+    serviceRoundtrip,
+    smokeState: capturedFinalState,
+  };
+  const gateModule =
+    await import("./wasm-browser-cdp-gate.mjs");
+  const serializeResult = typeof gateModule.serializeCdpResult === "function"
+    ? gateModule.serializeCdpResult
+    : (result) => JSON.stringify(result, null, 2);
+  const serializedResult = serializeResult(completeResult);
+  assert.equal(serializedResult.includes(sentinel), false);
+  const parsedResult = JSON.parse(serializedResult);
+  assert.equal(parsedResult.success, true);
+  assert.equal(
+    serviceRoundtripSucceeded(parsedResult.serviceRoundtrip),
+    true,
+  );
+  assert.equal(
+    Object.hasOwn(parsedResult.smokeState, "serviceBridge"),
+    false,
+  );
+});
+
 {
   const state = serviceBridgeState();
   const scope = {

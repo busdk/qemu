@@ -582,6 +582,17 @@ export function createServiceRequestId(uuid = randomUUID()) {
   return requestId;
 }
 
+export function serializeCdpResult(result) {
+  if (result?.smokeState === null ||
+      typeof result?.smokeState !== "object" ||
+      Array.isArray(result.smokeState)) {
+    return JSON.stringify(result, null, 2);
+  }
+  const smokeState = { ...result.smokeState };
+  delete smokeState.serviceBridge;
+  return JSON.stringify({ ...result, smokeState }, null, 2);
+}
+
 export async function runServiceRoundtripInPage(
   request,
   scope = globalThis,
@@ -1548,7 +1559,7 @@ async function main() {
     wasm64Runloop: finalState?.wasm64Runloop || null,
     smokeState: finalState,
   };
-  await writeFile(options.out, JSON.stringify(result, null, 2));
+  await writeFile(options.out, serializeCdpResult(result));
   console.log(JSON.stringify({
     outPath: options.out,
     markerSeen: result.markerSeen,
