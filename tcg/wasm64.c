@@ -697,6 +697,15 @@ static __thread uint64_t vcpu_last_entered_iteration;
 static __thread uint64_t vcpu_last_entered_guest_pc;
 static uint64_t vcpu_last_entered_sequence QEMU_ALIGNED(8);
 
+#ifdef CONFIG_EMSCRIPTEN
+EMSCRIPTEN_KEEPALIVE
+uintptr_t
+tcg_wasm64_vcpu_last_entered_publication_address(void)
+{
+    return (uintptr_t)&vcpu_last_entered_sequence;
+}
+#endif
+
 /*
  * Exact cause breakdown recorded every time
  * tcg_wasm64_live_generated_exec_main_loop_exit_pending() observes a
@@ -9494,7 +9503,6 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             "\"exit\":%" PRIu64 ","
             "\"exception\":%" PRIu64 "},"
             "\"vcpu_last_entered\":{"
-            "\"publication_address\":\"0x%" PRIxPTR "\","
             "\"phase\":\"%s\","
             "\"iteration\":%" PRIu64 ","
             "\"last_guest_pc\":%" PRIu64 "},"
@@ -9559,7 +9567,6 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             live_generated_exec_main_loop_pending_interrupt,
             live_generated_exec_main_loop_pending_exit,
             live_generated_exec_main_loop_pending_exception,
-            (uintptr_t)&vcpu_last_entered_sequence,
             tcg_wasm64_vcpu_last_entered_phase_name(
                 vcpu_last_entered_phase),
             vcpu_last_entered_iteration,

@@ -1666,6 +1666,11 @@ const SENSITIVE_DIAGNOSTIC_TEXT =
   /(?:^|[_-])(?:secret|password|credential|authorization|bearer|private[_-]?key)(?:[_-]|$)/i;
 const NONNEGATIVE_DIAGNOSTIC_FIELD =
   /(?:^elapsedMs$|(?:^|_)(?:attempts|successes|rejects|skips|count|counts|instructions|entries|calls|loads|stores|writes|budget|limit|length|size|time|ppm|numerator|denominator|iteration|sequence)(?:$|_))/;
+const RUNLOOP_REQUIRED_FIELD_GROUPS = [
+  ["attempts", "successes", "rejects"],
+  ["generated_regs_checksum", "reference_regs_checksum"],
+  ["generated_memory_checksum", "reference_memory_checksum"],
+];
 
 function boundedNonNegativeInteger(value) {
   return Number.isInteger(value) && value >= 0 &&
@@ -1737,6 +1742,52 @@ function redactRunloopDiagnosticValue(
   }
   active.delete(value);
   return projected;
+}
+
+function runloopDiagnosticRelationsValid(raw, projected) {
+  if (!raw || typeof raw !== "object") {
+    return true;
+  }
+  if (!projected || typeof projected !== "object" ||
+      Array.isArray(raw) !== Array.isArray(projected)) {
+    return false;
+  }
+  for (const fields of RUNLOOP_REQUIRED_FIELD_GROUPS) {
+    if (fields.some((field) => Object.hasOwn(raw, field)) &&
+        fields.some((field) => !Object.hasOwn(projected, field))) {
+      return false;
+    }
+  }
+  if (["attempts", "successes", "rejects"].every(
+    (field) => Object.hasOwn(projected, field),
+  ) && (projected.successes > projected.attempts ||
+        projected.rejects > projected.attempts)) {
+    return false;
+  }
+  if (projected.ok === true && [
+    ["generated_regs_checksum", "reference_regs_checksum"],
+    ["generated_memory_checksum", "reference_memory_checksum"],
+  ].some(([generated, reference]) =>
+    Object.hasOwn(projected, generated) &&
+    projected[generated] !== projected[reference])) {
+    return false;
+  }
+
+  if (Array.isArray(raw)) {
+    return raw.every((entry, index) =>
+      !entry || typeof entry !== "object" ||
+      runloopDiagnosticRelationsValid(entry, projected[index]));
+  }
+  return Object.entries(raw).every(([field, entry]) =>
+    !entry || typeof entry !== "object" ||
+    runloopDiagnosticRelationsValid(entry, projected[field]));
+}
+
+function isWasm64RunloopContainer(value) {
+  return value && typeof value === "object" && !Array.isArray(value) &&
+    Object.hasOwn(value, "enabled") &&
+    Object.hasOwn(value, "summaryCount") &&
+    Object.hasOwn(value, "lastSummary");
 }
 
 /*
@@ -1895,7 +1946,8 @@ export function sanitizeWasm64Runloop(runloop) {
   const lastSummary = redactRunloopDiagnosticValue(
     runloop.lastSummary, "lastSummary",
   );
-  if (!lastSummary || typeof lastSummary.event !== "string") {
+  if (!lastSummary || typeof lastSummary.event !== "string" ||
+      !runloopDiagnosticRelationsValid(runloop.lastSummary, lastSummary)) {
     return null;
   }
   return { enabled, summaryCount, lastSummary };
@@ -1913,11 +1965,14 @@ function sanitizeRunloopText(value) {
     }
     let event = null;
     try {
-      const projected = redactRunloopDiagnosticValue(
-        JSON.parse(line.slice(prefixIndex + prefix.length).trimStart()),
-        "lastSummary",
+      const raw = JSON.parse(
+        line.slice(prefixIndex + prefix.length).trimStart(),
       );
-      event = projected && typeof projected.event === "string"
+      const projected = redactRunloopDiagnosticValue(
+        raw, "lastSummary",
+      );
+      event = projected && typeof projected.event === "string" &&
+        runloopDiagnosticRelationsValid(raw, projected)
         ? projected.event
         : null;
     } catch {
@@ -1929,32 +1984,52 @@ function sanitizeRunloopText(value) {
   }).join("\n");
 }
 
-function sanitizeDiagnosticTree(value, key = "", projectedValues = new WeakMap()) {
+function sanitizeDiagnosticTree(
+  value, key = "", projectedValues = new WeakMap(), active = new WeakSet(),
+) {
   if (typeof value === "string") {
-    return sanitizeRunloopText(value);
+    const boundedText = sanitizeRunloopText(value);
+    const projected = redactRunloopDiagnosticValue(boundedText, key);
+    return projected === undefined ? null : projected;
   }
   if (value === null || typeof value !== "object") {
     return value;
   }
+  if (active.has(value)) {
+    return null;
+  }
   if (projectedValues.has(value)) {
     return projectedValues.get(value);
   }
-  if (key === "wasm64Runloop") {
-    return sanitizeWasm64Runloop(value);
+  if (isWasm64RunloopContainer(value)) {
+    const projected = sanitizeWasm64Runloop(value);
+    projectedValues.set(value, projected);
+    return projected;
   }
+  active.add(value);
   if (Array.isArray(value)) {
     const projected = [];
     projectedValues.set(value, projected);
     for (const entry of value) {
-      projected.push(sanitizeDiagnosticTree(entry, "", projectedValues));
+      projected.push(sanitizeDiagnosticTree(
+        entry, "", projectedValues, active,
+      ));
     }
+    active.delete(value);
     return projected;
   }
   const projected = {};
   projectedValues.set(value, projected);
   for (const [field, entry] of Object.entries(value)) {
-    projected[field] = sanitizeDiagnosticTree(entry, field, projectedValues);
+    if (field === "publication_address" ||
+        SENSITIVE_DIAGNOSTIC_TEXT.test(field)) {
+      continue;
+    }
+    projected[field] = sanitizeDiagnosticTree(
+      entry, field, projectedValues, active,
+    );
   }
+  active.delete(value);
   return projected;
 }
 

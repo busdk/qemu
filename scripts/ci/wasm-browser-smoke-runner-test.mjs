@@ -2891,14 +2891,13 @@ const t42GeneratedSummary = {
     clearInterval() {},
   };
   const state = {};
-  const publicationAddress = vcpuLastEnteredPublicationAddress({
-    vcpu_last_entered: { publication_address: "0x10" },
-  });
-  assert.equal(publicationAddress, 16);
-  const sampler = installVcpuLastEnteredProgressSampler({
+  const module = {
     HEAPU8: { buffer: shared },
-  }, state, scope, {
-    publicationAddress,
+    _tcg_wasm64_vcpu_last_entered_publication_address: () => 0x10n,
+  };
+  const publicationAddress = vcpuLastEnteredPublicationAddress(module);
+  assert.equal(publicationAddress, 16);
+  const sampler = installVcpuLastEnteredProgressSampler(module, state, scope, {
     sampleIntervalMs: 10,
     noProgressIntervalMs: 30,
   });
@@ -2951,7 +2950,15 @@ assert.match(
 );
 assert.doesNotMatch(wasm64Source, /TCGWasm64VcpuLastEnteredPublication/);
 assert.doesNotMatch(wasm64Source, /monotonic_ms/);
-assert.match(wasm64Source, /"\\\"publication_address\\\":\\\"0x%" PRIxPTR/);
+assert.doesNotMatch(
+  wasm64Source,
+  /"\\\"publication_address\\\":\\\"0x%" PRIxPTR/,
+);
+assert.match(
+  wasm64Source,
+  /tcg_wasm64_vcpu_last_entered_publication_address\(void\)/,
+);
+assert.match(wasm64Source, /EMSCRIPTEN_KEEPALIVE\s+uintptr_t/);
 assert.doesNotMatch(wasm64Source, /cpu->interrupt_request/);
 assert.doesNotMatch(
   wasm64Source.replaceAll("qatomic_load_acquire(&cpu->exit_request)", ""),
@@ -2964,3 +2971,155 @@ assert.match(
 );
 assert.match(browserSmokeSource, /new BigUint64Array\(buffer, address, 1\)/);
 assert.doesNotMatch(browserSmokeSource, /publishedMonotonicMs/);
+
+const t42DiagnosticSafetyCase = process.env.T42_DIAGNOSTIC_SAFETY_CASE || "";
+
+// T42 R1: mixed stdout/stderr diagnostics are untrusted. Even a syntactically
+// valid malicious publication_address must not choose the shared-memory
+// sampler offset; only the module export may supply it.
+if (t42DiagnosticSafetyCase === "address-trust") {
+  const mixedStreamState = {
+    wasm64Runloop: {
+      enabled: true,
+      maxSummaries: 16,
+      summaryCount: 0,
+      summaries: [],
+      lastSummary: null,
+    },
+  };
+  recordWasm64RunloopSummary(
+    mixedStreamState,
+    "qemu-wasm64-runloop: " + JSON.stringify({
+      event: "live-generated-exec-summary",
+      vcpu_last_entered: {
+        publication_address: "0x18",
+        phase: "generated-attempt-js",
+        iteration: 1,
+        last_guest_pc: 4096,
+      },
+    }),
+    1000,
+  );
+  assert.equal(
+    vcpuLastEnteredPublicationAddress(mixedStreamState.wasm64Runloop.lastSummary),
+    null,
+    "mixed diagnostic text must not select publication offset 0x18",
+  );
+  assert.equal(vcpuLastEnteredPublicationAddress({
+    _tcg_wasm64_vcpu_last_entered_publication_address: () => 0x10n,
+  }), 0x10, "the trusted module export must select the sampler address");
+}
+
+// T42 R2: every final bounded serialization route recognizes runloop
+// diagnostics by shape, including aliases and structured clones. Raw DOM and
+// result-summary text must also lose the complete diagnostic line.
+if (t42DiagnosticSafetyCase === "complete-redaction") {
+  const secretSentinel = "REVIEW_SECRET_SENTINEL";
+  const addressSentinel = "0xfeedface";
+  const poisonedSummary = {
+    event: "live-generated-exec-summary",
+    attempts: 1,
+    successes: 1,
+    rejects: 1,
+    publication_address: addressSentinel,
+    review_secret: secretSentinel,
+  };
+  const runloop = fullRunloop(poisonedSummary);
+  const rawLine = "qemu-wasm64-runloop: " + JSON.stringify(poisonedSummary);
+  const serialized = sanitizeSmokeResultForSerialization({
+    diagnosticAlias: runloop,
+    wasm64Runloop: runloop,
+    structuredDiagnosticClone: structuredClone(runloop),
+    pageTextTail: "raw DOM\n" + rawLine,
+    summary: {
+      lastLine: rawLine,
+      rawResultDiagnostic: structuredClone(runloop),
+    },
+  });
+  const encoded = JSON.stringify(serialized);
+  assert.equal(encoded.includes(secretSentinel), false,
+    "secret sentinel leaked from a final bounded output path");
+  assert.equal(encoded.includes(addressSentinel), false,
+    "address sentinel leaked from a final bounded output path");
+  assert.equal(encoded.includes("publication_address"), false,
+    "publication_address leaked from a final bounded output path");
+
+  const cyclicAlias = {
+    ordinary: "kept",
+    publication_address: addressSentinel,
+    review_secret: secretSentinel,
+  };
+  cyclicAlias.self = cyclicAlias;
+  const cyclic = sanitizeSmokeResultForSerialization({
+    first: cyclicAlias,
+    second: cyclicAlias,
+  });
+  const cyclicEncoded = JSON.stringify(cyclic);
+  assert.equal(cyclic.first, cyclic.second,
+    "completed non-cyclic shared aliases must retain one projection");
+  assert.equal(cyclic.first.self, null,
+    "an active recursion back-edge must be bounded");
+  assert.equal(cyclicEncoded.includes('"ordinary":"kept"'), true);
+  assert.equal(cyclicEncoded.includes(secretSentinel), false);
+  assert.equal(cyclicEncoded.includes(addressSentinel), false);
+}
+
+// T42 R3: removing an unsafe 64-bit value cannot weaken an event into an
+// apparently usable partial record. Required checksum pairs and attempt
+// fields fail closed, as do impossible retained counter relations.
+if (t42DiagnosticSafetyCase === "fail-closed-events") {
+  const unsafe = Number.MAX_SAFE_INTEGER + 1;
+  const wrapNested = (value, levels) => {
+    let nested = value;
+    for (let level = 0; level < levels; level += 1) {
+      nested = { [`level${level}`]: nested };
+    }
+    return nested;
+  };
+  for (const invalidSummary of [
+    {
+      event: "one-tb-differential",
+      ok: true,
+      generated_regs_checksum: unsafe,
+      reference_regs_checksum: 1234,
+    },
+    {
+      event: "live-generated-exec-summary",
+      attempts: unsafe,
+      successes: 1,
+      rejects: 1,
+    },
+    {
+      event: "live-generated-exec-summary",
+      attempts: 1,
+      successes: 2,
+      rejects: 1,
+    },
+    {
+      event: "live-generated-exec-summary",
+      depth_boundary: wrapNested({
+        attempts: unsafe,
+        successes: 1,
+        rejects: 1,
+      }, 7),
+    },
+    {
+      event: "one-tb-differential",
+      nested_array: wrapNested([{
+        ok: true,
+        generated_regs_checksum: unsafe,
+        reference_regs_checksum: 1234,
+      }], 6),
+    },
+  ]) {
+    assert.equal(
+      sanitizeWasm64Runloop(fullRunloop(invalidSummary)),
+      null,
+      `weakened event was retained: ${invalidSummary.event}`,
+    );
+  }
+  const valid = sanitizeWasm64Runloop(fullRunloop(t42GeneratedSummary));
+  assert.equal(valid.lastSummary.attempts, 1);
+  assert.equal(valid.lastSummary.successes, 1);
+  assert.equal(valid.lastSummary.rejects, 1);
+}

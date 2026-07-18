@@ -1372,14 +1372,26 @@ function readVcpuLastEnteredPublication(publication) {
   return Number(sequence);
 }
 
-export function vcpuLastEnteredPublicationAddress(lastSummary) {
-  const value = lastSummary && lastSummary.vcpu_last_entered &&
-    lastSummary.vcpu_last_entered.publication_address;
-  if (typeof value !== "string" || !/^0x[0-9a-f]+$/.test(value)) {
+export function vcpuLastEnteredPublicationAddress(module) {
+  const addressFunction = module &&
+    module._tcg_wasm64_vcpu_last_entered_publication_address;
+  if (typeof addressFunction !== "function") {
     return null;
   }
-  const address = BigInt(value);
-  return address <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(address) : null;
+  let rawAddress;
+  try {
+    rawAddress = addressFunction();
+  } catch {
+    return null;
+  }
+  if (typeof rawAddress === "bigint") {
+    return rawAddress >= 0n && rawAddress <= BigInt(Number.MAX_SAFE_INTEGER)
+      ? Number(rawAddress)
+      : null;
+  }
+  return Number.isSafeInteger(rawAddress) && rawAddress >= 0
+    ? rawAddress
+    : null;
 }
 
 /*
@@ -1423,10 +1435,7 @@ export function installVcpuLastEnteredProgressSampler(
     return null;
   }
 
-  const rawAddress = overrides.publicationAddress;
-  const address = typeof rawAddress === "bigint"
-    ? Number(rawAddress)
-    : rawAddress;
+  const address = vcpuLastEnteredPublicationAddress(module);
   if (
     !Number.isSafeInteger(address) || address < 0 || address % 8 !== 0 ||
     address + 8 > buffer.byteLength
@@ -2350,17 +2359,10 @@ async function run() {
          !config.wasm64LiveGeneratedExecPreflight)) {
       return;
     }
-    const address = vcpuLastEnteredPublicationAddress(
-      smokeState.wasm64Runloop.lastSummary,
-    );
-    if (address === null) {
-      return;
-    }
     vcpuLastEnteredProgressSampler = installVcpuLastEnteredProgressSampler(
       module,
       smokeState,
       globalThis,
-      { publicationAddress: address },
     );
   };
 
