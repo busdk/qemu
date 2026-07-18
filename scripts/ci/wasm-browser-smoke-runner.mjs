@@ -1647,6 +1647,103 @@ async function writeResult(options, result) {
   await writeFile(options.out, `${JSON.stringify(result, null, 2)}\n`);
 }
 
+const VCPU_LIVENESS_PHASES = new Set([
+  "main-loop",
+  "tci-dispatch",
+  "generated-attempt-js",
+  "halted",
+]);
+
+function boundedNonNegativeInteger(value) {
+  return Number.isInteger(value) && value >= 0 &&
+    value <= Number.MAX_SAFE_INTEGER
+    ? value
+    : null;
+}
+
+function boundedBoolean(value) {
+  return typeof value === "boolean" ? value : null;
+}
+
+/*
+ * T42 additive vCPU liveness diagnostic. The runloop summary's
+ * "vcpu_liveness" object is guest/runtime-influenced JSON forwarded
+ * verbatim by the generic wasm64Runloop summary parser (no field-specific
+ * validation there); every field is bounded/enum-checked here before it
+ * enters the runner result, and the whole object is omitted (fail closed)
+ * if any field is missing, the wrong type, or out of bounds. This never
+ * carries a raw guest string into the result.
+ */
+export function sanitizeVcpuLiveness(lastSummary) {
+  const raw = lastSummary && typeof lastSummary === "object"
+    ? lastSummary.vcpu_liveness
+    : null;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const phase = typeof raw.phase === "string" &&
+    VCPU_LIVENESS_PHASES.has(raw.phase)
+    ? raw.phase
+    : null;
+  const iteration = boundedNonNegativeInteger(raw.iteration);
+  const lastGuestPc = boundedNonNegativeInteger(raw.last_guest_pc);
+  const halted = boundedBoolean(raw.halted);
+  const pendingInterrupt = boundedBoolean(raw.pending_interrupt);
+  const pendingExit = boundedBoolean(raw.pending_exit);
+  const pendingException = boundedBoolean(raw.pending_exception);
+
+  if (
+    phase === null || iteration === null || lastGuestPc === null ||
+    halted === null || pendingInterrupt === null || pendingExit === null ||
+    pendingException === null
+  ) {
+    return null;
+  }
+
+  return {
+    phase,
+    iteration,
+    lastGuestPc,
+    halted,
+    pendingInterrupt,
+    pendingExit,
+    pendingException,
+  };
+}
+
+/*
+ * Same bounded-validation treatment for the runloop summary's
+ * "pending_causes" object (T42): exact per-cause counts recorded every
+ * time the generated-exec main-loop-exit-pending predicate observed a
+ * pending interrupt, exit request, or exception, plus the last observed
+ * interrupt-request bitmask.
+ */
+export function sanitizePendingCauses(lastSummary) {
+  const raw = lastSummary && typeof lastSummary === "object"
+    ? lastSummary.pending_causes
+    : null;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const interrupt = boundedNonNegativeInteger(raw.interrupt);
+  const exit = boundedNonNegativeInteger(raw.exit);
+  const exception = boundedNonNegativeInteger(raw.exception);
+  const lastInterruptRequestBitmask = boundedNonNegativeInteger(
+    raw.last_interrupt_request_bitmask,
+  );
+
+  if (
+    interrupt === null || exit === null || exception === null ||
+    lastInterruptRequestBitmask === null
+  ) {
+    return null;
+  }
+
+  return { interrupt, exit, exception, lastInterruptRequestBitmask };
+}
+
 export function promoteSmokeState(result, smokeState) {
   if (smokeState === null) {
     return;
@@ -1679,6 +1776,12 @@ export function promoteSmokeState(result, smokeState) {
   result.fwCfgTrace = smokeState.fwCfgTrace || null;
   result.wasm64Tcg = smokeState.wasm64Tcg || null;
   result.wasm64Runloop = smokeState.wasm64Runloop || null;
+  result.vcpuLiveness = sanitizeVcpuLiveness(
+    smokeState.wasm64Runloop && smokeState.wasm64Runloop.lastSummary,
+  );
+  result.pendingCauses = sanitizePendingCauses(
+    smokeState.wasm64Runloop && smokeState.wasm64Runloop.lastSummary,
+  );
   result.tci = smokeState.tci || null;
 }
 

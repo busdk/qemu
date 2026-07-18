@@ -325,6 +325,14 @@ typedef struct TCGWasm64LiveMultiAccessRejectStat {
     int32_t branch_index;
     int32_t last_access_index;
     TCGWasm64LiveMultiAccessBranchPosition branch_position;
+    /*
+     * Additive diagnostic detail only (T42 vCPU liveness): total brcond
+     * count seen in the rejected body and the first branch's resolved
+     * target word index, alongside the existing first-branch index/position.
+     * Neither field feeds any admission or rejection decision.
+     */
+    uint32_t branch_count;
+    int32_t branch_target_index;
     uint64_t count;
 } TCGWasm64LiveMultiAccessRejectStat;
 
@@ -670,6 +678,44 @@ static __thread TCGWasm64GeneratedReturnValidation
 static __thread bool live_tb_coverage_checked;
 static __thread bool live_tb_coverage_no_shape_reported;
 static __thread uint64_t live_tb_coverage_scanned;
+
+/*
+ * T42 additive vCPU liveness diagnostic. The smallest truthful phase set
+ * that distinguishes where dispatch currently is: inside the TCI fallback
+ * dispatcher, inside a generated attempt/JS run, in the surrounding main
+ * dispatch loop between attempts, or halted. This never feeds an admission
+ * or rejection decision; it is sampled independently of TB/attempt
+ * progress so it stays observable if those counters stop advancing.
+ */
+typedef enum TCGWasm64VcpuLivenessPhase {
+    TCG_WASM64_VCPU_LIVENESS_PHASE_MAIN_LOOP,
+    TCG_WASM64_VCPU_LIVENESS_PHASE_TCI_DISPATCH,
+    TCG_WASM64_VCPU_LIVENESS_PHASE_GENERATED_ATTEMPT_JS,
+    TCG_WASM64_VCPU_LIVENESS_PHASE_HALTED,
+} TCGWasm64VcpuLivenessPhase;
+
+static __thread TCGWasm64VcpuLivenessPhase vcpu_liveness_phase =
+    TCG_WASM64_VCPU_LIVENESS_PHASE_MAIN_LOOP;
+static __thread uint64_t vcpu_liveness_iteration;
+static __thread uint64_t vcpu_liveness_last_guest_pc;
+static __thread uint64_t vcpu_liveness_last_report_ns;
+static __thread bool vcpu_liveness_halted;
+static __thread bool vcpu_liveness_pending_interrupt;
+static __thread bool vcpu_liveness_pending_exit;
+static __thread bool vcpu_liveness_pending_exception;
+
+/*
+ * Exact cause breakdown recorded every time
+ * tcg_wasm64_live_generated_exec_main_loop_exit_pending() observes a
+ * pending exit condition. A single observation can set more than one
+ * cause (e.g. interrupt and exception together), so each cause counts
+ * independently rather than picking the first true branch.
+ */
+static __thread uint64_t live_generated_exec_main_loop_pending_interrupt;
+static __thread uint64_t live_generated_exec_main_loop_pending_exit;
+static __thread uint64_t live_generated_exec_main_loop_pending_exception;
+static __thread uint32_t live_generated_exec_main_loop_last_interrupt_request;
+
 static volatile uint64_t tcg_wasm64_runloop_smoke_sink;
 static uint64_t tcg_wasm64_translate_begin_total;
 static gsize summary_env_initialized;
@@ -691,6 +737,8 @@ static uint64_t tcg_wasm64_current_address_space_generation = 1;
 
 static const char *tcg_wasm64_op_name(uint32_t op);
 static void tcg_wasm64_report_live_generated_exec_summary(const char *reason);
+static const char *tcg_wasm64_vcpu_liveness_phase_name(
+    TCGWasm64VcpuLivenessPhase phase);
 static const char *
 tcg_wasm64_live_generated_exec_js_status_reject_reason(uint64_t status);
 static const char *
@@ -8034,7 +8082,8 @@ static bool tcg_wasm64_live_generated_exec_multi_access_stat_matches(
     const TCGWasm64LiveMultiAccessRejectStat *stat, uint32_t access_count,
     uint32_t load_count, uint32_t store_count, const char *order,
     const MemOp *memops, bool store_before_later_guard,
-    TCGWasm64LiveMultiAccessBranchPosition branch_position)
+    TCGWasm64LiveMultiAccessBranchPosition branch_position,
+    uint32_t branch_count, int32_t branch_target_index)
 {
     if (stat->count == 0 ||
         stat->access_count != access_count ||
@@ -8042,6 +8091,8 @@ static bool tcg_wasm64_live_generated_exec_multi_access_stat_matches(
         stat->store_count != store_count ||
         stat->store_before_later_guard != store_before_later_guard ||
         stat->branch_position != branch_position ||
+        stat->branch_count != branch_count ||
+        stat->branch_target_index != branch_target_index ||
         strncmp(stat->order, order, sizeof(stat->order)) != 0) {
         return false;
     }
@@ -8060,7 +8111,8 @@ static void tcg_wasm64_live_generated_exec_store_multi_access_stat(
     uint32_t load_count, uint32_t store_count, const char *order,
     const MemOp *memops, bool store_before_later_guard,
     int32_t branch_index, int32_t last_access_index,
-    TCGWasm64LiveMultiAccessBranchPosition branch_position)
+    TCGWasm64LiveMultiAccessBranchPosition branch_position,
+    uint32_t branch_count, int32_t branch_target_index)
 {
     stat->access_count = access_count;
     stat->load_count = load_count;
@@ -8069,6 +8121,8 @@ static void tcg_wasm64_live_generated_exec_store_multi_access_stat(
     stat->branch_index = branch_index;
     stat->last_access_index = last_access_index;
     stat->branch_position = branch_position;
+    stat->branch_count = branch_count;
+    stat->branch_target_index = branch_target_index;
     memset(stat->order, 0, sizeof(stat->order));
     memcpy(stat->order, order, MIN(strlen(order), sizeof(stat->order) - 1));
     memset(stat->memops, 0, sizeof(stat->memops));
@@ -8084,7 +8138,8 @@ static void tcg_wasm64_live_generated_exec_count_multi_access_reject(
     uint32_t access_count, uint32_t load_count, uint32_t store_count,
     const char *order, const MemOp *memops, bool store_before_later_guard,
     int32_t branch_index, int32_t first_access_index,
-    int32_t last_access_index)
+    int32_t last_access_index, uint32_t branch_count,
+    int32_t branch_target_index)
 {
     TCGWasm64LiveMultiAccessBranchPosition branch_position =
         tcg_wasm64_live_generated_exec_multi_access_branch_position(
@@ -8096,7 +8151,8 @@ static void tcg_wasm64_live_generated_exec_count_multi_access_reject(
 
         if (tcg_wasm64_live_generated_exec_multi_access_stat_matches(
                 stat, access_count, load_count, store_count, order, memops,
-                store_before_later_guard, branch_position)) {
+                store_before_later_guard, branch_position, branch_count,
+                branch_target_index)) {
             stat->count++;
             return;
         }
@@ -8109,7 +8165,7 @@ static void tcg_wasm64_live_generated_exec_count_multi_access_reject(
             tcg_wasm64_live_generated_exec_store_multi_access_stat(
                 stat, access_count, load_count, store_count, order, memops,
                 store_before_later_guard, branch_index, last_access_index,
-                branch_position);
+                branch_position, branch_count, branch_target_index);
             return;
         }
     }
@@ -8613,7 +8669,8 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
                     memop_count, load_count, store_count, access_order,
                     access_memops, store_before_later_guard,
                     first_branch_index, first_access_index,
-                    last_access_index);
+                    last_access_index, branch_count,
+                    first_branch_target_index);
                 return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_MULTI_ACCESS_UNSUPPORTED;
             }
 #if defined(CONFIG_USER_ONLY)
@@ -8762,7 +8819,8 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
         tcg_wasm64_live_generated_exec_count_multi_access_reject(
             memop_count, load_count, store_count, access_order,
             access_memops, store_before_later_guard,
-            first_branch_index, first_access_index, last_access_index);
+            first_branch_index, first_access_index, last_access_index,
+            branch_count, first_branch_target_index);
         return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_DIRECT_MEMORY_UNSUPPORTED;
     }
     if (memop_count > 1 && control_flow_unsupported) {
@@ -8805,7 +8863,8 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
             tcg_wasm64_live_generated_exec_count_multi_access_reject(
                 memop_count, load_count, store_count, access_order,
                 access_memops, store_before_later_guard,
-                first_branch_index, first_access_index, last_access_index);
+                first_branch_index, first_access_index, last_access_index,
+                branch_count, first_branch_target_index);
             return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_CONTROL_FLOW_UNSUPPORTED;
         }
     }
@@ -8813,7 +8872,8 @@ tcg_wasm64_live_generated_exec_validate_selected_memops(
         tcg_wasm64_live_generated_exec_count_multi_access_reject(
             memop_count, load_count, store_count, access_order,
             access_memops, store_before_later_guard,
-            first_branch_index, first_access_index, last_access_index);
+            first_branch_index, first_access_index, last_access_index,
+            branch_count, first_branch_target_index);
         return TCG_WASM64_LIVE_GENERATED_EXEC_REJECT_SELECTED_BODY_SOFTMMU_MULTI_ACCESS_UNSUPPORTED;
     }
     if (have_mmu_idx) {
@@ -8905,6 +8965,8 @@ static void tcg_wasm64_print_live_generated_exec_reject_multi_accesses(void)
                 "\"store_before_later_guard\":%s,"
                 "\"branch_position\":\"%s\","
                 "\"branch_index\":%d,"
+                "\"branch_count\":%u,"
+                "\"branch_target_index\":%d,"
                 "\"last_access_index\":%d,\"memops\":[",
                 first ? "" : ",",
                 stat->access_count, stat->order,
@@ -8912,7 +8974,8 @@ static void tcg_wasm64_print_live_generated_exec_reject_multi_accesses(void)
                 stat->store_before_later_guard ? "true" : "false",
                 tcg_wasm64_live_generated_exec_multi_access_branch_position_name(
                     stat->branch_position),
-                stat->branch_index, stat->last_access_index);
+                stat->branch_index, stat->branch_count,
+                stat->branch_target_index, stat->last_access_index);
         for (uint32_t i = 0; i < MIN(stat->access_count,
                                      TCG_WASM64_LIVE_SOFTMMU_MAX_ACCESSES);
              i++) {
@@ -9434,6 +9497,19 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             "\"hotset_target_metadata_hits\":%" PRIu64 ","
             "\"hotset_target_output_hits\":%" PRIu64 ","
             "\"hotset_target_stale\":%" PRIu64 ","
+            "\"pending_causes\":{"
+            "\"interrupt\":%" PRIu64 ","
+            "\"exit\":%" PRIu64 ","
+            "\"exception\":%" PRIu64 ","
+            "\"last_interrupt_request_bitmask\":%" PRIu32 "},"
+            "\"vcpu_liveness\":{"
+            "\"phase\":\"%s\","
+            "\"iteration\":%" PRIu64 ","
+            "\"last_guest_pc\":%" PRIu64 ","
+            "\"halted\":%s,"
+            "\"pending_interrupt\":%s,"
+            "\"pending_exit\":%s,"
+            "\"pending_exception\":%s},"
             "\"metadata_lookup\":{\"ok\":%" PRIu64 ","
             "\"null_tb_ptr\":%" PRIu64 ","
             "\"cache_null\":%" PRIu64 ","
@@ -9492,6 +9568,17 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             live_generated_exec_hotset_target_metadata_hits,
             live_generated_exec_hotset_target_output_hits,
             live_generated_exec_hotset_target_stale,
+            live_generated_exec_main_loop_pending_interrupt,
+            live_generated_exec_main_loop_pending_exit,
+            live_generated_exec_main_loop_pending_exception,
+            live_generated_exec_main_loop_last_interrupt_request,
+            tcg_wasm64_vcpu_liveness_phase_name(vcpu_liveness_phase),
+            vcpu_liveness_iteration,
+            vcpu_liveness_last_guest_pc,
+            vcpu_liveness_halted ? "true" : "false",
+            vcpu_liveness_pending_interrupt ? "true" : "false",
+            vcpu_liveness_pending_exit ? "true" : "false",
+            vcpu_liveness_pending_exception ? "true" : "false",
             live_generated_exec_metadata_lookup_status[
                 TCG_WASM64_TRANSLATE_LOOKUP_OK],
             live_generated_exec_metadata_lookup_status[
@@ -9998,14 +10085,100 @@ static bool tcg_wasm64_live_generated_exec_prepare_tb(
     return true;
 }
 
+static void tcg_wasm64_vcpu_liveness_record_pending_causes(CPUState *cpu)
+{
+    if (cpu->interrupt_request != 0) {
+        live_generated_exec_main_loop_pending_interrupt++;
+        live_generated_exec_main_loop_last_interrupt_request =
+            cpu->interrupt_request;
+    }
+    if (cpu->exit_request) {
+        live_generated_exec_main_loop_pending_exit++;
+    }
+    if (cpu->exception_index >= 0) {
+        live_generated_exec_main_loop_pending_exception++;
+    }
+}
+
 static bool tcg_wasm64_live_generated_exec_main_loop_exit_pending(
     CPUArchState *env)
 {
     CPUState *cpu = env_cpu(env);
-
-    return cpu->interrupt_request != 0 ||
+    bool pending = cpu->interrupt_request != 0 ||
            cpu->exit_request ||
            cpu->exception_index >= 0;
+
+    if (pending) {
+        tcg_wasm64_vcpu_liveness_record_pending_causes(cpu);
+    }
+    return pending;
+}
+
+static const char *tcg_wasm64_vcpu_liveness_phase_name(
+    TCGWasm64VcpuLivenessPhase phase)
+{
+    switch (phase) {
+    case TCG_WASM64_VCPU_LIVENESS_PHASE_MAIN_LOOP:
+        return "main-loop";
+    case TCG_WASM64_VCPU_LIVENESS_PHASE_TCI_DISPATCH:
+        return "tci-dispatch";
+    case TCG_WASM64_VCPU_LIVENESS_PHASE_GENERATED_ATTEMPT_JS:
+        return "generated-attempt-js";
+    case TCG_WASM64_VCPU_LIVENESS_PHASE_HALTED:
+        return "halted";
+    default:
+        return "unknown";
+    }
+}
+
+/*
+ * Forces a runloop summary emission at most once per wall-clock second,
+ * independent of the "interval" reason's unchanged-attempt dedup and of
+ * translated-TB progress, so vCPU liveness remains observable even if TB
+ * dispatch counters stop advancing. No-op until at least one generated-exec
+ * attempt has happened, matching the existing summary's own gate.
+ */
+static void tcg_wasm64_vcpu_liveness_maybe_report(void)
+{
+    uint64_t now_ns;
+
+    if (!live_generated_exec_enabled) {
+        return;
+    }
+    now_ns = tcg_wasm64_runloop_smoke_time_ns();
+    if (vcpu_liveness_last_report_ns != 0 &&
+        now_ns - vcpu_liveness_last_report_ns < 1000000000ull) {
+        return;
+    }
+    vcpu_liveness_last_report_ns = now_ns;
+    tcg_wasm64_report_live_generated_exec_summary("vcpu-liveness-tick");
+}
+
+/*
+ * Cheap per-dispatch liveness note: bumps the monotonic iteration counter,
+ * records which phase dispatch is currently in (halted always wins, since
+ * it is the truthful terminal state regardless of the caller's phase), and
+ * optionally refreshes the last known guest PC when the caller has one
+ * cheaply available. Never gates or alters dispatch behavior.
+ */
+static void tcg_wasm64_vcpu_liveness_note(CPUArchState *env,
+                                           TCGWasm64VcpuLivenessPhase phase,
+                                           bool guest_pc_known,
+                                           uint64_t guest_pc)
+{
+    CPUState *cpu = env_cpu(env);
+
+    vcpu_liveness_iteration++;
+    vcpu_liveness_phase = cpu->halted != 0 ?
+        TCG_WASM64_VCPU_LIVENESS_PHASE_HALTED : phase;
+    vcpu_liveness_halted = cpu->halted != 0;
+    vcpu_liveness_pending_interrupt = cpu->interrupt_request != 0;
+    vcpu_liveness_pending_exit = cpu->exit_request;
+    vcpu_liveness_pending_exception = cpu->exception_index >= 0;
+    if (guest_pc_known) {
+        vcpu_liveness_last_guest_pc = guest_pc;
+    }
+    tcg_wasm64_vcpu_liveness_maybe_report();
 }
 
 static void tcg_wasm64_live_generated_exec_record_chain_exit(
@@ -10243,6 +10416,10 @@ static bool tcg_wasm64_live_generated_exec_try(
             }
             break;
         }
+
+        tcg_wasm64_vcpu_liveness_note(
+            env, TCG_WASM64_VCPU_LIVENESS_PHASE_GENERATED_ATTEMPT_JS,
+            true, (uint64_t)tb->pc);
 
         if (has_memop) {
             tcg_wasm64_tlb_mirror_refresh(&tlb_mirror, env, memop_mmu_idx);
@@ -11058,6 +11235,8 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
         .counters = counters,
     };
 
+    tcg_wasm64_vcpu_liveness_note(
+        env, TCG_WASM64_VCPU_LIVENESS_PHASE_MAIN_LOOP, false, 0);
     tcg_wasm64_runloop_smoke_maybe(env);
     tcg_wasm64_one_tb_differential_maybe(env);
 
@@ -11110,6 +11289,8 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
             fallback_guest_insns;
         tci_dispatch_start_ns = tcg_wasm64_runloop_smoke_time_ns();
     }
+    tcg_wasm64_vcpu_liveness_note(
+        env, TCG_WASM64_VCPU_LIVENESS_PHASE_TCI_DISPATCH, false, 0);
     active_counters = counters;
     ret = tcg_tci_qemu_tb_exec(env, tb_ptr);
     active_counters = previous_counters;
