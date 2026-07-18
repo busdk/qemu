@@ -31,6 +31,7 @@ import {
   responseErrorDiagnostic,
   sanitizePendingCauses,
   sanitizeVcpuLiveness,
+  sanitizeWasm64Runloop,
   serialIdleDiagnostic,
   smokeResultSummary,
   wasm64TcgMetricGate,
@@ -57,7 +58,10 @@ import {
 const marker = "QEMU_WASM_LINUX_BOOT_OK";
 const runnerPath = fileURLToPath(new URL("./wasm-browser-smoke-runner.mjs", import.meta.url));
 const browserSmokePath = fileURLToPath(new URL("./wasm-browser-smoke.mjs", import.meta.url));
+const wasm64Path = fileURLToPath(new URL("../../tcg/wasm64.c", import.meta.url));
+const runnerSource = readFileSync(runnerPath, "utf8");
 const browserSmokeSource = readFileSync(browserSmokePath, "utf8");
+const wasm64Source = readFileSync(wasm64Path, "utf8");
 
 function captureStderr(fn) {
   const writes = [];
@@ -2638,7 +2642,7 @@ for (const status of [
   });
 }
 
-// T42 vCPU liveness diagnostic: sanitizeVcpuLiveness bounded validation.
+// T42 vCPU liveness diagnostic: bounded last-entered validation.
 {
   assert.deepEqual(
     sanitizeVcpuLiveness({
@@ -2646,20 +2650,12 @@ for (const status of [
         phase: "generated-attempt-js",
         iteration: 58,
         last_guest_pc: 4096,
-        halted: false,
-        pending_interrupt: false,
-        pending_exit: false,
-        pending_exception: true,
       },
     }),
     {
       phase: "generated-attempt-js",
       iteration: 58,
       lastGuestPc: 4096,
-      halted: false,
-      pendingInterrupt: false,
-      pendingExit: false,
-      pendingException: true,
     },
   );
 
@@ -2678,10 +2674,6 @@ for (const status of [
         phase: "<script>alert(1)</script>",
         iteration: 1,
         last_guest_pc: 0,
-        halted: false,
-        pending_interrupt: false,
-        pending_exit: false,
-        pending_exception: false,
       },
     }),
     null,
@@ -2696,10 +2688,6 @@ for (const status of [
           phase: "main-loop",
           iteration: badIteration,
           last_guest_pc: 0,
-          halted: false,
-          pending_interrupt: false,
-          pending_exit: false,
-          pending_exception: false,
         },
       }),
       null,
@@ -2713,10 +2701,6 @@ for (const status of [
           phase: "main-loop",
           iteration: 1,
           last_guest_pc: badPc,
-          halted: false,
-          pending_interrupt: false,
-          pending_exit: false,
-          pending_exception: false,
         },
       }),
       null,
@@ -2724,25 +2708,19 @@ for (const status of [
     );
   }
 
-  // Non-boolean pending/halted fields (e.g. a stray guest-influenced number
-  // or string in place of a bool) fail closed rather than being coerced.
-  for (const badBool of [0, 1, "true", null, undefined]) {
-    assert.equal(
-      sanitizeVcpuLiveness({
-        vcpu_liveness: {
-          phase: "main-loop",
-          iteration: 1,
-          last_guest_pc: 0,
-          halted: badBool,
-          pending_interrupt: false,
-          pending_exit: false,
-          pending_exception: false,
-        },
-      }),
-      null,
-      `halted=${String(badBool)} must fail closed`,
-    );
-  }
+  // Halted and pending observations do not belong to a cooperative
+  // last-entered snapshot; unexpected fields fail closed.
+  assert.equal(
+    sanitizeVcpuLiveness({
+      vcpu_liveness: {
+        phase: "main-loop",
+        iteration: 1,
+        last_guest_pc: 0,
+        halted: false,
+      },
+    }),
+    null,
+  );
 }
 
 // T42 vCPU liveness diagnostic: sanitizePendingCauses bounded validation.
@@ -2753,14 +2731,12 @@ for (const status of [
         interrupt: 3,
         exit: 0,
         exception: 1,
-        last_interrupt_request_bitmask: 5,
       },
     }),
     {
       interrupt: 3,
       exit: 0,
       exception: 1,
-      lastInterruptRequestBitmask: 5,
     },
   );
 
@@ -2775,31 +2751,16 @@ for (const status of [
           interrupt: badCount,
           exit: 0,
           exception: 0,
-          last_interrupt_request_bitmask: 0,
         },
       }),
       null,
       `interrupt=${String(badCount)} must fail closed`,
     );
-    assert.equal(
-      sanitizePendingCauses({
-        pending_causes: {
-          interrupt: 0,
-          exit: 0,
-          exception: 0,
-          last_interrupt_request_bitmask: badCount,
-        },
-      }),
-      null,
-      `last_interrupt_request_bitmask=${String(badCount)} must fail closed`,
-    );
   }
 }
 
-// T42: promoteSmokeState captures the additive fields losslessly when
-// present, and leaves them null (matching the parent's lack of the fields)
-// when the runloop summary predates this diagnostic. The pre-existing
-// wasm64Runloop passthrough key/meaning is unchanged either way.
+// T42: promoteSmokeState only emits bounded projections of parser-owned
+// runloop diagnostics, while preserving the additive fields when valid.
 {
   const withLiveness = { untouched: true };
   promoteSmokeState(withLiveness, {
@@ -2813,16 +2774,11 @@ for (const status of [
           phase: "tci-dispatch",
           iteration: 12,
           last_guest_pc: 8192,
-          halted: false,
-          pending_interrupt: true,
-          pending_exit: false,
-          pending_exception: false,
         },
         pending_causes: {
           interrupt: 2,
           exit: 0,
           exception: 0,
-          last_interrupt_request_bitmask: 1,
         },
       },
     },
@@ -2833,37 +2789,17 @@ for (const status of [
     lastSummary: {
       event: "runtime-smoke",
       generated_guest_instructions: 4000000,
-      vcpu_liveness: {
-        phase: "tci-dispatch",
-        iteration: 12,
-        last_guest_pc: 8192,
-        halted: false,
-        pending_interrupt: true,
-        pending_exit: false,
-        pending_exception: false,
-      },
-      pending_causes: {
-        interrupt: 2,
-        exit: 0,
-        exception: 0,
-        last_interrupt_request_bitmask: 1,
-      },
     },
   });
   assert.deepEqual(withLiveness.vcpuLiveness, {
     phase: "tci-dispatch",
     iteration: 12,
     lastGuestPc: 8192,
-    halted: false,
-    pendingInterrupt: true,
-    pendingExit: false,
-    pendingException: false,
   });
   assert.deepEqual(withLiveness.pendingCauses, {
     interrupt: 2,
     exit: 0,
     exception: 0,
-    lastInterruptRequestBitmask: 1,
   });
 
   const withoutLiveness = { untouched: true };
@@ -2887,11 +2823,9 @@ for (const status of [
   assert.equal(withNoRunloopAtAll.pendingCauses, null);
 }
 
-// T42: liveness samples must keep arriving through recordWasm64RunloopSummary
-// (the existing browser/main-thread diagnostics capture path) even across
-// consecutive summary lines whose TB/attempt counters are unchanged - proving
-// the sampler is independent of the "interval" reason's unchanged-attempt
-// dedup that gates the pre-existing TB-progress-driven summary reports.
+// T42: parser input alone proves only parser acceptance. The vCPU snapshot is
+// explicitly last-entered evidence; it is not a one-second or post-freeze
+// progress proof.
 {
   const state = {
     wasm64Runloop: {
@@ -2901,31 +2835,72 @@ for (const status of [
       lastSummary: null,
     },
   };
-  const fixedAttempts = 122;
-  const fixedSuccesses = 58;
-  for (const iteration of [58, 59, 60]) {
-    recordWasm64RunloopSummary(
-      state,
-      `qemu-wasm64-runloop: {"format":1,"event":"live-generated-exec-summary",` +
-        `"reason":"vcpu-liveness-tick","attempts":${fixedAttempts},` +
-        `"successes":${fixedSuccesses},` +
-        `"vcpu_liveness":{"phase":"generated-attempt-js","iteration":${iteration},` +
-        `"last_guest_pc":4096,"halted":false,"pending_interrupt":false,` +
-        `"pending_exit":false,"pending_exception":false}}`,
-      iteration * 1000,
-    );
-  }
-
-  assert.equal(state.wasm64Runloop.summaryCount, 3);
-  assert.equal(state.wasm64Runloop.summaries.length, 3);
-  const iterations = state.wasm64Runloop.summaries.map(
-    (summary) => sanitizeVcpuLiveness(summary).iteration,
+  recordWasm64RunloopSummary(
+    state,
+    "qemu-wasm64-runloop: {\"format\":1,\"event\":\"live-generated-exec-summary\"," +
+      "\"vcpu_liveness\":{\"phase\":\"generated-attempt-js\",\"iteration\":58," +
+      "\"last_guest_pc\":4096}}",
+    58000,
   );
-  assert.deepEqual(iterations, [58, 59, 60]);
-  // Every sample shares the same unchanged attempts/successes TB counters,
-  // demonstrating the liveness samples are not gated on TB/attempt progress.
-  for (const summary of state.wasm64Runloop.summaries) {
-    assert.equal(summary.attempts, fixedAttempts);
-    assert.equal(summary.successes, fixedSuccesses);
-  }
+
+  assert.equal(state.wasm64Runloop.summaryCount, 1);
+  assert.equal(state.wasm64Runloop.summaries.length, 1);
+  assert.deepEqual(sanitizeVcpuLiveness(state.wasm64Runloop.lastSummary), {
+    phase: "generated-attempt-js",
+    iteration: 58,
+    lastGuestPc: 4096,
+  });
 }
+
+// T42: the written result keeps a bounded runloop projection only. Raw parser
+// keys, invalid numeric values, and review sentinels cannot escape elsewhere
+// in complete result JSON.
+{
+  const raw = {
+    enabled: true,
+    summaryCount: 1,
+    lastSummary: {
+      event: "live-generated-exec-summary",
+      generated_run_entries: 7,
+      generated_guest_instructions: -1,
+      generated_body_time_ns: 20,
+      generated_coverage_numerator: 3,
+      generated_coverage_denominator: 9,
+      REVIEW_SECRET_SENTINEL: "REVIEW_SECRET_SENTINEL",
+      nested: { guest: "REVIEW_SECRET_SENTINEL" },
+    },
+  };
+  assert.deepEqual(sanitizeWasm64Runloop(raw), {
+    enabled: true,
+    summaryCount: 1,
+    lastSummary: {
+      event: "live-generated-exec-summary",
+      generated_run_entries: 7,
+      generated_body_time_ns: 20,
+      generated_coverage_numerator: 3,
+      generated_coverage_denominator: 9,
+    },
+  });
+
+  const result = {};
+  promoteSmokeState(result, { wasm64Runloop: raw });
+  const encoded = JSON.stringify(result);
+  assert.equal(encoded.includes("REVIEW_SECRET_SENTINEL"), false);
+  assert.equal(encoded.includes("generated_guest_instructions\":-1"), false);
+  assert.equal(encoded.includes("nested"), false);
+  assert.doesNotMatch(runnerSource, /result\.smokeState\s*=/);
+}
+
+// T42 mutation controls: no periodic ticker, halted state, or unsafe direct
+// cross-thread flag read may return in the bounded liveness implementation.
+assert.match(wasm64Source, /cpu_test_interrupt\(cpu, ~0\)/);
+assert.match(wasm64Source, /qatomic_load_acquire\(&cpu->exit_request\)/);
+assert.match(wasm64Source, /post-freeze progress/);
+assert.doesNotMatch(wasm64Source, /vcpu-liveness-tick/);
+assert.doesNotMatch(wasm64Source, /TCG_WASM64_VCPU_LIVENESS_PHASE_HALTED/);
+assert.doesNotMatch(wasm64Source, /cpu->interrupt_request/);
+assert.doesNotMatch(
+  wasm64Source.replaceAll("qatomic_load_acquire(&cpu->exit_request)", ""),
+  /cpu->exit_request/,
+);
+assert.doesNotMatch(wasm64Source, /cpu->halted/);

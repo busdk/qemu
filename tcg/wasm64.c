@@ -680,29 +680,22 @@ static __thread bool live_tb_coverage_no_shape_reported;
 static __thread uint64_t live_tb_coverage_scanned;
 
 /*
- * T42 additive vCPU liveness diagnostic. The smallest truthful phase set
- * that distinguishes where dispatch currently is: inside the TCI fallback
- * dispatcher, inside a generated attempt/JS run, in the surrounding main
- * dispatch loop between attempts, or halted. This never feeds an admission
- * or rejection decision; it is sampled independently of TB/attempt
- * progress so it stays observable if those counters stop advancing.
+ * T42 additive vCPU liveness diagnostic. This records only the last
+ * cooperative dispatch entry: the TCI fallback dispatcher, a generated
+ * attempt/JS run, or the surrounding main dispatch loop. It is last-entered
+ * evidence, not periodic sampling or a claim of post-freeze progress.
+ * It never feeds an admission or rejection decision.
  */
 typedef enum TCGWasm64VcpuLivenessPhase {
     TCG_WASM64_VCPU_LIVENESS_PHASE_MAIN_LOOP,
     TCG_WASM64_VCPU_LIVENESS_PHASE_TCI_DISPATCH,
     TCG_WASM64_VCPU_LIVENESS_PHASE_GENERATED_ATTEMPT_JS,
-    TCG_WASM64_VCPU_LIVENESS_PHASE_HALTED,
 } TCGWasm64VcpuLivenessPhase;
 
 static __thread TCGWasm64VcpuLivenessPhase vcpu_liveness_phase =
     TCG_WASM64_VCPU_LIVENESS_PHASE_MAIN_LOOP;
 static __thread uint64_t vcpu_liveness_iteration;
 static __thread uint64_t vcpu_liveness_last_guest_pc;
-static __thread uint64_t vcpu_liveness_last_report_ns;
-static __thread bool vcpu_liveness_halted;
-static __thread bool vcpu_liveness_pending_interrupt;
-static __thread bool vcpu_liveness_pending_exit;
-static __thread bool vcpu_liveness_pending_exception;
 
 /*
  * Exact cause breakdown recorded every time
@@ -714,7 +707,6 @@ static __thread bool vcpu_liveness_pending_exception;
 static __thread uint64_t live_generated_exec_main_loop_pending_interrupt;
 static __thread uint64_t live_generated_exec_main_loop_pending_exit;
 static __thread uint64_t live_generated_exec_main_loop_pending_exception;
-static __thread uint32_t live_generated_exec_main_loop_last_interrupt_request;
 
 static volatile uint64_t tcg_wasm64_runloop_smoke_sink;
 static uint64_t tcg_wasm64_translate_begin_total;
@@ -9500,16 +9492,11 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             "\"pending_causes\":{"
             "\"interrupt\":%" PRIu64 ","
             "\"exit\":%" PRIu64 ","
-            "\"exception\":%" PRIu64 ","
-            "\"last_interrupt_request_bitmask\":%" PRIu32 "},"
+            "\"exception\":%" PRIu64 "},"
             "\"vcpu_liveness\":{"
             "\"phase\":\"%s\","
             "\"iteration\":%" PRIu64 ","
-            "\"last_guest_pc\":%" PRIu64 ","
-            "\"halted\":%s,"
-            "\"pending_interrupt\":%s,"
-            "\"pending_exit\":%s,"
-            "\"pending_exception\":%s},"
+            "\"last_guest_pc\":%" PRIu64 "},"
             "\"metadata_lookup\":{\"ok\":%" PRIu64 ","
             "\"null_tb_ptr\":%" PRIu64 ","
             "\"cache_null\":%" PRIu64 ","
@@ -9571,14 +9558,9 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             live_generated_exec_main_loop_pending_interrupt,
             live_generated_exec_main_loop_pending_exit,
             live_generated_exec_main_loop_pending_exception,
-            live_generated_exec_main_loop_last_interrupt_request,
             tcg_wasm64_vcpu_liveness_phase_name(vcpu_liveness_phase),
             vcpu_liveness_iteration,
             vcpu_liveness_last_guest_pc,
-            vcpu_liveness_halted ? "true" : "false",
-            vcpu_liveness_pending_interrupt ? "true" : "false",
-            vcpu_liveness_pending_exit ? "true" : "false",
-            vcpu_liveness_pending_exception ? "true" : "false",
             live_generated_exec_metadata_lookup_status[
                 TCG_WASM64_TRANSLATE_LOOKUP_OK],
             live_generated_exec_metadata_lookup_status[
@@ -10085,17 +10067,16 @@ static bool tcg_wasm64_live_generated_exec_prepare_tb(
     return true;
 }
 
-static void tcg_wasm64_vcpu_liveness_record_pending_causes(CPUState *cpu)
+static void tcg_wasm64_vcpu_liveness_record_pending_causes(
+    bool pending_interrupt, bool pending_exit, bool pending_exception)
 {
-    if (cpu->interrupt_request != 0) {
+    if (pending_interrupt) {
         live_generated_exec_main_loop_pending_interrupt++;
-        live_generated_exec_main_loop_last_interrupt_request =
-            cpu->interrupt_request;
     }
-    if (cpu->exit_request) {
+    if (pending_exit) {
         live_generated_exec_main_loop_pending_exit++;
     }
-    if (cpu->exception_index >= 0) {
+    if (pending_exception) {
         live_generated_exec_main_loop_pending_exception++;
     }
 }
@@ -10104,12 +10085,14 @@ static bool tcg_wasm64_live_generated_exec_main_loop_exit_pending(
     CPUArchState *env)
 {
     CPUState *cpu = env_cpu(env);
-    bool pending = cpu->interrupt_request != 0 ||
-           cpu->exit_request ||
-           cpu->exception_index >= 0;
+    bool pending_interrupt = cpu_test_interrupt(cpu, ~0);
+    bool pending_exit = qatomic_load_acquire(&cpu->exit_request);
+    bool pending_exception = cpu->exception_index >= 0;
+    bool pending = pending_interrupt || pending_exit || pending_exception;
 
     if (pending) {
-        tcg_wasm64_vcpu_liveness_record_pending_causes(cpu);
+        tcg_wasm64_vcpu_liveness_record_pending_causes(
+            pending_interrupt, pending_exit, pending_exception);
     }
     return pending;
 }
@@ -10124,61 +10107,25 @@ static const char *tcg_wasm64_vcpu_liveness_phase_name(
         return "tci-dispatch";
     case TCG_WASM64_VCPU_LIVENESS_PHASE_GENERATED_ATTEMPT_JS:
         return "generated-attempt-js";
-    case TCG_WASM64_VCPU_LIVENESS_PHASE_HALTED:
-        return "halted";
     default:
         return "unknown";
     }
 }
 
 /*
- * Forces a runloop summary emission at most once per wall-clock second,
- * independent of the "interval" reason's unchanged-attempt dedup and of
- * translated-TB progress, so vCPU liveness remains observable even if TB
- * dispatch counters stop advancing. No-op until at least one generated-exec
- * attempt has happened, matching the existing summary's own gate.
- */
-static void tcg_wasm64_vcpu_liveness_maybe_report(void)
-{
-    uint64_t now_ns;
-
-    if (!live_generated_exec_enabled) {
-        return;
-    }
-    now_ns = tcg_wasm64_runloop_smoke_time_ns();
-    if (vcpu_liveness_last_report_ns != 0 &&
-        now_ns - vcpu_liveness_last_report_ns < 1000000000ull) {
-        return;
-    }
-    vcpu_liveness_last_report_ns = now_ns;
-    tcg_wasm64_report_live_generated_exec_summary("vcpu-liveness-tick");
-}
-
-/*
- * Cheap per-dispatch liveness note: bumps the monotonic iteration counter,
- * records which phase dispatch is currently in (halted always wins, since
- * it is the truthful terminal state regardless of the caller's phase), and
+ * Cheap cooperative dispatch-entry note: records the last entered phase and
  * optionally refreshes the last known guest PC when the caller has one
- * cheaply available. Never gates or alters dispatch behavior.
+ * cheaply available. It does not publish a summary or alter dispatch.
  */
-static void tcg_wasm64_vcpu_liveness_note(CPUArchState *env,
-                                           TCGWasm64VcpuLivenessPhase phase,
+static void tcg_wasm64_vcpu_liveness_note(TCGWasm64VcpuLivenessPhase phase,
                                            bool guest_pc_known,
                                            uint64_t guest_pc)
 {
-    CPUState *cpu = env_cpu(env);
-
     vcpu_liveness_iteration++;
-    vcpu_liveness_phase = cpu->halted != 0 ?
-        TCG_WASM64_VCPU_LIVENESS_PHASE_HALTED : phase;
-    vcpu_liveness_halted = cpu->halted != 0;
-    vcpu_liveness_pending_interrupt = cpu->interrupt_request != 0;
-    vcpu_liveness_pending_exit = cpu->exit_request;
-    vcpu_liveness_pending_exception = cpu->exception_index >= 0;
+    vcpu_liveness_phase = phase;
     if (guest_pc_known) {
         vcpu_liveness_last_guest_pc = guest_pc;
     }
-    tcg_wasm64_vcpu_liveness_maybe_report();
 }
 
 static void tcg_wasm64_live_generated_exec_record_chain_exit(
@@ -10418,7 +10365,7 @@ static bool tcg_wasm64_live_generated_exec_try(
         }
 
         tcg_wasm64_vcpu_liveness_note(
-            env, TCG_WASM64_VCPU_LIVENESS_PHASE_GENERATED_ATTEMPT_JS,
+            TCG_WASM64_VCPU_LIVENESS_PHASE_GENERATED_ATTEMPT_JS,
             true, (uint64_t)tb->pc);
 
         if (has_memop) {
@@ -11236,7 +11183,7 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
     };
 
     tcg_wasm64_vcpu_liveness_note(
-        env, TCG_WASM64_VCPU_LIVENESS_PHASE_MAIN_LOOP, false, 0);
+        TCG_WASM64_VCPU_LIVENESS_PHASE_MAIN_LOOP, false, 0);
     tcg_wasm64_runloop_smoke_maybe(env);
     tcg_wasm64_one_tb_differential_maybe(env);
 
@@ -11290,7 +11237,7 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
         tci_dispatch_start_ns = tcg_wasm64_runloop_smoke_time_ns();
     }
     tcg_wasm64_vcpu_liveness_note(
-        env, TCG_WASM64_VCPU_LIVENESS_PHASE_TCI_DISPATCH, false, 0);
+        TCG_WASM64_VCPU_LIVENESS_PHASE_TCI_DISPATCH, false, 0);
     active_counters = counters;
     ret = tcg_tci_qemu_tb_exec(env, tb_ptr);
     active_counters = previous_counters;

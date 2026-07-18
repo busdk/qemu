@@ -1651,8 +1651,22 @@ const VCPU_LIVENESS_PHASES = new Set([
   "main-loop",
   "tci-dispatch",
   "generated-attempt-js",
-  "halted",
 ]);
+
+const WASM64_RUNLOOP_EVENTS = new Set([
+  "runtime-smoke",
+  "live-generated-exec-summary",
+]);
+
+const WASM64_RUNLOOP_NUMERIC_FIELDS = [
+  "elapsedMs",
+  "generated_run_entries",
+  "generated_guest_instructions",
+  "generated_body_time_ns",
+  "generated_coverage_numerator",
+  "generated_coverage_denominator",
+  "generated_coverage_ppm",
+];
 
 function boundedNonNegativeInteger(value) {
   return Number.isInteger(value) && value >= 0 &&
@@ -1666,13 +1680,10 @@ function boundedBoolean(value) {
 }
 
 /*
- * T42 additive vCPU liveness diagnostic. The runloop summary's
- * "vcpu_liveness" object is guest/runtime-influenced JSON forwarded
- * verbatim by the generic wasm64Runloop summary parser (no field-specific
- * validation there); every field is bounded/enum-checked here before it
- * enters the runner result, and the whole object is omitted (fail closed)
- * if any field is missing, the wrong type, or out of bounds. This never
- * carries a raw guest string into the result.
+ * T42 additive vCPU liveness diagnostic. This is bounded last-entered
+ * evidence from a cooperative dispatch hook. Every field is enum-checked or
+ * range-checked before it enters the result; the whole object is omitted
+ * fail-closed when a required field is missing or invalid.
  */
 export function sanitizeVcpuLiveness(lastSummary) {
   const raw = lastSummary && typeof lastSummary === "object"
@@ -1688,15 +1699,12 @@ export function sanitizeVcpuLiveness(lastSummary) {
     : null;
   const iteration = boundedNonNegativeInteger(raw.iteration);
   const lastGuestPc = boundedNonNegativeInteger(raw.last_guest_pc);
-  const halted = boundedBoolean(raw.halted);
-  const pendingInterrupt = boundedBoolean(raw.pending_interrupt);
-  const pendingExit = boundedBoolean(raw.pending_exit);
-  const pendingException = boundedBoolean(raw.pending_exception);
 
   if (
     phase === null || iteration === null || lastGuestPc === null ||
-    halted === null || pendingInterrupt === null || pendingExit === null ||
-    pendingException === null
+    Object.keys(raw).some((key) => ![
+      "phase", "iteration", "last_guest_pc",
+    ].includes(key))
   ) {
     return null;
   }
@@ -1705,10 +1713,6 @@ export function sanitizeVcpuLiveness(lastSummary) {
     phase,
     iteration,
     lastGuestPc,
-    halted,
-    pendingInterrupt,
-    pendingExit,
-    pendingException,
   };
 }
 
@@ -1716,8 +1720,7 @@ export function sanitizeVcpuLiveness(lastSummary) {
  * Same bounded-validation treatment for the runloop summary's
  * "pending_causes" object (T42): exact per-cause counts recorded every
  * time the generated-exec main-loop-exit-pending predicate observed a
- * pending interrupt, exit request, or exception, plus the last observed
- * interrupt-request bitmask.
+ * pending interrupt, exit request, or exception.
  */
 export function sanitizePendingCauses(lastSummary) {
   const raw = lastSummary && typeof lastSummary === "object"
@@ -1730,18 +1733,50 @@ export function sanitizePendingCauses(lastSummary) {
   const interrupt = boundedNonNegativeInteger(raw.interrupt);
   const exit = boundedNonNegativeInteger(raw.exit);
   const exception = boundedNonNegativeInteger(raw.exception);
-  const lastInterruptRequestBitmask = boundedNonNegativeInteger(
-    raw.last_interrupt_request_bitmask,
-  );
 
   if (
     interrupt === null || exit === null || exception === null ||
-    lastInterruptRequestBitmask === null
+    Object.keys(raw).some((key) => ![
+      "interrupt", "exit", "exception",
+    ].includes(key))
   ) {
     return null;
   }
 
-  return { interrupt, exit, exception, lastInterruptRequestBitmask };
+  return { interrupt, exit, exception };
+}
+
+/*
+ * The browser parser retains raw runloop JSON for its in-page diagnostics,
+ * but the written runner result only exposes this fixed, bounded projection.
+ * Unknown keys and non-integer values never cross this boundary.
+ */
+export function sanitizeWasm64Runloop(runloop) {
+  if (!runloop || typeof runloop !== "object") {
+    return null;
+  }
+
+  const enabled = boundedBoolean(runloop.enabled);
+  const summaryCount = boundedNonNegativeInteger(runloop.summaryCount);
+  const rawSummary = runloop.lastSummary;
+  if (enabled === null || summaryCount === null ||
+      !rawSummary || typeof rawSummary !== "object") {
+    return null;
+  }
+
+  if (typeof rawSummary.event !== "string" ||
+      !WASM64_RUNLOOP_EVENTS.has(rawSummary.event)) {
+    return null;
+  }
+
+  const lastSummary = { event: rawSummary.event };
+  for (const field of WASM64_RUNLOOP_NUMERIC_FIELDS) {
+    const value = boundedNonNegativeInteger(rawSummary[field]);
+    if (value !== null) {
+      lastSummary[field] = value;
+    }
+  }
+  return { enabled, summaryCount, lastSummary };
 }
 
 export function promoteSmokeState(result, smokeState) {
@@ -1775,12 +1810,14 @@ export function promoteSmokeState(result, smokeState) {
   result.performanceAttribution = smokeState.performanceAttribution || null;
   result.fwCfgTrace = smokeState.fwCfgTrace || null;
   result.wasm64Tcg = smokeState.wasm64Tcg || null;
-  result.wasm64Runloop = smokeState.wasm64Runloop || null;
+  const lastRunloopSummary = smokeState.wasm64Runloop &&
+    smokeState.wasm64Runloop.lastSummary;
+  result.wasm64Runloop = sanitizeWasm64Runloop(smokeState.wasm64Runloop);
   result.vcpuLiveness = sanitizeVcpuLiveness(
-    smokeState.wasm64Runloop && smokeState.wasm64Runloop.lastSummary,
+    lastRunloopSummary,
   );
   result.pendingCauses = sanitizePendingCauses(
-    smokeState.wasm64Runloop && smokeState.wasm64Runloop.lastSummary,
+    lastRunloopSummary,
   );
   result.tci = smokeState.tci || null;
 }
@@ -2067,8 +2104,10 @@ async function capturePageText(page, result, tailBytes) {
   }
   try {
     result.pageStatus = await page.evaluate(() => document.querySelector("#status")?.textContent || "");
-    result.smokeState = await page.evaluate(() => globalThis.qemuWasmSmokeState || null);
-    promoteSmokeState(result, result.smokeState);
+    const smokeState = await page.evaluate(
+      () => globalThis.qemuWasmSmokeState || null,
+    );
+    promoteSmokeState(result, smokeState);
     const text = await page.evaluate(() => document.body.textContent || "");
     result.pageTextTail = text.slice(-tailBytes);
   } catch (error) {
