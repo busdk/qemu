@@ -691,17 +691,11 @@ typedef enum TCGWasm64VcpuLastEnteredPhase {
     TCG_WASM64_VCPU_LAST_ENTERED_PHASE_GENERATED_ATTEMPT_JS,
 } TCGWasm64VcpuLastEnteredPhase;
 
-typedef struct TCGWasm64VcpuLastEnteredPublication {
-    uint64_t sequence;
-    uint64_t monotonic_ms;
-} TCGWasm64VcpuLastEnteredPublication;
-
 static __thread TCGWasm64VcpuLastEnteredPhase vcpu_last_entered_phase =
     TCG_WASM64_VCPU_LAST_ENTERED_PHASE_MAIN_LOOP;
 static __thread uint64_t vcpu_last_entered_iteration;
 static __thread uint64_t vcpu_last_entered_guest_pc;
-static TCGWasm64VcpuLastEnteredPublication vcpu_last_entered_publication
-    QEMU_ALIGNED(8);
+static uint64_t vcpu_last_entered_sequence QEMU_ALIGNED(8);
 
 /*
  * Exact cause breakdown recorded every time
@@ -9565,7 +9559,7 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             live_generated_exec_main_loop_pending_interrupt,
             live_generated_exec_main_loop_pending_exit,
             live_generated_exec_main_loop_pending_exception,
-            (uintptr_t)&vcpu_last_entered_publication,
+            (uintptr_t)&vcpu_last_entered_sequence,
             tcg_wasm64_vcpu_last_entered_phase_name(
                 vcpu_last_entered_phase),
             vcpu_last_entered_iteration,
@@ -10125,28 +10119,21 @@ static const char *tcg_wasm64_vcpu_last_entered_phase_name(
  * Cheap cooperative dispatch-entry note: records the last entered phase and
  * optionally refreshes the last known guest PC when the caller has one
  * cheaply available. When live generated execution diagnostics are enabled,
- * the sequence and timestamp are atomically published in shared Wasm memory
- * for observation by the browser main thread. They prove only whether a new
- * cooperative entry was observed; they do not identify guest state.
+ * one sequence is atomically published in shared Wasm memory for observation
+ * by the browser main thread. It proves only whether a new cooperative entry
+ * was observed; it does not identify guest state.
  */
 static void tcg_wasm64_vcpu_last_entered_note(
     TCGWasm64VcpuLastEnteredPhase phase, bool guest_pc_known,
     uint64_t guest_pc)
 {
-    QEMU_BUILD_BUG_ON(offsetof(TCGWasm64VcpuLastEnteredPublication,
-                               sequence) != 0);
-    QEMU_BUILD_BUG_ON(offsetof(TCGWasm64VcpuLastEnteredPublication,
-                               monotonic_ms) != 8);
-    QEMU_BUILD_BUG_ON(sizeof(TCGWasm64VcpuLastEnteredPublication) != 16);
     vcpu_last_entered_iteration++;
     vcpu_last_entered_phase = phase;
     if (guest_pc_known) {
         vcpu_last_entered_guest_pc = guest_pc;
     }
     if (live_generated_exec_enabled) {
-        qatomic_store_release(&vcpu_last_entered_publication.monotonic_ms,
-                              g_get_monotonic_time() / 1000u);
-        qatomic_inc_fetch(&vcpu_last_entered_publication.sequence);
+        qatomic_inc_fetch(&vcpu_last_entered_sequence);
     }
 }
 

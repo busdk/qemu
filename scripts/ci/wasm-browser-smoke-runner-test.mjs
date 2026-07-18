@@ -2646,10 +2646,10 @@ for (const status of [
   });
 }
 
-function fullRunloop(summary, maxSummaries = 16) {
+function fullRunloop(summary) {
   return {
     enabled: true,
-    maxSummaries,
+    maxSummaries: 16,
     summaryCount: 1,
     summaries: [{ ...summary }],
     lastSummary: { ...summary },
@@ -2661,28 +2661,14 @@ const t42GeneratedSummary = {
   format: 1,
   event: "live-generated-exec-summary",
   reason: "interval",
-  chain_exit_reason: "none",
-  compat_fallback: true,
-  preflight: false,
-  preflight_limit: 10000,
-  chain_budget: 4096,
-  preflight_ready: true,
-  no_silent_fallback: false,
   attempts: 1,
   successes: 1,
-  rejects: 0,
-  skips: 0,
+  rejects: 1,
   generated_run_entries: 1,
   generated_guest_instructions: 3,
   fallback_guest_instructions: 7,
   generated_body_time_ns: 20,
   generated_chain_length: 1,
-  generated_guest_instructions_per_entry: 3,
-  generated_coverage_numerator: 3,
-  generated_coverage_denominator: 10,
-  generated_coverage_ppm: 300000,
-  inline_tlb_hit_loads: 4,
-  exits_unsupported: 0,
   pending_causes: { interrupt: 2, exit: 0, exception: 1 },
   vcpu_last_entered: {
     publication_address: "0x10",
@@ -2690,194 +2676,157 @@ const t42GeneratedSummary = {
     iteration: 9,
     last_guest_pc: 4096,
   },
+  return_validation: {
+    status: 32,
+    terminal_parse_ok: true,
+    exit_low_bits_ok: false,
+  },
 };
 
-// T42: both cooperative-entry projections are exact, bounded, and named for
-// what they prove.
+// T42: C can complete an attempt successfully after separately recording
+// invalid return evidence. The runner must retain that valid 1/1/1 state and
+// its diagnostic detail without imposing a duplicate counter relationship.
 {
-  assert.deepEqual(sanitizeVcpuLastEntered(t42GeneratedSummary), {
+  const projected = sanitizeWasm64Runloop(
+    fullRunloop(t42GeneratedSummary),
+  );
+  assert.notEqual(projected, null);
+  assert.deepEqual(Object.keys(projected).sort(), [
+    "enabled", "lastSummary", "summaryCount",
+  ]);
+  assert.equal(projected.lastSummary.attempts, 1);
+  assert.equal(projected.lastSummary.successes, 1);
+  assert.equal(projected.lastSummary.rejects, 1);
+  assert.deepEqual(projected.lastSummary.return_validation, {
+    status: 32,
+    terminal_parse_ok: true,
+    exit_low_bits_ok: false,
+  });
+  assert.equal(
+    Object.hasOwn(
+      projected.lastSummary.vcpu_last_entered,
+      "publication_address",
+    ),
+    false,
+  );
+  assert.deepEqual(sanitizeVcpuLastEntered(projected.lastSummary), {
     phase: "generated-attempt-js",
     iteration: 9,
     lastGuestPc: 4096,
   });
-  assert.deepEqual(sanitizePendingCauses(t42GeneratedSummary), {
+  assert.deepEqual(sanitizePendingCauses(projected.lastSummary), {
     interrupt: 2,
     exit: 0,
     exception: 1,
   });
-  for (const badIteration of [-1, 1.5, "9", null, NaN, Infinity]) {
-    assert.equal(sanitizeVcpuLastEntered({
-      vcpu_last_entered: {
-        phase: "main-loop",
-        iteration: badIteration,
-        last_guest_pc: 0,
-      },
-    }), null);
-  }
-  assert.equal(sanitizeVcpuLastEntered({
-    vcpu_last_entered: {
-      phase: "unbounded-guest-string",
-      iteration: 1,
-      last_guest_pc: 0,
-    },
-  }), null);
-  assert.equal(sanitizePendingCauses({
-    pending_causes: { interrupt: -1, exit: 0, exception: 0 },
-  }), null);
+
+  const promoted = {};
+  promoteSmokeState(promoted, {
+    wasm64Runloop: fullRunloop(t42GeneratedSummary),
+  });
+  assert.equal(promoted.wasm64Runloop.lastSummary.rejects, 1);
+  assert.deepEqual(promoted.vcpuLastEntered, {
+    phase: "generated-attempt-js",
+    iteration: 9,
+    lastGuestPc: 4096,
+  });
+  assert.deepEqual(promoted.pendingCauses, {
+    interrupt: 2,
+    exit: 0,
+    exception: 1,
+  });
 }
 
-// T42: all established runloop event families keep their accepted evidence.
+// T42: retain the parent runner's ordinary result shape. Disabled/no-summary
+// remains null, and an enabled result does not acquire runner-owned history.
 {
-  const eventFixtures = {
-    "runtime-smoke": {
-      elapsedMs: 10,
-      format: 1,
-      event: "runtime-smoke",
-      ok: true,
-      budget: 100,
-      exit_reason: "budget",
-      exit_reason_code: 1,
-      generated_guest_instructions: 400,
-      fallback_guest_instructions: 400,
-      generated_body_time_ns: 20,
-      tci_dispatch_time_ns: 100,
-      generated_vs_tci_speedup_ppm: 5000000,
-      min_generated_vs_tci_speedup_ppm: 3000000,
-      generated_chain_length: 100,
-      inline_tlb_hit_loads: 4,
-      inline_tlb_hit_stores: 4,
-      helper_calls: 0,
-      qemu_ld_calls: 0,
-      qemu_st_calls: 0,
-      exits_budget: 1,
-      exits_unsupported: 0,
-      workload_count: 0,
-      workloads: [],
-    },
-    "one-tb-differential": {
-      elapsedMs: 20,
-      format: 1,
-      event: "one-tb-differential",
-      name: "live-x86-pre-r4i-ld32u-goto-tb-13",
-      ok: true,
-      live_shape_fixture: true,
-      real_live_state_capture: false,
-      shape: ["ld32u", "goto_tb"],
-      generated_tci_op_equivalents: 2,
-      reference_tci_op_equivalents: 2,
-      generated_status: 2,
-      reference_status: 2,
-      generated_memory_writes: 1,
-      reference_memory_writes: 1,
-      expected_memory_writes: 1,
-      js_status: 0,
-    },
-    "live-one-tb-differential": {
-      elapsedMs: 30,
-      format: 1,
-      event: "live-one-tb-differential",
-      name: "live-x86-r4i-ld32u-goto-tb-11",
-      ok: true,
-      live_shape_fixture: false,
-      real_live_state_capture: true,
-      shape: ["ld32u", "goto_tb"],
-      tb_ptr: "0x1000",
-      generated_guest_instructions: 1,
-      reference_guest_instructions: 1,
-      generated_status: 2,
-      reference_status: 2,
-      generated_memory_writes: 1,
-      reference_memory_writes: 1,
-      expected_memory_writes: 1,
-      js_status: 0,
-      js_status_name: "ok",
-    },
-    "live-tb-coverage": {
-      elapsedMs: 40,
-      format: 1,
-      event: "live-tb-coverage",
-      name: "live-rv64-generated-coverage",
-      ok: true,
-      real_live_tb: true,
-      guest_state_commit: false,
-      tb_ptr: "0x2000",
-      generated_guest_instructions: 1,
-      generated_status: 1,
-      reference_status: 1,
-      generated_exit_value: 2,
-      reference_exit_value: 2,
-      generated_tci_op_equivalents: 3,
-      reference_tci_op_equivalents: 3,
-      js_status: 0,
-    },
-    "live-generated-exec-summary": t42GeneratedSummary,
-  };
-  const projected = Object.fromEntries(Object.entries(eventFixtures).map(
-    ([event, summary]) => [event, sanitizeWasm64Runloop(fullRunloop(summary))],
-  ));
-  for (const [event, runloop] of Object.entries(projected)) {
-    assert.equal(runloop.lastSummary.event, event);
-    assert.equal(runloop.summaries[0].event, event);
-  }
-  const runtime = projected["runtime-smoke"].lastSummary;
-  assert.equal(runtime.fallback_guest_instructions, 400);
-  assert.equal(runtime.generated_chain_length, 100);
-  assert.equal(runtime.inline_tlb_hit_loads, 4);
-  assert.equal(runtime.exits_unsupported, 0);
-}
-
-// T42: numerical and container relations reject impossible evidence.
-{
-  assert.equal(sanitizeWasm64Runloop(fullRunloop({
-    ...t42GeneratedSummary,
-    generated_coverage_numerator: 10,
-    generated_coverage_denominator: 1,
-    generated_coverage_ppm: 2000000,
-  })), null);
   assert.equal(sanitizeWasm64Runloop({
-    ...fullRunloop(t42GeneratedSummary),
     enabled: false,
-  }), null);
-  assert.equal(sanitizeWasm64Runloop({
-    ...fullRunloop(t42GeneratedSummary),
-    summaryCount: 2,
+    maxSummaries: 16,
+    summaryCount: 0,
+    summaries: [],
+    lastSummary: null,
   }), null);
   assert.equal(sanitizeWasm64Runloop({
     enabled: true,
     maxSummaries: 16,
     summaryCount: 0,
-    summaries: [t42GeneratedSummary],
-    lastSummary: t42GeneratedSummary,
+    summaries: [],
+    lastSummary: null,
   }), null);
-  assert.equal(sanitizeWasm64Runloop(fullRunloop({
-    ...t42GeneratedSummary,
-    attempts: -1,
-  })), null);
-  assert.equal(sanitizeWasm64Runloop(fullRunloop({
-    format: 1,
-    event: "live-one-tb-differential",
-    live_shape_fixture: true,
-    real_live_state_capture: true,
-  })), null);
-  const contradictoryLast = fullRunloop(t42GeneratedSummary);
-  contradictoryLast.lastSummary = {
+
+  const projected = sanitizeWasm64Runloop(fullRunloop({
     format: 1,
     event: "runtime-smoke",
-  };
-  assert.equal(sanitizeWasm64Runloop(contradictoryLast), null);
+    ok: true,
+  }));
+  assert.deepEqual(projected, {
+    enabled: true,
+    summaryCount: 1,
+    lastSummary: {
+      format: 1,
+      event: "runtime-smoke",
+      ok: true,
+    },
+  });
 }
 
-// T42: populated whole-result projection closes every previously observed
-// escape route while retaining ordinary diagnostics.
+// T42: centralized bounded redaction is event-agnostic and retains established
+// C evidence instead of duplicating five C schemas in the runner.
+{
+  const eventFixtures = {
+    "runtime-smoke": {
+      event: "runtime-smoke",
+      fallback_guest_instructions: 400,
+      generated_chain_length: 100,
+      workloads: [{ name: "alu-branch", ok: true }],
+    },
+    "one-tb-differential": {
+      event: "one-tb-differential",
+      shape: ["ld32u", "goto_tb"],
+      generated_memory_writes: 1,
+    },
+    "live-one-tb-differential": {
+      event: "live-one-tb-differential",
+      metadata_generated_output_checksum: 1234,
+      js_status_name: "ok",
+    },
+    "live-tb-coverage": {
+      event: "live-tb-coverage",
+      generated_output_words: 11,
+      guest_state_commit: false,
+    },
+    "live-generated-exec-summary": {
+      event: "live-generated-exec-summary",
+      attempts: 1,
+      successes: 1,
+      rejects: 1,
+      return_validation: { status: 32 },
+    },
+  };
+  for (const [event, summary] of Object.entries(eventFixtures)) {
+    const projected = sanitizeWasm64Runloop(fullRunloop(summary));
+    assert.equal(projected.lastSummary.event, event);
+    assert.deepEqual(projected.lastSummary, summary);
+  }
+  assert.doesNotMatch(runnerSource, /RUNLOOP_EVENT_FIELDS/);
+  assert.doesNotMatch(runnerSource, /RUNLOOP_NESTED_FIELDS/);
+  assert.doesNotMatch(runnerSource, /runloopSummaryRelationsValid/);
+  assert.doesNotMatch(runnerSource, /projectRunloopNested/);
+}
+
+// T42: raw runloop lines and sensitive or unsafe diagnostic values are
+// removed at one final serialization boundary everywhere state can appear.
 {
   const sentinel = "REVIEW_SECRET_SENTINEL";
   const poisoned = {
     ...t42GeneratedSummary,
     generated_guest_instructions: -1,
     oversized: Number.MAX_SAFE_INTEGER + 1,
+    publication_address: "0xdeadbeef",
     unexpected_key: sentinel,
   };
-  const rawLine = `qemu-wasm64-runloop: ${JSON.stringify(poisoned)}`;
+  const rawLine = "qemu-wasm64-runloop: " + JSON.stringify(poisoned);
   const rawState = {
     phase: "guest-boot",
     phases: [{ phase: "guest-boot", elapsedMs: 900, message: "starting" }],
@@ -2888,7 +2837,7 @@ const t42GeneratedSummary = {
     outputBytes: 128,
     guestLines: 1,
     guestOutputBytes: 32,
-    lastLine: `${sentinel} ${rawLine}`,
+    lastLine: sentinel + " " + rawLine,
     guestLastLine: "Linux version 6.x",
     wasm64Runloop: fullRunloop(poisoned),
   };
@@ -2906,32 +2855,31 @@ const t42GeneratedSummary = {
     ...promoted,
     progressSamples: [progress],
     pageErrors: [pageError],
-    pageTextTail: `ordinary page diagnostic\n${rawLine}`,
+    pageTextTail: "ordinary page diagnostic\n" + rawLine,
     smokeState: rawState,
   });
   const encoded = JSON.stringify(complete);
   assert.equal(encoded.includes(sentinel), false);
   assert.equal(encoded.includes("unexpected_key"), false);
+  assert.equal(encoded.includes("publication_address"), false);
   assert.equal(encoded.includes("generated_guest_instructions\":-1"), false);
   assert.equal(encoded.includes("qemu-wasm64-runloop:"), false);
   assert.equal(encoded.includes("ordinary page diagnostic"), true);
   assert.equal(JSON.stringify(progress).includes(sentinel), false);
   assert.equal(JSON.stringify(pageError).includes(sentinel), false);
   assert.equal(Object.hasOwn(promoted, "vcpuLastEntered"), true);
-  const broadPublicName = ["vcpu", "Liveness"].join("");
-  assert.equal(Object.hasOwn(promoted, broadPublicName), false);
+  assert.equal(Object.hasOwn(promoted, "vcpuLiveness"), false);
   assert.match(runnerSource, /sanitizeRunloopText\(text\)\.slice\(-tailBytes\)/);
   assert.doesNotMatch(runnerSource, /result\.smokeState\s*=/);
 }
 
-// T42: the browser-main-thread interval continues to atomically sample after
-// the vCPU publication stops changing, then records only the bounded
-// observational classification.
+// T42: one atomic sequence is sufficient. A writer update between main-thread
+// samples is observed without accepting an incoherent timestamp/sequence pair,
+// and sampling continues after the final sequence update.
 {
   const shared = new SharedArrayBuffer(64);
-  const publication = new BigUint64Array(shared, 16, 2);
+  const publication = new BigUint64Array(shared, 16, 1);
   Atomics.store(publication, 0, 1n);
-  Atomics.store(publication, 1, 10n);
   let now = 0;
   const callbacks = [];
   const scope = {
@@ -2954,7 +2902,9 @@ const t42GeneratedSummary = {
     sampleIntervalMs: 10,
     noProgressIntervalMs: 30,
   });
-  Atomics.store(publication, 1, 20n);
+
+  // Deterministic writer interleave between the initial synchronous sample
+  // and the first timer callback.
   Atomics.store(publication, 0, 2n);
   for (now of [10, 20, 30, 40]) {
     callbacks[0]();
@@ -2963,7 +2913,13 @@ const t42GeneratedSummary = {
   assert.equal(callbacks.length, 1);
   assert.equal(state.vcpuLastEnteredProgress.sampleCount, 5);
   assert.equal(state.vcpuLastEnteredProgress.sequence, 2);
-  assert.equal(state.vcpuLastEnteredProgress.publishedMonotonicMs, 20);
+  assert.equal(
+    Object.hasOwn(
+      state.vcpuLastEnteredProgress,
+      "publishedMonotonicMs",
+    ),
+    false,
+  );
   assert.equal(
     state.vcpuLastEnteredProgress.observation,
     "no-new-vcpu-progress-observed",
@@ -2976,7 +2932,7 @@ const t42GeneratedSummary = {
   );
 }
 
-// T42 C snapshot and shared-publication source contract.
+// T42 C snapshot and sequence-only shared-publication source contract.
 assert.equal(
   wasm64Source.match(/cpu_test_interrupt\(cpu, ~0\)/g)?.length,
   1,
@@ -2987,19 +2943,15 @@ assert.equal(
 );
 assert.match(
   wasm64Source,
-  /qatomic_store_release\(&vcpu_last_entered_publication\.monotonic_ms/,
+  /qatomic_inc_fetch\(&vcpu_last_entered_sequence\)/,
 );
 assert.match(
   wasm64Source,
-  /qatomic_inc_fetch\(&vcpu_last_entered_publication\.sequence\)/,
+  /vcpu_last_entered_sequence QEMU_ALIGNED\(8\)/,
 );
-assert.match(wasm64Source, /vcpu_last_entered_publication\s*\n\s*QEMU_ALIGNED\(8\)/);
-assert.match(
-  wasm64Source,
-  /offsetof\(TCGWasm64VcpuLastEnteredPublication,\s*\n\s*monotonic_ms\) != 8/,
-);
+assert.doesNotMatch(wasm64Source, /TCGWasm64VcpuLastEnteredPublication/);
+assert.doesNotMatch(wasm64Source, /monotonic_ms/);
 assert.match(wasm64Source, /"\\\"publication_address\\\":\\\"0x%" PRIxPTR/);
-assert.doesNotMatch(wasm64Source, /vcpu-liveness-tick/);
 assert.doesNotMatch(wasm64Source, /cpu->interrupt_request/);
 assert.doesNotMatch(
   wasm64Source.replaceAll("qatomic_load_acquire(&cpu->exit_request)", ""),
@@ -3010,3 +2962,5 @@ assert.match(
   browserSmokeSource,
   /maybeInstallVcpuLastEnteredProgressSampler\(activeModule\)/,
 );
+assert.match(browserSmokeSource, /new BigUint64Array\(buffer, address, 1\)/);
+assert.doesNotMatch(browserSmokeSource, /publishedMonotonicMs/);

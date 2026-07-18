@@ -1659,234 +1659,13 @@ const VCPU_LAST_ENTERED_PHASES = new Set([
   "generated-attempt-js",
 ]);
 
-function fieldSet(fields) {
-  return new Set(fields.trim().split(/\s+/));
-}
-
-const RUNLOOP_EVENT_FIELDS = new Map([
-  ["runtime-smoke", fieldSet(`
-    elapsedMs format event ok budget exit_reason exit_reason_code
-    generated_guest_instructions fallback_guest_instructions
-    generated_body_time_ns tci_dispatch_time_ns tb_lookup_time_ns
-    helper_call_time_ns qemu_ld_time_ns qemu_st_time_ns
-    generated_vs_tci_speedup_ppm min_generated_vs_tci_speedup_ppm
-    compile_time_ns instantiate_time_ns generated_chain_length
-    inline_tlb_hit_loads inline_tlb_hit_stores helper_calls qemu_ld_calls
-    qemu_st_calls exits_budget exits_mmio exits_tlb_miss_or_fault
-    exits_interrupt exits_helper exits_unsupported exits_hlt
-    exits_invalidated workload_count workloads
-  `)],
-  ["one-tb-differential", fieldSet(`
-    elapsedMs format event name ok live_shape_fixture
-    real_live_state_capture shape generated_tci_op_equivalents
-    reference_tci_op_equivalents generated_body_time_ns
-    tci_dispatch_time_ns compile_time_ns instantiate_time_ns
-    generated_chain_length inline_tlb_hit_loads inline_tlb_hit_stores
-    helper_calls qemu_ld_calls qemu_st_calls generated_status
-    reference_status dispatch_status generated_dispatch_target
-    reference_dispatch_target exit_reason_code exit_value
-    generated_regs_checksum reference_regs_checksum
-    generated_memory_checksum reference_memory_checksum
-    generated_memory_writes reference_memory_writes expected_memory_writes
-    js_status
-  `)],
-  ["live-one-tb-differential", fieldSet(`
-    elapsedMs format event name ok blocker live_shape_fixture
-    real_live_state_capture shape tb_ptr tb_pc tb_cs_base tb_flags
-    tb_cflags tb_size tb_icount has_tb has_metadata metadata_op_count
-    metadata_first_op metadata_first_op_name
-    metadata_generated_output_available metadata_generated_output_size
-    metadata_generated_output_op_count metadata_generated_output_checksum
-    metadata_first_generated_unsupported_op
-    metadata_first_generated_unsupported_op_name
-    generated_guest_instructions reference_guest_instructions
-    generated_tci_op_equivalents reference_tci_op_equivalents
-    generated_body_time_ns tci_dispatch_time_ns compile_time_ns
-    instantiate_time_ns generated_chain_length inline_tlb_hit_loads
-    inline_tlb_hit_stores host_memory_loads host_memory_stores helper_calls
-    qemu_ld_calls qemu_st_calls generated_status reference_status
-    dispatch_status generated_dispatch_target reference_dispatch_target
-    exit_reason_code exit_value generated_regs_checksum
-    reference_regs_checksum generated_memory_checksum
-    reference_memory_checksum generated_memory_writes
-    reference_memory_writes expected_memory_writes
-    scanned_live_tbs_before_match js_status js_status_name
-  `)],
-  ["live-tb-coverage", fieldSet(`
-    elapsedMs format event name ok blocker real_live_tb guest_state_commit
-    tb_ptr tb_pc tb_cs_base tb_flags tb_cflags tb_size tb_icount
-    has_metadata metadata_op_count metadata_first_op
-    metadata_first_op_name metadata_generated_output_available
-    metadata_generated_output_size metadata_generated_output_op_count
-    metadata_generated_output_checksum
-    metadata_first_generated_unsupported_op
-    metadata_first_generated_unsupported_op_name
-    generated_guest_instructions generated_body_time_ns compile_time_ns
-    instantiate_time_ns generated_chain_length inline_tlb_hit_loads
-    inline_tlb_hit_stores helper_calls qemu_ld_calls qemu_st_calls
-    exits_mmio exits_tlb_miss_or_fault exits_unsupported generated_status
-    reference_status generated_exit_value reference_exit_value
-    generated_regs_checksum reference_regs_checksum
-    generated_tci_op_equivalents reference_tci_op_equivalents
-    generated_output_words exit_reason_code exit_value
-    scanned_live_tbs_before_match scanned_live_tbs scan_limit js_status
-  `)],
-  ["live-generated-exec-summary", fieldSet(`
-    elapsedMs format event reason chain_exit_reason compat_fallback
-    preflight preflight_limit chain_budget preflight_ready
-    no_silent_fallback attempts successes rejects skips
-    generated_guest_instructions fallback_guest_instructions
-    generated_body_time_ns tci_dispatch_time_ns tb_lookup_time_ns
-    helper_call_time_ns qemu_ld_time_ns qemu_st_time_ns compile_time_ns
-    instantiate_time_ns generated_run_entries generated_chain_length
-    generated_guest_instructions_per_entry generated_coverage_numerator
-    generated_coverage_denominator generated_coverage_ppm
-    inline_tlb_hit_loads inline_tlb_hit_stores helper_calls qemu_ld_calls
-    qemu_st_calls exits_budget exits_mmio exits_tlb_miss_or_fault
-    exits_interrupt exits_helper exits_unsupported exits_hlt
-    exits_invalidated hotset_probe_attempts hotset_goto_sources
-    hotset_target_slots_read hotset_target_slots_unsafe
-    hotset_target_metadata_hits hotset_target_output_hits
-    hotset_target_stale pending_causes vcpu_last_entered metadata_lookup
-    metadata_lookup_sample selected_body_helper_exit_skips
-    selected_body_no_terminal metadata_output_mismatch return_validation
-    module_failure selected_body_unsupported_ops reject_reasons
-    reject_memops reject_multi_accesses reject_direct_memory
-    reject_control_flow
-  `)],
-]);
-
-const RUNLOOP_BOOLEAN_FIELDS = fieldSet(`
-  ok live_shape_fixture real_live_state_capture has_tb has_metadata
-  metadata_generated_output_available real_live_tb guest_state_commit
-  compat_fallback preflight preflight_ready no_silent_fallback
-`);
-const RUNLOOP_STRING_FIELDS = fieldSet(`
-  event name exit_reason blocker tb_ptr tb_pc tb_cs_base js_status_name
-  metadata_first_op_name metadata_first_generated_unsupported_op_name
-  reason chain_exit_reason
-`);
-const RUNLOOP_ARRAY_FIELDS = fieldSet(`
-  shape workloads selected_body_unsupported_ops reject_reasons reject_memops
-  reject_multi_accesses reject_direct_memory reject_control_flow
-`);
-const RUNLOOP_OBJECT_FIELDS = fieldSet(`
-  pending_causes vcpu_last_entered metadata_lookup metadata_lookup_sample
-  metadata_output_mismatch return_validation module_failure
-`);
-const RUNLOOP_BLOCKERS = new Set([
-  "metadata missing for live TB",
-  "generated output unavailable for selected hot shape",
-  "selected hot shape unsupported by live per-TB emitter",
-  "matched shape but missing TranslationBlock identity or nonzero icount",
-  "scan limit reached before a generated live TB shape ran",
-  "generated output matched but TranslationBlock identity or icount was missing",
-]);
-const RUNLOOP_NAMES = new Set([
-  "live-x86-pre-r4i-ld32u-goto-tb-13",
-  "live-x86-r4i-ld32u-goto-tb-11",
-  "live-rv64-generated-coverage",
-  "alu-branch",
-  "tlb-hit-ram",
-]);
-
-const RUNLOOP_NESTED_FIELDS = new Map([
-  ["shape", new Set()],
-  ["workloads", fieldSet(`
-    name ok exit_reason exit_reason_code generated_guest_instructions
-    fallback_guest_instructions generated_body_time_ns tci_dispatch_time_ns
-    generated_vs_tci_speedup_ppm min_generated_vs_tci_speedup_ppm
-    compile_time_ns instantiate_time_ns generated_chain_length
-    inline_tlb_hit_loads inline_tlb_hit_stores generated_exit_value
-    fallback_exit_value generated_ram_value fallback_ram_value helper_calls
-    qemu_ld_calls qemu_st_calls exits_budget exits_mmio
-    exits_tlb_miss_or_fault exits_interrupt exits_helper exits_unsupported
-    exits_hlt exits_invalidated
-  `)],
-  ["pending_causes", fieldSet("interrupt exit exception")],
-  ["vcpu_last_entered", fieldSet(`
-    publication_address phase iteration last_guest_pc
-  `)],
-  ["metadata_lookup", fieldSet(`
-    ok null_tb_ptr cache_null no_entry entry_invalid key_mismatch cache_size
-    translate_begin_total
-  `)],
-  ["metadata_lookup_sample", fieldSet(`
-    status requested_tb_ptr entry_tb_ptr metadata_tb_ptr magic version flags
-  `)],
-  ["metadata_output_mismatch", fieldSet(`
-    reason index op op_name metadata_word metadata_word_hex live_word
-    live_word_hex
-  `)],
-  ["return_validation", fieldSet(`
-    status ret tb_ptr tb_rx_base tb_pc tb_size tb_icount terminal_parse_ok
-    terminal_op terminal_op_name terminal_raw_diff terminal_slot_offset
-    terminal_null_pointer slot_addr slot_value goto_slot_ok
-    dispatch_ret_is_tb_ptr dispatch_ret_is_slot_addr
-    dispatch_ret_is_slot_value expected_exit_base exit_base_ok
-    exit_low_bits_ok exit_ret_is_null_pointer exit_ret_matches_terminal
-  `)],
-  ["module_failure", fieldSet(`
-    reason phase phase_code status status_name shape_op_count shape_truncated
-    first_op first_op_name terminal_op terminal_op_name shape detail
-    memory_import
-  `)],
-  ["module_failure.shape", fieldSet("op name word")],
-  ["module_failure.detail", fieldSet(`
-    code name index op op_name count js_exception_kind target_index base_reg
-    offset size
-  `)],
-  ["module_failure.memory_import", fieldSet(`
-    module name kind limits_flags limits_flags_hex initial_pages has_maximum
-    maximum_pages shared memory64
-  `)],
-  ["selected_body_unsupported_ops", fieldSet("op name count")],
-  ["reject_reasons", fieldSet("reason count")],
-  ["reject_memops", fieldSet("reason memop memop_hex count")],
-  ["reject_multi_accesses", fieldSet(`
-    reason access_count order loads stores store_before_later_guard
-    branch_position branch_index branch_count branch_target_index
-    last_access_index memops count
-  `)],
-  ["reject_direct_memory", fieldSet(`
-    route op op_name base_reg offset size env_relative_supported
-    softmmu_access_count softmmu_order direct_store_count direct_store_limit
-    direct_store_ranges count
-  `)],
-  ["direct_store_ranges", fieldSet("offset size")],
-  ["reject_control_flow", fieldSet("reason misaligned backward_distance count")],
-]);
-const RUNLOOP_NESTED_BOOLEAN_FIELDS = fieldSet(`
-  ok terminal_parse_ok terminal_null_pointer goto_slot_ok
-  dispatch_ret_is_tb_ptr dispatch_ret_is_slot_addr
-  dispatch_ret_is_slot_value exit_base_ok exit_low_bits_ok
-  exit_ret_is_null_pointer exit_ret_matches_terminal shape_truncated
-  has_maximum shared memory64 store_before_later_guard
-  env_relative_supported misaligned
-`);
-const RUNLOOP_NESTED_STRING_FIELDS = fieldSet(`
-  name exit_reason phase requested_tb_ptr entry_tb_ptr metadata_tb_ptr
-  reason op_name metadata_word_hex live_word_hex ret tb_ptr tb_rx_base tb_pc
-  terminal_op_name slot_addr slot_value expected_exit_base status_name
-  first_op_name terminal_op_name word js_exception_kind module
-  limits_flags_hex memop_hex order branch_position route softmmu_order
-`);
-const RUNLOOP_NESTED_SIGNED_FIELDS = fieldSet(`
-  terminal_raw_diff terminal_slot_offset branch_index branch_target_index
-  last_access_index offset size backward_distance
-`);
-const RUNLOOP_NESTED_NULLABLE_FIELDS = fieldSet(`
-  index target_index base_reg offset size maximum_pages
-`);
-const RUNLOOP_NESTED_ARRAY_FIELDS = new Set([
-  "shape",
-  "memops",
-  "direct_store_ranges",
-]);
-const RUNLOOP_NESTED_OBJECT_FIELDS = new Set([
-  "detail",
-  "memory_import",
-]);
+const MAX_RUNLOOP_DIAGNOSTIC_DEPTH = 8;
+const MAX_RUNLOOP_DIAGNOSTIC_ENTRIES = 512;
+const MAX_RUNLOOP_DIAGNOSTIC_STRING_LENGTH = 4096;
+const SENSITIVE_DIAGNOSTIC_TEXT =
+  /(?:^|[_-])(?:secret|password|credential|authorization|bearer|private[_-]?key)(?:[_-]|$)/i;
+const NONNEGATIVE_DIAGNOSTIC_FIELD =
+  /(?:^elapsedMs$|(?:^|_)(?:attempts|successes|rejects|skips|count|counts|instructions|entries|calls|loads|stores|writes|budget|limit|length|size|time|ppm|numerator|denominator|iteration|sequence)(?:$|_))/;
 
 function boundedNonNegativeInteger(value) {
   return Number.isInteger(value) && value >= 0 &&
@@ -1899,384 +1678,96 @@ function boundedBoolean(value) {
   return typeof value === "boolean" ? value : null;
 }
 
-function boundedSignedInteger(value) {
-  return Number.isSafeInteger(value) ? value : null;
-}
-
-function boundedRunloopString(field, value, context = "") {
-  if (typeof value !== "string" || value.length === 0 || value.length > 160) {
-    return null;
+function redactRunloopDiagnosticValue(
+  value, field = "", depth = 0, active = new WeakSet(),
+) {
+  if (field === "publication_address" ||
+      SENSITIVE_DIAGNOSTIC_TEXT.test(field)) {
+    return undefined;
   }
-  if (field === "blocker") {
-    return RUNLOOP_BLOCKERS.has(value) ? value : null;
+  if (value === null || typeof value === "boolean") {
+    return value;
   }
-  if (field === "name") {
-    if (context === "module_failure.memory_import") {
-      return value === "memory" ? value : null;
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) ||
+        (value < 0 && NONNEGATIVE_DIAGNOSTIC_FIELD.test(field))) {
+      return undefined;
     }
-    return RUNLOOP_NAMES.has(value) || /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value)
-      ? value
-      : null;
+    return value;
   }
-  if (field === "module") {
-    return value === "env" ? value : null;
+  if (typeof value === "string") {
+    if (value.length > MAX_RUNLOOP_DIAGNOSTIC_STRING_LENGTH ||
+        SENSITIVE_DIAGNOSTIC_TEXT.test(value)) {
+      return undefined;
+    }
+    return value;
   }
-  if (field === "phase" && context === "vcpu_last_entered") {
-    return VCPU_LAST_ENTERED_PHASES.has(value) ? value : null;
+  if (!value || typeof value !== "object" ||
+      depth >= MAX_RUNLOOP_DIAGNOSTIC_DEPTH || active.has(value)) {
+    return undefined;
   }
-  if ([
-    "tb_ptr", "tb_pc", "tb_cs_base", "requested_tb_ptr", "entry_tb_ptr",
-    "metadata_tb_ptr", "ret", "tb_rx_base", "slot_addr", "slot_value",
-    "expected_exit_base", "publication_address", "metadata_word_hex",
-    "live_word_hex", "word", "limits_flags_hex", "memop_hex",
-  ].includes(field)) {
-    return /^0x[0-9a-f]+$/.test(value) ? value : null;
-  }
-  if (field === "order" || field === "softmmu_order") {
-    return /^[LS]{1,32}$/.test(value) ? value : null;
-  }
-  return /^[a-z0-9][a-z0-9_.:+/-]{0,95}$/.test(value) ? value : null;
-}
 
-function nestedContext(parent, field) {
-  const qualified = `${parent}.${field}`;
-  return RUNLOOP_NESTED_FIELDS.has(qualified) ? qualified : field;
-}
-
-function projectRunloopNested(value, context, depth = 0) {
-  if (depth > 5) {
-    return null;
-  }
-  const allowed = RUNLOOP_NESTED_FIELDS.get(context);
-  if (!allowed) {
-    return null;
-  }
+  active.add(value);
   if (Array.isArray(value)) {
-    if (value.length > 64) {
-      return null;
-    }
     const projected = [];
-    for (const entry of value) {
-      if (typeof entry === "string") {
-        const stringValue = boundedRunloopString("shape", entry, context);
-        if (stringValue === null) {
-          return null;
-        }
-        projected.push(stringValue);
-      } else {
-        const objectValue = projectRunloopNested(entry, context, depth + 1);
-        if (objectValue === null) {
-          return null;
-        }
-        projected.push(objectValue);
-      }
+    for (const entry of value.slice(0, MAX_RUNLOOP_DIAGNOSTIC_ENTRIES)) {
+      const item = redactRunloopDiagnosticValue(
+        entry, field, depth + 1, active,
+      );
+      projected.push(item === undefined ? null : item);
     }
+    active.delete(value);
     return projected;
   }
-  if (!value || typeof value !== "object") {
-    return null;
-  }
+
   const projected = {};
-  for (const [field, raw] of Object.entries(value)) {
-    if (!allowed.has(field)) {
-      return null;
-    }
-    if (context === "vcpu_last_entered" &&
-        field === "publication_address") {
-      if (boundedRunloopString(field, raw, context) === null) {
-        return null;
-      }
+  for (const [key, entry] of Object.entries(value).slice(
+    0,
+    MAX_RUNLOOP_DIAGNOSTIC_ENTRIES,
+  )) {
+    if (key.length > 128 || !/^[A-Za-z0-9_.-]+$/.test(key)) {
       continue;
     }
-    if (raw === null && RUNLOOP_NESTED_NULLABLE_FIELDS.has(field)) {
-      projected[field] = null;
-    } else if (RUNLOOP_NESTED_BOOLEAN_FIELDS.has(field) &&
-               !(field === "ok" && context === "metadata_lookup")) {
-      const booleanValue = boundedBoolean(raw);
-      if (booleanValue === null) {
-        return null;
-      }
-      projected[field] = booleanValue;
-    } else if (RUNLOOP_NESTED_STRING_FIELDS.has(field) ||
-               (field === "status" &&
-                context === "metadata_lookup_sample")) {
-      const stringValue = boundedRunloopString(field, raw, context);
-      if (stringValue === null) {
-        return null;
-      }
-      projected[field] = stringValue;
-    } else if (RUNLOOP_NESTED_ARRAY_FIELDS.has(field)) {
-      if (!Array.isArray(raw) || raw.length > 64) {
-        return null;
-      }
-      if (field === "memops") {
-        const strings = raw.map((entry) =>
-          boundedRunloopString("memop_hex", entry, context));
-        if (strings.some((entry) => entry === null)) {
-          return null;
-        }
-        projected[field] = strings;
-      } else {
-        const arrayValue = projectRunloopNested(
-          raw,
-          nestedContext(context, field),
-          depth + 1,
-        );
-        if (arrayValue === null) {
-          return null;
-        }
-        projected[field] = arrayValue;
-      }
-    } else if (RUNLOOP_NESTED_OBJECT_FIELDS.has(field)) {
-      const objectValue = projectRunloopNested(
-        raw,
-        nestedContext(context, field),
-        depth + 1,
-      );
-      if (objectValue === null) {
-        return null;
-      }
-      projected[field] = objectValue;
-    } else {
-      const numericValue = RUNLOOP_NESTED_SIGNED_FIELDS.has(field)
-        ? boundedSignedInteger(raw)
-        : boundedNonNegativeInteger(raw);
-      if (numericValue === null) {
-        return null;
-      }
-      projected[field] = numericValue;
+    const item = redactRunloopDiagnosticValue(
+      entry, key, depth + 1, active,
+    );
+    if (item !== undefined) {
+      projected[key] = item;
     }
   }
+  active.delete(value);
   return projected;
-}
-
-function equalProjectedFields(summary, left, right) {
-  return summary[left] === undefined || summary[right] === undefined ||
-    summary[left] === summary[right];
-}
-
-function runloopSummaryRelationsValid(summary) {
-  const numerator = summary.generated_coverage_numerator;
-  const denominator = summary.generated_coverage_denominator;
-  const ppm = summary.generated_coverage_ppm;
-  if (numerator !== undefined || denominator !== undefined || ppm !== undefined) {
-    if (numerator === undefined || denominator === undefined ||
-        numerator > denominator) {
-      return false;
-    }
-    const computedPpm = denominator === 0
-      ? 0
-      : Number(BigInt(numerator) * 1000000n / BigInt(denominator));
-    if (ppm !== undefined && (ppm > 1000000 || ppm !== computedPpm)) {
-      return false;
-    }
-  }
-  if (summary.workload_count !== undefined) {
-    if (!Array.isArray(summary.workloads) ||
-        summary.workload_count !== summary.workloads.length) {
-      return false;
-    }
-  }
-  if (summary.generated_run_entries !== undefined &&
-      summary.generated_guest_instructions !== undefined &&
-      summary.generated_guest_instructions_per_entry !== undefined) {
-    const expected = summary.generated_run_entries === 0
-      ? 0
-      : Math.floor(
-        summary.generated_guest_instructions / summary.generated_run_entries,
-      );
-    if (summary.generated_guest_instructions_per_entry !== expected ||
-        (summary.generated_run_entries === 0 &&
-         summary.generated_guest_instructions !== 0)) {
-      return false;
-    }
-  }
-  if (["attempts", "successes", "rejects"].every(
-    (field) => summary[field] !== undefined,
-  ) && summary.attempts !== summary.successes + summary.rejects) {
-    return false;
-  }
-  if (summary.preflight_ready === true && summary.successes === 0) {
-    return false;
-  }
-  if (summary.no_silent_fallback === true && summary.compat_fallback === true) {
-    return false;
-  }
-
-  if (summary.event === "runtime-smoke") {
-    return summary.workloads === undefined ||
-      summary.workloads.every((workload) =>
-        summary.ok !== true || workload.ok === true);
-  }
-  if (summary.event === "one-tb-differential") {
-    if (summary.live_shape_fixture !== undefined &&
-        summary.live_shape_fixture !== true) {
-      return false;
-    }
-    if (summary.real_live_state_capture !== undefined &&
-        summary.real_live_state_capture !== false) {
-      return false;
-    }
-  }
-  if (summary.event === "live-one-tb-differential") {
-    if (summary.live_shape_fixture !== undefined &&
-        summary.live_shape_fixture !== false) {
-      return false;
-    }
-    if (summary.real_live_state_capture !== undefined &&
-        summary.real_live_state_capture !== true) {
-      return false;
-    }
-  }
-  if (summary.event === "live-tb-coverage") {
-    if (summary.real_live_tb !== undefined && summary.real_live_tb !== true) {
-      return false;
-    }
-    if (summary.guest_state_commit !== undefined &&
-        summary.guest_state_commit !== false) {
-      return false;
-    }
-  }
-  if (summary.ok === true && [
-    ["generated_status", "reference_status"],
-    ["generated_dispatch_target", "reference_dispatch_target"],
-    ["generated_exit_value", "reference_exit_value"],
-    ["generated_regs_checksum", "reference_regs_checksum"],
-    ["generated_memory_checksum", "reference_memory_checksum"],
-    ["generated_memory_writes", "reference_memory_writes"],
-    ["generated_tci_op_equivalents", "reference_tci_op_equivalents"],
-    ["generated_guest_instructions", "reference_guest_instructions"],
-  ].some(([left, right]) => !equalProjectedFields(summary, left, right))) {
-    return false;
-  }
-  if (summary.ok === true && summary.expected_memory_writes !== undefined &&
-      summary.generated_memory_writes !== undefined &&
-      summary.expected_memory_writes !== summary.generated_memory_writes) {
-    return false;
-  }
-  if (summary.ok === true && summary.js_status !== undefined &&
-      summary.js_status !== 0) {
-    return false;
-  }
-  return true;
-}
-
-function sanitizeWasm64RunloopSummary(rawSummary) {
-  if (!rawSummary || typeof rawSummary !== "object" ||
-      Array.isArray(rawSummary) ||
-      typeof rawSummary.event !== "string") {
-    return null;
-  }
-  const allowed = RUNLOOP_EVENT_FIELDS.get(rawSummary.event);
-  if (!allowed) {
-    return null;
-  }
-  const summary = { event: rawSummary.event };
-  const omittedWideFields = [];
-  for (const [field, raw] of Object.entries(rawSummary)) {
-    if (field === "event" || !allowed.has(field)) {
-      continue;
-    }
-    if (field === "format") {
-      if (raw !== 1) {
-        return null;
-      }
-      summary.format = 1;
-    } else if (RUNLOOP_BOOLEAN_FIELDS.has(field)) {
-      const value = boundedBoolean(raw);
-      if (value === null) {
-        return null;
-      }
-      summary[field] = value;
-    } else if (RUNLOOP_STRING_FIELDS.has(field)) {
-      const value = boundedRunloopString(field, raw);
-      if (value === null) {
-        return null;
-      }
-      summary[field] = value;
-    } else if (RUNLOOP_ARRAY_FIELDS.has(field) ||
-               RUNLOOP_OBJECT_FIELDS.has(field)) {
-      if (raw === null && [
-        "metadata_lookup_sample", "metadata_output_mismatch",
-        "return_validation", "module_failure",
-      ].includes(field)) {
-        summary[field] = null;
-        continue;
-      }
-      const value = projectRunloopNested(raw, field);
-      if (value === null) {
-        return null;
-      }
-      summary[field] = value;
-    } else {
-      const value = boundedNonNegativeInteger(raw);
-      if (value === null) {
-        if (Number.isInteger(raw) && raw >= 0) {
-          omittedWideFields.push(field);
-          continue;
-        }
-        return null;
-      }
-      summary[field] = value;
-    }
-  }
-  if (omittedWideFields.length > 0) {
-    summary.projectionOmittedFields = omittedWideFields;
-  }
-  return runloopSummaryRelationsValid(summary) ? summary : null;
-}
-
-function projectedValuesEqual(left, right) {
-  if (left === right) {
-    return true;
-  }
-  if (!left || !right || typeof left !== "object" ||
-      typeof right !== "object" || Array.isArray(left) !== Array.isArray(right)) {
-    return false;
-  }
-  if (Array.isArray(left)) {
-    return left.length === right.length &&
-      left.every((entry, index) => projectedValuesEqual(entry, right[index]));
-  }
-  const leftKeys = Object.keys(left).sort();
-  const rightKeys = Object.keys(right).sort();
-  return leftKeys.length === rightKeys.length &&
-    leftKeys.every((key, index) => key === rightKeys[index] &&
-      projectedValuesEqual(left[key], right[key]));
 }
 
 /*
  * T42 additive vCPU progress diagnostic. This is bounded last-entered
- * evidence from a cooperative dispatch hook. Every field is enum-checked or
- * range-checked before it enters the result; the whole object is omitted
- * fail-closed when a required field is missing or invalid.
+ * evidence from a cooperative dispatch hook. It is intentionally narrower
+ * than the raw runloop summary and makes no guest-state inference.
  */
 export function sanitizeVcpuLastEntered(lastSummary) {
   const raw = lastSummary && typeof lastSummary === "object"
     ? lastSummary.vcpu_last_entered
     : null;
-  if (!raw || typeof raw !== "object") {
+  const projected = redactRunloopDiagnosticValue(
+    raw, "vcpu_last_entered",
+  );
+  if (!projected || typeof projected !== "object" ||
+      Array.isArray(projected)) {
     return null;
   }
 
-  const phase = typeof raw.phase === "string" &&
-    VCPU_LAST_ENTERED_PHASES.has(raw.phase)
-    ? raw.phase
+  const phase = typeof projected.phase === "string" &&
+    VCPU_LAST_ENTERED_PHASES.has(projected.phase)
+    ? projected.phase
     : null;
-  const iteration = boundedNonNegativeInteger(raw.iteration);
-  const lastGuestPc = boundedNonNegativeInteger(raw.last_guest_pc);
+  const iteration = boundedNonNegativeInteger(projected.iteration);
+  const lastGuestPc = boundedNonNegativeInteger(projected.last_guest_pc);
 
   if (
     phase === null || iteration === null || lastGuestPc === null ||
-    Object.keys(raw).some((key) => ![
-      "publication_address", "phase", "iteration", "last_guest_pc",
-    ].includes(key)) ||
-    (Object.hasOwn(raw, "publication_address") &&
-     boundedRunloopString(
-       "publication_address",
-       raw.publication_address,
-       "vcpu_last_entered",
-     ) === null)
+    Object.keys(projected).some((key) => ![
+      "phase", "iteration", "last_guest_pc",
+    ].includes(key))
   ) {
     return null;
   }
@@ -2290,7 +1781,6 @@ export function sanitizeVcpuLastEntered(lastSummary) {
 
 const VCPU_LAST_ENTERED_PROGRESS_OBSERVATIONS = new Set([
   "publication-unavailable",
-  "publication-inconsistent",
   "awaiting-first-vcpu-entry",
   "new-vcpu-progress-observed",
   "awaiting-bounded-progress-interval",
@@ -2302,8 +1792,8 @@ export function sanitizeVcpuLastEnteredProgress(raw) {
       Object.keys(raw).some((key) => ![
         "enabled", "sampleIntervalMs", "noProgressIntervalMs",
         "sampleCount", "changeCount", "observation", "sequence",
-        "publishedMonotonicMs", "observedElapsedMs",
-        "lastChangeElapsedMs", "unchangedForMs", "guestStateInferred",
+        "observedElapsedMs", "lastChangeElapsedMs", "unchangedForMs",
+        "guestStateInferred",
       ].includes(key))) {
     return null;
   }
@@ -2325,8 +1815,7 @@ export function sanitizeVcpuLastEnteredProgress(raw) {
     return null;
   }
   const nullableFields = [
-    "sequence", "publishedMonotonicMs", "observedElapsedMs",
-    "lastChangeElapsedMs", "unchangedForMs",
+    "sequence", "observedElapsedMs", "lastChangeElapsedMs", "unchangedForMs",
   ];
   const projected = {
     enabled,
@@ -2356,12 +1845,6 @@ export function sanitizeVcpuLastEnteredProgress(raw) {
   return projected;
 }
 
-/*
- * Same bounded-validation treatment for the runloop summary's
- * "pending_causes" object (T42): exact per-cause counts recorded every
- * time the generated-exec main-loop-exit-pending predicate observed a
- * pending interrupt, exit request, or exception.
- */
 export function sanitizePendingCauses(lastSummary) {
   const raw = lastSummary && typeof lastSummary === "object"
     ? lastSummary.pending_causes
@@ -2387,9 +1870,9 @@ export function sanitizePendingCauses(lastSummary) {
 }
 
 /*
- * The browser parser retains raw runloop JSON for its in-page diagnostics,
- * but the written runner result only exposes this fixed, bounded projection.
- * Unknown keys and non-integer values never cross this boundary.
+ * Preserve C's diagnostic object without duplicating its event schemas or
+ * counter relationships. The runner owns only container compatibility and a
+ * bounded recursive redaction boundary.
  */
 export function sanitizeWasm64Runloop(runloop) {
   if (!runloop || typeof runloop !== "object" || Array.isArray(runloop)) {
@@ -2398,60 +1881,24 @@ export function sanitizeWasm64Runloop(runloop) {
 
   const enabled = boundedBoolean(runloop.enabled);
   const summaryCount = boundedNonNegativeInteger(runloop.summaryCount);
-  if (enabled === null || summaryCount === null) {
+  if (enabled === false && summaryCount === 0 &&
+      (runloop.lastSummary === null ||
+       runloop.lastSummary === undefined)) {
     return null;
   }
-  const hasHistory = Object.hasOwn(runloop, "maxSummaries") ||
-    Object.hasOwn(runloop, "summaries");
-  if (hasHistory !== (Object.hasOwn(runloop, "maxSummaries") &&
-                      Object.hasOwn(runloop, "summaries"))) {
+  if (enabled !== true || !summaryCount ||
+      !runloop.lastSummary || typeof runloop.lastSummary !== "object" ||
+      Array.isArray(runloop.lastSummary)) {
     return null;
   }
-  const maxSummaries = hasHistory
-    ? boundedNonNegativeInteger(runloop.maxSummaries)
-    : null;
-  if (hasHistory && (!maxSummaries || maxSummaries > 64 ||
-      !Array.isArray(runloop.summaries) ||
-      runloop.summaries.length !== Math.min(summaryCount, maxSummaries))) {
+
+  const lastSummary = redactRunloopDiagnosticValue(
+    runloop.lastSummary, "lastSummary",
+  );
+  if (!lastSummary || typeof lastSummary.event !== "string") {
     return null;
   }
-  if (!enabled && summaryCount !== 0) {
-    return null;
-  }
-  if (summaryCount === 0) {
-    if (runloop.lastSummary !== null ||
-        (hasHistory && runloop.summaries.length !== 0)) {
-      return null;
-    }
-    return {
-      enabled,
-      ...(hasHistory ? { maxSummaries, summaries: [] } : {}),
-      summaryCount,
-      lastSummary: null,
-    };
-  }
-  if (!enabled || !runloop.lastSummary) {
-    return null;
-  }
-  const lastSummary = sanitizeWasm64RunloopSummary(runloop.lastSummary);
-  if (lastSummary === null) {
-    return null;
-  }
-  if (!hasHistory) {
-    return { enabled, summaryCount, lastSummary };
-  }
-  const summaries = [];
-  for (const rawSummary of runloop.summaries) {
-    const summary = sanitizeWasm64RunloopSummary(rawSummary);
-    if (summary === null) {
-      return null;
-    }
-    summaries.push(summary);
-  }
-  if (!projectedValuesEqual(summaries[summaries.length - 1], lastSummary)) {
-    return null;
-  }
-  return { enabled, maxSummaries, summaryCount, summaries, lastSummary };
+  return { enabled, summaryCount, lastSummary };
 }
 
 function sanitizeRunloopText(value) {
@@ -2466,16 +1913,19 @@ function sanitizeRunloopText(value) {
     }
     let event = null;
     try {
-      const projected = sanitizeWasm64RunloopSummary(
+      const projected = redactRunloopDiagnosticValue(
         JSON.parse(line.slice(prefixIndex + prefix.length).trimStart()),
+        "lastSummary",
       );
-      event = projected && projected.event;
+      event = projected && typeof projected.event === "string"
+        ? projected.event
+        : null;
     } catch {
       event = null;
     }
-    return `[${event
-      ? `bounded wasm64 runloop diagnostic: ${event}`
-      : "rejected wasm64 runloop diagnostic"}]`;
+    return event
+      ? "[bounded wasm64 runloop diagnostic: " + event + "]"
+      : "[rejected wasm64 runloop diagnostic]";
   }).join("\n");
 }
 

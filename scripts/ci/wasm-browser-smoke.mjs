@@ -1365,24 +1365,11 @@ const VCPU_LAST_ENTERED_SAMPLE_INTERVAL_MS = 1000;
 const VCPU_LAST_ENTERED_NO_PROGRESS_INTERVAL_MS = 5000;
 
 function readVcpuLastEnteredPublication(publication) {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const sequenceBefore = Atomics.load(publication, 0);
-    const publishedMonotonicMs = Atomics.load(publication, 1);
-    const sequenceAfter = Atomics.load(publication, 0);
-    if (sequenceBefore === sequenceAfter) {
-      if (
-        sequenceAfter > BigInt(Number.MAX_SAFE_INTEGER) ||
-        publishedMonotonicMs > BigInt(Number.MAX_SAFE_INTEGER)
-      ) {
-        return null;
-      }
-      return {
-        sequence: Number(sequenceAfter),
-        publishedMonotonicMs: Number(publishedMonotonicMs),
-      };
-    }
+  const sequence = Atomics.load(publication, 0);
+  if (sequence > BigInt(Number.MAX_SAFE_INTEGER)) {
+    return null;
   }
-  return null;
+  return Number(sequence);
 }
 
 export function vcpuLastEnteredPublicationAddress(lastSummary) {
@@ -1397,7 +1384,7 @@ export function vcpuLastEnteredPublicationAddress(lastSummary) {
 
 /*
  * This interval runs on the browser main thread and reads only the atomically
- * published cooperative-entry sequence/timestamp from shared Wasm memory.
+ * published cooperative-entry sequence from shared Wasm memory.
  * An unchanged sequence means that no new vCPU progress was observed for the
  * measured interval. It deliberately makes no inference about guest state.
  */
@@ -1421,7 +1408,6 @@ export function installVcpuLastEnteredProgressSampler(
     changeCount: 0,
     observation: "publication-unavailable",
     sequence: null,
-    publishedMonotonicMs: null,
     observedElapsedMs: null,
     lastChangeElapsedMs: null,
     unchangedForMs: null,
@@ -1437,21 +1423,18 @@ export function installVcpuLastEnteredProgressSampler(
     return null;
   }
 
-  const addressFunction = module &&
-    module._tcg_wasm64_vcpu_last_entered_publication_address;
-  const rawAddress = overrides.publicationAddress ??
-    (typeof addressFunction === "function" ? addressFunction() : null);
+  const rawAddress = overrides.publicationAddress;
   const address = typeof rawAddress === "bigint"
     ? Number(rawAddress)
     : rawAddress;
   if (
     !Number.isSafeInteger(address) || address < 0 || address % 8 !== 0 ||
-    address + 16 > buffer.byteLength
+    address + 8 > buffer.byteLength
   ) {
     return null;
   }
 
-  const publication = new BigUint64Array(buffer, address, 2);
+  const publication = new BigUint64Array(buffer, address, 1);
   const startedAtMs = scope.performance.now();
   let lastSequence = null;
   let lastChangeElapsedMs = null;
@@ -1464,18 +1447,17 @@ export function installVcpuLastEnteredProgressSampler(
     diagnostic.sampleCount += 1;
     diagnostic.observedElapsedMs = observedElapsedMs;
     if (observed === null) {
-      diagnostic.observation = "publication-inconsistent";
+      diagnostic.observation = "publication-unavailable";
       return;
     }
-    diagnostic.sequence = observed.sequence;
-    diagnostic.publishedMonotonicMs = observed.publishedMonotonicMs;
-    if (observed.sequence === 0) {
+    diagnostic.sequence = observed;
+    if (observed === 0) {
       diagnostic.observation = "awaiting-first-vcpu-entry";
       diagnostic.unchangedForMs = null;
       return;
     }
-    if (observed.sequence !== lastSequence) {
-      lastSequence = observed.sequence;
+    if (observed !== lastSequence) {
+      lastSequence = observed;
       lastChangeElapsedMs = observedElapsedMs;
       diagnostic.changeCount += 1;
       diagnostic.lastChangeElapsedMs = observedElapsedMs;
