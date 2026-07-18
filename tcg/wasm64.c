@@ -326,7 +326,7 @@ typedef struct TCGWasm64LiveMultiAccessRejectStat {
     int32_t last_access_index;
     TCGWasm64LiveMultiAccessBranchPosition branch_position;
     /*
-     * Additive diagnostic detail only (T42 vCPU liveness): total brcond
+     * Additive diagnostic detail only (T42): total brcond
      * count seen in the rejected body and the first branch's resolved
      * target word index, alongside the existing first-branch index/position.
      * Neither field feeds any admission or rejection decision.
@@ -680,22 +680,28 @@ static __thread bool live_tb_coverage_no_shape_reported;
 static __thread uint64_t live_tb_coverage_scanned;
 
 /*
- * T42 additive vCPU liveness diagnostic. This records only the last
+ * T42 additive vCPU progress diagnostic. This records only the last
  * cooperative dispatch entry: the TCI fallback dispatcher, a generated
  * attempt/JS run, or the surrounding main dispatch loop. It is last-entered
- * evidence, not periodic sampling or a claim of post-freeze progress.
- * It never feeds an admission or rejection decision.
+ * evidence and never feeds an admission or rejection decision.
  */
-typedef enum TCGWasm64VcpuLivenessPhase {
-    TCG_WASM64_VCPU_LIVENESS_PHASE_MAIN_LOOP,
-    TCG_WASM64_VCPU_LIVENESS_PHASE_TCI_DISPATCH,
-    TCG_WASM64_VCPU_LIVENESS_PHASE_GENERATED_ATTEMPT_JS,
-} TCGWasm64VcpuLivenessPhase;
+typedef enum TCGWasm64VcpuLastEnteredPhase {
+    TCG_WASM64_VCPU_LAST_ENTERED_PHASE_MAIN_LOOP,
+    TCG_WASM64_VCPU_LAST_ENTERED_PHASE_TCI_DISPATCH,
+    TCG_WASM64_VCPU_LAST_ENTERED_PHASE_GENERATED_ATTEMPT_JS,
+} TCGWasm64VcpuLastEnteredPhase;
 
-static __thread TCGWasm64VcpuLivenessPhase vcpu_liveness_phase =
-    TCG_WASM64_VCPU_LIVENESS_PHASE_MAIN_LOOP;
-static __thread uint64_t vcpu_liveness_iteration;
-static __thread uint64_t vcpu_liveness_last_guest_pc;
+typedef struct TCGWasm64VcpuLastEnteredPublication {
+    uint64_t sequence;
+    uint64_t monotonic_ms;
+} TCGWasm64VcpuLastEnteredPublication;
+
+static __thread TCGWasm64VcpuLastEnteredPhase vcpu_last_entered_phase =
+    TCG_WASM64_VCPU_LAST_ENTERED_PHASE_MAIN_LOOP;
+static __thread uint64_t vcpu_last_entered_iteration;
+static __thread uint64_t vcpu_last_entered_guest_pc;
+static TCGWasm64VcpuLastEnteredPublication vcpu_last_entered_publication
+    QEMU_ALIGNED(8);
 
 /*
  * Exact cause breakdown recorded every time
@@ -729,8 +735,8 @@ static uint64_t tcg_wasm64_current_address_space_generation = 1;
 
 static const char *tcg_wasm64_op_name(uint32_t op);
 static void tcg_wasm64_report_live_generated_exec_summary(const char *reason);
-static const char *tcg_wasm64_vcpu_liveness_phase_name(
-    TCGWasm64VcpuLivenessPhase phase);
+static const char *tcg_wasm64_vcpu_last_entered_phase_name(
+    TCGWasm64VcpuLastEnteredPhase phase);
 static const char *
 tcg_wasm64_live_generated_exec_js_status_reject_reason(uint64_t status);
 static const char *
@@ -9493,7 +9499,8 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             "\"interrupt\":%" PRIu64 ","
             "\"exit\":%" PRIu64 ","
             "\"exception\":%" PRIu64 "},"
-            "\"vcpu_liveness\":{"
+            "\"vcpu_last_entered\":{"
+            "\"publication_address\":\"0x%" PRIxPTR "\","
             "\"phase\":\"%s\","
             "\"iteration\":%" PRIu64 ","
             "\"last_guest_pc\":%" PRIu64 "},"
@@ -9558,9 +9565,11 @@ static void tcg_wasm64_report_live_generated_exec_summary(const char *reason)
             live_generated_exec_main_loop_pending_interrupt,
             live_generated_exec_main_loop_pending_exit,
             live_generated_exec_main_loop_pending_exception,
-            tcg_wasm64_vcpu_liveness_phase_name(vcpu_liveness_phase),
-            vcpu_liveness_iteration,
-            vcpu_liveness_last_guest_pc,
+            (uintptr_t)&vcpu_last_entered_publication,
+            tcg_wasm64_vcpu_last_entered_phase_name(
+                vcpu_last_entered_phase),
+            vcpu_last_entered_iteration,
+            vcpu_last_entered_guest_pc,
             live_generated_exec_metadata_lookup_status[
                 TCG_WASM64_TRANSLATE_LOOKUP_OK],
             live_generated_exec_metadata_lookup_status[
@@ -10067,7 +10076,7 @@ static bool tcg_wasm64_live_generated_exec_prepare_tb(
     return true;
 }
 
-static void tcg_wasm64_vcpu_liveness_record_pending_causes(
+static void tcg_wasm64_vcpu_last_entered_record_pending_causes(
     bool pending_interrupt, bool pending_exit, bool pending_exception)
 {
     if (pending_interrupt) {
@@ -10091,21 +10100,21 @@ static bool tcg_wasm64_live_generated_exec_main_loop_exit_pending(
     bool pending = pending_interrupt || pending_exit || pending_exception;
 
     if (pending) {
-        tcg_wasm64_vcpu_liveness_record_pending_causes(
+        tcg_wasm64_vcpu_last_entered_record_pending_causes(
             pending_interrupt, pending_exit, pending_exception);
     }
     return pending;
 }
 
-static const char *tcg_wasm64_vcpu_liveness_phase_name(
-    TCGWasm64VcpuLivenessPhase phase)
+static const char *tcg_wasm64_vcpu_last_entered_phase_name(
+    TCGWasm64VcpuLastEnteredPhase phase)
 {
     switch (phase) {
-    case TCG_WASM64_VCPU_LIVENESS_PHASE_MAIN_LOOP:
+    case TCG_WASM64_VCPU_LAST_ENTERED_PHASE_MAIN_LOOP:
         return "main-loop";
-    case TCG_WASM64_VCPU_LIVENESS_PHASE_TCI_DISPATCH:
+    case TCG_WASM64_VCPU_LAST_ENTERED_PHASE_TCI_DISPATCH:
         return "tci-dispatch";
-    case TCG_WASM64_VCPU_LIVENESS_PHASE_GENERATED_ATTEMPT_JS:
+    case TCG_WASM64_VCPU_LAST_ENTERED_PHASE_GENERATED_ATTEMPT_JS:
         return "generated-attempt-js";
     default:
         return "unknown";
@@ -10115,16 +10124,29 @@ static const char *tcg_wasm64_vcpu_liveness_phase_name(
 /*
  * Cheap cooperative dispatch-entry note: records the last entered phase and
  * optionally refreshes the last known guest PC when the caller has one
- * cheaply available. It does not publish a summary or alter dispatch.
+ * cheaply available. When live generated execution diagnostics are enabled,
+ * the sequence and timestamp are atomically published in shared Wasm memory
+ * for observation by the browser main thread. They prove only whether a new
+ * cooperative entry was observed; they do not identify guest state.
  */
-static void tcg_wasm64_vcpu_liveness_note(TCGWasm64VcpuLivenessPhase phase,
-                                           bool guest_pc_known,
-                                           uint64_t guest_pc)
+static void tcg_wasm64_vcpu_last_entered_note(
+    TCGWasm64VcpuLastEnteredPhase phase, bool guest_pc_known,
+    uint64_t guest_pc)
 {
-    vcpu_liveness_iteration++;
-    vcpu_liveness_phase = phase;
+    QEMU_BUILD_BUG_ON(offsetof(TCGWasm64VcpuLastEnteredPublication,
+                               sequence) != 0);
+    QEMU_BUILD_BUG_ON(offsetof(TCGWasm64VcpuLastEnteredPublication,
+                               monotonic_ms) != 8);
+    QEMU_BUILD_BUG_ON(sizeof(TCGWasm64VcpuLastEnteredPublication) != 16);
+    vcpu_last_entered_iteration++;
+    vcpu_last_entered_phase = phase;
     if (guest_pc_known) {
-        vcpu_liveness_last_guest_pc = guest_pc;
+        vcpu_last_entered_guest_pc = guest_pc;
+    }
+    if (live_generated_exec_enabled) {
+        qatomic_store_release(&vcpu_last_entered_publication.monotonic_ms,
+                              g_get_monotonic_time() / 1000u);
+        qatomic_inc_fetch(&vcpu_last_entered_publication.sequence);
     }
 }
 
@@ -10364,8 +10386,8 @@ static bool tcg_wasm64_live_generated_exec_try(
             break;
         }
 
-        tcg_wasm64_vcpu_liveness_note(
-            TCG_WASM64_VCPU_LIVENESS_PHASE_GENERATED_ATTEMPT_JS,
+        tcg_wasm64_vcpu_last_entered_note(
+            TCG_WASM64_VCPU_LAST_ENTERED_PHASE_GENERATED_ATTEMPT_JS,
             true, (uint64_t)tb->pc);
 
         if (has_memop) {
@@ -11182,8 +11204,8 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
         .counters = counters,
     };
 
-    tcg_wasm64_vcpu_liveness_note(
-        TCG_WASM64_VCPU_LIVENESS_PHASE_MAIN_LOOP, false, 0);
+    tcg_wasm64_vcpu_last_entered_note(
+        TCG_WASM64_VCPU_LAST_ENTERED_PHASE_MAIN_LOOP, false, 0);
     tcg_wasm64_runloop_smoke_maybe(env);
     tcg_wasm64_one_tb_differential_maybe(env);
 
@@ -11236,8 +11258,8 @@ uintptr_t tcg_wasm64_tb_exec(CPUArchState *env, const void *tb_ptr,
             fallback_guest_insns;
         tci_dispatch_start_ns = tcg_wasm64_runloop_smoke_time_ns();
     }
-    tcg_wasm64_vcpu_liveness_note(
-        TCG_WASM64_VCPU_LIVENESS_PHASE_TCI_DISPATCH, false, 0);
+    tcg_wasm64_vcpu_last_entered_note(
+        TCG_WASM64_VCPU_LAST_ENTERED_PHASE_TCI_DISPATCH, false, 0);
     active_counters = counters;
     ret = tcg_tci_qemu_tb_exec(env, tb_ptr);
     active_counters = previous_counters;

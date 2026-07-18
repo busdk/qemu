@@ -30,7 +30,9 @@ import {
   requestPowerOperation,
   responseErrorDiagnostic,
   sanitizePendingCauses,
-  sanitizeVcpuLiveness,
+  sanitizeSmokeResultForSerialization,
+  sanitizeVcpuLastEntered,
+  sanitizeVcpuLastEnteredProgress,
   sanitizeWasm64Runloop,
   serialIdleDiagnostic,
   smokeResultSummary,
@@ -40,6 +42,7 @@ import {
   bootMilestoneForLine,
   fwCfgTrace,
   hotBlockSummary,
+  installVcpuLastEnteredProgressSampler,
   perfAttributionSummary,
   recordBootMilestone,
   recordFwCfgTrace,
@@ -51,6 +54,7 @@ import {
   recordWasm64TcgSummary,
   tciProgressSummary,
   tciWasmGeneratedTrace,
+  vcpuLastEnteredPublicationAddress,
   wasm64RunloopSummary,
   wasm64TcgSummary,
 } from "./wasm-browser-smoke.mjs";
@@ -2642,265 +2646,367 @@ for (const status of [
   });
 }
 
-// T42 vCPU liveness diagnostic: bounded last-entered validation.
-{
-  assert.deepEqual(
-    sanitizeVcpuLiveness({
-      vcpu_liveness: {
-        phase: "generated-attempt-js",
-        iteration: 58,
-        last_guest_pc: 4096,
-      },
-    }),
-    {
-      phase: "generated-attempt-js",
-      iteration: 58,
-      lastGuestPc: 4096,
-    },
-  );
-
-  // No lastSummary / no vcpu_liveness object at all: fails closed to null,
-  // matching what the parent (pre-T42) runloop summary shape looks like.
-  assert.equal(sanitizeVcpuLiveness(null), null);
-  assert.equal(sanitizeVcpuLiveness({}), null);
-  assert.equal(sanitizeVcpuLiveness({ vcpu_liveness: null }), null);
-  assert.equal(sanitizeVcpuLiveness({ vcpu_liveness: "not-an-object" }), null);
-
-  // Unknown/guest-controlled phase strings fail closed rather than being
-  // forwarded verbatim into the result (no raw string may enter results).
-  assert.equal(
-    sanitizeVcpuLiveness({
-      vcpu_liveness: {
-        phase: "<script>alert(1)</script>",
-        iteration: 1,
-        last_guest_pc: 0,
-      },
-    }),
-    null,
-  );
-
-  // Negative iteration/pc are guest/runtime-controlled sentinels and must
-  // fail closed rather than being coerced or truncated.
-  for (const badIteration of [-1, 1.5, "58", null, undefined, NaN, Infinity]) {
-    assert.equal(
-      sanitizeVcpuLiveness({
-        vcpu_liveness: {
-          phase: "main-loop",
-          iteration: badIteration,
-          last_guest_pc: 0,
-        },
-      }),
-      null,
-      `iteration=${String(badIteration)} must fail closed`,
-    );
-  }
-  for (const badPc of [-1, 1.5, "0x1000", Number.MAX_SAFE_INTEGER + 2]) {
-    assert.equal(
-      sanitizeVcpuLiveness({
-        vcpu_liveness: {
-          phase: "main-loop",
-          iteration: 1,
-          last_guest_pc: badPc,
-        },
-      }),
-      null,
-      `last_guest_pc=${String(badPc)} must fail closed`,
-    );
-  }
-
-  // Halted and pending observations do not belong to a cooperative
-  // last-entered snapshot; unexpected fields fail closed.
-  assert.equal(
-    sanitizeVcpuLiveness({
-      vcpu_liveness: {
-        phase: "main-loop",
-        iteration: 1,
-        last_guest_pc: 0,
-        halted: false,
-      },
-    }),
-    null,
-  );
-}
-
-// T42 vCPU liveness diagnostic: sanitizePendingCauses bounded validation.
-{
-  assert.deepEqual(
-    sanitizePendingCauses({
-      pending_causes: {
-        interrupt: 3,
-        exit: 0,
-        exception: 1,
-      },
-    }),
-    {
-      interrupt: 3,
-      exit: 0,
-      exception: 1,
-    },
-  );
-
-  assert.equal(sanitizePendingCauses(null), null);
-  assert.equal(sanitizePendingCauses({}), null);
-  assert.equal(sanitizePendingCauses({ pending_causes: null }), null);
-
-  for (const badCount of [-1, 1.5, "3", null, undefined]) {
-    assert.equal(
-      sanitizePendingCauses({
-        pending_causes: {
-          interrupt: badCount,
-          exit: 0,
-          exception: 0,
-        },
-      }),
-      null,
-      `interrupt=${String(badCount)} must fail closed`,
-    );
-  }
-}
-
-// T42: promoteSmokeState only emits bounded projections of parser-owned
-// runloop diagnostics, while preserving the additive fields when valid.
-{
-  const withLiveness = { untouched: true };
-  promoteSmokeState(withLiveness, {
-    wasm64Runloop: {
-      enabled: true,
-      summaryCount: 1,
-      lastSummary: {
-        event: "runtime-smoke",
-        generated_guest_instructions: 4000000,
-        vcpu_liveness: {
-          phase: "tci-dispatch",
-          iteration: 12,
-          last_guest_pc: 8192,
-        },
-        pending_causes: {
-          interrupt: 2,
-          exit: 0,
-          exception: 0,
-        },
-      },
-    },
-  });
-  assert.deepEqual(withLiveness.wasm64Runloop, {
+function fullRunloop(summary, maxSummaries = 16) {
+  return {
     enabled: true,
+    maxSummaries,
     summaryCount: 1,
-    lastSummary: {
-      event: "runtime-smoke",
-      generated_guest_instructions: 4000000,
-    },
-  });
-  assert.deepEqual(withLiveness.vcpuLiveness, {
-    phase: "tci-dispatch",
-    iteration: 12,
-    lastGuestPc: 8192,
-  });
-  assert.deepEqual(withLiveness.pendingCauses, {
-    interrupt: 2,
-    exit: 0,
-    exception: 0,
-  });
-
-  const withoutLiveness = { untouched: true };
-  promoteSmokeState(withoutLiveness, {
-    wasm64Runloop: {
-      enabled: true,
-      summaryCount: 1,
-      lastSummary: {
-        event: "runtime-smoke",
-        generated_guest_instructions: 4000000,
-      },
-    },
-  });
-  assert.equal(withoutLiveness.vcpuLiveness, null);
-  assert.equal(withoutLiveness.pendingCauses, null);
-
-  const withNoRunloopAtAll = { untouched: true };
-  promoteSmokeState(withNoRunloopAtAll, {});
-  assert.equal(withNoRunloopAtAll.wasm64Runloop, null);
-  assert.equal(withNoRunloopAtAll.vcpuLiveness, null);
-  assert.equal(withNoRunloopAtAll.pendingCauses, null);
+    summaries: [{ ...summary }],
+    lastSummary: { ...summary },
+  };
 }
 
-// T42: parser input alone proves only parser acceptance. The vCPU snapshot is
-// explicitly last-entered evidence; it is not a one-second or post-freeze
-// progress proof.
-{
-  const state = {
-    wasm64Runloop: {
-      maxSummaries: 8,
-      summaryCount: 0,
-      summaries: [],
-      lastSummary: null,
-    },
-  };
-  recordWasm64RunloopSummary(
-    state,
-    "qemu-wasm64-runloop: {\"format\":1,\"event\":\"live-generated-exec-summary\"," +
-      "\"vcpu_liveness\":{\"phase\":\"generated-attempt-js\",\"iteration\":58," +
-      "\"last_guest_pc\":4096}}",
-    58000,
-  );
-
-  assert.equal(state.wasm64Runloop.summaryCount, 1);
-  assert.equal(state.wasm64Runloop.summaries.length, 1);
-  assert.deepEqual(sanitizeVcpuLiveness(state.wasm64Runloop.lastSummary), {
+const t42GeneratedSummary = {
+  elapsedMs: 1000,
+  format: 1,
+  event: "live-generated-exec-summary",
+  reason: "interval",
+  chain_exit_reason: "none",
+  compat_fallback: true,
+  preflight: false,
+  preflight_limit: 10000,
+  chain_budget: 4096,
+  preflight_ready: true,
+  no_silent_fallback: false,
+  attempts: 1,
+  successes: 1,
+  rejects: 0,
+  skips: 0,
+  generated_run_entries: 1,
+  generated_guest_instructions: 3,
+  fallback_guest_instructions: 7,
+  generated_body_time_ns: 20,
+  generated_chain_length: 1,
+  generated_guest_instructions_per_entry: 3,
+  generated_coverage_numerator: 3,
+  generated_coverage_denominator: 10,
+  generated_coverage_ppm: 300000,
+  inline_tlb_hit_loads: 4,
+  exits_unsupported: 0,
+  pending_causes: { interrupt: 2, exit: 0, exception: 1 },
+  vcpu_last_entered: {
+    publication_address: "0x10",
     phase: "generated-attempt-js",
-    iteration: 58,
+    iteration: 9,
+    last_guest_pc: 4096,
+  },
+};
+
+// T42: both cooperative-entry projections are exact, bounded, and named for
+// what they prove.
+{
+  assert.deepEqual(sanitizeVcpuLastEntered(t42GeneratedSummary), {
+    phase: "generated-attempt-js",
+    iteration: 9,
     lastGuestPc: 4096,
   });
+  assert.deepEqual(sanitizePendingCauses(t42GeneratedSummary), {
+    interrupt: 2,
+    exit: 0,
+    exception: 1,
+  });
+  for (const badIteration of [-1, 1.5, "9", null, NaN, Infinity]) {
+    assert.equal(sanitizeVcpuLastEntered({
+      vcpu_last_entered: {
+        phase: "main-loop",
+        iteration: badIteration,
+        last_guest_pc: 0,
+      },
+    }), null);
+  }
+  assert.equal(sanitizeVcpuLastEntered({
+    vcpu_last_entered: {
+      phase: "unbounded-guest-string",
+      iteration: 1,
+      last_guest_pc: 0,
+    },
+  }), null);
+  assert.equal(sanitizePendingCauses({
+    pending_causes: { interrupt: -1, exit: 0, exception: 0 },
+  }), null);
 }
 
-// T42: the written result keeps a bounded runloop projection only. Raw parser
-// keys, invalid numeric values, and review sentinels cannot escape elsewhere
-// in complete result JSON.
+// T42: all established runloop event families keep their accepted evidence.
 {
-  const raw = {
-    enabled: true,
-    summaryCount: 1,
-    lastSummary: {
-      event: "live-generated-exec-summary",
-      generated_run_entries: 7,
-      generated_guest_instructions: -1,
+  const eventFixtures = {
+    "runtime-smoke": {
+      elapsedMs: 10,
+      format: 1,
+      event: "runtime-smoke",
+      ok: true,
+      budget: 100,
+      exit_reason: "budget",
+      exit_reason_code: 1,
+      generated_guest_instructions: 400,
+      fallback_guest_instructions: 400,
       generated_body_time_ns: 20,
-      generated_coverage_numerator: 3,
-      generated_coverage_denominator: 9,
-      REVIEW_SECRET_SENTINEL: "REVIEW_SECRET_SENTINEL",
-      nested: { guest: "REVIEW_SECRET_SENTINEL" },
+      tci_dispatch_time_ns: 100,
+      generated_vs_tci_speedup_ppm: 5000000,
+      min_generated_vs_tci_speedup_ppm: 3000000,
+      generated_chain_length: 100,
+      inline_tlb_hit_loads: 4,
+      inline_tlb_hit_stores: 4,
+      helper_calls: 0,
+      qemu_ld_calls: 0,
+      qemu_st_calls: 0,
+      exits_budget: 1,
+      exits_unsupported: 0,
+      workload_count: 0,
+      workloads: [],
     },
+    "one-tb-differential": {
+      elapsedMs: 20,
+      format: 1,
+      event: "one-tb-differential",
+      name: "live-x86-pre-r4i-ld32u-goto-tb-13",
+      ok: true,
+      live_shape_fixture: true,
+      real_live_state_capture: false,
+      shape: ["ld32u", "goto_tb"],
+      generated_tci_op_equivalents: 2,
+      reference_tci_op_equivalents: 2,
+      generated_status: 2,
+      reference_status: 2,
+      generated_memory_writes: 1,
+      reference_memory_writes: 1,
+      expected_memory_writes: 1,
+      js_status: 0,
+    },
+    "live-one-tb-differential": {
+      elapsedMs: 30,
+      format: 1,
+      event: "live-one-tb-differential",
+      name: "live-x86-r4i-ld32u-goto-tb-11",
+      ok: true,
+      live_shape_fixture: false,
+      real_live_state_capture: true,
+      shape: ["ld32u", "goto_tb"],
+      tb_ptr: "0x1000",
+      generated_guest_instructions: 1,
+      reference_guest_instructions: 1,
+      generated_status: 2,
+      reference_status: 2,
+      generated_memory_writes: 1,
+      reference_memory_writes: 1,
+      expected_memory_writes: 1,
+      js_status: 0,
+      js_status_name: "ok",
+    },
+    "live-tb-coverage": {
+      elapsedMs: 40,
+      format: 1,
+      event: "live-tb-coverage",
+      name: "live-rv64-generated-coverage",
+      ok: true,
+      real_live_tb: true,
+      guest_state_commit: false,
+      tb_ptr: "0x2000",
+      generated_guest_instructions: 1,
+      generated_status: 1,
+      reference_status: 1,
+      generated_exit_value: 2,
+      reference_exit_value: 2,
+      generated_tci_op_equivalents: 3,
+      reference_tci_op_equivalents: 3,
+      js_status: 0,
+    },
+    "live-generated-exec-summary": t42GeneratedSummary,
   };
-  assert.deepEqual(sanitizeWasm64Runloop(raw), {
-    enabled: true,
-    summaryCount: 1,
-    lastSummary: {
-      event: "live-generated-exec-summary",
-      generated_run_entries: 7,
-      generated_body_time_ns: 20,
-      generated_coverage_numerator: 3,
-      generated_coverage_denominator: 9,
-    },
-  });
+  const projected = Object.fromEntries(Object.entries(eventFixtures).map(
+    ([event, summary]) => [event, sanitizeWasm64Runloop(fullRunloop(summary))],
+  ));
+  for (const [event, runloop] of Object.entries(projected)) {
+    assert.equal(runloop.lastSummary.event, event);
+    assert.equal(runloop.summaries[0].event, event);
+  }
+  const runtime = projected["runtime-smoke"].lastSummary;
+  assert.equal(runtime.fallback_guest_instructions, 400);
+  assert.equal(runtime.generated_chain_length, 100);
+  assert.equal(runtime.inline_tlb_hit_loads, 4);
+  assert.equal(runtime.exits_unsupported, 0);
+}
 
-  const result = {};
-  promoteSmokeState(result, { wasm64Runloop: raw });
-  const encoded = JSON.stringify(result);
-  assert.equal(encoded.includes("REVIEW_SECRET_SENTINEL"), false);
+// T42: numerical and container relations reject impossible evidence.
+{
+  assert.equal(sanitizeWasm64Runloop(fullRunloop({
+    ...t42GeneratedSummary,
+    generated_coverage_numerator: 10,
+    generated_coverage_denominator: 1,
+    generated_coverage_ppm: 2000000,
+  })), null);
+  assert.equal(sanitizeWasm64Runloop({
+    ...fullRunloop(t42GeneratedSummary),
+    enabled: false,
+  }), null);
+  assert.equal(sanitizeWasm64Runloop({
+    ...fullRunloop(t42GeneratedSummary),
+    summaryCount: 2,
+  }), null);
+  assert.equal(sanitizeWasm64Runloop({
+    enabled: true,
+    maxSummaries: 16,
+    summaryCount: 0,
+    summaries: [t42GeneratedSummary],
+    lastSummary: t42GeneratedSummary,
+  }), null);
+  assert.equal(sanitizeWasm64Runloop(fullRunloop({
+    ...t42GeneratedSummary,
+    attempts: -1,
+  })), null);
+  assert.equal(sanitizeWasm64Runloop(fullRunloop({
+    format: 1,
+    event: "live-one-tb-differential",
+    live_shape_fixture: true,
+    real_live_state_capture: true,
+  })), null);
+  const contradictoryLast = fullRunloop(t42GeneratedSummary);
+  contradictoryLast.lastSummary = {
+    format: 1,
+    event: "runtime-smoke",
+  };
+  assert.equal(sanitizeWasm64Runloop(contradictoryLast), null);
+}
+
+// T42: populated whole-result projection closes every previously observed
+// escape route while retaining ordinary diagnostics.
+{
+  const sentinel = "REVIEW_SECRET_SENTINEL";
+  const poisoned = {
+    ...t42GeneratedSummary,
+    generated_guest_instructions: -1,
+    oversized: Number.MAX_SAFE_INTEGER + 1,
+    unexpected_key: sentinel,
+  };
+  const rawLine = `qemu-wasm64-runloop: ${JSON.stringify(poisoned)}`;
+  const rawState = {
+    phase: "guest-boot",
+    phases: [{ phase: "guest-boot", elapsedMs: 900, message: "starting" }],
+    qemuArgs: ["-M", "virt"],
+    markerSeen: false,
+    expectedTextSeen: [{ text: "login:", seen: false }],
+    lines: 2,
+    outputBytes: 128,
+    guestLines: 1,
+    guestOutputBytes: 32,
+    lastLine: `${sentinel} ${rawLine}`,
+    guestLastLine: "Linux version 6.x",
+    wasm64Runloop: fullRunloop(poisoned),
+  };
+  const promoted = {};
+  promoteSmokeState(promoted, rawState);
+  const progress = progressSampleDiagnostic(
+    { progressSamples: [] }, 1000, "whole-result", rawState,
+  );
+  const pageError = pageErrorDiagnostic(
+    new Error("whole-result"), 1000, rawState,
+  );
+  const complete = sanitizeSmokeResultForSerialization({
+    success: false,
+    phase: "guest-boot",
+    ...promoted,
+    progressSamples: [progress],
+    pageErrors: [pageError],
+    pageTextTail: `ordinary page diagnostic\n${rawLine}`,
+    smokeState: rawState,
+  });
+  const encoded = JSON.stringify(complete);
+  assert.equal(encoded.includes(sentinel), false);
+  assert.equal(encoded.includes("unexpected_key"), false);
   assert.equal(encoded.includes("generated_guest_instructions\":-1"), false);
-  assert.equal(encoded.includes("nested"), false);
+  assert.equal(encoded.includes("qemu-wasm64-runloop:"), false);
+  assert.equal(encoded.includes("ordinary page diagnostic"), true);
+  assert.equal(JSON.stringify(progress).includes(sentinel), false);
+  assert.equal(JSON.stringify(pageError).includes(sentinel), false);
+  assert.equal(Object.hasOwn(promoted, "vcpuLastEntered"), true);
+  const broadPublicName = ["vcpu", "Liveness"].join("");
+  assert.equal(Object.hasOwn(promoted, broadPublicName), false);
+  assert.match(runnerSource, /sanitizeRunloopText\(text\)\.slice\(-tailBytes\)/);
   assert.doesNotMatch(runnerSource, /result\.smokeState\s*=/);
 }
 
-// T42 mutation controls: no periodic ticker, halted state, or unsafe direct
-// cross-thread flag read may return in the bounded liveness implementation.
-assert.match(wasm64Source, /cpu_test_interrupt\(cpu, ~0\)/);
-assert.match(wasm64Source, /qatomic_load_acquire\(&cpu->exit_request\)/);
-assert.match(wasm64Source, /post-freeze progress/);
+// T42: the browser-main-thread interval continues to atomically sample after
+// the vCPU publication stops changing, then records only the bounded
+// observational classification.
+{
+  const shared = new SharedArrayBuffer(64);
+  const publication = new BigUint64Array(shared, 16, 2);
+  Atomics.store(publication, 0, 1n);
+  Atomics.store(publication, 1, 10n);
+  let now = 0;
+  const callbacks = [];
+  const scope = {
+    performance: { now: () => now },
+    setInterval(callback) {
+      callbacks.push(callback);
+      return callbacks.length;
+    },
+    clearInterval() {},
+  };
+  const state = {};
+  const publicationAddress = vcpuLastEnteredPublicationAddress({
+    vcpu_last_entered: { publication_address: "0x10" },
+  });
+  assert.equal(publicationAddress, 16);
+  const sampler = installVcpuLastEnteredProgressSampler({
+    HEAPU8: { buffer: shared },
+  }, state, scope, {
+    publicationAddress,
+    sampleIntervalMs: 10,
+    noProgressIntervalMs: 30,
+  });
+  Atomics.store(publication, 1, 20n);
+  Atomics.store(publication, 0, 2n);
+  for (now of [10, 20, 30, 40]) {
+    callbacks[0]();
+  }
+  assert.notEqual(sampler, null);
+  assert.equal(callbacks.length, 1);
+  assert.equal(state.vcpuLastEnteredProgress.sampleCount, 5);
+  assert.equal(state.vcpuLastEnteredProgress.sequence, 2);
+  assert.equal(state.vcpuLastEnteredProgress.publishedMonotonicMs, 20);
+  assert.equal(
+    state.vcpuLastEnteredProgress.observation,
+    "no-new-vcpu-progress-observed",
+  );
+  assert.equal(state.vcpuLastEnteredProgress.unchangedForMs, 30);
+  assert.equal(state.vcpuLastEnteredProgress.guestStateInferred, false);
+  assert.deepEqual(
+    sanitizeVcpuLastEnteredProgress(state.vcpuLastEnteredProgress),
+    state.vcpuLastEnteredProgress,
+  );
+}
+
+// T42 C snapshot and shared-publication source contract.
+assert.equal(
+  wasm64Source.match(/cpu_test_interrupt\(cpu, ~0\)/g)?.length,
+  1,
+);
+assert.equal(
+  wasm64Source.match(/qatomic_load_acquire\(&cpu->exit_request\)/g)?.length,
+  1,
+);
+assert.match(
+  wasm64Source,
+  /qatomic_store_release\(&vcpu_last_entered_publication\.monotonic_ms/,
+);
+assert.match(
+  wasm64Source,
+  /qatomic_inc_fetch\(&vcpu_last_entered_publication\.sequence\)/,
+);
+assert.match(wasm64Source, /vcpu_last_entered_publication\s*\n\s*QEMU_ALIGNED\(8\)/);
+assert.match(
+  wasm64Source,
+  /offsetof\(TCGWasm64VcpuLastEnteredPublication,\s*\n\s*monotonic_ms\) != 8/,
+);
+assert.match(wasm64Source, /"\\\"publication_address\\\":\\\"0x%" PRIxPTR/);
 assert.doesNotMatch(wasm64Source, /vcpu-liveness-tick/);
-assert.doesNotMatch(wasm64Source, /TCG_WASM64_VCPU_LIVENESS_PHASE_HALTED/);
 assert.doesNotMatch(wasm64Source, /cpu->interrupt_request/);
 assert.doesNotMatch(
   wasm64Source.replaceAll("qatomic_load_acquire(&cpu->exit_request)", ""),
   /cpu->exit_request/,
 );
 assert.doesNotMatch(wasm64Source, /cpu->halted/);
+assert.match(
+  browserSmokeSource,
+  /maybeInstallVcpuLastEnteredProgressSampler\(activeModule\)/,
+);

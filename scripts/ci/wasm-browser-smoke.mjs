@@ -1361,6 +1361,145 @@ export function browserRuntimeSnapshot(scope = globalThis) {
   };
 }
 
+const VCPU_LAST_ENTERED_SAMPLE_INTERVAL_MS = 1000;
+const VCPU_LAST_ENTERED_NO_PROGRESS_INTERVAL_MS = 5000;
+
+function readVcpuLastEnteredPublication(publication) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const sequenceBefore = Atomics.load(publication, 0);
+    const publishedMonotonicMs = Atomics.load(publication, 1);
+    const sequenceAfter = Atomics.load(publication, 0);
+    if (sequenceBefore === sequenceAfter) {
+      if (
+        sequenceAfter > BigInt(Number.MAX_SAFE_INTEGER) ||
+        publishedMonotonicMs > BigInt(Number.MAX_SAFE_INTEGER)
+      ) {
+        return null;
+      }
+      return {
+        sequence: Number(sequenceAfter),
+        publishedMonotonicMs: Number(publishedMonotonicMs),
+      };
+    }
+  }
+  return null;
+}
+
+export function vcpuLastEnteredPublicationAddress(lastSummary) {
+  const value = lastSummary && lastSummary.vcpu_last_entered &&
+    lastSummary.vcpu_last_entered.publication_address;
+  if (typeof value !== "string" || !/^0x[0-9a-f]+$/.test(value)) {
+    return null;
+  }
+  const address = BigInt(value);
+  return address <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(address) : null;
+}
+
+/*
+ * This interval runs on the browser main thread and reads only the atomically
+ * published cooperative-entry sequence/timestamp from shared Wasm memory.
+ * An unchanged sequence means that no new vCPU progress was observed for the
+ * measured interval. It deliberately makes no inference about guest state.
+ */
+export function installVcpuLastEnteredProgressSampler(
+  module, smokeState, scope = globalThis, overrides = {},
+) {
+  const sampleIntervalMs = Number.isInteger(overrides.sampleIntervalMs) &&
+      overrides.sampleIntervalMs > 0
+    ? overrides.sampleIntervalMs
+    : VCPU_LAST_ENTERED_SAMPLE_INTERVAL_MS;
+  const noProgressIntervalMs =
+    Number.isInteger(overrides.noProgressIntervalMs) &&
+      overrides.noProgressIntervalMs >= sampleIntervalMs
+      ? overrides.noProgressIntervalMs
+      : VCPU_LAST_ENTERED_NO_PROGRESS_INTERVAL_MS;
+  const diagnostic = {
+    enabled: false,
+    sampleIntervalMs,
+    noProgressIntervalMs,
+    sampleCount: 0,
+    changeCount: 0,
+    observation: "publication-unavailable",
+    sequence: null,
+    publishedMonotonicMs: null,
+    observedElapsedMs: null,
+    lastChangeElapsedMs: null,
+    unchangedForMs: null,
+    guestStateInferred: false,
+  };
+  smokeState.vcpuLastEnteredProgress = diagnostic;
+
+  const buffer = module && module.HEAPU8 && module.HEAPU8.buffer;
+  if (
+    typeof SharedArrayBuffer === "undefined" ||
+    !(buffer instanceof SharedArrayBuffer)
+  ) {
+    return null;
+  }
+
+  const addressFunction = module &&
+    module._tcg_wasm64_vcpu_last_entered_publication_address;
+  const rawAddress = overrides.publicationAddress ??
+    (typeof addressFunction === "function" ? addressFunction() : null);
+  const address = typeof rawAddress === "bigint"
+    ? Number(rawAddress)
+    : rawAddress;
+  if (
+    !Number.isSafeInteger(address) || address < 0 || address % 8 !== 0 ||
+    address + 16 > buffer.byteLength
+  ) {
+    return null;
+  }
+
+  const publication = new BigUint64Array(buffer, address, 2);
+  const startedAtMs = scope.performance.now();
+  let lastSequence = null;
+  let lastChangeElapsedMs = null;
+  const sample = () => {
+    const observedElapsedMs = Math.max(
+      0,
+      Math.round(scope.performance.now() - startedAtMs),
+    );
+    const observed = readVcpuLastEnteredPublication(publication);
+    diagnostic.sampleCount += 1;
+    diagnostic.observedElapsedMs = observedElapsedMs;
+    if (observed === null) {
+      diagnostic.observation = "publication-inconsistent";
+      return;
+    }
+    diagnostic.sequence = observed.sequence;
+    diagnostic.publishedMonotonicMs = observed.publishedMonotonicMs;
+    if (observed.sequence === 0) {
+      diagnostic.observation = "awaiting-first-vcpu-entry";
+      diagnostic.unchangedForMs = null;
+      return;
+    }
+    if (observed.sequence !== lastSequence) {
+      lastSequence = observed.sequence;
+      lastChangeElapsedMs = observedElapsedMs;
+      diagnostic.changeCount += 1;
+      diagnostic.lastChangeElapsedMs = observedElapsedMs;
+      diagnostic.unchangedForMs = 0;
+      diagnostic.observation = "new-vcpu-progress-observed";
+      return;
+    }
+    diagnostic.unchangedForMs = observedElapsedMs - lastChangeElapsedMs;
+    diagnostic.observation =
+      diagnostic.unchangedForMs >= noProgressIntervalMs
+        ? "no-new-vcpu-progress-observed"
+        : "awaiting-bounded-progress-interval";
+  };
+
+  diagnostic.enabled = true;
+  sample();
+  const intervalId = scope.setInterval(sample, sampleIntervalMs);
+  return {
+    stop() {
+      scope.clearInterval(intervalId);
+    },
+  };
+}
+
 const BROWSER_SHORTCUT_KEYS = new Set([
   "l",
   "n",
@@ -2222,6 +2361,27 @@ async function run() {
     }
   };
 
+  let vcpuLastEnteredProgressSampler = null;
+  const maybeInstallVcpuLastEnteredProgressSampler = (module) => {
+    if (vcpuLastEnteredProgressSampler !== null || !module ||
+        (!config.wasm64LiveGeneratedExec &&
+         !config.wasm64LiveGeneratedExecPreflight)) {
+      return;
+    }
+    const address = vcpuLastEnteredPublicationAddress(
+      smokeState.wasm64Runloop.lastSummary,
+    );
+    if (address === null) {
+      return;
+    }
+    vcpuLastEnteredProgressSampler = installVcpuLastEnteredProgressSampler(
+      module,
+      smokeState,
+      globalThis,
+      { publicationAddress: address },
+    );
+  };
+
   const isGuestProgressLine = (line) => {
     if (typeof line !== "string") {
       return false;
@@ -2297,6 +2457,7 @@ async function run() {
       line,
       Math.round(performance.now() - startTime),
     );
+    maybeInstallVcpuLastEnteredProgressSampler(activeModule);
     if (smokeState.outputBytes < config.maxOutputBytes) {
       const remaining = config.maxOutputBytes - smokeState.outputBytes;
       if (encoded.length <= remaining) {
@@ -2510,6 +2671,7 @@ async function run() {
     moduleOptions.canvas = moduleCanvas;
   }
   qemuModule = await moduleFactory(moduleOptions);
+  maybeInstallVcpuLastEnteredProgressSampler(qemuModule);
   powerControl.attachModule(qemuModule);
   installWasmKeySink(qemuModule);
   if (primarySerialInput) {
